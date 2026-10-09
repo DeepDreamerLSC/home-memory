@@ -10,16 +10,29 @@
 
 const automator = require("miniprogram-automator");
 
-function judge(readRes, addRes) {
-  const readDenied = readRes.kind === "read-deny" || (readRes.kind === "read-ok" && readRes.count === 0);
-  const addDenied = addRes.kind === "add-deny";
-  console.log("");
-  if (readDenied && addDenied) {
-    console.log("== 通过:客户端直连读与写均被权限规则拒绝 ==");
-  } else {
-    console.log("== 未通过:存在客户端直连通道,请检查 items 集合权限设置 ==");
-    process.exitCode = 1;
+/** 只有「明确的权限拒绝」才算通过:空集合、唯一键冲突(E11000)等都不是权限拒绝 */
+function isPermissionDenied(res) {
+  if (res.kind !== "read-deny" && res.kind !== "add-deny") {
+    return false;
   }
+  const msg = String(res.errMsg || "");
+  return /permission/i.test(msg) || /DATABASE_PERMISSION_DENIED/.test(msg);
+}
+
+function judge(readRes, addRes) {
+  console.log("");
+  if (isPermissionDenied(readRes) && isPermissionDenied(addRes)) {
+    console.log("== 通过:客户端直连读与写均被权限规则明确拒绝 ==");
+    return;
+  }
+  console.log("== 未通过:存在客户端直连通道或拒绝原因不是权限 ==");
+  if (!isPermissionDenied(readRes)) {
+    console.log("   读取未通过:" + (readRes.kind === "read-ok" ? "读取成功(含空结果)不代表被拒绝" : "拒绝原因非权限:" + readRes.errMsg));
+  }
+  if (!isPermissionDenied(addRes)) {
+    console.log("   写入未通过:" + (addRes.kind === "add-ok" ? "写入成功" : "拒绝原因非权限(如唯一键冲突):" + addRes.errMsg));
+  }
+  process.exitCode = 1;
 }
 
 async function main() {

@@ -64,6 +64,20 @@ function operationConflict(doc) {
   };
 }
 
+/** 修改内容的稳定指纹(键排序后的 JSON 字符串):重放识别除 update_id 外还要求内容一致 */
+function changesFingerprint(changes) {
+  var keys = Object.keys(changes).sort();
+  var parts = [];
+  for (var i = 0; i < keys.length; i++) {
+    parts.push(JSON.stringify(keys[i]) + ":" + JSON.stringify(changes[keys[i]]));
+  }
+  return "{" + parts.join(",") + "}";
+}
+
+function validUpdateId(v) {
+  return isString(v) && v.length >= 1 && v.length <= OPERATION_ID_MAX;
+}
+
 /** 识别 CloudBase 唯一索引拒绝并发插入的错误(E11000 duplicate key) */
 function isDuplicateKeyError(e) {
   var msg = e && e.message ? String(e.message) : "";
@@ -217,7 +231,7 @@ async function updateItem(event, deps) {
   }
   // update_id(可选):同一次逻辑修改的标识,用于「响应丢失后重试」的重放识别
   var updateId = event.update_id;
-  if (updateId !== undefined && (!isString(updateId) || updateId.length < 1 || updateId.length > OPERATION_ID_MAX)) {
+  if (updateId !== undefined && !validUpdateId(updateId)) {
     return fail("INVALID_INPUT");
   }
 
@@ -248,10 +262,14 @@ async function updateItem(event, deps) {
     return fail("INVALID_INPUT");
   }
 
+  // 指纹只覆盖用户内容字段(在注入 version/updated_at/last_update_* 元数据之前计算)
+  var fingerprint = changesFingerprint(changes);
+
   changes.version = expectedVersion + 1;
   changes.updated_at = deps.now();
   if (updateId !== undefined) {
     changes.last_update_id = updateId;
+    changes.last_update_fingerprint = fingerprint;
   }
 
   var res = await collection(deps)
@@ -276,12 +294,13 @@ async function updateItem(event, deps) {
     .get();
   if (still.data && still.data.length > 0) {
     var current = still.data[0];
-    // 重放识别:版本恰好是 expected+1 且 last_update_id 相同 → 是自己刚写入但响应丢失的那笔,
-    // 如实返回当前内容(replayed:true),绝不误报 VERSION_CONFLICT。
+    // 重放识别(三重条件):版本恰为 expected+1、last_update_id 相同、且修改内容指纹一致。
+    // 相同 update_id 但内容不同 → 一律 VERSION_CONFLICT,绝不把新内容当重放吞掉。
     if (
       updateId !== undefined &&
       current.version === expectedVersion + 1 &&
-      current.last_update_id === updateId
+      current.last_update_id === updateId &&
+      current.last_update_fingerprint === fingerprint
     ) {
       return { ok: true, item: project(current), replayed: true };
     }

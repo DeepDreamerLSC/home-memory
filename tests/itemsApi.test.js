@@ -689,3 +689,31 @@ test("get:按 id 单查命中;越权与已删均 NOT_FOUND;不受 list 截断影
   assert.equal(gotDeleted.ok, false);
   assert.equal(gotDeleted.error, "NOT_FOUND");
 });
+
+test("重放内容校验:同 update_id 但内容不同,一律 VERSION_CONFLICT 绝不吞掉新内容", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-fp", "灭火器", "厨房角落"), t.deps);
+  var itemId = created.item.item_id;
+  // 第一笔写入成功(响应丢失)
+  var lost = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "fp-1", location_text: "阳台" },
+    t.deps
+  );
+  assert.equal(lost.ok, true);
+  // 同 update_id 但内容变了:不能当重放返回成功,必须报版本冲突
+  var tampered = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "fp-1", location_text: "车库" },
+    t.deps
+  );
+  assert.equal(tampered.ok, false, "同 update_id 异内容必须失败");
+  assert.equal(tampered.error, "VERSION_CONFLICT");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data[0].location_text, "阳台", "原写入内容无损");
+  // 同 update_id 同内容:仍是合法重放
+  var replay = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "fp-1", location_text: "阳台" },
+    t.deps
+  );
+  assert.equal(replay.ok, true);
+  assert.equal(replay.replayed, true);
+});

@@ -53,7 +53,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:48 项(itemsApi 25 + extractDraft 20 + 胶水层 3),全部通过
+npm test             # 离线全量测试:49 项(itemsApi 26 + extractDraft 20 + 胶水层 3),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```

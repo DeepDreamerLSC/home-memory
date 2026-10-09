@@ -242,12 +242,26 @@ Page<
   async refreshLatest(): Promise<RefreshResult> {
     try {
       const res = await callItemsApi({ action: "get", item_id: this.data.itemId });
+      // 字段级三方合并:用户真正编辑过的字段(与刷新前基准不同)保留用户的未提交编辑;
+      // 未编辑的字段采纳服务端最新值(可能来自另一设备),避免下次保存把别处的新改动连带覆盖。
+      const prev = this.original;
+      const mergedName =
+        this.data.name.trim() !== prev.name ? this.data.name : res.item.name;
+      const mergedLocation =
+        this.data.locationText.trim() !== prev.location
+          ? this.data.locationText
+          : res.item.location_text;
+      const mergedNote =
+        this.data.note.trim() !== prev.note ? this.data.note : res.item.note;
       this.original = {
         name: res.item.name,
         location: res.item.location_text,
         note: res.item.note,
       };
       this.setData({
+        name: mergedName,
+        locationText: mergedLocation,
+        note: mergedNote,
         version: res.item.version,
         updatedAtText: formatDateTime(res.item.updated_at),
       });
