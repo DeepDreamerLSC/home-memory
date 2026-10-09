@@ -19,16 +19,17 @@
 云函数用 cloud.getWXContext().OPENID 取身份;household_id 等于 "hh_" 拼接 sha256(openid) 十六进制的前 32 位(避免裸 openid 落库)。客户端传来的 household_id/openid 一律忽略;itemsApi 的 handler 不得从 event 读取任何身份字段,身份只来自 deps.householdId(由 index.js 从 OPENID 派生),缺失时返回 UNAUTHORIZED。所有读写都必须带服务端派生的 household_id 条件。一个微信用户等于一个私人家庭空间。README 需说明建议为 (household_id, operation_id) 建唯一索引;代码中先查后插实现幂等。
 
 ## items 集合文档
-字段:_id(等于 "it_" 加服务端随机串)、household_id、name(去空白后 1-50 字)、name_norm、location_text(去空白后 1-200 字)、note(≤200,可空字符串)、version(从 1 起)、deleted(false)、operation_id(创建幂等键,非空 ≤64)、created_at(ISO 字符串)、updated_at(ISO 字符串)。
+字段:_id(等于 "it_" 加服务端随机串)、household_id、name(去空白后 1-50 字)、name_norm、location_text(去空白后 1-200 字)、note(≤200,可空字符串)、version(从 1 起)、deleted(false)、operation_id(创建幂等键,非空 ≤64)、last_update_id(可选,最近一次带 update_id 的成功更新回写的标识,≤64)、created_at(ISO 字符串)、updated_at(ISO 字符串)。所有面向客户端的响应只给投影字段 { item_id, name, location_text, note, version, updated_at },绝不包含内部字段。
 
 ## normalizeName(s)
 NFC 归一 → 全角转半角 → 小写 → 去所有空白字符 → 去中英文标点。name_norm 与查询词都经过它。
 
 ## itemsApi 协议
-event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文,可直接给用户看) }。错误码:INVALID_INPUT、NOT_FOUND、VERSION_CONFLICT、UNAUTHORIZED。
-- create:入参 { action:"create", operation_id, name, location_text, note? }。校验:operation_id 非空 ≤64;name 去空白后 1-50;location_text 去空白后 1-200;note ≤200。校验失败返回 INVALID_INPUT 且绝不写入。幂等:查 (household_id, operation_id) 已有则返回 { ok:true, item:已有文档, duplicated:true };否则插入 version=1、deleted=false、created_at 与 updated_at,返回 { ok:true, item, duplicated:false }。
-- update:入参 { action:"update", item_id, expected_version, location_text?, name?, note? }。至少一个可变字段,字段校验同上。条件更新:where(_id 等于 item_id 且 household_id 匹配且 deleted 为 false 且 version 等于 expected_version)更新字段、version 加一、updated_at 刷新(name 变则 name_norm 重算)。命中 1 条返回 { ok:true, item };命中 0 条再查该 _id 与 household_id 且未删:存在则 VERSION_CONFLICT,否则 NOT_FOUND。
+event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文,可直接给用户看) }。错误码:INVALID_INPUT、NOT_FOUND、VERSION_CONFLICT、UNAUTHORIZED、OPERATION_CONFLICT。
+- create:入参 { action:"create", operation_id, name, location_text, note? }。校验:operation_id 非空 ≤64;name 去空白后 1-50;location_text 去空白后 1-200;note ≤200。校验失败返回 INVALID_INPUT 且绝不写入。**幂等只对「同键同内容」成立**:查 (household_id, operation_id, deleted:false) 已有——name/location_text/note 与本次一致则返回 { ok:true, item(投影), duplicated:true };内容不同则返回 { ok:false, error:"OPERATION_CONFLICT", message:"这条已保存过且内容与当前填写不同,请到详情页修改", existing(投影,已删时不下发) },绝不静默返回旧数据。并发下唯一索引拒绝第二笔插入时:捕获重复键错误后回查,按上述同款规则返回稳定结果(同内容 duplicated;异内容或命中已删文档 OPERATION_CONFLICT,已删变体 message 说明已删除)。新插入 version=1、deleted=false,返回 { ok:true, item(投影), duplicated:false }。
+- update:入参 { action:"update", item_id, expected_version, update_id?, location_text?, name?, note? }。update_id 可选(非空 ≤64),标识同一次逻辑修改,用于响应丢失后的重试重放。至少一个可变字段,字段校验同上。条件更新:where(_id 等于 item_id 且 household_id 匹配且 deleted 为 false 且 version 等于 expected_version)更新字段、version 加一、updated_at 刷新(name 变则 name_norm 重算;带 update_id 时回写 last_update_id)。命中 1 条返回 { ok:true, item(投影) };命中 0 条再查该 _id 与 household_id 且未删:存在且 version 恰为 expected_version+1 且 last_update_id 等于本次 update_id,判定为「自己刚写入但响应丢失」的重放,返回 { ok:true, item(投影), replayed:true };否则存在即 VERSION_CONFLICT,不存在即 NOT_FOUND。
 - delete:入参 { action:"delete", item_id }。条件更新 where(_id 且 household_id 且 deleted 为 false)置 deleted 为 true 并把 name、name_norm、location_text、note 全部抹成空字符串。返回 { ok:true };查无则 NOT_FOUND。查询与列表永远过滤 deleted 为 false。
+- get:入参 { action:"get", item_id }。按 id 单查(where _id 且 household_id 且 deleted 为 false),返回 { ok:true, item(投影) };查无或越权均 NOT_FOUND。用于详情页冲突刷新等场景,不受 list 分页截断影响。
 - query:入参 { action:"query", q }。q 去空白后非空否则 INVALID_INPUT。nq 为 normalizeName(q);按 name_norm 精确匹配优先、其次前缀匹配、最后包含匹配,各自按 updated_at 降序,合并去重,最多 20 条,返回 { ok:true, items:[{item_id,name,location_text,note,version,updated_at}], match_type:"exact" 或 "prefix" 或 "contains" 或 "none" }。无结果是正常结果(items 为空数组)。
 - list:入参 { action:"list", limit? }。deleted 为 false,updated_at 降序,limit 默认 50、最大 50,返回 { ok:true, items:[同上] }。
 - 未知 action、缺必填字段一律 INVALID_INPUT。
@@ -43,8 +44,8 @@ system prompt 要点:家庭物品位置提取器;从一句话提取一件物品�
 - config.ts 导出 cloudEnv(占位 "YOUR_ENV_ID",README 说明替换);app.ts 中 wx.cloud.init({ env: cloudEnv, traceUser:false })。
 - utils/api.ts:类型化封装 callItemsApi/callExtractDraft,统一超时与错误映射(错误码到用户可读中文);包含 operation_id 的 uuid 生成。
 - pages/index(首页):「记一件」textarea 输入一句话后调 extractDraft:needs_split 则 toast 提示拆分;AI_UNAVAILABLE 则弹确认后带 manual=true 进确认页;成功则带草稿进确认页。「找东西」输入名称调 itemsApi query,结果列表显示名称、位置、更新时间,点击进详情页。下方「最近记录」用 list。
-- pages/confirm(确认页):标识「AI 草稿,请确认」;名称、位置、备注可编辑,位置为空时提示必填;manual 模式为空白表单;保存调 create(operation_id 用 uuid),成功 toast「已记住」返回首页,失败如实提示。
-- pages/item(详情页):查看与修改名称、位置、备注,保存带 expected_version,VERSION_CONFLICT 则提示「内容已被修改,已为你刷新,请重试」并拉取最新;删除需 wx.showModal 确认,删除后返回。
+- pages/confirm(确认页):标识「AI 草稿,请确认」;名称、位置、备注可编辑,位置为空时提示必填;manual 模式为空白表单;保存调 create(operation_id 用 uuid),成功 toast「已记住」返回首页;OPERATION_CONFLICT 时弹窗引导「去详情页」(携带服务端下发的 existing)或留在本页,绝不静默;其余失败如实提示。
+- pages/item(详情页):查看与修改名称、位置、备注,保存带 expected_version 与 update_id(uuid;同样内容的失败重试复用同一 update_id,内容一变即换新);VERSION_CONFLICT 则提示并以 get 按 id 刷新版本号与元数据(保留用户未保存的编辑,绝不无提示覆盖),由用户检查后重试;删除需 wx.showModal 确认,删除后返回。
 - UI 全中文、样式简洁;不信任也不传 household_id。
 
 ## 离线测试规范

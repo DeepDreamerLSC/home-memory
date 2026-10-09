@@ -42,12 +42,13 @@ export interface Draft {
 /** query 的匹配层级 */
 export type MatchType = "exact" | "prefix" | "contains" | "none";
 
-/** itemsApi 错误码(契约固定四个) */
+/** itemsApi 错误码(契约固定) */
 export type ItemsApiErrorCode =
   | "INVALID_INPUT"
   | "NOT_FOUND"
   | "VERSION_CONFLICT"
-  | "UNAUTHORIZED";
+  | "UNAUTHORIZED"
+  | "OPERATION_CONFLICT";
 
 /** extractDraft 错误码 */
 export type ExtractDraftErrorCode = "AI_UNAVAILABLE";
@@ -67,11 +68,14 @@ export type ItemsApiEvent =
       action: "update";
       item_id: string;
       expected_version: number;
+      /** 同一次逻辑修改的标识(uuid):响应丢失后以相同内容重试时复用,服务端据此识别重放 */
+      update_id?: string;
       name?: string;
       location_text?: string;
       note?: string;
     }
   | { action: "delete"; item_id: string }
+  | { action: "get"; item_id: string }
   | { action: "query"; q: string }
   | { action: "list"; limit?: number };
 
@@ -79,13 +83,20 @@ export type ItemsApiEvent =
 
 export interface CreateItemResponse {
   ok: true;
-  item: ItemRecord;
+  item: ItemSummary;
   duplicated: boolean;
 }
 
 export interface UpdateItemResponse {
   ok: true;
-  item: ItemRecord;
+  item: ItemSummary;
+  /** true 表示这是同 update_id 的重放(上次写入成功但响应丢失),内容已是最新 */
+  replayed?: boolean;
+}
+
+export interface GetItemResponse {
+  ok: true;
+  item: ItemSummary;
 }
 
 export interface DeleteItemResponse {
@@ -108,12 +119,15 @@ export interface ItemsApiErrorResponse {
   error: ItemsApiErrorCode;
   /** 中文文案,可直接给用户看 */
   message: string;
+  /** OPERATION_CONFLICT 时附带的已有记录(同 operation_id 但内容不同),供可操作引导 */
+  existing?: ItemSummary;
 }
 
 export type ItemsApiOkResponse =
   | CreateItemResponse
   | UpdateItemResponse
   | DeleteItemResponse
+  | GetItemResponse
   | QueryItemsResponse
   | ListItemsResponse;
 

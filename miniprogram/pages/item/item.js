@@ -23,6 +23,7 @@ Page({
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
+    pendingRetry: null,
     onLoad(options) {
         const raw = options.data;
         let summary = null;
@@ -118,17 +119,27 @@ Page({
             wx.showToast({ title: "内容没有变化", icon: "none" });
             return;
         }
+        // 同样内容的重试复用同一 update_id:服务端据此把「自己刚写入但响应丢失」的重放
+        // 识别为 replayed 成功,而不是误报 VERSION_CONFLICT;内容一变即生成新 update_id。
+        const retry = this.pendingRetry;
+        const samePayload = retry !== null &&
+            retry.changes.name === changes.name &&
+            retry.changes.location_text === changes.location_text &&
+            retry.changes.note === changes.note;
+        const updateId = samePayload ? retry.updateId : (0, api_1.uuid)();
         this.setData({ saving: true });
         try {
             const res = await (0, api_1.callItemsApi)({
                 action: "update",
                 item_id: this.data.itemId,
                 expected_version: this.data.version,
+                update_id: updateId,
                 ...changes,
             });
+            this.pendingRetry = null;
             const it = res.item;
             this.applySummary({
-                item_id: it._id,
+                item_id: it.item_id,
                 name: it.name,
                 location_text: it.location_text,
                 note: it.note,
@@ -138,10 +149,12 @@ Page({
             wx.showToast({ title: "已保存", icon: "success" });
         }
         catch (e) {
+            // 记录失败的更新供重试复用 update_id(仅同样内容的重试)
+            this.pendingRetry = { updateId, changes };
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
-                // 契约要求:提示后拉取最新内容,让用户基于最新版本重试
+                // 提示后只对齐版本与元数据,保留用户未保存的编辑(绝不无提示覆盖)
                 wx.showToast({
-                    title: "内容已被修改,已为你刷新,请重试",
+                    title: "内容已被修改,已更新版本号,请检查后重试",
                     icon: "none",
                     duration: 2500,
                 });
@@ -169,15 +182,22 @@ Page({
             this.setData({ saving: false });
         }
     },
-    /** 拉取最新内容:契约没有按 id 单查的 action,用 list 后按 item_id 查找 */
+    /**
+     * 拉取最新内容(get 按 id 单查,不受 list 分页截断影响)。
+     * 只对齐版本号/更新时间/基准内容,不覆盖表单里用户未保存的编辑。
+     */
     async refreshLatest() {
         try {
-            const res = await (0, api_1.callItemsApi)({ action: "list" });
-            const found = res.items.find((s) => s.item_id === this.data.itemId);
-            if (!found) {
-                return "notfound";
-            }
-            this.applySummary(found);
+            const res = await (0, api_1.callItemsApi)({ action: "get", item_id: this.data.itemId });
+            this.original = {
+                name: res.item.name,
+                location: res.item.location_text,
+                note: res.item.note,
+            };
+            this.setData({
+                version: res.item.version,
+                updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+            });
             return "refreshed";
         }
         catch (e) {

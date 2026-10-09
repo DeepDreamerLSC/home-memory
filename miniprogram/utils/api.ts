@@ -13,8 +13,10 @@ import type {
   ExtractDraftEvent,
   ExtractDraftNeedsSplitResponse,
   ExtractDraftOkResponse,
+  GetItemResponse,
   ItemsApiEvent,
   ItemsApiOkResponse,
+  ItemSummary,
   ListItemsResponse,
   QueryItemsResponse,
   UpdateItemResponse,
@@ -36,11 +38,14 @@ export const CLIENT_BAD_RESPONSE = "CLIENT_BAD_RESPONSE";
 /** 携带错误码的异常,message 为可直接展示的中文文案 */
 export class ApiError extends Error {
   readonly code: string;
+  /** OPERATION_CONFLICT 时服务端附带的已有记录,供可操作引导(如跳详情页修改) */
+  readonly existing?: ItemSummary;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, existing?: ItemSummary) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.existing = existing;
   }
 }
 
@@ -54,6 +59,7 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   NOT_FOUND: "没有找到这条记录",
   VERSION_CONFLICT: "内容已被修改,已为你刷新,请重试",
   UNAUTHORIZED: "登录状态异常,请退出小程序后重试",
+  OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -68,18 +74,26 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message */
+/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing 附加数据 */
 function toServerError(
   code: unknown,
   message: unknown,
   fallbacks: Record<string, string>,
+  existing?: unknown,
 ): ApiError {
   const codeText =
     typeof code === "string" && code.length > 0 ? code : CLIENT_BAD_RESPONSE;
   const fallback = fallbacks[codeText];
   const serverMessage =
     typeof message === "string" && message.trim().length > 0 ? message : "";
-  return new ApiError(codeText, serverMessage || fallback || DEFAULT_ERROR_MESSAGE);
+  const existingSummary = isRecord(existing)
+    ? (existing as unknown as ItemSummary)
+    : undefined;
+  return new ApiError(
+    codeText,
+    serverMessage || fallback || DEFAULT_ERROR_MESSAGE,
+    existingSummary,
+  );
 }
 
 /** 调用云函数,带客户端超时;不静默吞错,失败一律 reject ApiError */
@@ -147,6 +161,11 @@ function validateItemsOkResponse(
         throw bad();
       }
       break;
+    case "get":
+      if (!isRecord(r.item)) {
+        throw bad();
+      }
+      break;
     case "query":
       if (!Array.isArray(r.items) || typeof r.match_type !== "string") {
         throw bad();
@@ -172,6 +191,9 @@ export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "delete" }>,
 ): Promise<DeleteItemResponse>;
 export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "get" }>,
+): Promise<GetItemResponse>;
+export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "query" }>,
 ): Promise<QueryItemsResponse>;
 export function callItemsApi(
@@ -189,7 +211,7 @@ export async function callItemsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   if (result.ok === false) {
-    throw toServerError(result.error, result.message, ITEMS_API_MESSAGES);
+    throw toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing);
   }
   if (result.ok !== true) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);

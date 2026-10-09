@@ -71,8 +71,12 @@ test("胶水层:itemsApi/index.js require 链正确,create → query 全链路�
   assert.strictEqual(created.ok, true, "create 应成功:" + JSON.stringify(created));
   assert.strictEqual(created.duplicated, false);
   assert.strictEqual(created.item.version, 1);
+  assert.ok(String(created.item.item_id).indexOf("it_") === 0, "item_id 应以 it_ 开头");
+  // household 派生经存储层直查断言(响应为投影形态,不含内部字段)
+  const stored = await stub.db.collection("items").where({}).get();
+  assert.strictEqual(stored.data.length, 1, "应恰好写入一件");
   const expectedHousehold = "hh_" + crypto.createHash("sha256").update("o-glue-user-1", "utf8").digest("hex").slice(0, 32);
-  assert.strictEqual(created.item.household_id, expectedHousehold, "household_id 应由 OPENID 按契约公式派生");
+  assert.strictEqual(stored.data[0].household_id, expectedHousehold, "household_id 应由 OPENID 按契约公式派生");
 
   const queried = await entry.main({ action: "query", q: "测试钥匙" });
   assert.strictEqual(queried.ok, true);

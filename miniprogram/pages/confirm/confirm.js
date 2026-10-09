@@ -103,6 +103,34 @@ Page({
             }, 800);
         }
         catch (e) {
+            if (e instanceof api_1.ApiError && e.code === "OPERATION_CONFLICT") {
+                // 同 operation_id 已保存过且内容与当前填写不同(响应丢失后修改重试的典型场景):
+                // 绝不静默;给出可操作引导——跳到已保存版本的详情页再改。
+                const existing = e.existing;
+                if (existing && existing.item_id) {
+                    wx.showModal({
+                        title: "这条已保存过",
+                        content: "之前已保存过一次,内容与当前填写不同。可到详情页基于已保存的版本修改。",
+                        confirmText: "去详情页",
+                        cancelText: "留在本页",
+                        success: (r) => {
+                            if (r.confirm) {
+                                wx.navigateTo({
+                                    url: "/pages/item/item?data=" + encodeURIComponent(JSON.stringify(existing)),
+                                });
+                            }
+                        },
+                    });
+                }
+                else {
+                    wx.showModal({
+                        title: "保存失败",
+                        content: e.message,
+                        showCancel: false,
+                    });
+                }
+                return;
+            }
             wx.showModal({
                 title: "保存失败",
                 content: (0, api_1.errorMessage)(e),

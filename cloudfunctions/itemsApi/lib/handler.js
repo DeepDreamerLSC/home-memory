@@ -26,11 +26,48 @@ var ERROR_MESSAGES = {
   INVALID_INPUT: "输入不合法,请检查后重试",
   NOT_FOUND: "没有找到这条记录",
   VERSION_CONFLICT: "内容已被修改,已为你刷新,请重试",
-  UNAUTHORIZED: "请先登录"
+  UNAUTHORIZED: "请先登录",
+  OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改"
 };
 
 function fail(error) {
   return { ok: false, error: error, message: ERROR_MESSAGES[error] };
+}
+
+/** 同 operation_id 重放时的内容比对(创建幂等只对「同键同内容」成立) */
+function sameCreateContent(doc, name, locationText, note) {
+  var noteNorm = note === undefined ? "" : note;
+  return (
+    doc.name === name &&
+    doc.location_text === locationText &&
+    (doc.note || "") === noteNorm
+  );
+}
+
+/**
+ * 同键异内容(或命中已删文档):明确冲突,绝不静默返回旧数据。
+ * deleted 为 true 时不带 existing(内容已抹空,进详情页无意义)。
+ */
+function operationConflict(doc) {
+  if (doc && doc.deleted) {
+    return {
+      ok: false,
+      error: "OPERATION_CONFLICT",
+      message: "这条记录已删除过,本次操作未保存,请重新记一件"
+    };
+  }
+  return {
+    ok: false,
+    error: "OPERATION_CONFLICT",
+    message: ERROR_MESSAGES.OPERATION_CONFLICT,
+    existing: project(doc)
+  };
+}
+
+/** 识别 CloudBase 唯一索引拒绝并发插入的错误(E11000 duplicate key) */
+function isDuplicateKeyError(e) {
+  var msg = e && e.message ? String(e.message) : "";
+  return msg.indexOf("E11000") !== -1 || msg.indexOf("duplicate key") !== -1;
 }
 
 function isString(v) {
@@ -115,12 +152,17 @@ async function createItem(event, deps) {
     return fail("INVALID_INPUT");
   }
 
-  // 先查后插实现幂等(README 建议线上为 (household_id, operation_id) 建唯一索引兜底)
+  // 幂等只对「同键同内容」成立:命中未删除的同键记录时,
+  // 内容一致 → duplicated:true 稳定返回;内容不同 → OPERATION_CONFLICT(绝不静默吞掉用户的修改)。
   var existing = await collection(deps)
-    .where({ household_id: deps.householdId, operation_id: operationId })
+    .where({ household_id: deps.householdId, operation_id: operationId, deleted: false })
     .get();
   if (existing.data && existing.data.length > 0) {
-    return { ok: true, item: existing.data[0], duplicated: true };
+    var doc = existing.data[0];
+    if (sameCreateContent(doc, name, locationText, note)) {
+      return { ok: true, item: project(doc), duplicated: true };
+    }
+    return operationConflict(doc);
   }
 
   var now = deps.now();
@@ -137,8 +179,28 @@ async function createItem(event, deps) {
     created_at: now,
     updated_at: now
   };
-  await collection(deps).add({ data: item });
-  return { ok: true, item: item, duplicated: false };
+  try {
+    await collection(deps).add({ data: item });
+  } catch (e) {
+    // 并发重放:唯一索引 (household_id, operation_id) 拒绝第二笔插入。
+    // 回查后返回稳定结果:同内容 duplicated、异内容或命中已删 → OPERATION_CONFLICT。
+    if (!isDuplicateKeyError(e)) {
+      throw e;
+    }
+    var after = await collection(deps)
+      .where({ household_id: deps.householdId, operation_id: operationId })
+      .get();
+    if (after.data && after.data.length > 0) {
+      var raced = after.data[0];
+      if (!raced.deleted && sameCreateContent(raced, name, locationText, note)) {
+        return { ok: true, item: project(raced), duplicated: true };
+      }
+      return operationConflict(raced);
+    }
+    // 回查不到属于异常场景:按原始错误上抛,绝不假装成功。
+    throw e;
+  }
+  return { ok: true, item: project(item), duplicated: false };
 }
 
 /**
@@ -151,6 +213,11 @@ async function updateItem(event, deps) {
   }
   var expectedVersion = event.expected_version;
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    return fail("INVALID_INPUT");
+  }
+  // update_id(可选):同一次逻辑修改的标识,用于「响应丢失后重试」的重放识别
+  var updateId = event.update_id;
+  if (updateId !== undefined && (!isString(updateId) || updateId.length < 1 || updateId.length > OPERATION_ID_MAX)) {
     return fail("INVALID_INPUT");
   }
 
@@ -183,6 +250,9 @@ async function updateItem(event, deps) {
 
   changes.version = expectedVersion + 1;
   changes.updated_at = deps.now();
+  if (updateId !== undefined) {
+    changes.last_update_id = updateId;
+  }
 
   var res = await collection(deps)
     .where({
@@ -197,7 +267,7 @@ async function updateItem(event, deps) {
     var after = await collection(deps)
       .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
       .get();
-    return { ok: true, item: after.data[0] };
+    return { ok: true, item: project(after.data[0]) };
   }
 
   // 命中 0 条:同一 _id 与 household 且未删仍存在 → 版本冲突;否则 NOT_FOUND
@@ -205,6 +275,16 @@ async function updateItem(event, deps) {
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
     .get();
   if (still.data && still.data.length > 0) {
+    var current = still.data[0];
+    // 重放识别:版本恰好是 expected+1 且 last_update_id 相同 → 是自己刚写入但响应丢失的那笔,
+    // 如实返回当前内容(replayed:true),绝不误报 VERSION_CONFLICT。
+    if (
+      updateId !== undefined &&
+      current.version === expectedVersion + 1 &&
+      current.last_update_id === updateId
+    ) {
+      return { ok: true, item: project(current), replayed: true };
+    }
     return fail("VERSION_CONFLICT");
   }
   return fail("NOT_FOUND");
@@ -327,10 +407,29 @@ async function listItems(event, deps) {
   return { ok: true, items: docs.slice(0, limit).map(project) };
 }
 
+/**
+ * get:入参 { action:"get", item_id }
+ * 按 id 单查(带 household 条件,过滤已删),供详情页冲突刷新等场景使用,
+ * 不受 list 分页截断影响。
+ */
+async function getItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var got = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (got.data && got.data.length > 0) {
+    return { ok: true, item: project(got.data[0]) };
+  }
+  return fail("NOT_FOUND");
+}
+
 var ACTIONS = {
   create: createItem,
   update: updateItem,
   delete: deleteItem,
+  get: getItem,
   query: queryItems,
   list: listItems
 };

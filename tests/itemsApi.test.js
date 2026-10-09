@@ -80,16 +80,19 @@ test("首次录入:create 后 query 按名可查到位置", async function () {
   assert.equal(res.ok, true);
   assert.equal(res.duplicated, false);
   assert.equal(res.item.version, 1);
-  assert.equal(res.item.deleted, false);
-  assert.equal(res.item.household_id, HOUSEHOLD_A);
-  assert.equal(res.item.name_norm, "降压药");
-  assert.ok(res.item._id.indexOf("it_") === 0, "_id 应以 it_ 开头");
+  // 响应为投影形态(不含内部字段);内部字段经 rawItems 直查存储层断言
+  assert.ok(res.item.item_id.indexOf("it_") === 0, "item_id 应以 it_ 开头");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1);
+  assert.equal(raw.data[0].deleted, false);
+  assert.equal(raw.data[0].household_id, HOUSEHOLD_A);
+  assert.equal(raw.data[0].name_norm, "降压药");
 
   var q = await handler({ action: "query", q: "降压药" }, t.deps);
   assert.equal(q.ok, true);
   assert.equal(q.match_type, "exact");
   assert.equal(q.items.length, 1);
-  assert.equal(q.items[0].item_id, res.item._id);
+  assert.equal(q.items[0].item_id, res.item.item_id);
   assert.equal(q.items[0].name, "降压药");
   assert.equal(q.items[0].location_text, "厨房第二个抽屉");
   assert.equal(q.items[0].note, "早晚各一片");
@@ -103,7 +106,7 @@ test("同名不同件:两件同名不同位置,query 都能查到", async functi
   var r2 = await handler(createEvent("op-b", "充电器", "卧室床头插座"), t.deps);
   assert.equal(r1.ok, true);
   assert.equal(r2.ok, true);
-  assert.notEqual(r1.item._id, r2.item._id);
+  assert.notEqual(r1.item.item_id, r2.item.item_id);
 
   var q = await handler({ action: "query", q: "充电器" }, t.deps);
   assert.equal(q.ok, true);
@@ -119,7 +122,7 @@ test("移动:update 位置后 query 返回新位置且 version 加一", async fu
   var upd = await handler(
     {
       action: "update",
-      item_id: created.item._id,
+      item_id: created.item.item_id,
       expected_version: 1,
       location_text: "卧室保险柜"
     },
@@ -149,7 +152,7 @@ test("纠正:录错位置后 update 修正,query 返回正确位置", async func
   var upd = await handler(
     {
       action: "update",
-      item_id: created.item._id,
+      item_id: created.item.item_id,
       expected_version: 1,
       location_text: "书房文件盒"
     },
@@ -165,14 +168,15 @@ test("纠正:录错位置后 update 修正,query 返回正确位置", async func
   var rename = await handler(
     {
       action: "update",
-      item_id: created.item._id,
+      item_id: created.item.item_id,
       expected_version: 2,
       name: "港澳通行证"
     },
     t.deps
   );
   assert.equal(rename.ok, true);
-  assert.equal(rename.item.name_norm, "港澳通行证");
+  var rawRenamed = await rawItems(t.db);
+  assert.equal(rawRenamed.data[0].name_norm, "港澳通行证");
   var byOld = await handler({ action: "query", q: "护照" }, t.deps);
   assert.equal(byOld.items.length, 0);
   var byNew = await handler({ action: "query", q: "港澳通行证" }, t.deps);
@@ -233,13 +237,13 @@ test("越权:A 查询 B 的物品为空,A 对 B 的物品 update/delete 得 NOT_
 
   // A 对 B 的物品 update / delete 均为 NOT_FOUND,绝不落到 B 的文档上
   var updA = await handler(
-    { action: "update", item_id: bItem.item._id, expected_version: 1, location_text: "被我改了" },
+    { action: "update", item_id: bItem.item.item_id, expected_version: 1, location_text: "被我改了" },
     depsA
   );
   assert.equal(updA.ok, false);
   assert.equal(updA.error, "NOT_FOUND");
 
-  var delA = await handler({ action: "delete", item_id: bItem.item._id }, depsA);
+  var delA = await handler({ action: "delete", item_id: bItem.item.item_id }, depsA);
   assert.equal(delA.ok, false);
   assert.equal(delA.error, "NOT_FOUND");
 
@@ -259,7 +263,7 @@ test("重试并发:同 operation_id 两次 create 只建一件,第二次 duplica
   assert.equal(first.duplicated, false);
   assert.equal(second.ok, true);
   assert.equal(second.duplicated, true);
-  assert.equal(second.item._id, first.item._id);
+  assert.equal(second.item.item_id, first.item.item_id);
   assert.equal(second.item.version, 1);
 
   var raw = await rawItems(t.db);
@@ -271,11 +275,11 @@ test("重试并发:同 expected_version 的两次 update 恰好一笔成功一�
   var created = await handler(createEvent("op-conflict", "电费卡", "餐边抽屉"), t.deps);
 
   var txA = await handler(
-    { action: "update", item_id: created.item._id, expected_version: 1, location_text: "书房抽屉" },
+    { action: "update", item_id: created.item.item_id, expected_version: 1, location_text: "书房抽屉" },
     t.deps
   );
   var txB = await handler(
-    { action: "update", item_id: created.item._id, expected_version: 1, location_text: "卧室抽屉" },
+    { action: "update", item_id: created.item.item_id, expected_version: 1, location_text: "卧室抽屉" },
     t.deps
   );
 
@@ -294,7 +298,7 @@ test("重试并发:同 expected_version 的两次 update 恰好一笔成功一�
 
   // 过期版本再试仍是 VERSION_CONFLICT;错误 ID 则是 NOT_FOUND
   var stale = await handler(
-    { action: "update", item_id: created.item._id, expected_version: 1, location_text: "再试一次" },
+    { action: "update", item_id: created.item.item_id, expected_version: 1, location_text: "再试一次" },
     t.deps
   );
   assert.equal(stale.error, "VERSION_CONFLICT");
@@ -311,7 +315,7 @@ test("删除:软删除后 query/list 不可见且内容字段已抹空", async f
   var created = await handler(createEvent("op-del", "旧合同", "阳台纸箱", "可销毁"), t.deps);
   await handler(createEvent("op-keep", "新合同", "书房柜子"), t.deps);
 
-  var del = await handler({ action: "delete", item_id: created.item._id }, t.deps);
+  var del = await handler({ action: "delete", item_id: created.item.item_id }, t.deps);
   assert.equal(del.ok, true);
 
   var q = await handler({ action: "query", q: "旧合同" }, t.deps);
@@ -322,7 +326,7 @@ test("删除:软删除后 query/list 不可见且内容字段已抹空", async f
   assert.equal(list.items[0].name, "新合同");
 
   // 底层文档仍在(deleted 标记),但内容字段全部抹成空字符串
-  var raw = await t.db.collection("items").where({ _id: created.item._id }).get();
+  var raw = await t.db.collection("items").where({ _id: created.item.item_id }).get();
   assert.equal(raw.data.length, 1);
   var doc = raw.data[0];
   assert.equal(doc.deleted, true);
@@ -332,10 +336,10 @@ test("删除:软删除后 query/list 不可见且内容字段已抹空", async f
   assert.equal(doc.note, "");
 
   // 已删除的物品再删 → NOT_FOUND;对它 update → NOT_FOUND
-  var delAgain = await handler({ action: "delete", item_id: created.item._id }, t.deps);
+  var delAgain = await handler({ action: "delete", item_id: created.item.item_id }, t.deps);
   assert.equal(delAgain.error, "NOT_FOUND");
   var updDeleted = await handler(
-    { action: "update", item_id: created.item._id, expected_version: 1, location_text: "复活" },
+    { action: "update", item_id: created.item.item_id, expected_version: 1, location_text: "复活" },
     t.deps
   );
   assert.equal(updDeleted.error, "NOT_FOUND");
@@ -457,12 +461,12 @@ test("分页:文档超过 100 条后 query/list 仍基于全量,不被单次 get
   assert.equal(q.ok, true);
   assert.equal(q.match_type, "exact");
   assert.equal(q.items.length, 1);
-  assert.equal(q.items[0].item_id, target.item._id, "第二页的物品也必须能查到");
+  assert.equal(q.items[0].item_id, target.item.item_id, "第二页的物品也必须能查到");
 
   var list = await handler({ action: "list" }, t.deps);
   assert.equal(list.ok, true);
   assert.equal(list.items.length, 50, "默认 limit 50");
-  assert.equal(list.items[0].item_id, target.item._id, "最新一条在首位,来自第二页数据");
+  assert.equal(list.items[0].item_id, target.item.item_id, "最新一条在首位,来自第二页数据");
 });
 
 test("memoryDb:CloudBase 语义(add/where().get()/where().update()/doc().get()/doc().update())", async function () {
@@ -549,4 +553,139 @@ test("日志脱敏:只输出 action、错误码、耗时、计数", async functi
     var keys = Object.keys(entries[i]).sort();
     assert.deepEqual(keys, ["action", "count", "error", "ms"], "日志字段只能是 action/error/ms/count");
   }
+});
+
+// ---------- 评审修复回归(OPERATION_CONFLICT / update 重放 / get) ----------
+
+test("同键异内容重放:OPERATION_CONFLICT,附已有记录,绝不静默返回旧数据", async function () {
+  var t = fresh();
+  var first = await handler(createEvent("op-x", "钥匙", "玄关抽屉"), t.deps);
+  assert.equal(first.ok, true);
+  // 场景:第一次保存成功但响应丢失,用户改了位置后用同一 operation_id 重试
+  var second = await handler(createEvent("op-x", "钥匙", "书房抽屉"), t.deps);
+  assert.equal(second.ok, false);
+  assert.equal(second.error, "OPERATION_CONFLICT");
+  assert.ok(second.message.indexOf("内容") !== -1, "提示应说明内容不同");
+  assert.equal(second.existing.item_id, first.item.item_id, "应附已有记录供可操作引导");
+  assert.equal(second.existing.location_text, "玄关抽屉");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1, "数据库仍只有一件,未被覆盖");
+});
+
+test("同键删除后重放:OPERATION_CONFLICT(已删除变体),不复活也不新建", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-d", "旧充电宝", "鞋柜"), t.deps);
+  assert.equal(created.ok, true);
+  var del = await handler({ action: "delete", item_id: created.item.item_id }, t.deps);
+  assert.equal(del.ok, true);
+  // 软删文档仍占用唯一索引;同键重放必须明确冲突而不是返回已删数据或新建
+  var replay = await handler(createEvent("op-d", "旧充电宝", "鞋柜"), t.deps);
+  assert.equal(replay.ok, false);
+  assert.equal(replay.error, "OPERATION_CONFLICT");
+  assert.ok(replay.message.indexOf("删除") !== -1, "提示应说明已删除");
+  assert.equal(replay.existing, undefined, "已删记录不应作为 existing 下发");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1, "未新建文档");
+  assert.equal(raw.data[0].deleted, true, "原文档保持已删");
+});
+
+test("真并发创建(同键同内容):Promise.all 双请求,恰好一笔新建一笔 duplicated", async function () {
+  var t = fresh();
+  var results = await Promise.all([
+    handler(createEvent("op-race", "体温计", "药箱"), t.deps),
+    handler(createEvent("op-race", "体温计", "药箱"), t.deps),
+  ]);
+  // 两笔都先查后插:唯一索引拒绝第二笔,catch 回查后返回稳定结果
+  var dupCount = results.filter(function (r) { return r.ok === true && r.duplicated === true; }).length;
+  var newCount = results.filter(function (r) { return r.ok === true && r.duplicated === false; }).length;
+  assert.equal(dupCount, 1, "应恰好一笔 duplicated");
+  assert.equal(newCount, 1, "应恰好一笔新建");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1, "库中只有一件");
+});
+
+test("真并发创建(同键异内容):Promise.all 双请求,一笔成功另一笔 OPERATION_CONFLICT", async function () {
+  var t = fresh();
+  var results = await Promise.all([
+    handler(createEvent("op-race2", "体温计", "药箱"), t.deps),
+    handler(createEvent("op-race2", "体温计", "客厅抽屉"), t.deps),
+  ]);
+  var okCount = results.filter(function (r) { return r.ok === true; }).length;
+  var conflictCount = results.filter(function (r) { return r.ok === false && r.error === "OPERATION_CONFLICT"; }).length;
+  assert.equal(okCount, 1);
+  assert.equal(conflictCount, 1);
+});
+
+test("update 重放:同 update_id 的丢失响应重试返回 replayed,不误报版本冲突", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-u", "护照", "书房保险柜"), t.deps);
+  var itemId = created.item.item_id;
+  // 第一笔写入成功但响应丢失(客户端不知道)
+  var lost = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "upd-1", location_text: "卧室保险柜" },
+    t.deps
+  );
+  assert.equal(lost.ok, true);
+  assert.equal(lost.item.version, 2);
+  // 同 update_id、同 expected_version 的重试:应识别为自己的重放
+  var replay = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "upd-1", location_text: "卧室保险柜" },
+    t.deps
+  );
+  assert.equal(replay.ok, true, "重放应成功");
+  assert.equal(replay.replayed, true, "应标记 replayed");
+  assert.equal(replay.item.version, 2);
+  assert.equal(replay.item.location_text, "卧室保险柜");
+  // 不同 update_id 撞旧版本:才是真正的 VERSION_CONFLICT
+  var other = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "upd-2", location_text: "书房抽屉" },
+    t.deps
+  );
+  assert.equal(other.ok, false);
+  assert.equal(other.error, "VERSION_CONFLICT");
+});
+
+test("真并发修改:Promise.all 两笔不同 update_id 同 expected_version,恰好一笔成功", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-cu", "扳手", "工具箱"), t.deps);
+  var itemId = created.item.item_id;
+  var results = await Promise.all([
+    handler({ action: "update", item_id: itemId, expected_version: 1, update_id: "cu-1", location_text: "阳台柜" }, t.deps),
+    handler({ action: "update", item_id: itemId, expected_version: 1, update_id: "cu-2", location_text: "车库" }, t.deps),
+  ]);
+  var okCount = results.filter(function (r) { return r.ok === true; }).length;
+  var conflictCount = results.filter(function (r) { return r.ok === false && r.error === "VERSION_CONFLICT"; }).length;
+  assert.equal(okCount, 1, "恰好一笔成功");
+  assert.equal(conflictCount, 1, "另一笔版本冲突");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data[0].version, 2, "落库 version 只加一次");
+});
+
+test("get:按 id 单查命中;越权与已删均 NOT_FOUND;不受 list 截断影响", async function () {
+  var t = fresh();
+  var oldest = null;
+  for (var i = 1; i <= 55; i++) {
+    var r = await handler(createEvent("op-g" + i, "备件" + String(i).padStart(2, "0"), "仓库第" + i + "格"), t.deps);
+    if (i === 1) {
+      oldest = r.item;
+    }
+  }
+  // list 默认 50 条:最早的一条会被截断
+  var list = await handler({ action: "list" }, t.deps);
+  assert.equal(list.items.length, 50);
+  assert.equal(list.items.some(function (s) { return s.item_id === oldest.item_id; }), false, "最早一条不在 list 里");
+  // get 不受截断影响
+  var got = await handler({ action: "get", item_id: oldest.item_id }, t.deps);
+  assert.equal(got.ok, true);
+  assert.equal(got.item.item_id, oldest.item_id);
+  assert.equal(got.item.name, "备件01");
+  // 越权:另一身份 get 得 NOT_FOUND
+  var foreign = await handler({ action: "get", item_id: oldest.item_id }, makeDeps(t.db, HOUSEHOLD_B));
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error, "NOT_FOUND");
+  // 已删:get 不可见
+  await handler({ action: "delete", item_id: oldest.item_id }, t.deps);
+  var gotDeleted = await handler({ action: "get", item_id: oldest.item_id }, t.deps);
+  assert.equal(gotDeleted.ok, false);
+  assert.equal(gotDeleted.error, "NOT_FOUND");
 });

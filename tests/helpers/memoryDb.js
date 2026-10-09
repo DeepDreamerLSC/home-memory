@@ -57,6 +57,22 @@ function createMemoryDb() {
         // 与真实 wx-server-sdk 一致:add({ data: doc });裸传 doc 时数据不落库(只得到空文档)
         var doc = clone(options && options.data) || {};
         var docs = docsOf(name);
+        // 模拟真实环境的 (household_id, operation_id) 组合唯一索引:
+        // 两字段都存在的文档重复时,以 E11000 同款错误拒绝插入
+        if (doc.household_id !== undefined && doc.operation_id !== undefined) {
+          var clash = docs.some(function (d) {
+            return d.household_id === doc.household_id && d.operation_id === doc.operation_id;
+          });
+          if (clash) {
+            return Promise.reject(
+              new Error(
+                "collection.add:fail -502001 database request fail. [FailedOperation.Insert] " +
+                  "bulk write error: E11000 duplicate key error collection: items " +
+                  "index: uniq_household_operation"
+              )
+            );
+          }
+        }
         var id = doc._id;
         if (id === undefined || id === null) {
           id = "mem-" + docs.length + "-" + Math.random().toString(36).slice(2, 10);

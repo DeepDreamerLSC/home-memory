@@ -53,7 +53,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:38 项(itemsApi 18 + extractDraft 20),全部通过
+npm test             # 离线全量测试:48 项(itemsApi 25 + extractDraft 20 + 胶水层 3),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
@@ -77,13 +77,21 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 把 `miniprogram/config.ts` 里的 `cloudEnv = "YOUR_ENV_ID"` 替换为你的环境 ID。未替换时小程序启动会弹窗如实提示(见 `miniprogram/app.ts`),云函数调用无法成功。
 
-### 4. 创建 items 集合与唯一索引(必做)
+### 4. 创建 items 集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 创建集合 `items`。随后立即为其添加**组合唯一索引**:
+云开发控制台 → 数据库 → 创建集合 `items`。随后完成两项配置:
+
+**① 组合唯一索引**:
 
 > items 集合 → 索引管理 → 添加索引:字段一 `household_id`(升序)+ 字段二 `operation_id`(升序),勾选「**唯一**」。
 
-**为什么必须建**:`create` 的幂等在代码层是「先查后插」(`cloudfunctions/itemsApi/lib/handler.js` 的 `createItem`),对先后到达的重放有效;但对**并发**重放(两笔同 `operation_id` 的请求几乎同时到达)不是原子的。唯一索引在数据库层兜底:第二笔插入被数据库拒绝、报错而非静默双写;用户重试时,先查后插会命中已有文档,正常返回 `duplicated: true`。
+**为什么必须建**:`create` 的幂等在代码层是「先查后插 + 同键同内容比对」(`cloudfunctions/itemsApi/lib/handler.js` 的 `createItem`),对先后到达的重放有效;但对**并发**重放(两笔同 `operation_id` 的请求几乎同时到达)不是原子的。唯一索引在数据库层兜底:第二笔插入被数据库拒绝后,服务端捕获该错误回查并返回稳定结果(同内容 `duplicated: true`;异内容或命中已删文档 `OPERATION_CONFLICT`),绝不静默双写。
+
+**② 权限设置(安全必做)**:
+
+> items 集合 → 权限设置 → 选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
+
+**为什么必须改**:所有业务访问都经云函数(管理端身份,不受权限规则约束),客户端不需要任何直连权限。默认权限曾实测允许任意客户端直读全集合(见 `docs/security-evidence.md` 证据 1)——不改等于向所有用户开放全部家庭数据。
 
 ### 5. 为 extractDraft 配置 DEEPSEEK_API_KEY
 
