@@ -1,0 +1,15 @@
+{
+  "id": "s12",
+  "category": "可容忍别字",
+  "text": "充气简放在阳台储物柜最里面",
+  "expect": {
+    "draft": {
+      "name": "充气简",
+      "location_text": "阳台储物柜最里面",
+      "certain": true,
+      "qualifiers": [
+        "最里面"
+      ]
+    }
+  }
+}

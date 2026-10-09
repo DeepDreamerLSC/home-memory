@@ -1,0 +1,4 @@
+/* 详情页补充样式(其余复用 app.wxss) */
+.field:last-of-type {
+  margin-bottom: 0;
+}

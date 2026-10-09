@@ -1,0 +1,10 @@
+{
+  "name": "itemsApi",
+  "version": "1.0.0",
+  "description": "家庭物品记忆助手 PR1:items 集合的 create/update/delete/query/list 云函数",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

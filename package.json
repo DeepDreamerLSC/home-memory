@@ -1,0 +1,15 @@
+{
+  "name": "home-memory",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "typecheck": "tsc -p miniprogram --noEmit",
+    "build:mp": "tsc -p miniprogram",
+    "samples:live": "node tests/samples-live.js"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "^3.12.0",
+    "miniprogram-automator": "^0.12.1",
+    "typescript": "^5.4.0"
+  }
+}

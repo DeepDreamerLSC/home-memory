@@ -1,0 +1,56 @@
+<view class="page">
+  <view wx:if="{{ isManual }}" class="banner manual">手动录入</view>
+  <block wx:else>
+    <view class="banner">AI 草稿,请确认</view>
+    <view wx:if="{{ qualifiersText }}" class="qualifiers">
+      位置限定语:{{ qualifiersText }}
+    </view>
+    <view wx:if="{{ !certain }}" class="qualifiers warn">
+      AI 未能确定位置,请补充填写
+    </view>
+  </block>
+
+  <view class="card">
+    <view class="field">
+      <view class="label">名称</view>
+      <input
+        class="input"
+        placeholder="物品名称(必填)"
+        placeholder-class="placeholder"
+        value="{{ name }}"
+        maxlength="50"
+        bindinput="onNameInput"
+      />
+    </view>
+    <view class="field">
+      <view class="label">位置(必填)</view>
+      <input
+        class="input"
+        placeholder="放在哪里"
+        placeholder-class="placeholder"
+        value="{{ locationText }}"
+        maxlength="200"
+        bindinput="onLocationInput"
+      />
+    </view>
+    <view class="field">
+      <view class="label">备注</view>
+      <textarea
+        class="textarea"
+        placeholder="选填,最多 200 字"
+        placeholder-class="placeholder"
+        value="{{ note }}"
+        maxlength="200"
+        auto-height
+        bindinput="onNoteInput"
+      />
+    </view>
+    <button
+      class="btn primary block"
+      loading="{{ saving }}"
+      bindtap="onSaveTap"
+    >
+      保存
+    </button>
+  </view>
+</view>

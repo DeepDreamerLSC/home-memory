@@ -1,0 +1,13 @@
+{
+  "id": "s14",
+  "category": "长度边界",
+  "text": "伞",
+  "expect": {
+    "draft": {
+      "name": "伞",
+      "location_text": "",
+      "certain": false,
+      "qualifiers": []
+    }
+  }
+}

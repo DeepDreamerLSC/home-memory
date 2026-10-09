@@ -1,0 +1,13 @@
+{
+  "id": "s11",
+  "category": "可容忍别字",
+  "text": "雨伞挂在玄官的挂钩上",
+  "expect": {
+    "draft": {
+      "name": "雨伞",
+      "location_text": "玄官的挂钩上",
+      "certain": true,
+      "qualifiers": []
+    }
+  }
+}

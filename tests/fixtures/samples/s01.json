@@ -1,0 +1,15 @@
+{
+  "id": "s01",
+  "category": "典型一句话",
+  "text": "降压药放在厨房第二个抽屉",
+  "expect": {
+    "draft": {
+      "name": "降压药",
+      "location_text": "厨房第二个抽屉",
+      "certain": true,
+      "qualifiers": [
+        "第二个"
+      ]
+    }
+  }
+}

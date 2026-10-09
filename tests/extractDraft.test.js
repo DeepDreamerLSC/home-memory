@@ -1,0 +1,514 @@
+"use strict";
+
+/*
+ * extractDraft 离线测试(node:test + node:assert,零外部依赖)。
+ * 只 require cloudfunctions/extractDraft 下的 lib,绝不 require wx-server-sdk。
+ * 覆盖:成功、不肯定给空位置、幻觉防护、拆分、空名、坏 JSON 重试、callLLM 抛错、
+ * text 超长/为空,以及逐条样例驱动 validateDraft 与 mock callLLM 驱动 handler。
+ */
+
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const { handler, buildPrompt } = require("../cloudfunctions/extractDraft/lib/handler");
+const { validateDraft } = require("../cloudfunctions/extractDraft/lib/validate");
+
+const SAMPLES_DIR = path.join(__dirname, "fixtures", "samples");
+const samples = fs
+  .readdirSync(SAMPLES_DIR)
+  .filter((f) => f.endsWith(".json"))
+  .sort()
+  .map((f) => JSON.parse(fs.readFileSync(path.join(SAMPLES_DIR, f), "utf8")));
+
+const codePointLength = (s) => Array.from(s.replace(/\s+/g, "")).length;
+
+// ---------- 公共工具 ----------
+
+function userTextFromPrompt(prompt) {
+  const marker = "【用户输入】\n";
+  const start = prompt.indexOf(marker);
+  assert.notStrictEqual(start, -1, "prompt 应包含【用户输入】标记");
+  let rest = prompt.slice(start + marker.length);
+  const retryIdx = rest.indexOf("\n\n【上次输出】");
+  if (retryIdx !== -1) rest = rest.slice(0, retryIdx);
+  return rest;
+}
+
+// 按样例构造「模型原始输出文本」:draft 样例输出对应 JSON;
+// needs_split 样例输出 needs_split true;error 样例输出空白名称。
+function rawFromSample(sample) {
+  const e = sample.expect;
+  if (e.draft) {
+    return JSON.stringify({
+      name: e.draft.name,
+      location_text: e.draft.location_text,
+      certain: e.draft.certain,
+      qualifiers: e.draft.qualifiers,
+      needs_split: false,
+    });
+  }
+  if (e.needs_split) {
+    return JSON.stringify({
+      name: "物品",
+      location_text: "",
+      certain: false,
+      qualifiers: [],
+      needs_split: true,
+    });
+  }
+  return JSON.stringify({
+    name: "   ",
+    location_text: "",
+    certain: false,
+    qualifiers: [],
+    needs_split: false,
+  });
+}
+
+// 故意包上 markdown 围栏或废话,考验解析。
+function wrapRaw(i, raw) {
+  const mode = i % 3;
+  if (mode === 1) return "```json\n" + raw + "\n```";
+  if (mode === 2) return "好的,提取结果如下:\n" + raw + "\n如果还需要调整请告诉我。";
+  return raw;
+}
+
+function mockFromSample(sample, opts) {
+  opts = opts || {};
+  const calls = [];
+  return {
+    calls,
+    callLLM: async (prompt) => {
+      calls.push(prompt);
+      const text = userTextFromPrompt(prompt);
+      assert.strictEqual(text, sample.text, "callLLM 应收到对应样例原文");
+      let raw = rawFromSample(sample);
+      if (
+        opts.hallucinateLocation &&
+        sample.expect.draft &&
+        sample.expect.draft.certain === false
+      ) {
+        // 幻觉场景:模型 certain 为 false 却编了一个位置。
+        raw = JSON.stringify({
+          name: sample.expect.draft.name,
+          location_text: "卧室抽屉",
+          certain: false,
+          qualifiers: [],
+          needs_split: false,
+        });
+      }
+      if (typeof opts.wrapMode === "number") raw = wrapRaw(opts.wrapMode, raw);
+      return raw;
+    },
+  };
+}
+
+function seqMock(responses) {
+  const calls = [];
+  return {
+    calls,
+    callLLM: async (prompt) => {
+      calls.push(prompt);
+      const item = responses[Math.min(calls.length - 1, responses.length - 1)];
+      if (item instanceof Error) throw item;
+      return item;
+    },
+  };
+}
+
+const noopLogger = () => {};
+
+function assertExpect(sample, res) {
+  const e = sample.expect;
+  if (e.draft) {
+    assert.strictEqual(res.ok, true, sample.id + " 应成功");
+    assert.deepStrictEqual(res.draft, e.draft, sample.id + " draft 应与 expect 一致");
+  } else if (e.needs_split) {
+    assert.strictEqual(res.ok, true, sample.id + " 应成功");
+    assert.strictEqual(res.needs_split, true, sample.id + " 应为 needs_split");
+    assert.strictEqual(res.message, "一次只记一件物品,请分开说", sample.id);
+  } else {
+    assert.strictEqual(res.ok, false, sample.id + " 应失败");
+    assert.strictEqual(res.error, e.error, sample.id + " 错误码应为 " + e.error);
+  }
+}
+
+// ---------- 样例集本身 ----------
+
+test("样例集:至少 15 条,覆盖契约七类情形,边界字数正确", () => {
+  assert.ok(samples.length >= 15, "样例至少 15 条,实际 " + samples.length);
+  const categories = new Set(samples.map((s) => s.category));
+  for (const required of [
+    "典型一句话",
+    "带限定语",
+    "多件需拆分",
+    "口语化模糊位置",
+    "无位置信息",
+    "可容忍别字",
+    "长度边界",
+  ]) {
+    assert.ok(categories.has(required), "缺少类别:" + required);
+  }
+  const s13 = samples.find((s) => s.id === "s13");
+  const s14 = samples.find((s) => s.id === "s14");
+  assert.strictEqual(codePointLength(s13.text), 500, "s13 应恰好 500 字");
+  assert.strictEqual(codePointLength(s14.text), 1, "s14 应为 1 字");
+});
+
+test("样例逐条:validateDraft 对模型原始输出(裸 JSON / 围栏 / 废话包装)均符合 expect", () => {
+  samples.forEach((sample) => {
+    const raw = rawFromSample(sample);
+    for (const variant of [raw, wrapRaw(1, raw), wrapRaw(2, raw)]) {
+      const res = validateDraft(variant, sample.text);
+      assertExpect(sample, res);
+    }
+  });
+});
+
+// ---------- handler:样例驱动 ----------
+
+test("handler:成功提取(输出包装围栏/废话也能解析),draft 与 expect 一致", async () => {
+  const draftSamples = samples.filter((s) => s.expect.draft);
+  assert.ok(draftSamples.length >= 8);
+  for (let i = 0; i < draftSamples.length; i++) {
+    const sample = draftSamples[i];
+    const mock = mockFromSample(sample, { wrapMode: i % 3 });
+    const res = await handler(
+      { text: sample.text },
+      { callLLM: mock.callLLM, logger: noopLogger }
+    );
+    assertExpect(sample, res);
+    assert.strictEqual(mock.calls.length, 1, sample.id + " 只应调用一次");
+  }
+});
+
+test("handler:不肯定的样例,草稿位置必须为空且 certain 为 false", async () => {
+  const uncertain = samples.filter((s) => s.expect.draft && s.expect.draft.certain === false);
+  assert.ok(uncertain.length >= 4);
+  for (const sample of uncertain) {
+    const mock = mockFromSample(sample);
+    const res = await handler(
+      { text: sample.text },
+      { callLLM: mock.callLLM, logger: noopLogger }
+    );
+    assert.strictEqual(res.ok, true, sample.id);
+    assert.strictEqual(res.draft.location_text, "", sample.id);
+    assert.strictEqual(res.draft.certain, false, sample.id);
+  }
+});
+
+test("handler:幻觉防护——模型 certain 为 false 却给了位置,最终 draft 位置必须为空", async () => {
+  const sample = samples.find((s) => s.expect.draft && s.expect.draft.certain === false);
+  assert.ok(sample, "应存在不肯定样例");
+  const mock = mockFromSample(sample, { hallucinateLocation: true });
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.draft.location_text, "", "幻觉位置必须被清空");
+  assert.strictEqual(res.draft.certain, false);
+  assert.deepStrictEqual(res.draft, sample.expect.draft, "最终应与 expect 一致");
+
+  // 直接对 validateDraft 断言同一规则。
+  const raw = JSON.stringify({
+    name: sample.expect.draft.name,
+    location_text: "厨房第三个抽屉",
+    certain: false,
+    qualifiers: ["编的"],
+    needs_split: false,
+  });
+  const res2 = validateDraft(raw, sample.text);
+  assert.strictEqual(res2.ok, true);
+  assert.strictEqual(res2.draft.location_text, "");
+  assert.strictEqual(res2.draft.certain, false);
+});
+
+test("handler:多件物品返回 needs_split 与固定提示语", async () => {
+  const splitSamples = samples.filter((s) => s.expect.needs_split);
+  assert.ok(splitSamples.length >= 2, "至少 2 条拆分样例");
+  for (const sample of splitSamples) {
+    const mock = mockFromSample(sample);
+    const res = await handler(
+      { text: sample.text },
+      { callLLM: mock.callLLM, logger: noopLogger }
+    );
+    assert.strictEqual(res.ok, true, sample.id);
+    assert.strictEqual(res.needs_split, true, sample.id);
+    assert.strictEqual(res.message, "一次只记一件物品,请分开说", sample.id);
+    assert.strictEqual(mock.calls.length, 1, sample.id);
+  }
+});
+
+test("handler:空名称返回 AI_UNAVAILABLE(可手动回退)", async () => {
+  const sample = samples.find((s) => s.expect.error === "AI_UNAVAILABLE");
+  assert.ok(sample, "应存在空名称样例");
+  const mock = mockFromSample(sample);
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, "AI_UNAVAILABLE");
+  assert.strictEqual(res.manual_fallback, true);
+});
+
+// ---------- handler:失败与重试 ----------
+
+test("handler:坏 JSON 带错误重试一次,重试成功返回草稿", async () => {
+  const sample = samples.find((s) => s.expect.draft && s.expect.draft.certain === true);
+  const mock = seqMock(["哎呀,我不太明白你的意思呢~", rawFromSample(sample)]);
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, true);
+  assert.deepStrictEqual(res.draft, sample.expect.draft);
+  assert.strictEqual(mock.calls.length, 2, "应恰好调用两次");
+  assert.ok(mock.calls[1].includes("【上次输出】"), "重试 prompt 应回传上次输出");
+  assert.ok(mock.calls[1].includes("【解析错误】"), "重试 prompt 应带解析错误");
+  assert.ok(mock.calls[1].includes("哎呀"), "重试 prompt 应包含上次原始输出内容");
+});
+
+test("handler:坏 JSON 重试一次仍是坏 JSON,返回 AI_UNAVAILABLE", async () => {
+  const sample = samples.find((s) => s.expect.draft);
+  const mock = seqMock(["这不是 JSON", "还是不行 { 未闭合"]);
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, "AI_UNAVAILABLE");
+  assert.strictEqual(mock.calls.length, 2, "只重试一次,不再三连调");
+});
+
+test("handler:callLLM 抛错返回 AI_UNAVAILABLE 且 manual_fallback 为 true", async () => {
+  const sample = samples.find((s) => s.expect.draft);
+  const mock = seqMock([new Error("HTTP_503")]);
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, "AI_UNAVAILABLE");
+  assert.strictEqual(res.manual_fallback, true);
+  assert.strictEqual(mock.calls.length, 1);
+});
+
+test("handler:重试阶段 callLLM 抛错同样返回 AI_UNAVAILABLE", async () => {
+  const sample = samples.find((s) => s.expect.draft);
+  const mock = seqMock(["bad json", new Error("TIMEOUT")]);
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.error, "AI_UNAVAILABLE");
+  assert.strictEqual(res.manual_fallback, true);
+  assert.strictEqual(mock.calls.length, 2);
+});
+
+// ---------- handler:入参校验 ----------
+
+test("handler:text 超长/为空/纯空白/非字符串一律 INVALID_INPUT 且不调用 LLM", async () => {
+  const cases = [
+    { label: "501 字", text: "记".repeat(501) },
+    { label: "空字符串", text: "" },
+    { label: "纯空白", text: "   \n\t  " },
+    { label: "数字", text: 123 },
+    { label: "null", text: null },
+    { label: "undefined", text: undefined },
+  ];
+  for (const c of cases) {
+    const mock = seqMock(["不应被调用"]);
+    const res = await handler(
+      { text: c.text },
+      { callLLM: mock.callLLM, logger: noopLogger }
+    );
+    assert.strictEqual(res.ok, false, c.label);
+    assert.strictEqual(res.error, "INVALID_INPUT", c.label);
+    assert.strictEqual(mock.calls.length, 0, c.label + " 不应调用 LLM");
+  }
+  const mock2 = seqMock(["不应被调用"]);
+  const res2 = await handler({}, { callLLM: mock2.callLLM, logger: noopLogger });
+  assert.strictEqual(res2.error, "INVALID_INPUT", "缺 text 字段");
+  assert.strictEqual(mock2.calls.length, 0);
+
+  // 500 字边界是合法输入(s13 样例已在成功用例中覆盖)。
+  const mock3 = seqMock([rawFromSample(samples.find((s) => s.id === "s13"))]);
+  const res3 = await handler(
+    { text: samples.find((s) => s.id === "s13").text },
+    { callLLM: mock3.callLLM, logger: noopLogger }
+  );
+  assert.strictEqual(res3.ok, true, "恰好 500 字应通过");
+});
+
+test("handler:缺 logger 也能正常工作(纯函数容错)", async () => {
+  const sample = samples.find((s) => s.expect.draft);
+  const mock = mockFromSample(sample);
+  const res = await handler({ text: sample.text }, { callLLM: mock.callLLM });
+  assert.strictEqual(res.ok, true);
+  assert.deepStrictEqual(res.draft, sample.expect.draft);
+});
+
+// ---------- 日志纪律 ----------
+
+test("日志只记文本长度、耗时、错误码,不含原文与提取结果", async () => {
+  const sample = samples.find((s) => s.expect.draft && s.expect.draft.certain === true);
+  const mock = mockFromSample(sample);
+  const logs = [];
+  const res = await handler(
+    { text: sample.text },
+    { callLLM: mock.callLLM, logger: (meta) => logs.push(meta) }
+  );
+  assert.strictEqual(res.ok, true);
+  assert.ok(logs.length >= 1, "成功路径至少一条日志");
+  const serialized = JSON.stringify(logs);
+  assert.ok(!serialized.includes(sample.text), "日志不得包含原文");
+  assert.ok(!serialized.includes(sample.expect.draft.name), "日志不得包含物品名");
+  assert.ok(!serialized.includes(sample.expect.draft.location_text), "日志不得包含位置");
+  for (const entry of logs) {
+    for (const key of Object.keys(entry)) {
+      assert.ok(
+        ["textLength", "elapsedMs", "error"].includes(key),
+        "日志出现越界字段:" + key
+      );
+    }
+    assert.strictEqual(typeof entry.textLength, "number");
+    assert.strictEqual(typeof entry.elapsedMs, "number");
+    assert.ok(entry.elapsedMs >= 0);
+  }
+  assert.strictEqual(logs[logs.length - 1].textLength, codePointLength(sample.text));
+
+  // 失败路径同样只记错误码。
+  const mock2 = seqMock([new Error("HTTP_500")]);
+  const logs2 = [];
+  await handler(
+    { text: sample.text },
+    { callLLM: mock2.callLLM, logger: (meta) => logs2.push(meta) }
+  );
+  assert.strictEqual(logs2[logs2.length - 1].error, "AI_UNAVAILABLE");
+
+  const mock3 = seqMock(["x"]);
+  const logs3 = [];
+  await handler(
+    { text: "记".repeat(501) },
+    { callLLM: mock3.callLLM, logger: (meta) => logs3.push(meta) }
+  );
+  assert.strictEqual(logs3[logs3.length - 1].error, "INVALID_INPUT");
+});
+
+// ---------- validateDraft 规则细节 ----------
+
+test("validateDraft:certain 为 true 但空位置按不肯定处理", () => {
+  const res = validateDraft(
+    JSON.stringify({ name: "手电", location_text: "", certain: true, qualifiers: [] }),
+    "手电"
+  );
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.draft.certain, false);
+  assert.strictEqual(res.draft.location_text, "");
+});
+
+test("validateDraft:长度与类型规则", () => {
+  const cases = [
+    { label: "name 超过 50 字", raw: { name: "长".repeat(51), location_text: "柜子", certain: true, qualifiers: [] } },
+    { label: "location 超过 200 字", raw: { name: "钥匙", location_text: "柜".repeat(201), certain: true, qualifiers: [] } },
+    { label: "qualifier 超过 20 字", raw: { name: "钥匙", location_text: "柜子", certain: true, qualifiers: ["长".repeat(21)] } },
+    { label: "qualifier 非字符串", raw: { name: "钥匙", location_text: "柜子", certain: true, qualifiers: [1] } },
+    { label: "qualifiers 非数组", raw: { name: "钥匙", location_text: "柜子", certain: true, qualifiers: "右边" } },
+    { label: "certain 非布尔", raw: { name: "钥匙", location_text: "柜子", certain: "yes", qualifiers: [] } },
+    { label: "needs_split 非布尔", raw: { name: "钥匙", location_text: "柜子", certain: true, qualifiers: [], needs_split: "true" } },
+    { label: "name 缺失", raw: { location_text: "柜子", certain: true, qualifiers: [] } },
+  ];
+  for (const c of cases) {
+    const res = validateDraft(JSON.stringify(c.raw), "原文");
+    assert.strictEqual(res.ok, false, c.label);
+    assert.strictEqual(res.error, "AI_UNAVAILABLE", c.label);
+    assert.strictEqual(res.retryable, undefined, c.label + " 不属于可重试解析失败");
+  }
+
+  // name 为空白字符串 → AI_UNAVAILABLE。
+  const resName = validateDraft(
+    JSON.stringify({ name: " \t ", location_text: "", certain: false, qualifiers: [] }),
+    "原文"
+  );
+  assert.strictEqual(resName.error, "AI_UNAVAILABLE");
+
+  // name 去空白后统计长度(内部空白不计数)。
+  const resSpaces = validateDraft(
+    JSON.stringify({ name: "a b", location_text: "柜 子", certain: true, qualifiers: [] }),
+    "原文"
+  );
+  assert.strictEqual(resSpaces.ok, true);
+  assert.strictEqual(resSpaces.draft.name, "ab");
+  assert.strictEqual(resSpaces.draft.location_text, "柜子");
+});
+
+test("validateDraft:仅 qualifiers 数量允许截断为 5 个", () => {
+  const res = validateDraft(
+    JSON.stringify({
+      name: "钥匙",
+      location_text: "柜子",
+      certain: true,
+      qualifiers: ["一", "二", "三", "四", "五", "六", "七"],
+    }),
+    "原文"
+  );
+  assert.strictEqual(res.ok, true);
+  assert.deepStrictEqual(res.draft.qualifiers, ["一", "二", "三", "四", "五"]);
+});
+
+test("validateDraft:JSON 解析失败返回可重试标记", () => {
+  const bads = [
+    undefined,
+    null,
+    42,
+    "",
+    "   ",
+    "这不是 JSON",
+    "还是不行 { 未闭合",
+    "[1,2,3]",
+    "null",
+    "一句话",
+  ];
+  for (const bad of bads) {
+    const res = validateDraft(bad, "原文");
+    assert.strictEqual(res.ok, false, "坏输入应 ok:false");
+    assert.strictEqual(res.retryable, true, "应标记可重试:" + JSON.stringify(bad));
+    assert.ok(typeof res.reason === "string" && res.reason.length > 0, "应带原因");
+  }
+});
+
+test("validateDraft:needs_split 优先于其余字段校验", () => {
+  const res = validateDraft(JSON.stringify({ needs_split: true, name: "" }), "原文");
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.needs_split, true);
+  assert.strictEqual(res.message, "一次只记一件物品,请分开说");
+});
+
+// ---------- buildPrompt ----------
+
+test("buildPrompt:包含契约要点、用户输入与重试上下文", () => {
+  const prompt = buildPrompt("降压药在厨房");
+  assert.ok(prompt.includes("【用户输入】\n降压药在厨房"));
+  for (const keyword of [
+    "家庭物品位置提取器",
+    "位置必须来自原文",
+    "禁止猜测",
+    "qualifiers",
+    "needs_split",
+    "certain",
+    "只输出一个 JSON 对象",
+  ]) {
+    assert.ok(prompt.includes(keyword), "system prompt 缺少要点:" + keyword);
+  }
+  const retryPrompt = buildPrompt("降压药在厨房", {
+    previousOutput: "上次烂输出",
+    reason: "输出不是合法的 JSON 对象",
+  });
+  assert.ok(retryPrompt.includes("【上次输出】\n上次烂输出"));
+  assert.ok(retryPrompt.includes("【解析错误】\n输出不是合法的 JSON 对象"));
+});
