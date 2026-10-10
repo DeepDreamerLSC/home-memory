@@ -30,11 +30,18 @@
   margin-bottom: 12rpx;
 }
 
+/* 「找」按钮外包透明热区:视觉圆 80rpx 不变,实际可点范围四周外扩 */
+.search-go-hit {
+  flex-shrink: 0;
+  /* 左侧 16rpx 恰好接上原按钮与输入框的间距,视觉位置不变;其余方向各外扩 20rpx */
+  padding: 20rpx 20rpx 20rpx 16rpx;
+  /* 负边距抵消上下外扩占用的行高,布局与改前一致 */
+  margin: -20rpx 0;
+}
+
 .search-go {
   width: 80rpx;
   height: 80rpx;
-  margin-left: 16rpx;
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;

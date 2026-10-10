@@ -40,9 +40,9 @@ page {
     --card-inset: #161616;
     --text: #f5f4f0;
     --text-2: #a8a69e;
-    --text-3: #6e6c66;
+    --text-3: #8a8880;
     --line: #2e2e2e;
-    --placeholder: #5c5a54;
+    --placeholder: #82807a;
     --accent: #f7d64b;
     --accent-shadow: #8f7a1e;
     --accent-dim: #3a3627;

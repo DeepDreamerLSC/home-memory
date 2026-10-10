@@ -23,8 +23,10 @@
         bindinput="onQueryInput"
         bindconfirm="onQueryTap"
       />
-      <view class="search-go {{ querying ? 'busy' : '' }}" bindtap="onQueryTap">
-        {{ querying ? '…' : '找' }}
+      <view class="search-go-hit" bindtap="onQueryTap">
+        <view class="search-go {{ querying ? 'busy' : '' }}">
+          {{ querying ? '…' : '找' }}
+        </view>
       </view>
     </view>
 
@@ -32,7 +34,7 @@
 
     <block wx:if="{{ queried && !queryError }}">
       <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
-        糟了,这件我还真没记住。要记一件?往下按住说话。
+        糟了,这个叫法我还真没对上。试试别的叫法,比如全名或俗称。
       </view>
       <view
         wx:for="{{ queryResults }}"
