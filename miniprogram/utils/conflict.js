@@ -22,6 +22,14 @@ exports.FIELD_LABELS = {
 };
 const FIELDS = ["name", "location", "note"];
 /**
+ * 运行时容错:旧文档可能缺 note 字段(服务端 project 已兜底为空串,这里再守一层),
+ * 非字符串值一律按空串参与比较,保证比较与输出永远是字符串,
+ * 避免把 undefined 写回表单导致后续 .trim() 抛错。
+ */
+function norm(value) {
+    return typeof value === "string" ? value : "";
+}
+/**
  * 对 base(进页/上次对齐时的基准)、local(用户当前输入)、remote(服务端最新)
  * 逐字段比较。传入的值应已按保存口径 trim(base/remote 为服务端原文)。
  */
@@ -29,9 +37,9 @@ function mergeLatest(base, local, remote) {
     const conflicts = [];
     const merged = { name: "", location: "", note: "" };
     for (const key of FIELDS) {
-        const b = base[key];
-        const l = local[key];
-        const r = remote[key];
+        const b = norm(base[key]);
+        const l = norm(local[key]);
+        const r = norm(remote[key]);
         if (l !== b && r !== b && l !== r) {
             conflicts.push({
                 key,

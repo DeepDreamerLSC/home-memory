@@ -130,7 +130,9 @@ function project(doc) {
     item_id: doc._id,
     name: doc.name,
     location_text: doc.location_text,
-    note: doc.note,
+    // note 兜底为空串:与 sameCreateContent 同一约定,早期写入的旧文档可能缺该字段;
+    // 原样透传 undefined 会让客户端(详情页冲突面板/表单 .trim())拿到非字符串而抛错
+    note: doc.note || "",
     version: doc.version,
     updated_at: doc.updated_at
   };

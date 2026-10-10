@@ -2,7 +2,7 @@
   <view wx:if="{{ conflicts.length > 0 }}" class="conflict-card">
     <view class="conflict-title">这些字段与最新记录冲突</view>
     <view class="conflict-desc">
-      保存时检测到其他设备也修改了这些字段。请逐项选择保留哪一版后再次保存;其余字段不受影响。
+      保存时检测到其他设备也修改了这些字段。逐项选择保留哪一版后才能再次保存;在输入框直接修改不会替代选择。
     </view>
     <view wx:for="{{ conflicts }}" wx:key="key" class="conflict-item">
       <view class="conflict-item-title">{{ item.label }}</view>

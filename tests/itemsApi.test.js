@@ -717,3 +717,25 @@ test("重放内容校验:同 update_id 但内容不同,一律 VERSION_CONFLICT �
   assert.equal(replay.ok, true);
   assert.equal(replay.replayed, true);
 });
+
+// 回归:早期写入的旧文档可能缺 note 字段,投影必须兜底为空串,
+// 不能把 undefined 透传给客户端(详情页冲突面板/表单 .trim() 会拿到非字符串而抛错)
+test("project:旧文档缺 note 时 get 投影兜底为空串", async function () {
+  var t = fresh();
+  var added = await t.db.collection("items").add({
+    data: {
+      name: "旧数据钥匙",
+      name_norm: "旧数据钥匙",
+      location_text: "玄关",
+      version: 1,
+      updated_at: "2025-01-01T00:00:00.000Z",
+      deleted: false,
+      household_id: HOUSEHOLD_A
+      // 故意不写 note:模拟早期版本写入的旧文档(sameCreateContent 的 doc.note || "" 即为此约定)
+    }
+  });
+  var got = await handler({ action: "get", item_id: added._id }, t.deps);
+  assert.equal(got.ok, true);
+  assert.equal(got.item.note, "", "缺 note 的旧文档投影应兜底为空串");
+  assert.equal(typeof got.item.note, "string", "note 必须是字符串,不能是 undefined");
+});

@@ -62,6 +62,7 @@ Page<
     onChooseRemote(e: WechatMiniprogram.BaseEvent): void;
     applyConflictChoice(key: EditableField, choice: ConflictChoice): void;
     syncConflictFromInput(key: EditableField, value: string): void;
+    dismissConflictsIfSettled(): void;
     onSaveTap(): Promise<void>;
     onDeleteTap(): void;
     confirmDelete(): Promise<void>;
@@ -151,9 +152,11 @@ Page<
   },
 
   /**
-   * 冲突态下用户直接编辑了冲突字段:视为对「你的修改」的最新表达,
-   * 同步面板上的本地值并按「保留我的修改」计;程序 setData 不触发 input 事件,
-   * 不会干扰「采用最新记录」按钮写入的值。
+   * 冲突态下用户直接编辑了冲突字段:仅把面板上的「你的修改」同步为最新输入,
+   * 不视为显式选择——门禁要求点选按钮,避免「不看面板、在输入框敲个空格再删掉」
+   * 就绕过冲突确认直接覆盖(issue #6:必须知悉对方修改后明确选择)。
+   * 输入会撤回该字段已做的选择(既有选择已不再反映输入框内容);
+   * 程序 setData 不触发 input 事件,「采用最新记录」按钮写入的值不会被误判为输入。
    */
   syncConflictFromInput(key: EditableField, value: string): void {
     const idx = this.data.conflicts.findIndex((c) => c.key === key);
@@ -165,11 +168,9 @@ Page<
     if (entry.localValue !== value.trim()) {
       patch["conflicts[" + idx + "].localValue"] = value.trim();
     }
-    if (entry.choice !== "local") {
-      patch["conflicts[" + idx + "].choice"] = "local";
-      patch.conflictPending = this.data.conflicts.some(
-        (c, i) => i !== idx && !c.choice
-      );
+    if (entry.choice !== null) {
+      patch["conflicts[" + idx + "].choice"] = null;
+      patch.conflictPending = true;
     }
     if (Object.keys(patch).length > 0) {
       this.setData(patch);
@@ -192,6 +193,30 @@ Page<
         (c, i) => i !== idx && !c.choice
       ),
     });
+    this.dismissConflictsIfSettled();
+  },
+
+  /**
+   * 冲突全部选完且表单已与最新基准完全一致(典型:全部采用最新记录且无其他改动)
+   * 时收起面板。此时没有任何待提交内容,保留面板只会引导一次
+   * 注定「内容没有变化」的保存,让用户找不到出口。
+   */
+  dismissConflictsIfSettled(): void {
+    if (this.data.conflicts.length === 0) {
+      return;
+    }
+    if (this.data.conflicts.some((c) => c.choice === null)) {
+      return;
+    }
+    const changes = buildUpdateChanges(this.original, {
+      name: this.data.name.trim(),
+      location: this.data.locationText.trim(),
+      note: this.data.note.trim(),
+    });
+    if (Object.keys(changes).length === 0) {
+      this.setData({ conflicts: [], conflictPending: false });
+      wx.showToast({ title: "已与最新记录一致", icon: "none" });
+    }
   },
 
   onChooseLocal(e) {
@@ -249,6 +274,11 @@ Page<
       note,
     });
     if (Object.keys(changes).length === 0) {
+      // 冲突态下走到这里 = 冲突字段全部选了「采用最新记录」且无其他改动:
+      // 表单已与最新基准一致,收起面板,不给用户留一个只会空跑的面板。
+      if (this.data.conflicts.length > 0) {
+        this.setData({ conflicts: [], conflictPending: false });
+      }
       wx.showToast({ title: "内容没有变化", icon: "none" });
       return;
     }
@@ -276,7 +306,7 @@ Page<
         item_id: it.item_id,
         name: it.name,
         location_text: it.location_text,
-        note: it.note,
+        note: it.note || "",
         version: it.version,
         updated_at: it.updated_at,
       });
@@ -327,6 +357,13 @@ Page<
   async refreshLatest(): Promise<RefreshResult> {
     try {
       const res = await callItemsApi({ action: "get", item_id: this.data.itemId });
+      // note 兜底为空串:早期写入的旧文档可能缺该字段,原样透传 undefined
+      // 会让冲突比较与表单 .trim() 拿到非字符串(服务端投影已兜底,这里双保险)
+      const remote = {
+        name: res.item.name,
+        location: res.item.location_text,
+        note: res.item.note || "",
+      };
       const outcome = mergeLatest(
         this.original,
         {
@@ -334,17 +371,9 @@ Page<
           location: this.data.locationText.trim(),
           note: this.data.note.trim(),
         },
-        {
-          name: res.item.name,
-          location: res.item.location_text,
-          note: res.item.note,
-        }
+        remote
       );
-      this.original = {
-        name: res.item.name,
-        location: res.item.location_text,
-        note: res.item.note,
-      };
+      this.original = remote;
       this.setData({
         name: outcome.merged.name,
         locationText: outcome.merged.location,
@@ -356,6 +385,10 @@ Page<
       });
       return "refreshed";
     } catch (e) {
+      if (e instanceof ApiError && e.code === "NOT_FOUND") {
+        // 冲突期间记录已被删除:不弹「刷新失败」,交由调用方提示「记录不存在」并返回
+        return "notfound";
+      }
       wx.showModal({
         title: "刷新失败",
         content: errorMessage(e),

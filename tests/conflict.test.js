@@ -168,3 +168,31 @@ test("buildUpdateChanges:与保存口径一致,无变化返回空对象", functi
     { name: "钥匙B", location_text: "位置A2", note: "备注X" }
   );
 });
+
+test("旧文档缺 note(undefined)按空串参与比较,不产生 undefined 值", function () {
+  // 远端投影原样返回缺失的 note(undefined):与用户清空的 "" 视为同一值,
+  // 不应让用户在两个看不见差异的「(空)」里做选择
+  var cleared = mergeLatest(
+    values("钥匙", "位置A", "旧备注"),
+    values("钥匙", "位置A", ""),
+    { name: "钥匙", location: "位置A", note: undefined }
+  );
+  assert.deepEqual(cleared.conflicts, [], "空串与缺失视为同一值(都等于没有备注)");
+  assert.equal(cleared.merged.note, "");
+
+  // 用户改了备注、远端缺 note:判冲突,但远端值必须是字符串,选远端回填后 .trim() 不抛错
+  var conflictOut = mergeLatest(
+    values("钥匙", "位置A", "旧备注"),
+    values("钥匙", "位置A", "新备注"),
+    { name: "钥匙", location: "位置A", note: undefined }
+  );
+  assert.equal(conflictOut.conflicts.length, 1, "备注一方清缺、一方改写,应判冲突");
+  assert.equal(conflictOut.conflicts[0].remoteValue, "", "undefined 应兜底为空串");
+  assert.equal(
+    typeof conflictOut.conflicts[0].remoteValue,
+    "string",
+    "冲突两版值必须是字符串,否则回填表单后保存 .trim() 会抛 TypeError"
+  );
+  assert.equal(chosenValue(conflictOut.conflicts[0], "remote"), "");
+  assert.equal(conflictOut.merged.note, "新备注", "冲突字段回填表单暂取本地值");
+});
