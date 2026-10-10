@@ -150,6 +150,7 @@ function parseRaw(segments, mergeSuggestions, uncertain) {
 /**
  * 扫描 mock:按 prompt 内容路由(并行块调用顺序不定,不能按调用序)。
  * 块 prompt 解析【物品清单】逐行,按「位置文本 → segments」表生成 results;
+ * 表值为 Error 的行使整块调用抛错(模拟 deepseek.js reject,而非塞进 JSON 静默变 {});
  * 近义 prompt(【候选树各层名字】)返回 synResponse(Error 则抛出)。
  */
 function routingMock(segmentByText, synResponse) {
@@ -184,6 +185,9 @@ function routingMock(segmentByText, synResponse) {
         assert.ok(text.trim() !== "", "清单不得出现空位置行(空位置件不送 LLM)");
         var segs = segmentByText[text];
         assert.ok(segs, "mock 未覆盖清单中的位置文本:" + text);
+        if (segs instanceof Error) {
+          throw segs; // 该块 LLM 调用 reject(HTTP 非 200/网络错误/超时)
+        }
         results.push({ index: Number(m[1]), segments: segs, uncertain: false });
       }
       return JSON.stringify({ results: results });
@@ -687,7 +691,8 @@ test("TS-NC2:scanHousehold 成功后两集合零变化;计数正确;悬挂件回
   assert.deepEqual(await rawDocs(t.db, "locations"), before.locations, "scanHousehold 绝不写 locations");
   assert.deepEqual(await rawDocs(t.db, "items"), before.items, "scanHousehold 绝不写 items");
 
-  // 任一块失败 → 整体 AI_UNAVAILABLE 且零写入
+  // 任一块 LLM 调用 reject(真抛错,非坏 JSON)→ 整体 AI_UNAVAILABLE 且零写入;
+  // 近义响应给合法 {groups:[]}:证明 AI_UNAVAILABLE 确实来自块失败,而非近义校验拒绝
   var t2 = fresh();
   var deps2 = makeDeps(t2.db, HOUSEHOLD_A);
   await createItem(deps2, "op-boom-1", "甲物", "厨房第一个抽屉");
@@ -699,7 +704,7 @@ test("TS-NC2:scanHousehold 成功后两集合零变化;计数正确;悬挂件回
     ]
   };
   boomSegs["阳台收纳箱"] = new Error("HTTP_500");
-  var boomMock = routingMock(boomSegs, "{}");
+  var boomMock = routingMock(boomSegs, JSON.stringify({ groups: [] }));
   var before2 = {
     locations: await rawDocs(t2.db, "locations"),
     items: await rawDocs(t2.db, "items")

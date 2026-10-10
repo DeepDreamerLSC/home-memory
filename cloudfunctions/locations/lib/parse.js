@@ -478,18 +478,24 @@ async function scanHousehold(event, deps) {
         return validate.validateScanChunk(output, chunk.length);
       }).then(function (call) {
         if (call.failed) {
-          throw new Error("SCAN_CHUNK_FAILED");
+          return { failed: true, results: null }; // 块失败不 throw:否则会以基础设施异常上抛(500)
         }
-        return call.result.results;
+        return { failed: false, results: call.result.results };
       });
     })
   );
+  for (var c0 = 0; c0 < chunkResults.length; c0++) {
+    if (chunkResults[c0].failed) {
+      logParse(deps, { action: "scanHousehold", items_scanned: pool.length, chunks: chunks.length, elapsed_ms: elapsedMs(), error: "AI_UNAVAILABLE" });
+      return aiUnavailableResult();
+    }
+  }
 
   var mounts = [];
   var candidateRoots = [];
   for (var c = 0; c < chunks.length; c++) {
     var chunk = chunks[c];
-    var results = chunkResults[c];
+    var results = chunkResults[c].results;
     var byIndex = Object.create(null);
     for (var r = 0; r < results.length; r++) {
       byIndex[results[r].index] = results[r];
