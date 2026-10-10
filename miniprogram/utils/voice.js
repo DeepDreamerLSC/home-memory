@@ -16,8 +16,6 @@ exports.summarizeTimings = summarizeTimings;
 exports.isSlideUpCancel = isSlideUpCancel;
 exports.cleanTranscript = cleanTranscript;
 exports.isMeaningfulTranscript = isMeaningfulTranscript;
-exports.resetVoiceCancelled = resetVoiceCancelled;
-exports.markVoiceCancelled = markVoiceCancelled;
 exports.createSessionGuard = createSessionGuard;
 exports.createVoiceController = createVoiceController;
 exports.loadTimings = loadTimings;
@@ -71,14 +69,6 @@ function isMeaningfulTranscript(text) {
     const stripped = text.replace(/[嗯啊哦呃唉诶呀哈\s,。、,.\?!!?~～]/g, "");
     return stripped.length >= 2;
 }
-/** 录音识别中标记为取消:丢弃最终结果,不再回调 onStop */
-let cancelled = false;
-function resetVoiceCancelled() {
-    cancelled = false;
-}
-function markVoiceCancelled() {
-    cancelled = true;
-}
 function createSessionGuard() {
     let current = 0;
     return {
@@ -101,24 +91,52 @@ function createSessionGuard() {
  */
 exports.VOICE_FORMAT = "mp3";
 function createVoiceController(callbacks, deps) {
+    let seq = 0;
+    /** 当前权威会话;新会话开始即替代并作废旧的 */
+    let active = null;
+    /** recorder.onStart 是否已为当前会话回调(松手早于实际启动时为 false) */
+    let started = false;
+    /** 耗时埋点:录音起止 */
     let pressStartAt = 0;
     let stopAt = 0;
+    const endIfActive = (s) => {
+        if (s !== null && active === s) {
+            active = null;
+        }
+    };
     deps.recorder.onStart(() => {
+        const s = active;
+        if (s === null || s.cancelled) {
+            // 迟到的启动回调,且会话已作废(松手/切换/离开早于 recorder.onStart):
+            // 立即停止录音,不回调页面、不上传
+            try {
+                deps.recorder.stop();
+            }
+            catch (e) { /* 已停止 */ }
+            return;
+        }
+        started = true;
         pressStartAt = Date.now();
-        resetVoiceCancelled();
         callbacks.onStart();
     });
     deps.recorder.onStop((res) => {
+        const s = active;
         stopAt = Date.now();
-        const recordMs = stopAt - pressStartAt;
-        if (cancelled) {
-            return; // 上滑取消:丢弃本次录音
+        if (s === null || s.cancelled) {
+            endIfActive(s);
+            return; // 已作废的录音:丢弃文件,不上传
         }
+        const recordMs = stopAt - pressStartAt;
         callbacks.onTranscribing();
         void (async () => {
             try {
                 const base64 = await deps.readFileBase64(res.tempFilePath);
                 const result = await deps.transcribe(base64, exports.VOICE_FORMAT);
+                // 转写返回时再次校验:被取消或已被新会话替代 → 旧结果永久失效
+                if (s.cancelled || active !== s) {
+                    endIfActive(s);
+                    return;
+                }
                 const text = result.ok ? cleanTranscript(result.text) : "";
                 appendTiming({
                     recordMs,
@@ -126,9 +144,6 @@ function createVoiceController(callbacks, deps) {
                     chars: text.length,
                     at: new Date().toISOString(),
                 });
-                if (cancelled) {
-                    return;
-                }
                 if (result.ok) {
                     callbacks.onStop(text);
                 }
@@ -138,8 +153,13 @@ function createVoiceController(callbacks, deps) {
                 else {
                     callbacks.onError("ASR_UNAVAILABLE", result.message || voiceErrorMessage("ASR_UNAVAILABLE"));
                 }
+                endIfActive(s);
             }
             catch (e) {
+                if (s.cancelled || active !== s) {
+                    endIfActive(s);
+                    return;
+                }
                 const msg = e instanceof Error ? e.message : String(e);
                 if (/readFile|base64/i.test(msg)) {
                     callbacks.onError("READ_FAIL", voiceErrorMessage("READ_FAIL"));
@@ -147,19 +167,29 @@ function createVoiceController(callbacks, deps) {
                 else {
                     callbacks.onError("ASR_UNAVAILABLE", voiceErrorMessage("ASR_UNAVAILABLE"));
                 }
+                endIfActive(s);
             }
         })();
     });
     deps.recorder.onError(() => {
-        if (cancelled) {
+        const s = active;
+        if (s === null || s.cancelled) {
+            endIfActive(s);
             return;
         }
+        endIfActive(s);
         callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
     });
     return {
-        start() {
+        begin() {
+            // 替代性会话:旧会话(含在途 ASR)永久作废
+            if (active !== null) {
+                active.cancelled = true;
+            }
+            const s = { id: (seq += 1), cancelled: false };
+            active = s;
+            started = false;
             try {
-                // mp3/16k/单声道/24kbps:60 秒约 180KB,远小于 ASR 的 3MB(base64)限额
                 deps.recorder.start({
                     format: exports.VOICE_FORMAT,
                     duration: 60000,
@@ -168,19 +198,42 @@ function createVoiceController(callbacks, deps) {
                     encodeBitRate: 24000,
                     frameSize: 4
                 });
-                return true;
             }
             catch (e) {
+                endIfActive(s);
                 callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
-                return false;
             }
+            return s;
         },
-        stop() {
+        stop(session) {
+            const s = session;
+            if (s !== active || s.cancelled) {
+                return;
+            }
+            if (!started) {
+                // 松手早于 recorder.onStart:作废本次,停止录音且不上传
+                s.cancelled = true;
+                try {
+                    deps.recorder.stop();
+                }
+                catch (e) { /* 已停止 */ }
+                return;
+            }
             try {
                 deps.recorder.stop();
             }
             catch (e) {
                 callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
+            }
+        },
+        cancel(session) {
+            const s = session;
+            s.cancelled = true;
+            if (s === active) {
+                try {
+                    deps.recorder.stop();
+                }
+                catch (e) { /* 已停止 */ }
             }
         },
     };

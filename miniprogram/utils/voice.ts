@@ -85,55 +85,10 @@ export function isMeaningfulTranscript(text: string): boolean {
   return stripped.length >= 2;
 }
 
-export interface VoiceControllerCallbacks {
-  /** 录音开始 */
-  onStart(): void;
-  /** 录音停止、开始识别(界面可显示"识别中") */
-  onTranscribing(): void;
-  /** 最终结果(已清洗;空字符串代表无有效内容) */
-  onStop(text: string): void;
-  /** 失败(code 见 VOICE_ERROR_MESSAGES) */
-  onError(code: string, message: string): void;
-}
-
-/** 依赖集合(均可注入便于离线测试) */
-export interface VoiceDeps {
-  recorder: {
-    start(options: Record<string, unknown>): void;
-    stop(): void;
-    onStart(cb: () => void): void;
-    onStop(cb: (res: { tempFilePath: string; duration?: number }) => void): void;
-    onError(cb: (err: { errMsg?: string }) => void): void;
-  };
-  readFileBase64(filePath: string): Promise<string>;
-  /** 云函数转写:成功 {ok:true,text},失败 {ok:false,...} */
-  transcribe(audioBase64: string, voiceFormat: string): Promise<
-    { ok: true; text: string } | { ok: false; error: string; message?: string }
-  >;
-}
-
-export interface VoiceController {
-  /** 开始录音;返回 false 表示启动失败(页面应回退文字输入) */
-  start(): boolean;
-  /** 停止录音并进入识别 */
-  stop(): void;
-}
-
-/** 录音识别中标记为取消:丢弃最终结果,不再回调 onStop */
-let cancelled = false;
-
-export function resetVoiceCancelled(): void {
-  cancelled = false;
-}
-
-export function markVoiceCancelled(): void {
-  cancelled = true;
-}
-
 /**
- * 轻量按压会话标识:确保「授权回调、录音、取消、识别结果」属于同一次按压。
- * 解决的竞态:按下 → 请求录音授权(异步)→ 用户松手/离开页面/切换模式 →
- * 授权才返回 —— 此时不得再启动录音;会话已作废。
+ * 轻量按压会话标识(页面用于「授权异步返回」窗口):
+ * 按下 → 请求录音授权(异步)→ 用户松手/离开页面/切换模式 → 授权才返回 ——
+ * 此时会话已作废,不得再发起录音会话。
  */
 export interface SessionGuard {
   /** 开始一次新的按压,返回本次会话号 */
@@ -160,6 +115,50 @@ export function createSessionGuard(): SessionGuard {
   };
 }
 
+export interface VoiceControllerCallbacks {
+  /** 录音开始 */
+  onStart(): void;
+  /** 录音停止、开始识别(界面可显示"识别中") */
+  onTranscribing(): void;
+  /** 最终结果(已清洗;空字符串代表无有效内容) */
+  onStop(text: string): void;
+  /** 失败(code 见 VOICE_ERROR_MESSAGES) */
+  onError(code: string, message: string): void;
+}
+
+/** 一次按压对应的录音会话(由控制器签发;启动/取消/转写回调均按会话校验) */
+export interface VoiceSession {
+  readonly id: number;
+}
+
+/** 依赖集合(均可注入便于离线测试) */
+export interface VoiceDeps {
+  recorder: {
+    start(options: Record<string, unknown>): void;
+    stop(): void;
+    onStart(cb: () => void): void;
+    onStop(cb: (res: { tempFilePath: string; duration?: number }) => void): void;
+    onError(cb: (err: { errMsg?: string }) => void): void;
+  };
+  readFileBase64(filePath: string): Promise<string>;
+  /** 云函数转写:成功 {ok:true,text},失败 {ok:false,...} */
+  transcribe(audioBase64: string, voiceFormat: string): Promise<
+    { ok: true; text: string } | { ok: false; error: string; message?: string }
+  >;
+}
+
+export interface VoiceController {
+  /**
+   * 发起一次录音会话。开始新会话会**永久作废**上一个会话
+   * (旧会话在途的识别结果将被丢弃,不会"复活")。
+   */
+  begin(): VoiceSession;
+  /** 正常结束(松手):允许本次录音继续转写并回调结果 */
+  stop(session: VoiceSession): void;
+  /** 永久作废该会话(上滑取消/切换模式/离开页面):迟到的启动与结果一律丢弃 */
+  cancel(session: VoiceSession): void;
+}
+
 /**
  * 录音格式:mp3/16k/单声道/24kbps(压缩编码)。
  * 不用 wav(PCM):60 秒约 1.9MB、base64 约 2.5MB,贴近调用与接口上限;
@@ -167,30 +166,61 @@ export function createSessionGuard(): SessionGuard {
  */
 export const VOICE_FORMAT = "mp3";
 
+interface SessionState {
+  id: number;
+  cancelled: boolean;
+}
+
 export function createVoiceController(
   callbacks: VoiceControllerCallbacks,
   deps: VoiceDeps,
 ): VoiceController {
+  let seq = 0;
+  /** 当前权威会话;新会话开始即替代并作废旧的 */
+  let active: SessionState | null = null;
+  /** recorder.onStart 是否已为当前会话回调(松手早于实际启动时为 false) */
+  let started = false;
+  /** 耗时埋点:录音起止 */
   let pressStartAt = 0;
   let stopAt = 0;
 
+  const endIfActive = (s: SessionState | null) => {
+    if (s !== null && active === s) {
+      active = null;
+    }
+  };
+
   deps.recorder.onStart(() => {
+    const s = active;
+    if (s === null || s.cancelled) {
+      // 迟到的启动回调,且会话已作废(松手/切换/离开早于 recorder.onStart):
+      // 立即停止录音,不回调页面、不上传
+      try { deps.recorder.stop(); } catch (e) { /* 已停止 */ }
+      return;
+    }
+    started = true;
     pressStartAt = Date.now();
-    resetVoiceCancelled();
     callbacks.onStart();
   });
 
   deps.recorder.onStop((res) => {
+    const s = active;
     stopAt = Date.now();
-    const recordMs = stopAt - pressStartAt;
-    if (cancelled) {
-      return; // 上滑取消:丢弃本次录音
+    if (s === null || s.cancelled) {
+      endIfActive(s);
+      return; // 已作废的录音:丢弃文件,不上传
     }
+    const recordMs = stopAt - pressStartAt;
     callbacks.onTranscribing();
     void (async () => {
       try {
         const base64 = await deps.readFileBase64(res.tempFilePath);
         const result = await deps.transcribe(base64, VOICE_FORMAT);
+        // 转写返回时再次校验:被取消或已被新会话替代 → 旧结果永久失效
+        if (s.cancelled || active !== s) {
+          endIfActive(s);
+          return;
+        }
         const text = result.ok ? cleanTranscript(result.text) : "";
         appendTiming({
           recordMs,
@@ -198,9 +228,6 @@ export function createVoiceController(
           chars: text.length,
           at: new Date().toISOString(),
         });
-        if (cancelled) {
-          return;
-        }
         if (result.ok) {
           callbacks.onStop(text);
         } else if (result.error === "INVALID_INPUT") {
@@ -208,28 +235,43 @@ export function createVoiceController(
         } else {
           callbacks.onError("ASR_UNAVAILABLE", result.message || voiceErrorMessage("ASR_UNAVAILABLE"));
         }
+        endIfActive(s);
       } catch (e) {
+        if (s.cancelled || active !== s) {
+          endIfActive(s);
+          return;
+        }
         const msg = e instanceof Error ? e.message : String(e);
         if (/readFile|base64/i.test(msg)) {
           callbacks.onError("READ_FAIL", voiceErrorMessage("READ_FAIL"));
         } else {
           callbacks.onError("ASR_UNAVAILABLE", voiceErrorMessage("ASR_UNAVAILABLE"));
         }
+        endIfActive(s);
       }
     })();
   });
 
   deps.recorder.onError(() => {
-    if (cancelled) {
+    const s = active;
+    if (s === null || s.cancelled) {
+      endIfActive(s);
       return;
     }
+    endIfActive(s);
     callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
   });
 
   return {
-    start() {
+    begin() {
+      // 替代性会话:旧会话(含在途 ASR)永久作废
+      if (active !== null) {
+        active.cancelled = true;
+      }
+      const s: SessionState = { id: (seq += 1), cancelled: false };
+      active = s;
+      started = false;
       try {
-        // mp3/16k/单声道/24kbps:60 秒约 180KB,远小于 ASR 的 3MB(base64)限额
         deps.recorder.start({
           format: VOICE_FORMAT,
           duration: 60000,
@@ -238,17 +280,34 @@ export function createVoiceController(
           encodeBitRate: 24000,
           frameSize: 4
         });
-        return true;
       } catch (e) {
+        endIfActive(s);
         callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
-        return false;
       }
+      return s;
     },
-    stop() {
+    stop(session) {
+      const s = session as SessionState;
+      if (s !== active || s.cancelled) {
+        return;
+      }
+      if (!started) {
+        // 松手早于 recorder.onStart:作废本次,停止录音且不上传
+        s.cancelled = true;
+        try { deps.recorder.stop(); } catch (e) { /* 已停止 */ }
+        return;
+      }
       try {
         deps.recorder.stop();
       } catch (e) {
         callbacks.onError("RECORD_FAIL", voiceErrorMessage("RECORD_FAIL"));
+      }
+    },
+    cancel(session) {
+      const s = session as SessionState;
+      s.cancelled = true;
+      if (s === active) {
+        try { deps.recorder.stop(); } catch (e) { /* 已停止 */ }
       }
     },
   };
