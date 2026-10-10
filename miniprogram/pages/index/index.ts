@@ -18,7 +18,7 @@ import {
   type VoiceController,
 } from "../../utils/voice";
 import type { ItemSummary } from "../../types";
-import { createDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
+import { createDraftSession, clearDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
@@ -76,6 +76,8 @@ Page<
     invalidateVoiceSession(): void;
     startRecording(session: number): Promise<void>;
     onExtractTap(): Promise<void>;
+    /** 未完成批次的新建门禁(第四轮评审):恢复 / 放弃 / 中止 三选 */
+    askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort">;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
@@ -333,6 +335,25 @@ Page<
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
+  /**
+   * 未完成批次的新建门禁(第四轮评审阻断项):存在未完成会话时直接新建会覆盖
+   * 持久化恢复入口,旧批次已保存行的 operation_id 幂等键随之丢失——必须先由
+   * 用户明确裁决:继续核对旧的 / 放弃旧的记新的 / 中止(什么都不动)。
+   */
+  askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort"> {
+    return new Promise((resolve) => {
+      wx.showActionSheet({
+        itemList: ["继续核对上一批(共 " + count + " 件)", "放弃上一批,记新的"],
+        success: (r) => {
+          resolve(r.tapIndex === 0 ? "resume" : "discard");
+        },
+        fail: () => {
+          resolve("abort"); // 点遮罩/取消:保留旧批次,本次不提取
+        },
+      });
+    });
+  },
+
   /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
   async onExtractTap() {
     const text = this.data.memoText.trim();
@@ -342,6 +363,19 @@ Page<
     }
     if (this.data.extracting) {
       return;
+    }
+    const unfinished = getUnfinishedDraftSession();
+    if (unfinished !== null) {
+      const choice = await this.askDraftEntryIntent(unfinished.payload.drafts.length);
+      if (choice === "resume") {
+        this.goToConfirm("/pages/confirm/confirm?sid=" + unfinished.sid);
+        return;
+      }
+      if (choice === "abort") {
+        return;
+      }
+      // 放弃:显式清除旧批次恢复入口后,才开始本次提取(不静默覆盖)
+      clearDraftSession(unfinished.sid);
     }
     this.setData({ extracting: true });
     try {

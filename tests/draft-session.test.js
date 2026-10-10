@@ -74,10 +74,51 @@ test("行状态回写与恢复:中途退出 → getUnfinishedDraftSession 可见
   assert.equal(ds.getUnfinishedDraftSession(), null);
 });
 
-test("新会话覆盖旧持久(只保留最新一个未完成会话)", function () {
+test("新会话覆盖旧持久(只保留最新一个未完成会话;入口必须有门禁,见 DG-1)", function () {
   const sidA = ds.createDraftSession("旧句子", [DRAFT], false);
   const sidB = ds.createDraftSession("新句子", [DRAFT], false);
   const unfinished = ds.getUnfinishedDraftSession();
   assert.equal(unfinished.sid, sidB, "持久层只保留最新会话");
   assert.notEqual(unfinished.sid, sidA);
+});
+
+// ---------- 四轮评审:未完成批次的新建入口门禁(阻断项回归) ----------
+// 页面入口(index.onExtractTap)在存在未完成会话时必须先让用户裁决,本测试
+// 锁住三条路径在持久层的可观测契约,防止门禁被移除后静默覆盖复活。
+
+test("DG-1:未完成批次存在时,新建必须经用户裁决——恢复保留幂等键/放弃先清除/无门禁直接新建必丢失", function () {
+  // 场景基线:旧批次两件,第一件已保存(持有 operation_id 幂等键),第二件未保存
+  const sidA = ds.createDraftSession("钥匙放玄关,充电宝放客厅", [
+    Object.assign({}, DRAFT, { name: "钥匙", source_quote: "钥匙放玄关" }),
+    Object.assign({}, DRAFT, { name: "充电宝", location_text: "客厅", source_quote: "充电宝放客厅" }),
+  ], false);
+  ds.updateDraftSessionRows(sidA, [
+    { key: "row-0", name: "钥匙", locationText: "玄关", checked: true, status: "saved", failMsg: "", operationId: "op-dg-a" },
+    { key: "row-1", name: "充电宝", locationText: "客厅", checked: true, status: "pending", failMsg: "", operationId: "op-dg-b" },
+  ]);
+
+  // 路径一(恢复):入口不得触碰持久层——旧会话完整、幂等键原样、仍是未完成入口
+  const before = ds.getUnfinishedDraftSession();
+  assert.ok(before, "存在未完成会话时入口应先看到它");
+  const restored = ds.getDraftSession(before.sid);
+  assert.equal(restored.rows.length, 2);
+  assert.equal(restored.rows[0].status, "saved");
+  assert.equal(restored.rows[0].operationId, "op-dg-a", "已保存行幂等键不丢(重放不双写)");
+  assert.equal(restored.rows[1].operationId, "op-dg-b");
+
+  // 路径二(放弃):必须显式 clearDraftSession 后才 createDraftSession——旧批次
+  // 不可再恢复、新会话干净落地,持久层不残留旧幂等键
+  ds.clearDraftSession(before.sid);
+  const sidB = ds.createDraftSession("新的句子", [DRAFT], false);
+  assert.equal(ds.getDraftSession(before.sid), null, "放弃后旧批次不再可恢复(用户已明确选择)");
+  const after = ds.getUnfinishedDraftSession();
+  assert.equal(after.sid, sidB);
+  assert.equal(after.payload.drafts[0].name, "钥匙", "新会话内容为本次输入,非旧批次残留");
+
+  // 反例锚(为什么门禁必须在入口):不 clear 直接 create(旧版静默覆盖行为)
+  // 会把旧批次的恢复入口与幂等键一并冲掉——持久层从不拒绝,防线只在入口。
+  ds.simulateProcessRestartForTest();
+  const sidC = ds.createDraftSession("第三句", [DRAFT], false);
+  const unfinishedC = ds.getUnfinishedDraftSession();
+  assert.notEqual(unfinishedC.sid, sidB, "无门禁时持久层只保留最新——旧幂等键随 sidB 消失");
 });
