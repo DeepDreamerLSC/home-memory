@@ -55,6 +55,26 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 .theme{position:absolute;right:12px;top:96px;display:none}
 .footer{padding:8px 12px;text-align:center;font-size:11px;color:var(--hint);border-top:1px solid var(--line)}
 @media(max-width:440px){body{background:#FAF8F2}.page{border-radius:0;margin:0;height:100dvh;border:0;box-shadow:none}}
+
+/* Issue #15 editing extension: design-only, no writes */
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mini-btn{background:var(--inset);border:1px solid var(--line);border-radius:11px;color:var(--text);font-size:12px;font-weight:700;min-height:43px;padding:0 13px;cursor:pointer;flex-shrink:0}
+.mini-btn.primary{background:var(--accent);border-color:var(--accent);color:#191919}
+.field{display:flex;flex-direction:column;gap:7px;margin-top:18px}
+.field label,.field legend{font-size:13px;font-weight:750}
+.field input,.field select,.field textarea{width:100%;padding:13px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);font:inherit;font-size:14px;min-height:48px}
+.field textarea{min-height:102px;resize:vertical}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid #C0A01A;outline-offset:1px}
+.segment{display:flex;gap:8px}.segment label{flex:1}.segment input{position:absolute;opacity:0;width:0;height:0}.segment span{display:flex;align-items:center;justify-content:center;background:var(--card);min-height:45px;border:1px solid var(--line);border-radius:11px;font-size:13px}.segment input:checked+span{background:var(--accent);color:#191919;border-color:var(--accent)}.segment input:focus-visible+span{outline:2px solid #C0A01A;outline-offset:2px}
+.cta{border:0;background:var(--accent);color:#191919;font-size:14px;font-weight:750;border-radius:14px;min-height:52px;width:100%;margin-top:18px;cursor:pointer}
+.cta.secondary{background:var(--card);border:1px solid var(--line);color:var(--text)}
+.form-note{font-size:11px;color:var(--text2);line-height:1.6;margin-top:12px}
+.impact{background:var(--inset);border-radius:14px;padding:14px;margin-top:14px}
+.impact strong{font-size:13px}.impact p{font-size:12px;line-height:1.6;color:var(--text2);margin:5px 0 0}
+.stacked-actions{display:flex;gap:9px;align-items:stretch;margin-top:12px}.stacked-actions button{flex:1}
+.draft{background:color-mix(in srgb,var(--accent) 37%,var(--card));border-radius:16px;padding:14px;margin-top:18px}
+.draft .line{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:10px 0;font-size:12px}.draft .line:last-child{border:0}
+.demo-tag{font-size:11px;font-weight:700;color:var(--text2);border:1px solid var(--line);border-radius:20px;padding:4px 9px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -76,7 +96,7 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 
 <section class="screen" data-screen="spaces">
 <div class="breadcrumb"><b>我的家</b></div>
-<h1>按房间翻翻</h1><div class="small">已归类 24 件 · 3 个房间，另有 2 件待归类</div>
+<div class="toolbar"><h1>按房间翻翻</h1><button class="mini-btn" data-nav="addlocation" data-add-root="1">+ 房间</button></div><div class="small">已归类 24 件 · 3 个房间，另有 2 件待归类</div>
 <div class="stack">
 <button class="tile space" data-nav="study"><span class="ico">▤</span><span class="info"><strong>书房</strong><span>书桌、小冰箱等</span></span><span class="count">12 件</span><span class="arrow">›</span></button>
 <button class="tile space" data-nav="living"><span class="ico">▱</span><span class="info"><strong>客厅</strong><span>沙发、电视柜等</span></span><span class="count">9 件</span><span class="arrow">›</span></button>
@@ -88,7 +108,7 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 
 <section class="screen" data-screen="study">
 <div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>书房</b></div>
-<div class="heading"><h1>书房</h1><span class="pill">12 件</span></div><div class="small">先看看这个房间有哪些收纳位置</div>
+<div class="toolbar"><div class="heading"><h1>书房</h1><span class="pill">12 件</span></div><button class="mini-btn" data-nav="editroom">编辑</button></div><div class="small">先看看这个房间有哪些收纳位置</div>
 <h3>往里看看</h3>
 <div class="stack">
 <button class="tile space" data-nav="desk"><span class="ico">▤</span><span class="info"><strong>书桌</strong><span>桌面、右侧第二个抽屉</span></span><span class="count">8 件</span><span class="arrow">›</span></button>
@@ -101,7 +121,7 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 
 <section class="screen" data-screen="desk">
 <div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>书桌</b></div>
-<div class="heading"><h1>书桌</h1><span class="pill">8 件</span></div><div class="small">书桌包含下级位置的物品，共 8 件</div>
+<div class="toolbar"><div class="heading"><h1>书桌</h1><span class="pill">8 件</span></div><button class="mini-btn" data-nav="editroom">管理位置</button></div><div class="small">书桌包含下级位置的物品，共 8 件</div>
 <h3>往里看看</h3>
 <button class="tile space" data-nav="drawer"><span class="ico">▤</span><span class="info"><strong>右侧第二个抽屉</strong><span>充电线、移动硬盘等</span></span><span class="count">5 件</span><span class="arrow">›</span></button>
 <h3>直接记录在书桌 <span class="count">3 件</span></h3>
@@ -114,7 +134,7 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 <div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <button data-nav="desk">书桌</button> › <b>抽屉</b></div>
 <div class="heading"><h1 style="font-size:23px">右侧第二个抽屉</h1><span class="pill">5 件</span></div><div class="small">书房 / 书桌 / 右侧第二个抽屉</div>
 <div class="note" style="margin-top:14px"><strong>这里只展示上次确认的位置</strong><p>如果发现东西移动了，可以进入物品详情更新记录。</p></div>
-<h3>这里记住的物品</h3>
+<div class="toolbar"><h3>这里记住的物品</h3><button class="mini-btn" data-nav="moveitem">移动物品</button></div>
 <button class="item" data-nav="item"><span class="ico ink">充</span><span class="info"><strong>USB 充电线</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
 <button class="item" data-nav="item"><span class="ico ink">硬</span><span class="info"><strong>移动硬盘</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
 <button class="item" data-nav="item"><span class="ico ink">头</span><span class="info"><strong>充电器</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
@@ -133,6 +153,84 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 
 <section class="screen" data-screen="living"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>客厅</b></div><div class="heading"><h1>客厅</h1><span class="pill">9 件</span></div><h3>往里看看</h3><button class="tile" data-demo="后续迭代按同一递归目录组件展示客厅 / 沙发 / 坐垫下面"><span class="ico">▱</span><span class="info"><strong>沙发</strong><span>坐垫下面等位置</span></span><span class="count">4 件</span><span class="arrow">›</span></button><div style="height:10px"></div><button class="tile" data-demo="后续迭代使用同一递归目录组件"><span class="ico">▥</span><span class="info"><strong>电视柜</strong><span>中层、右侧柜门</span></span><span class="count">5 件</span><span class="arrow">›</span></button></section>
 <section class="screen" data-screen="bedroom"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>卧室</b></div><div class="heading"><h1>卧室</h1><span class="pill">3 件</span></div><h3>往里看看</h3><button class="tile" data-demo="后续迭代复用同一递归目录组件"><span class="ico">▥</span><span class="info"><strong>床头柜</strong><span>上层抽屉等</span></span><span class="count">3 件</span><span class="arrow">›</span></button></section>
+
+<!-- E1: room editing prototype -->
+<section class="screen" data-screen="editroom">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>编辑空间</b></div>
+<div class="toolbar"><h1>编辑书房</h1><span class="demo-tag">模拟编辑</span></div>
+<div class="small">房间和里面的家具、物品均可进入编辑；当前仅演示操作，不改数据库。</div>
+<div class="toolbar"><h3>家具与收纳位置</h3><button class="mini-btn" data-nav="addlocation">+ 新增</button></div>
+<div class="stack">
+<div class="tile"><span class="ico">▤</span><span class="info"><strong>书桌</strong><span>桌面、右侧第二个抽屉 · 8 件</span></span><button class="mini-btn" data-nav="renameplace" data-place="书桌">修改</button></div>
+<div class="tile"><span class="ico">▣</span><span class="info"><strong>小冰箱</strong><span>冷藏层、门侧 · 3 件</span></span><button class="mini-btn" data-nav="renameplace" data-place="小冰箱">修改</button></div>
+</div>
+<div class="toolbar"><h3>直接放在书房</h3><button class="mini-btn" data-nav="addlocation">+ 加位置</button></div>
+<div class="tile"><span class="ico ink">扫</span><span class="info"><strong>扫地机器人</strong><span>上次记录：书房地面</span></span><button class="mini-btn" data-nav="moveitem" data-item-name="扫地机器人">移动</button></div>
+<button class="cta" data-nav="voiceedit">◉ 说一句，帮我修改</button>
+<div class="impact"><strong>编辑安全提示</strong><p>房间或家具改名不等于移动物品。移动整个家具、合并空间或删除含子节点的位置需要额外影响清单与独立安全评审。</p></div>
+</section>
+
+<!-- E2: add room / furniture / compartment -->
+<section class="screen" data-screen="addlocation">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>新增位置</b></div>
+<h1>这个位置叫什么？</h1><div class="small">可以手动编辑，也可以用一句话让 AI 帮你整理名称与层级。</div>
+<div class="field"><label for="add-parent">上级位置</label>
+<select id="add-parent"><option value="书房">我的家 / 书房</option><option value="我的家">我的家（新房间）</option><option value="书房 / 书桌">我的家 / 书房 / 书桌</option><option value="客厅">我的家 / 客厅</option></select></div>
+<fieldset class="field" style="padding:0;border:0"><legend>位置类型</legend><div class="segment">
+<label><input type="radio" name="space-type" value="家具" checked><span>家具</span></label>
+<label><input type="radio" name="space-type" value="房间"><span>房间</span></label>
+<label><input type="radio" name="space-type" value="抽屉"><span>抽屉</span></label></div></fieldset>
+<div class="field"><label for="add-name">位置名称</label><input id="add-name" maxlength="40" value="靠窗白色柜子" placeholder="例如：玄关左侧白柜"></div>
+<div class="field"><label for="add-spoken">自然语言输入（演示）</label><textarea id="add-spoken" placeholder="例如：书房有一个靠窗的白色柜子">书房有一个靠窗的白色柜子</textarea></div>
+<button class="mini-btn" id="add-parse">AI 回填示例（不调用模型）</button>
+<div class="draft" id="add-draft"><strong>位置候选 · 待确认</strong><div class="line"><span>房间</span><b>书房</b></div><div class="line"><span>家具</span><b>靠窗白色柜子</b></div><div class="form-note">保留原始说法；若与已有节点疑似重名，先询问是复用还是新建。</div></div>
+<button class="cta" id="add-confirm">确认新增（演示）</button>
+<div class="form-note">本原型不执行真实创建，任何结果都不会进入物品数据。</div>
+</section>
+
+<!-- rename space: distinct from move -->
+<section class="screen" data-screen="renameplace">
+<div class="breadcrumb"><button data-nav="study">书房</button> › <b>修改位置名称</b></div>
+<h1>修改家具名称</h1>
+<div class="field"><label>要修改的位置</label><input id="rename-old" value="书桌" disabled></div>
+<div class="field"><label for="rename-new">新的名称</label><input id="rename-new" value="靠窗工作台" maxlength="40"></div>
+<div class="impact"><strong>影响范围预览</strong><p>仅更改选定空间节点的显示名称（示例：书桌，包含后代共 8 件物品）。历史 `location_text` 是否同步更新需要单独裁定，不能在 V0 自动批量改写。</p></div>
+<button class="cta" id="rename-confirm">确认改名（演示）</button>
+<div class="form-note">位置改名和家具搬家是两个不同操作。</div>
+</section>
+
+<!-- E3: moving item -->
+<section class="screen" data-screen="moveitem">
+<div class="breadcrumb"><button data-nav="study">书房</button> › <b>移动物品</b></div>
+<h1>要把东西移到哪里？</h1><div class="small">物品可能同名，先明确是哪一件；移动记录不代表物品已实际搬动。</div>
+<div class="field"><label for="move-which">选择物品</label><select id="move-which">
+<option value="item_charge_01">充电宝 A · 书房书桌第二个抽屉</option>
+<option value="item_charge_02">充电宝 B · 玄关收纳盒</option>
+<option value="item_robot_03">扫地机器人 · 书房地面</option>
+</select></div>
+<div class="field"><label for="move-target">要放到的新位置</label><select id="move-target">
+<option value="living_tv">客厅 / 电视柜</option>
+<option value="study_desk">书房 / 书桌</option>
+<option value="study_drawer">书房 / 书桌 / 右侧第二个抽屉</option>
+</select></div>
+<div class="draft" id="move-draft"><strong>操作草稿 · 待确认</strong><div class="line"><span>物品</span><b id="moving-item">充电宝 A</b></div><div class="line"><span>原位置</span><b id="moving-from">书房书桌第二个抽屉</b></div><div class="line"><span>目标</span><b id="moving-to">客厅 / 电视柜</b></div></div>
+<div class="impact"><strong>影响范围：仅 1 件物品</strong><p>其他物品仍保留原位置。正式版必须验证版本/权限与最新记录，避免覆盖家庭其他成员刚刚修改的位置。</p></div>
+<button class="cta" id="move-confirm">确认移动（演示）</button>
+<button class="cta secondary" data-nav="voiceedit">改用语音说明</button>
+</section>
+
+<!-- E4: voice edit intent preview -->
+<section class="screen" data-screen="voiceedit">
+<div class="breadcrumb"><button data-nav="editroom">书房编辑</button> › <b>语音修改</b></div>
+<h1>你想修改什么？</h1><div class="small">正式版支持按住说话；这里用文字模拟录音转写。AI 只生成草稿，永不直接修改。</div>
+<div class="field"><label for="voice-transcript">刚才说的是（可编辑）</label><textarea id="voice-transcript">把充电宝移到客厅电视柜里</textarea></div>
+<button class="mini-btn" id="voice-parse">解析修改意图（固定演示）</button>
+<div class="draft" id="voice-draft"><strong>AI 整理的修改建议 · 待确认</strong><div class="line"><span>操作</span><b>移动物品</b></div><div class="line"><span>目标</span><b>充电宝（需要确认具体哪件）</b></div><div class="line"><span>从</span><b>书房 / 第二个抽屉</b></div><div class="line"><span>到</span><b>客厅 / 电视柜</b></div></div>
+<div class="impact"><strong>防误改</strong><p>如果匹配到两个充电宝，必须先逐件选择。移动整个柜子需展示所有受影响的下级节点与物品，不得套用单件移动。</p></div>
+<div class="stacked-actions"><button class="cta secondary" id="voice-cancel">取消</button><button class="cta" id="voice-confirm">继续核对</button></div>
+<div class="form-note">演示中的解析只支持固定示例；任意自然语言并未调用真实 AI。</div>
+</section>
+
 <section class="screen" data-screen="item"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>物品详情示意</b></div><h1 id="detail-name">充电宝</h1><div class="card"><h3 style="margin-top:0">上次记录的位置</h3><p id="detail-location">书房书桌右侧第二个抽屉</p><div class="small">此页面只是视觉示意，正式产品继续复用原有详情与更新 API。</div></div></section>
 </div><div class="footer">Issue #15 · 仅供交互评审 · 示例数据 · 无后台读写</div></div>
 <div class="toast" id="toast" role="status"></div>
@@ -140,14 +238,40 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 (function(){
 "use strict";
 var app=document.getElementById("app"), stack=["home"], nav=document.getElementById("navtitle"), back=document.getElementById("back"), scroll=document.getElementById("scrollarea");
-var names={home:"我靠东西呢",spaces:"按空间逛逛",study:"书房",desk:"书桌",drawer:"右侧第二个抽屉",uncategorized:"尚未归类",living:"客厅",bedroom:"卧室",item:"物品详情"};
+var names={home:"我靠东西呢",spaces:"按空间逛逛",study:"书房",desk:"书桌",drawer:"右侧第二个抽屉",uncategorized:"尚未归类",living:"客厅",bedroom:"卧室",item:"物品详情",editroom:"编辑书房",addlocation:"新增位置",renameplace:"修改位置名称",moveitem:"移动物品",voiceedit:"语音修改"};
 function show(name,push){if(!names[name])return;if(push){stack.push(name)}else{stack[stack.length-1]=name}
 document.querySelectorAll(".screen").forEach(function(el){el.classList.toggle("active",el.dataset.screen===name)});
 nav.textContent=names[name];back.hidden=stack.length===1;scroll.scrollTop=0}
 function go(name){show(name,true)}function previous(){if(stack.length>1){stack.pop();show(stack[stack.length-1],false)}}
 function toast(s){var el=document.getElementById("toast");el.textContent=s;el.classList.add("visible");setTimeout(function(){el.classList.remove("visible")},2200)}
-document.addEventListener("click",function(e){var t=e.target.closest("[data-nav],[data-demo]");if(t){if(t.dataset.nav){if(t.dataset.nav==="item"){var info=t.querySelector(".info");var name=info&&info.querySelector("strong");var loc=info&&info.querySelector("span");document.getElementById("detail-name").textContent=name?name.textContent:"物品详情";document.getElementById("detail-location").textContent=loc?loc.textContent.replace(/^上次记录[：:]\s*/,"").replace(/^原记录[：:]\s*/,""):"位置待确认"}go(t.dataset.nav)}else toast(t.dataset.demo)}});
+document.addEventListener("click",function(e){var t=e.target.closest("[data-nav],[data-demo]");if(t){if(t.dataset.nav){if(t.dataset.nav==="addlocation" && t.dataset.addRoot){document.getElementById("add-parent").value="我的家";document.querySelector('input[name="space-type"][value="房间"]').checked=true;document.getElementById("add-name").value="储藏室"}if(t.dataset.nav==="renameplace" && t.dataset.place){document.getElementById("rename-old").value=t.dataset.place;document.getElementById("rename-new").value=t.dataset.place==="书桌"?"靠窗工作台":"书房小冰箱"}if(t.dataset.nav==="moveitem" && t.dataset.itemName){document.getElementById("move-which").value="item_robot_03"}if(t.dataset.nav==="item"){var info=t.querySelector(".info");var name=info&&info.querySelector("strong");var loc=info&&info.querySelector("span");document.getElementById("detail-name").textContent=name?name.textContent:"物品详情";document.getElementById("detail-location").textContent=loc?loc.textContent.replace(/^上次记录[：:]\s*/,"").replace(/^原记录[：:]\s*/,""):"位置待确认"}go(t.dataset.nav)}else toast(t.dataset.demo)}});
 back.addEventListener("click",previous);
+
+function val(id){return document.getElementById(id).value.trim()}
+function el(id){return document.getElementById(id)}
+function moveRefresh(){var map={item_charge_01:["充电宝 A","书房书桌第二个抽屉"],item_charge_02:["充电宝 B","玄关收纳盒"],item_robot_03:["扫地机器人","书房地面"]};var options={living_tv:"客厅 / 电视柜",study_desk:"书房 / 书桌",study_drawer:"书房 / 书桌 / 右侧第二个抽屉"};var a=map[val("move-which")],b=options[val("move-target")];el("moving-item").textContent=a[0];el("moving-from").textContent=a[1];el("moving-to").textContent=b;}
+el("move-which").addEventListener("change",moveRefresh);el("move-target").addEventListener("change",moveRefresh);
+el("move-confirm").addEventListener("click",function(){toast("已模拟确认（未写入任何数据）")});
+el("rename-confirm").addEventListener("click",function(){if(!val("rename-new")){toast("名称不能留空");return}toast("改名预览已确认（未写入任何数据）")});
+el("add-parse").addEventListener("click",function(){
+var raw=val("add-spoken");
+var matched=raw.includes("书房")&&raw.includes("白")&&raw.includes("柜");
+if(!matched){el("add-draft").innerHTML="<strong>需要人工确认</strong><p class='form-note'>此原型只展示固定示例。真实版需要调用 AI 解析，不会凭关键词直接建位置。</p>";return}
+el("add-parent").value="书房";el("add-name").value="靠窗白色柜子";
+document.querySelector('input[name="space-type"][value="家具"]').checked=true;
+el("add-draft").innerHTML="<strong>解析候选 · 待确认</strong><div class='line'><span>房间</span><b>书房</b></div><div class='line'><span>家具</span><b>靠窗白色柜子</b></div><p class='form-note'>此结果为固定示例，必须经过用户审核。</p>";
+});
+el("add-confirm").addEventListener("click",function(){if(!val("add-name")){toast("需要位置名称");return}if(val("add-parent")==="我的家"&&!document.querySelector('input[name="space-type"][value="房间"]').checked){toast("上级是我的家时，请选房间类型");return}toast("已模拟新增位置（未写入任何数据）")});
+var voiceReady=false;
+el("voice-parse").addEventListener("click",function(){
+var raw=val("voice-transcript");voiceReady=false;
+if(raw.includes("充电宝")&&raw.includes("客厅")&&raw.includes("电视柜")&&(raw.includes("移")||raw.includes("放"))){
+el("voice-draft").innerHTML="<strong>固定意图演示 · 待确认</strong><div class='line'><span>操作</span><b>移动物品</b></div><div class='line'><span>物品</span><b>充电宝（需选择具体哪件）</b></div><div class='line'><span>目标位置</span><b>客厅 / 电视柜</b></div><p class='form-note'>不能凭名称自动确定 Item ID，也不应猜测原位置。</p>";voiceReady=true;
+}else{el("voice-draft").innerHTML="<strong>尚未解析</strong><p class='form-note'>此原型仅支持固定示例。真实版需模型解析，不能根据此处按钮执行任意指令。</p>";}
+});
+el("voice-transcript").addEventListener("input",function(){voiceReady=false;el("voice-draft").innerHTML="<strong>转写已修改，需重新解析</strong><p class='form-note'>修改文本后不能沿用旧的 AI 意图。</p>";});
+el("voice-cancel").addEventListener("click",function(){previous()});
+el("voice-confirm").addEventListener("click",function(){if(!voiceReady){toast("请先解析并核对当前转写内容");return}el("move-which").value="item_charge_01";el("move-target").value="living_tv";moveRefresh();go("moveitem");toast("请明确选择具体的充电宝，再确认")});
 var search=document.getElementById("search"),result=document.getElementById("searchresult");
 function doSearch(){var q=search.value.trim();if(!q){toast("请输入要找的东西");return}var matched=/充|线|钥|硬盘|相机/.test(q);result.innerHTML=matched?'<button class="item" data-nav="item"><span class="ico ink">充</span><span class="info"><strong>充电宝</strong><span>上次记录：书房书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>':'<div class="small">没有找到匹配的记录，换个名称试试。</div>';}
 document.getElementById("searchgo").addEventListener("click",doSearch);
