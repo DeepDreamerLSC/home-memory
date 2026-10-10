@@ -9,11 +9,13 @@
 #   ./extract-frames.sh <input-video> <output-dir> [选项]
 #   ./extract-frames.sh --clean <output-dir>
 #
-# 选项(均可用环境变量 INTERVAL/SCENE/MAX/QUALITY 覆盖默认值):
+# 选项(均可用环境变量 INTERVAL/SCENE/MAX/QUALITY/SCALE 覆盖默认值):
 #   --interval N   固定间隔抽帧,每 N 秒一帧(默认 2;若会超出 --max 预算,自动放大)
 #   --scene T      场景切换阈值 0–1,越小越敏感(默认 0.3)
 #   --max N        总帧数预算(默认 8;issue #3 示例预算 3–8)
 #   --quality Q    输出 JPEG 质量,ffmpeg -q:v 取值 2–31,越小质量越高(默认 2)
+#   --scale N      长边上限像素,等比缩放且不放大;0=不缩放(默认 2048;
+#                  依据调研报告 §七:满足智谱 ≤6000×6000 与 ≤5M/张,Qwen 侧 token 自动封顶)
 #   --clean DIR    删除整个输出目录后退出
 #
 # 产物命名:输出目录下 interval_NNN.jpg(固定间隔)与 scene_NNN.jpg(场景切换)。
@@ -24,7 +26,7 @@ set -euo pipefail
 SCRIPT_NAME="$(basename "$0")"
 
 usage() {
-  sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -36,6 +38,7 @@ INTERVAL="${INTERVAL:-2}"
 SCENE="${SCENE:-0.3}"
 MAX="${MAX:-8}"
 QUALITY="${QUALITY:-2}"
+SCALE="${SCALE:-2048}"
 
 CLEAN_MODE=0
 VIDEO=""
@@ -52,6 +55,7 @@ while [ $# -gt 0 ]; do
     --scene)    SCENE="$2"; shift 2 ;;
     --max)      MAX="$2"; shift 2 ;;
     --quality)  QUALITY="$2"; shift 2 ;;
+    --scale)    SCALE="$2"; shift 2 ;;
     -h|--help)  usage ;;
     --*)        die "未知选项:$1(见 --help)" ;;
     *)
@@ -81,6 +85,7 @@ INTERVAL="$(awk -v v="$INTERVAL" 'BEGIN{ if (v<=0) print ""; else printf "%.3f",
 awk -v s="$SCENE" 'BEGIN{ exit !(s>0 && s<1) }' || die "--scene 取值应为 0–1 之间"
 awk -v m="$MAX" 'BEGIN{ exit !(m>=1) }' || die "--max 至少为 1"
 awk -v q="$QUALITY" 'BEGIN{ exit !(q>=2 && q<=31) }' || die "--quality 取值应为 2–31"
+case "$SCALE" in ''|*[!0-9]*) die "--scale 必须为非负整数(0=不缩放)" ;; esac
 
 need ffmpeg
 need ffprobe
@@ -100,20 +105,29 @@ fi
 
 mkdir -p "$OUTDIR"
 
+# 长边 ≤SCALE 的等比缩放(不放大);横竖拍都约束长边。0 = 不缩放。
+# 末尾 format=yuvj420p:强制全量程 YUV 供 mjpeg 编码,避免部分输入触发
+# 「Non full-range YUV is non-standard」编码器报错(竖拍 yuv420p 输入实测复现)。
+if [ "$SCALE" -gt 0 ]; then
+  SCALE_VF="scale='if(gte(iw,ih),min(${SCALE},iw),-2)':'if(gte(iw,ih),-2,min(${SCALE},ih))',format=yuvj420p,"
+else
+  SCALE_VF="format=yuvj420p,"
+fi
+
 echo "[$SCRIPT_NAME] 视频:$VIDEO(约 ${DURATION_SEC}s)"
-echo "[$SCRIPT_NAME] 参数:间隔=${EFFECTIVE_INTERVAL}s 场景阈值=${SCENE} 预算=${MAX} 帧 JPEG质量(-q:v)=${QUALITY}"
+echo "[$SCRIPT_NAME] 参数:间隔=${EFFECTIVE_INTERVAL}s 场景阈值=${SCENE} 预算=${MAX} 帧 JPEG质量(-q:v)=${QUALITY} 长边上限=${SCALE:-不限制}"
 
 echo "[$SCRIPT_NAME] [1/2] 固定间隔抽帧 → interval_*.jpg"
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf "fps=1/${EFFECTIVE_INTERVAL}" -q:v "$QUALITY" \
+  -vf "${SCALE_VF}fps=1/${EFFECTIVE_INTERVAL}" -q:v "$QUALITY" \
   "$OUTDIR/interval_%03d.jpg"
 
 echo "[$SCRIPT_NAME] [2/2] 场景切换抽帧 → scene_*.jpg"
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf "select='gt(scene,${SCENE})'" -fps_mode vfr -q:v "$QUALITY" \
+  -vf "${SCALE_VF}select='gt(scene,${SCENE})'" -fps_mode vfr -q:v "$QUALITY" \
   "$OUTDIR/scene_%03d.jpg" 2>/dev/null || \
 ffmpeg -hide_banner -loglevel error -i "$VIDEO" \
-  -vf "select='gt(scene,${SCENE})'" -vsync vfr -q:v "$QUALITY" \
+  -vf "${SCALE_VF}select='gt(scene,${SCENE})'" -vsync vfr -q:v "$QUALITY" \
   "$OUTDIR/scene_%03d.jpg"
 
 INTERVAL_COUNT="$(find "$OUTDIR" -name 'interval_*.jpg' | wc -l | tr -d ' ')"

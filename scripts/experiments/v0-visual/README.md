@@ -68,11 +68,13 @@ scripts/experiments/v0-visual/
 ### C 方案:短视频 + 关键帧
 
 1. 对同一区域拍 10–15 秒单一位置慢扫视频。
-2. 抽帧(固定间隔 2s + 场景切换,预算 3–8 帧,可调):
+2. 抽帧(固定间隔 2s + 场景切换,预算 3–8 帧,长边 ≤2048,均可调):
 
    ```bash
-   ./extract-frames.sh ./video.mp4 ./frames --interval 2 --scene 0.3 --max 8
+   ./extract-frames.sh ./video.mp4 ./frames --interval 2 --scene 0.3 --max 8 --scale 2048
    ```
+
+   参数依据见调研报告 §七(与两家模型硬限制对齐:智谱 ≤6000×6000/≤5M 单张,Qwen token 自动封顶)。
 
 3. 人工剔除模糊帧与明显重复帧(issue 合同:排除模糊、明显重复片段——这步计入 C 方案耗时)。
 4. 将保留的帧按 `prompts/multi-frame.md` 发给模型(多图同请求;各模型多图上限见调研报告对照表),得到跨帧去重后的候选。
@@ -87,18 +89,23 @@ scripts/experiments/v0-visual/
 
 - 密钥只从环境变量读,绝不硬编码:`BIGMODEL_API_KEY`(智谱)或 `DASHSCOPE_API_KEY`(阿里)。
 - 没设 key 时:打印配置指引,以退出码 0 结束(与仓库 `tests/samples-live.js` 的先例一致),不会误报失败。
-- 默认 `PROVIDER=zhipu`、`MODEL=glm-4.6v-flash`(免费,选型报告主选);`PROVIDER=dashscope` 时默认 `qwen3.8-flash`。可用 `MODEL=`、`API_URL=`、`API_KEY_ENV=` 覆盖任意 OpenAI 兼容端点。
+- 默认 `PROVIDER=zhipu`、`MODEL=glm-4.6v-flash`(免费,选型报告主选);`PROVIDER=dashscope` 时默认 `qwen3.7-flash`(报告 §十一:0.2/0.8 元/百万 tokens、北京 30k RPM/5M TPM)。可用 `MODEL=`、`API_URL=`、`API_KEY_ENV=` 覆盖任意 OpenAI 兼容端点。
+- **探针通过标准**(5 项验证点:连通性/免费模型可用/Base64/多图/token 口径,含失败处置与「可开跑」判定)见调研报告 §十;质量切换门(区域级召回/精确 <50% → 升级兜底模型复测)见报告 §十与 §十一。
 - 输出:HTTP 状态、模型回复原文、用量(token 数,服务商返回时)、耗时。图片格式限 jpg/jpeg/png(智谱限制),超 5MB 会拒绝并提示。
 
 ## extract-frames.sh 说明
 
-- 参数均可调:`--interval N`(固定间隔秒数,默认 2)、`--scene T`(场景切换阈值 0–1,默认 0.3)、`--max N`(总帧预算,默认 8,issue 示例预算 3–8)、`--quality Q`(JPEG 质量,默认 2)。
+- 参数均可调:`--interval N`(固定间隔秒数,默认 2)、`--scene T`(场景切换阈值 0–1,默认 0.3)、`--max N`(总帧预算,默认 8,issue 示例预算 3–8)、`--quality Q`(JPEG 质量,默认 2)、`--scale N`(长边上限像素,等比不放大,默认 2048,0=不缩放)。
 - 两路抽取:① `fps=1/interval` 固定间隔(若按默认间隔会超预算,自动放大间隔保证 ≤max);② `select='gt(scene,T)'` 场景切换帧。
 - 产物:`interval_NNN.jpg` 与 `scene_NNN.jpg` 写入指定输出目录;`--clean` 删除整个输出目录。
 - 脚本不自动删帧——模糊/重复帧的人工剔除是实验流程的一部分。
 
 ## 开跑前需要提供(当前阻塞项)
 
-1. **API key**:智谱 bigmodel.cn(免费模型 GLM-4.6V-Flash 需开通)或阿里云百炼(北京地域,100 万 token/90 天免费额度)。
+1. **API key**:智谱 bigmodel.cn(免费模型 GLM-4.6V-Flash 需开通)或阿里云百炼(北京地域,100 万 token/90 天免费额度)。注册/开通步骤见调研报告 §九。
 2. **3 个抽屉/收纳箱的人工冻结金标清单**(标注不可见/严重遮挡物品)。
-3. 实验者本人对「素材上传外部模型服务商」的授权确认,及服务商数据条款审查结论。
+3. 实验者本人对「素材上传外部模型服务商」的授权确认,及服务商数据条款审查结论(报告 §八一审结论:阿里有「不用于训练」书面承诺;智谱未排除训练用途,真实素材上传前需工单书面确认)。探针阶段只用合成图,不受此项阻塞。
+
+## 预算纪律
+
+单一服务商付费支出 **≤ ¥5** 硬帽(报告 §六:V0 全部调用量按官方口径推算预计 <¥1);免费模型优先,每个实验日结束核对一次账单。

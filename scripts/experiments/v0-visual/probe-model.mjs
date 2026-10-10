@@ -38,10 +38,10 @@ const PROVIDERS = {
   },
   dashscope: {
     label: "阿里云百炼(对照/备胎)",
-    url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", // 旧域名,文档注明仍可用;401/404 时按报告「待验证」第 3 条换 workspace 专属域名
-    model: "qwen3.8-flash",
+    url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", // 旧域名,文档注明仍可用;401/404 时按调研报告 §十二 第 3 条换 workspace 专属域名
+    model: "qwen3.7-flash", // 默认对照模型(0.2/0.8 元/百万 tokens,北京 30k RPM/5M TPM);质量优先备选 qwen3.8-flash,见报告 §十一
     keyEnv: "DASHSCOPE_API_KEY",
-    keyHint: "阿里云百炼控制台 → API-KEY(注意地域绑定,跨地域 401)",
+    keyHint: "阿里云百炼控制台 → API-KEY(注意地域绑定,跨地域 401;免费额度仅北京地域)",
   },
 };
 
@@ -84,7 +84,7 @@ function help() {
 
 选项:
   --provider NAME   zhipu(默认)| dashscope | custom
-  --model ID        覆盖默认模型(默认:zhipu=glm-4.6v-flash,dashscope=qwen3.8-flash)
+  --model ID        覆盖默认模型(默认:zhipu=glm-4.6v-flash,dashscope=qwen3.7-flash)
   --prompt PATH     prompt 模板路径(默认 prompts/single-image.md)
   --help            本帮助
 
