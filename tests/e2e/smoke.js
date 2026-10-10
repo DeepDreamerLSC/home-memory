@@ -72,7 +72,30 @@ async function main() {
     "卡片标题与预期不符:" + JSON.stringify(texts),
   );
 
-  // 2. 记一件:输入交互
+  // 2. 默认应为语音模式(语音极速录入是核心场景)
+  const tabs0 = await page.$$(".mode-tab");
+  assert(tabs0.length === 2, "应有 文字/语音 两个模式切换标签");
+  const talkDefault = await page.$(".talk-btn");
+  assert(talkDefault !== null, "默认应展示语音输入界面(按住说话)");
+
+  // 2.5 语音模式 UI:切文字再切回语音(文字回退路径)
+  const tabs = await page.$$(".mode-tab");
+  await tabs[0].tap();
+  await page.waitFor(400);
+  const textareaBack = await page.$(".memo-input");
+  assert(textareaBack !== null, "切回文字模式应显示输入框(文字回退可用)");
+  console.log("✔ 文字模式正常(文字回退可用)");
+  const tabsBack = await page.$$(".mode-tab");
+  await tabsBack[1].tap();
+  await page.waitFor(400);
+  const talkBtn = await page.$(".talk-btn");
+  assert(talkBtn !== null, "语音模式下应显示「按住说话」按钮");
+  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
+
+  // 2.6 文字输入交互(切到文字模式)
+  const tabsText = await page.$$(".mode-tab");
+  await tabsText[0].tap();
+  await page.waitFor(400);
   const textarea = await page.$(".memo-input");
   assert(textarea !== null, "应找到「记一件」输入框");
   await textarea.input("钥匙放在玄关第二个抽屉");
@@ -81,21 +104,6 @@ async function main() {
   const countText = countEl === null ? "" : await countEl.text();
   console.log("✔ 输入后字数统计:", countText);
   assert(countText.includes("/500"), "字数统计应随输入更新");
-
-  // 2.5 语音模式 UI:切换可见性与回退
-  const tabs = await page.$$(".mode-tab");
-  assert(tabs.length === 2, "应有 文字/语音 两个模式切换标签");
-  await tabs[1].tap();
-  await page.waitFor(400);
-  const talkBtn = await page.$(".talk-btn");
-  assert(talkBtn !== null, "语音模式下应显示「按住说话」按钮");
-  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
-  const tabsBack = await page.$$(".mode-tab");
-  await tabsBack[0].tap();
-  await page.waitFor(400);
-  const textareaBack = await page.$(".memo-input");
-  assert(textareaBack !== null, "切回文字模式应恢复输入框(文字回退路径)");
-  console.log("✔ 切回文字模式正常(文字回退可用)");
 
   // 3. 找东西:查询结果如实呈现(云可用时空结果是正常结果;不可用时错误如实上屏)
   const searchInput = await page.$(".search-input");

@@ -27,8 +27,7 @@ function recognizeOnce(audioBase64, voiceFormat, secretId, secretKey, timeoutMs)
       SourceType: 1,
       VoiceFormat: voiceFormat,
       UsrAudioKey: "home-memory",
-      Data: audioBase64,
-      ResTextFormat: 0
+      Data: audioBase64
     });
     var timestamp = Math.floor(Date.now() / 1000);
     var headers = buildSignedHeaders(secretId, secretKey, HOST, SERVICE, ACTION, VERSION, payload, timestamp);
@@ -55,7 +54,9 @@ function recognizeOnce(audioBase64, voiceFormat, secretId, secretKey, timeoutMs)
           }
           if (parsed && parsed.Response && parsed.Response.Error) {
             var e = parsed.Response.Error;
-            reject(errWith("ASR_ERROR", "ASR " + e.Code + ":" + e.Message));
+            var err = errWith("ASR_ERROR", "ASR " + e.Code + ":" + e.Message);
+            err.detail = String(e.Code);
+            reject(err);
             return;
           }
           var text = parsed && parsed.Response && parsed.Response.Result;

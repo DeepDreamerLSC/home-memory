@@ -46,7 +46,8 @@ exports.main = async function (event) {
       ok: false,
       error: "ASR_UNAVAILABLE",
       message: "语音识别暂不可用,可手动录入",
-      manual_fallback: true
+      manual_fallback: true,
+      reason: "missing_keys"
     };
   }
 
@@ -55,12 +56,14 @@ exports.main = async function (event) {
     log({ audioChars: audioBase64.length, elapsedMs: Date.now() - startedAt });
     return { ok: true, text: res.text.trim() };
   } catch (e) {
-    log({ error: "ASR_UNAVAILABLE", reason: (e && e.code) || "unknown", elapsedMs: Date.now() - startedAt });
+    var reason = (e && e.detail) || (e && e.code) || "unknown";
+    log({ error: "ASR_UNAVAILABLE", reason: reason, elapsedMs: Date.now() - startedAt });
     return {
       ok: false,
       error: "ASR_UNAVAILABLE",
       message: "语音识别失败,请重试或改用文字",
-      manual_fallback: true
+      manual_fallback: true,
+      reason: reason
     };
   }
 };
