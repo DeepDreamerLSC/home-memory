@@ -115,13 +115,22 @@ export function getDraftSession(sid: string, now: number = Date.now()): DraftSes
   return payload;
 }
 
-/** 确认页回写行状态(保存中逐行调用;会话不存在则忽略) */
+/**
+ * 确认页回写行状态(保存中逐行调用;会话不存在则忽略)。
+ * 持久层归属检查(五轮评审 CAS 守卫):只有 sid 仍是当前持久化会话才落盘——
+ * 旧确认页被放弃/替换后的迟到回调,不得把已退役的 sid 反向写回 storage,
+ * 否则会顶掉新批次的恢复入口与其幂等键。内存行状态照常更新(不影响新批次)。
+ */
 export function updateDraftSessionRows(sid: string, rows: DraftSessionRowState[]): void {
   const payload = sessions.get(sid);
   if (payload === undefined) {
     return;
   }
   payload.rows = rows;
+  const persisted = readPersisted();
+  if (persisted === null || persisted.sid !== sid) {
+    return;
+  }
   writePersisted({ sid, payload });
 }
 

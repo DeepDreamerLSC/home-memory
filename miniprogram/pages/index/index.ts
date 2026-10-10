@@ -78,6 +78,8 @@ Page<
     onExtractTap(): Promise<void>;
     /** 未完成批次的新建门禁(第四轮评审):恢复 / 放弃 / 中止 三选 */
     askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort">;
+    /** 放弃旧批次二次确认(五轮评审):讲清非数据库撤销语义 */
+    confirmDiscardDraft(): Promise<boolean>;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
@@ -354,6 +356,27 @@ Page<
     });
   },
 
+  /**
+   * 放弃旧批次的二次确认(五轮评审):明确「放弃」只是丢掉恢复入口,
+   * 不是数据库撤销——已保存的物品不会回滚,结果未知的物品可能已入库。
+   */
+  confirmDiscardDraft(): Promise<boolean> {
+    return new Promise((resolve) => {
+      wx.showModal({
+        title: "放弃上一批?",
+        content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
+        confirmText: "放弃,记新的",
+        cancelText: "返回",
+        success: (r) => {
+          resolve(r.confirm);
+        },
+        fail: () => {
+          resolve(false);
+        },
+      });
+    });
+  },
+
   /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
   async onExtractTap() {
     const text = this.data.memoText.trim();
@@ -374,7 +397,10 @@ Page<
       if (choice === "abort") {
         return;
       }
-      // 放弃:显式清除旧批次恢复入口后,才开始本次提取(不静默覆盖)
+      // 放弃:二次确认讲清语义(非数据库撤销),显式清除恢复入口后才开始本次提取
+      if (!(await this.confirmDiscardDraft())) {
+        return;
+      }
       clearDraftSession(unfinished.sid);
     }
     this.setData({ extracting: true });

@@ -122,3 +122,65 @@ test("DG-1:未完成批次存在时,新建必须经用户裁决——恢复保�
   const unfinishedC = ds.getUnfinishedDraftSession();
   assert.notEqual(unfinishedC.sid, sidB, "无门禁时持久层只保留最新——旧幂等键随 sidB 消失");
 });
+
+// ---------- 五轮评审:持久层归属检查(CAS 守卫)----------
+// 旧确认页的迟到回调(persistRows → updateDraftSessionRows)不得把已退役的
+// sid 反向写回 storage,否则会顶掉新批次的恢复入口与其幂等键。
+
+test("DG-2:迟到回写不得复活已退役会话——恢复入口始终是新批,clear(A) 不清 B", function () {
+  // 评审反例:create(A) → create(B) → late update(A)
+  const sidA = ds.createDraftSession("旧批:钥匙放玄关", [
+    Object.assign({}, DRAFT, { name: "钥匙", source_quote: "钥匙放玄关" }),
+  ], false);
+  const sidB = ds.createDraftSession("新批:充电宝放客厅", [
+    Object.assign({}, DRAFT, { name: "充电宝", location_text: "客厅", source_quote: "充电宝放客厅" }),
+  ], false);
+  assert.equal(ds.getUnfinishedDraftSession().sid, sidB, "前置:当前持久化会话是 B");
+
+  // 旧确认页迟到回写 A(内存里 A 仍在,模拟旧页仍活跃/提交在途)
+  ds.updateDraftSessionRows(sidA, [
+    { key: "row-0", name: "钥匙", locationText: "玄关", checked: true, status: "saved", failMsg: "", operationId: "op-late-a" },
+  ]);
+  assert.equal(ds.getUnfinishedDraftSession().sid, sidB, "迟到回写 A 不得把 storage 改回 A");
+  const bPayload = ds.getDraftSession(sidB);
+  assert.ok(bPayload, "新批 B 完好");
+  assert.equal(bPayload.originalText, "新批:充电宝放客厅", "B 的内容未被 A 的回写污染");
+
+  // 正向对照:当前会话 B 的回写照常落盘
+  ds.updateDraftSessionRows(sidB, [
+    { key: "row-0", name: "充电宝", locationText: "客厅", checked: true, status: "saved", failMsg: "", operationId: "op-late-b" },
+  ]);
+  const unfinished = ds.getUnfinishedDraftSession();
+  assert.equal(unfinished.sid, sidB);
+  assert.equal(unfinished.payload.rows[0].operationId, "op-late-b", "当前会话回写正常持久化");
+
+  // 进程回收后(迟到回调跨进程场景):storage 归属仍是 B
+  ds.simulateProcessRestartForTest();
+  assert.equal(ds.getUnfinishedDraftSession().sid, sidB, "进程重启后恢复入口仍是 B");
+
+  // clear(A) 不得清 B(旧批次收尾不得误伤新批)
+  ds.clearDraftSession(sidA);
+  const afterClear = ds.getUnfinishedDraftSession();
+  assert.ok(afterClear, "clear(A) 不得清掉 B");
+  assert.equal(afterClear.sid, sidB);
+});
+
+test("DG-3:放弃路径的时序——clear(A) 之后到达的 A 迟到回写,不得重建 A 的持久入口", function () {
+  const sidA = ds.createDraftSession("旧批:猕猴桃在果篮", [
+    Object.assign({}, DRAFT, { name: "猕猴桃", source_quote: "猕猴桃在果篮" }),
+  ], false);
+  // 用户明确放弃 A(入口门禁路径):恢复入口清空
+  ds.clearDraftSession(sidA);
+  assert.equal(ds.getUnfinishedDraftSession(), null, "放弃后无恢复入口");
+  // A 的迟到回写才到:不得复活持久入口(内存已随 clear 移除,此处顺带覆盖该早退分支)
+  ds.updateDraftSessionRows(sidA, [
+    { key: "row-0", name: "猕猴桃", locationText: "果篮", checked: true, status: "saved", failMsg: "", operationId: "op-late-c" },
+  ]);
+  assert.equal(ds.getUnfinishedDraftSession(), null, "迟到回写不得复活已放弃的会话");
+
+  // 用户随即记新批:正常落地,不受 A 残留影响
+  const sidB = ds.createDraftSession("新批:雨伞在门口", [
+    Object.assign({}, DRAFT, { name: "雨伞", location_text: "门口", source_quote: "雨伞在门口" }),
+  ], false);
+  assert.equal(ds.getUnfinishedDraftSession().sid, sidB);
+});
