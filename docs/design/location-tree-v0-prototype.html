@@ -231,6 +231,17 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 <div class="form-note">演示中的解析只支持固定示例；任意自然语言并未调用真实 AI。</div>
 </section>
 
+<section class="screen" data-screen="fridge">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>小冰箱</b></div>
+<div class="toolbar"><div class="heading"><h1>小冰箱</h1><span class="pill">3 件</span></div><button class="mini-btn" data-nav="renameplace" data-place="小冰箱">修改</button></div>
+<div class="small">书房 / 小冰箱 · 全部为上次记录的位置</div>
+<h3>这里记住的物品</h3>
+<button class="item" data-nav="item"><span class="ico ink">饮</span><span class="info"><strong>饮料</strong><span>上次记录：书房小冰箱冷藏层</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">水</span><span class="info"><strong>矿泉水</strong><span>上次记录：书房小冰箱冷藏层</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">奶</span><span class="info"><strong>牛奶</strong><span>上次记录：书房小冰箱门侧</span></span><span class="arrow">›</span></button>
+<div class="note"><strong>浏览与编辑复用同一空间结构</strong><p>这是静态 fixture。正式版从已确认记录投影，不能靠猜测补全内容。</p></div>
+</section>
+
 <section class="screen" data-screen="item"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>物品详情示意</b></div><h1 id="detail-name">充电宝</h1><div class="card"><h3 style="margin-top:0">上次记录的位置</h3><p id="detail-location">书房书桌右侧第二个抽屉</p><div class="small">此页面只是视觉示意，正式产品继续复用原有详情与更新 API。</div></div></section>
 </div><div class="footer">Issue #15 · 仅供交互评审 · 示例数据 · 无后台读写</div></div>
 <div class="toast" id="toast" role="status"></div>
@@ -238,7 +249,7 @@ h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-wei
 (function(){
 "use strict";
 var app=document.getElementById("app"), stack=["home"], nav=document.getElementById("navtitle"), back=document.getElementById("back"), scroll=document.getElementById("scrollarea");
-var names={home:"我靠东西呢",spaces:"按空间逛逛",study:"书房",desk:"书桌",drawer:"右侧第二个抽屉",uncategorized:"尚未归类",living:"客厅",bedroom:"卧室",item:"物品详情",editroom:"编辑书房",addlocation:"新增位置",renameplace:"修改位置名称",moveitem:"移动物品",voiceedit:"语音修改"};
+var names={home:"我靠东西呢",spaces:"按空间逛逛",study:"书房",desk:"书桌",drawer:"右侧第二个抽屉",uncategorized:"尚未归类",living:"客厅",bedroom:"卧室",fridge:"小冰箱",item:"物品详情",editroom:"编辑书房",addlocation:"新增位置",renameplace:"修改位置名称",moveitem:"移动物品",voiceedit:"语音修改"};
 function show(name,push){if(!names[name])return;if(push){stack.push(name)}else{stack[stack.length-1]=name}
 document.querySelectorAll(".screen").forEach(function(el){el.classList.toggle("active",el.dataset.screen===name)});
 nav.textContent=names[name];back.hidden=stack.length===1;scroll.scrollTop=0}
