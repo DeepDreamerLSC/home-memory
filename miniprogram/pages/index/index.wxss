@@ -76,48 +76,49 @@
   box-shadow: 0 8rpx 0 var(--danger-shadow);
 }
 
-/* 黑圆麦克风:圆内白色麦克风图形,录音中显示秒数 */
-.mic-circle {
-  width: 152rpx;
-  height: 152rpx;
-  border-radius: 50%;
-  background: #191919;
+/* 麦克风图形:整个黄块即按钮,图形默认黑色;取消态随文案转红 */
+.mic-icon {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  --mic: #191919;
+}
+
+.talk-btn.cancel .mic-icon {
+  --mic: var(--danger);
 }
 
 .mic-cap {
-  width: 28rpx;
-  height: 48rpx;
-  border-radius: 14rpx;
-  background: #f5f4f0;
+  width: 32rpx;
+  height: 54rpx;
+  border-radius: 16rpx;
+  background: var(--mic, #191919);
 }
 
 .mic-stand {
   width: 6rpx;
-  height: 14rpx;
-  background: #f5f4f0;
+  height: 16rpx;
+  background: var(--mic, #191919);
   margin-top: 6rpx;
 }
 
 .mic-base {
-  width: 40rpx;
+  width: 44rpx;
   height: 6rpx;
   border-radius: 3rpx;
-  background: #f5f4f0;
+  background: var(--mic, #191919);
   margin-top: 4rpx;
 }
 
 .mic-seconds {
-  color: #f5f4f0;
-  font-size: 40rpx;
+  color: #191919;
+  font-size: 44rpx;
   font-weight: 700;
 }
 
-.talk-btn.busy .mic-circle {
-  opacity: 0.55;
+.talk-btn.busy .mic-icon {
+  opacity: 0.45;
 }
 
 .talk-label {

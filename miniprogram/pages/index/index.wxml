@@ -60,7 +60,7 @@
         catchtouchend="onTalkTouchEnd"
         catchtouchcancel="onTalkTouchCancel"
       >
-        <view class="mic-circle">
+        <view class="mic-icon">
           <block wx:if="{{ voiceState === 'recording' }}">
             <view class="mic-seconds">{{ recordSeconds }}s</view>
           </block>
