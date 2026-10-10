@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>我靠东西呢 · 家庭空间树 v0 可点击原型</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:#dedbd2;color:#191919}
+.page{--bg:#FAF8F2;--card:#fff;--inset:#F1EDE0;--text:#191919;--text2:#756F62;--hint:#948D7F;--line:#E8E3D6;--accent:#FFE15A;--pill:#FFF0AE;--iconbg:#191919;--iconfg:#fff;background:var(--bg);color:var(--text);width:min(100%,390px);height:min(100dvh,840px);margin:12px auto;border:1px solid #d2cbbb;border-radius:28px;box-shadow:0 12px 44px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden}
+.page.dark{--bg:#111111;--card:#1E1E1E;--inset:#292824;--text:#F5F4F0;--text2:#B7B2A8;--hint:#969187;--line:#34322E;--accent:#F7D64B;--pill:#45402B;--iconbg:#0F0F0F;--iconfg:#fff}
+@media(prefers-color-scheme:dark){.page:not(.force-light){--bg:#111111;--card:#1E1E1E;--inset:#292824;--text:#F5F4F0;--text2:#B7B2A8;--hint:#969187;--line:#34322E;--accent:#F7D64B;--pill:#45402B;--iconbg:#0F0F0F;--iconfg:#fff}}
+.status{height:30px;padding:11px 17px 0;font-size:12px;font-weight:700;display:flex;justify-content:space-between}
+.native{min-height:51px;display:flex;align-items:center;gap:7px;padding:0 16px;border-bottom:1px solid var(--line);font-weight:700}
+.native .back{border:0;background:none;color:var(--text);font-size:25px;width:32px;min-height:44px;padding:0;cursor:pointer}
+.native .capsule{margin-left:auto;padding:4px 13px;border:1px solid var(--line);border-radius:30px;background:var(--card);font-size:13px;letter-spacing:2px}
+.viewport{overflow-y:auto;flex:1;padding:16px 18px 34px;scrollbar-width:thin}
+.screen{display:none}.screen.active{display:block}
+h1{font-size:29px;line-height:1.18;letter-spacing:.3px;margin:8px 0 5px;font-weight:800}h2{font-size:18px;margin:0 0 10px;font-weight:750}h3{font-size:16px;margin:20px 0 11px;font-weight:750}
+.small{font-size:12px;color:var(--text2);line-height:1.5}.tiny{font-size:11px;color:var(--hint);line-height:1.5}
+.section-label{margin:23px 0 9px;font-size:14px;font-weight:700}
+.searchbar{display:flex;gap:9px;align-items:center}
+.searchbar input{min-width:0;flex:1;height:49px;border-radius:13px;background:var(--inset);border:0;padding:0 13px;font-size:13px;color:var(--text);outline-offset:3px}
+.searchbar button{height:49px;width:49px;border:0;border-radius:50%;background:var(--iconbg);color:var(--accent);font-size:15px;font-weight:700;cursor:pointer}
+.tile{border:1px solid var(--line);border-radius:17px;background:var(--card);padding:13px 12px;display:flex;align-items:center;gap:13px;min-height:75px;width:100%;color:var(--text);text-align:left;cursor:pointer}
+.tile + .tile{margin-top:10px}
+.ico{height:46px;width:46px;border-radius:13px;background:var(--inset);display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0}
+.ico.ink{background:var(--iconbg);color:var(--iconfg)}
+.info{flex:1;min-width:0}.info strong{font-size:15px;display:block;margin-bottom:4px}.info span{font-size:11px;color:var(--text2);line-height:1.4;display:block}
+.arrow{font-size:27px;color:var(--hint);font-weight:300}
+.count{font-size:12px;color:var(--text2);font-weight:700;white-space:nowrap}
+.card{background:var(--card);border-radius:20px;padding:18px;margin-top:15px}
+.voice{width:100%;height:151px;border:0;border-radius:19px;background:var(--accent);color:#191919;margin-top:14px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-weight:750;font-size:15px;cursor:pointer;box-shadow:0 5px 0 #E1C638}
+.mic{height:44px;width:23px;border:4px solid currentColor;border-radius:20px;position:relative;margin-bottom:7px}
+.mic:before{content:"";position:absolute;width:39px;height:27px;border:3px solid currentColor;border-top:0;left:-12px;top:18px;border-radius:0 0 25px 25px}
+.mic:after{content:"";position:absolute;width:22px;height:3px;background:currentColor;left:-4px;top:46px;box-shadow:0 -7px 0 transparent}
+.textlink{display:block;margin:13px auto 2px;background:none;border:0;color:var(--text2);min-height:44px;padding:5px 16px;font-size:13px;cursor:pointer}
+.breadcrumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text2);margin:6px 0 14px}
+.breadcrumb button{border:0;padding:3px 0;min-height:26px;background:transparent;color:var(--text2);cursor:pointer}
+.breadcrumb b{color:var(--text);font-weight:600}
+.heading{display:flex;align-items:center;gap:10px}
+.pill{background:var(--pill);font-weight:750;border-radius:20px;padding:5px 12px;color:var(--text);font-size:12px}
+.stack{display:grid;gap:10px;margin-top:12px}
+.space{min-height:88px}
+.space .ico{height:51px;width:51px}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.item{padding:13px 12px;background:var(--card);border-radius:15px;display:flex;align-items:center;gap:11px;border:0;color:var(--text);width:100%;text-align:left;min-height:78px;cursor:pointer}
+.item + .item{margin-top:8px}
+.item .ico{height:44px;width:44px;font-size:16px;font-weight:700}
+.note{background:color-mix(in srgb,var(--accent) 25%,var(--card));border-radius:15px;padding:14px 13px;margin-top:22px}
+.note strong{font-size:13px;display:block}.note p{font-size:11px;color:var(--text2);margin:7px 0 0;line-height:1.6}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#191919;color:#fff;border-radius:20px;padding:9px 16px;font-size:12px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90%;text-align:center;z-index:10}
+.toast.visible{opacity:1}
+.searchresult{padding:12px 4px 0}
+.theme{position:absolute;right:12px;top:96px;display:none}
+.footer{padding:8px 12px;text-align:center;font-size:11px;color:var(--hint);border-top:1px solid var(--line)}
+@media(max-width:440px){body{background:#FAF8F2}.page{border-radius:0;margin:0;height:100dvh;border:0;box-shadow:none}}
+</style>
+</head>
+<body>
+<div class="page" id="app">
+<div class="status"><span>9:41</span><span>● ● ▰</span></div>
+<div class="native"><button class="back" id="back" aria-label="返回" hidden>‹</button><span id="navtitle">我靠东西呢</span><span class="capsule">•••</span></div>
+<div class="viewport" id="scrollarea">
+
+<section class="screen active" data-screen="home">
+<h1>我靠东西呢</h1><div class="small">东西放哪儿了？我记得。</div>
+<div class="section-label">找东西</div>
+<div class="searchbar"><input id="search" aria-label="搜物品" placeholder="搜钥匙、证件、充电宝…"><button id="searchgo" aria-label="执行搜索">找</button></div>
+<div id="searchresult" class="searchresult"></div>
+<div style="height:13px"></div>
+<button class="tile" data-nav="spaces"><span class="ico">⌂</span><span class="info"><strong>按空间逛逛</strong><span>按房间翻翻已记的东西</span></span><span class="arrow">›</span></button>
+<div class="card"><h2>顺手记一件</h2><div class="tiny">比如说：“充电宝放在书房抽屉里”</div><button class="voice" data-demo="这里保留 PR #9 已验证的录音能力，本演示未连接麦克风"><span class="mic" aria-hidden="true"></span>按住说话，松开识别</button><button class="textlink" data-demo="文字录入沿用现有页面，本原型专注空间浏览">改用文字录入</button></div>
+<div class="card"><h2>最近记住的</h2><button class="item" data-nav="item"><span class="ico ink">充</span><span class="info"><strong>充电宝</strong><span>上次记录：书房右侧第二个抽屉</span></span><span class="arrow">›</span></button></div>
+</section>
+
+<section class="screen" data-screen="spaces">
+<div class="breadcrumb"><b>我的家</b></div>
+<h1>按房间翻翻</h1><div class="small">已归类 24 件 · 3 个房间，另有 2 件待归类</div>
+<div class="stack">
+<button class="tile space" data-nav="study"><span class="ico">▤</span><span class="info"><strong>书房</strong><span>书桌、小冰箱等</span></span><span class="count">12 件</span><span class="arrow">›</span></button>
+<button class="tile space" data-nav="living"><span class="ico">▱</span><span class="info"><strong>客厅</strong><span>沙发、电视柜等</span></span><span class="count">9 件</span><span class="arrow">›</span></button>
+<button class="tile space" data-nav="bedroom"><span class="ico">▥</span><span class="info"><strong>卧室</strong><span>床头柜、衣柜等</span></span><span class="count">3 件</span><span class="arrow">›</span></button>
+<button class="tile space" data-nav="uncategorized"><span class="ico">?</span><span class="info"><strong>尚未归类</strong><span>位置还需要确认</span></span><span class="count">2 件</span><span class="arrow">›</span></button>
+</div>
+<div class="note"><strong>这里只展示上次记录的位置</strong><p>东西可能移动了。点开物品详情，可以核对或更新位置；不会把推测位置当成事实。</p></div>
+</section>
+
+<section class="screen" data-screen="study">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>书房</b></div>
+<div class="heading"><h1>书房</h1><span class="pill">12 件</span></div><div class="small">先看看这个房间有哪些收纳位置</div>
+<h3>往里看看</h3>
+<div class="stack">
+<button class="tile space" data-nav="desk"><span class="ico">▤</span><span class="info"><strong>书桌</strong><span>桌面、右侧第二个抽屉</span></span><span class="count">8 件</span><span class="arrow">›</span></button>
+<button class="tile space" data-nav="fridge"><span class="ico">▣</span><span class="info"><strong>小冰箱</strong><span>冷藏层、门侧</span></span><span class="count">3 件</span><span class="arrow">›</span></button>
+</div>
+<h3>直接记录在书房 <span class="count">1 件</span></h3>
+<button class="item" data-nav="item"><span class="ico ink">扫</span><span class="info"><strong>扫地机器人</strong><span>上次记录：书房地面</span></span><span class="arrow">›</span></button>
+<div class="note"><strong>位置层级不必固定</strong><p>书房 → 书桌 → 第二个抽屉；也可以是客厅 → 沙发 → 坐垫下面。</p></div>
+</section>
+
+<section class="screen" data-screen="desk">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>书桌</b></div>
+<div class="heading"><h1>书桌</h1><span class="pill">8 件</span></div><div class="small">书桌包含下级位置的物品，共 8 件</div>
+<h3>往里看看</h3>
+<button class="tile space" data-nav="drawer"><span class="ico">▤</span><span class="info"><strong>右侧第二个抽屉</strong><span>充电线、移动硬盘等</span></span><span class="count">5 件</span><span class="arrow">›</span></button>
+<h3>直接记录在书桌 <span class="count">3 件</span></h3>
+<button class="item" data-nav="item"><span class="ico ink">台</span><span class="info"><strong>台灯</strong><span>上次记录：书房书桌桌面</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">笔</span><span class="info"><strong>笔筒</strong><span>上次记录：书房书桌桌面</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">书</span><span class="info"><strong>笔记本</strong><span>上次记录：书房书桌桌面</span></span><span class="arrow">›</span></button>
+</section>
+
+<section class="screen" data-screen="drawer">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <button data-nav="desk">书桌</button> › <b>抽屉</b></div>
+<div class="heading"><h1 style="font-size:23px">右侧第二个抽屉</h1><span class="pill">5 件</span></div><div class="small">书房 / 书桌 / 右侧第二个抽屉</div>
+<div class="note" style="margin-top:14px"><strong>这里只展示上次确认的位置</strong><p>如果发现东西移动了，可以进入物品详情更新记录。</p></div>
+<h3>这里记住的物品</h3>
+<button class="item" data-nav="item"><span class="ico ink">充</span><span class="info"><strong>USB 充电线</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">硬</span><span class="info"><strong>移动硬盘</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">头</span><span class="info"><strong>充电器</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">钥</span><span class="info"><strong>备用钥匙</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">卡</span><span class="info"><strong>读卡器</strong><span>上次记录：书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>
+</section>
+
+<section class="screen" data-screen="uncategorized">
+<div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>尚未归类</b></div>
+<h1>尚未归类</h1><div class="small">有 2 件物品的位置还不能可靠匹配房间。这里只展示，不自动改写位置。</div>
+<h3>待确认的位置</h3>
+<button class="item" data-nav="item"><span class="ico ink">盒</span><span class="info"><strong>旧相机电池</strong><span>原记录：放在那个白色柜子里</span></span><span class="arrow">›</span></button>
+<button class="item" data-nav="item"><span class="ico ink">卡</span><span class="info"><strong>备用门禁卡</strong><span>原记录：储物盒里面</span></span><span class="arrow">›</span></button>
+<div class="note"><strong>AI 无法确认时不强行归类</strong><p>第一版仅只读。正式位置更正仍须由用户在物品详情中确认。</p></div>
+</section>
+
+<section class="screen" data-screen="living"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>客厅</b></div><div class="heading"><h1>客厅</h1><span class="pill">9 件</span></div><h3>往里看看</h3><button class="tile" data-demo="后续迭代按同一递归目录组件展示客厅 / 沙发 / 坐垫下面"><span class="ico">▱</span><span class="info"><strong>沙发</strong><span>坐垫下面等位置</span></span><span class="count">4 件</span><span class="arrow">›</span></button><div style="height:10px"></div><button class="tile" data-demo="后续迭代使用同一递归目录组件"><span class="ico">▥</span><span class="info"><strong>电视柜</strong><span>中层、右侧柜门</span></span><span class="count">5 件</span><span class="arrow">›</span></button></section>
+<section class="screen" data-screen="bedroom"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <b>卧室</b></div><div class="heading"><h1>卧室</h1><span class="pill">3 件</span></div><h3>往里看看</h3><button class="tile" data-demo="后续迭代复用同一递归目录组件"><span class="ico">▥</span><span class="info"><strong>床头柜</strong><span>上层抽屉等</span></span><span class="count">3 件</span><span class="arrow">›</span></button></section>
+<section class="screen" data-screen="item"><div class="breadcrumb"><button data-nav="spaces">我的家</button> › <button data-nav="study">书房</button> › <b>物品详情示意</b></div><h1>充电宝</h1><div class="card"><h3 style="margin-top:0">上次记录的位置</h3><p>书房书桌右侧第二个抽屉</p><div class="small">此页面只是视觉示意，正式产品继续复用原有详情与更新 API。</div></div></section>
+</div><div class="footer">Issue #15 · 仅供交互评审 · 示例数据 · 无后台读写</div></div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+(function(){
+"use strict";
+var app=document.getElementById("app"), stack=["home"], nav=document.getElementById("navtitle"), back=document.getElementById("back"), scroll=document.getElementById("scrollarea");
+var names={home:"我靠东西呢",spaces:"按空间逛逛",study:"书房",desk:"书桌",drawer:"右侧第二个抽屉",uncategorized:"尚未归类",living:"客厅",bedroom:"卧室",item:"物品详情"};
+function show(name,push){if(!names[name])return;if(push){stack.push(name)}else{stack[stack.length-1]=name}
+document.querySelectorAll(".screen").forEach(function(el){el.classList.toggle("active",el.dataset.screen===name)});
+nav.textContent=names[name];back.hidden=stack.length===1;scroll.scrollTop=0}
+function go(name){show(name,true)}function previous(){if(stack.length>1){stack.pop();show(stack[stack.length-1],false)}}
+function toast(s){var el=document.getElementById("toast");el.textContent=s;el.classList.add("visible");setTimeout(function(){el.classList.remove("visible")},2200)}
+document.addEventListener("click",function(e){var t=e.target.closest("[data-nav],[data-demo]");if(t){if(t.dataset.nav)go(t.dataset.nav);else toast(t.dataset.demo)}});
+back.addEventListener("click",previous);
+var search=document.getElementById("search"),result=document.getElementById("searchresult");
+function doSearch(){var q=search.value.trim();if(!q){toast("请输入要找的东西");return}var matched=/充|线|钥|硬盘|相机/.test(q);result.innerHTML=matched?'<button class="item" data-nav="item"><span class="ico ink">充</span><span class="info"><strong>充电宝</strong><span>上次记录：书房书桌右侧第二个抽屉</span></span><span class="arrow">›</span></button>':'<div class="small">没有找到匹配的记录，换个名称试试。</div>';}
+document.getElementById("searchgo").addEventListener("click",doSearch);
+search.addEventListener("keydown",function(e){if(e.key==="Enter")doSearch()});
+window.addEventListener("keydown",function(e){if(e.key==="Escape")previous()});
+})();
+</script>
+</body>
+</html>
