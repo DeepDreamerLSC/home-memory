@@ -17,6 +17,7 @@ var tree = require("./tree");
 
 var LOC_COLLECTION = "locations";
 var ITEMS_COLLECTION = "items";
+var HISTORY_COLLECTION = "item_location_history";
 var NODE_NAME_MAX = 30; // 节点名去首尾空白后 1-30 字(码点)
 var PATH_MAX_SEGMENTS = tree.PATH_MAX_DEPTH; // path 1-6 段
 var OPERATION_ID_MAX = 64;
@@ -106,6 +107,11 @@ function locCol(deps) {
 
 function itemsCol(deps) {
   return deps.db.collection(ITEMS_COLLECTION);
+}
+
+/** 位置变更历史(append-only 预留层,§5.11):仅 locations 函数写入,V1 无读取入口 */
+function histCol(deps) {
+  return deps.db.collection(HISTORY_COLLECTION);
 }
 
 function digestOf(deps, s) {
@@ -353,9 +359,11 @@ function byUpdatedDesc(a, b) {
 
 /**
  * 版本条件更新 items 的挂载字段(所有挂载写入的唯一路径,§6.4 第 4 条)。
- * 返回命中数(0 = 并发修改或版本过期,调用方按各自语义回查)。
+ * source 用于位置变更历史(§5.11,append-only 预留):真实变更(from ≠ to)追加一条
+ * {item_id, from_node_id, to_node_id, changed_at, source};重放/0 命中走不进本分支,
+ * 历史天然不重复;from == to 的空变更不记录;历史写失败不阻断挂载主流程(且不落日志)。
  */
-async function conditionalMountUpdate(deps, item, locationNodeId, updateId) {
+async function conditionalMountUpdate(deps, item, locationNodeId, updateId, source) {
   var changes = { location_node_id: locationNodeId };
   var fingerprint = changesFingerprint(changes);
   var res = await itemsCol(deps)
@@ -374,6 +382,25 @@ async function conditionalMountUpdate(deps, item, locationNodeId, updateId) {
         last_update_fingerprint: fingerprint
       }
     });
+  if (res && res.stats && res.stats.updated >= 1 && source) {
+    var fromNodeId = item.location_node_id === undefined ? null : item.location_node_id;
+    if (fromNodeId !== locationNodeId) {
+      try {
+        await histCol(deps).add({
+          data: {
+            household_id: deps.householdId,
+            item_id: item._id,
+            from_node_id: fromNodeId,
+            to_node_id: locationNodeId,
+            changed_at: deps.now(),
+            source: source
+          }
+        });
+      } catch (histErr) {
+        // 历史是预留审计层:追加失败不影响挂载结果,也不写入任何日志
+      }
+    }
+  }
   return {
     updated: (res && res.stats && res.stats.updated) || 0,
     fingerprint: fingerprint,
@@ -391,7 +418,7 @@ async function compensateUnmount(deps, victims, updateIdOf) {
   for (var i = 0; i < victims.length; i++) {
     var item = victims[i];
     var updateId = updateIdOf(item);
-    var res = await conditionalMountUpdate(deps, item, null, updateId);
+    var res = await conditionalMountUpdate(deps, item, null, updateId, "compensate");
     if (res.updated >= 1) {
       compensated += 1;
       continue;
@@ -636,7 +663,7 @@ async function mergeRemountPhase(deps, source, target) {
     for (var i = 0; i < mounted.length; i++) {
       var item = mounted[i];
       var updateId = "merge:" + deps.digest(source._id + "→" + target._id + ":" + item._id);
-      var res = await conditionalMountUpdate(deps, item, target._id, updateId);
+      var res = await conditionalMountUpdate(deps, item, target._id, updateId, "merge");
       if (res.updated >= 1) {
         remounted += 1;
         continue;
@@ -887,12 +914,18 @@ async function linkItemAction(event, deps) {
     return fail("NOT_FOUND");
   }
   // 乐观并发:条件 version = 客户端声明的 expected_version(itemsApi.update 同构),
-  // 绝不以「读到的当前 version」放行并发过期写入。
+  // 绝不以「读到的当前 version」放行并发过期写入;from_node_id 取读取到的当前挂载
+  // (文档若在读取后被并发改动,version 条件必然失配,历史不会记错来源)。
   var res = await conditionalMountUpdate(
     deps,
-    { _id: event.item_id, version: event.expected_version },
+    {
+      _id: event.item_id,
+      version: event.expected_version,
+      location_node_id: item.data[0].location_node_id
+    },
     event.node_id,
-    event.update_id
+    event.update_id,
+    "link"
   );
   if (res.updated >= 1) {
     var after = await itemsCol(deps)
@@ -920,9 +953,14 @@ async function unlinkItemAction(event, deps) {
   }
   var res = await conditionalMountUpdate(
     deps,
-    { _id: event.item_id, version: event.expected_version },
+    {
+      _id: event.item_id,
+      version: event.expected_version,
+      location_node_id: item.data[0].location_node_id
+    },
     null,
-    event.update_id
+    event.update_id,
+    "unlink"
   );
   if (res.updated >= 1) {
     var after = await itemsCol(deps)
@@ -996,11 +1034,13 @@ async function applyScanAction(event, deps) {
     var pathEnsured = await ensurePathSegments(deps, one.path, "scan");
     var targetId = pathEnsured.nodes[pathEnsured.nodes.length - 1]._id;
     var updateId = "scan:" + deps.digest(event.operation_id + ":" + one.item_id);
+    // 扫描池只收未挂载物品,from_node_id 按 null 记(§5.9;item 构造体不带该字段)
     var res = await conditionalMountUpdate(
       deps,
       { _id: one.item_id, version: one.expected_version },
       targetId,
-      updateId
+      updateId,
+      "apply_scan"
     );
     if (res.updated >= 1) {
       mountResults.push({ item_id: one.item_id, status: "mounted", version: one.expected_version + 1 });

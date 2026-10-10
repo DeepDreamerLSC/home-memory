@@ -1883,3 +1883,169 @@ test("glue:locations/index.js 可加载;OPENID 缺失 UNAUTHORIZED;身份派生�
   assert.equal(unknown.ok, false);
   assert.equal(unknown.error, "INVALID_INPUT");
 });
+
+// ---------- TS-CHUNK / TS-HIST:架构初审修订(splitChunks 契约 + 位置变更历史 §5.11) ----------
+
+test("TS-CHUNK:splitChunks 均分保序,size 上限真实生效(不再依赖 30÷3 巧合)", async function () {
+  var splitChunks = require("../cloudfunctions/locations/lib/parse").splitChunks;
+
+  // 30 件 / target 3 / size 10:与旧行为逐位一致(每块 10,round-robin 保序)
+  var thirty = [];
+  for (var i = 0; i < 30; i++) {
+    thirty.push(i);
+  }
+  var chunks = splitChunks(thirty, 3, 10);
+  assert.equal(chunks.length, 3);
+  assert.deepEqual(
+    chunks.map(function (c) { return c.length; }),
+    [10, 10, 10]
+  );
+  assert.deepEqual(chunks[0], [0, 3, 6, 9, 12, 15, 18, 21, 24, 27], "块内保持原顺序");
+
+  // 40 件 / target 3 / size 10:均分会使单块达 14 → 自动增块到 4,每块 ≤ 10
+  var forty = [];
+  for (var f = 0; f < 40; f++) {
+    forty.push(f);
+  }
+  var big = splitChunks(forty, 3, 10);
+  assert.equal(big.length, 4);
+  for (var b = 0; b < big.length; b++) {
+    assert.ok(big[b].length <= 10, "第 " + b + " 块 " + big[b].length + " 件,超过上限");
+  }
+
+  // 小数组行为不变:4 件 3 块 [2,1,1];空数组 0 块
+  var four = splitChunks([1, 2, 3, 4], 3, 10);
+  assert.equal(four.length, 3);
+  assert.deepEqual(
+    four.map(function (c) { return c.length; }),
+    [2, 1, 1]
+  );
+  assert.deepEqual(splitChunks([], 3, 10), []);
+});
+
+test("TS-HIST1:link/unlink/merge/apply_scan 真实变更写入 item_location_history;重放与空变更不写", async function () {
+  var t = fresh();
+  var created = await createItem(t.deps, "op-hist1", "充电宝", "书房桌子右边第二个抽屉");
+  var itemId = created.item.item_id;
+
+  // link:null → 桌子,历史 1 条(source=link)
+  var tree = await ensurePath(t.deps, ["书房", "桌子"]);
+  var deskId = tree.nodes[1].location_id;
+  var link1 = await locHandler(
+    { action: "linkItem", item_id: itemId, node_id: deskId, expected_version: 1, update_id: "u-hist-1" },
+    t.deps
+  );
+  assert.equal(link1.ok, true, JSON.stringify(link1));
+  var hist = await rawDocs(t.db, "item_location_history");
+  assert.equal(hist.length, 1, "首挂写入一条历史");
+  assert.equal(hist[0].item_id, itemId);
+  assert.equal(hist[0].from_node_id, null);
+  assert.equal(hist[0].to_node_id, deskId);
+  assert.equal(hist[0].source, "link");
+  assert.equal(hist[0].household_id, HOUSEHOLD_A);
+  assert.ok(typeof hist[0].changed_at === "string" && hist[0].changed_at.length > 0, "changed_at 必填");
+
+  // 同 update_id 重放:replayed=true,历史不重复
+  var link1Replay = await locHandler(
+    { action: "linkItem", item_id: itemId, node_id: deskId, expected_version: 1, update_id: "u-hist-1" },
+    t.deps
+  );
+  assert.equal(link1Replay.ok, true);
+  assert.equal(link1Replay.replayed, true);
+  assert.equal((await rawDocs(t.db, "item_location_history")).length, 1, "重放不产生历史");
+
+  // unlink:桌子 → null(source=unlink),历史 2 条
+  var unlink1 = await locHandler(
+    { action: "unlinkItem", item_id: itemId, expected_version: 2, update_id: "u-hist-2" },
+    t.deps
+  );
+  assert.equal(unlink1.ok, true, JSON.stringify(unlink1));
+  hist = await rawDocs(t.db, "item_location_history");
+  assert.equal(hist.length, 2);
+  assert.equal(hist[1].from_node_id, deskId);
+  assert.equal(hist[1].to_node_id, null);
+  assert.equal(hist[1].source, "unlink");
+
+  // 已摘除物品再 unlink(设计语义:版本照 +1):null → null 空变更,历史不增
+  var unlink2 = await locHandler(
+    { action: "unlinkItem", item_id: itemId, expected_version: 3, update_id: "u-hist-3" },
+    t.deps
+  );
+  assert.equal(unlink2.ok, true);
+  assert.equal((await rawDocs(t.db, "item_location_history")).length, 2, "空变更不写历史");
+
+  // merge:重挂载写入 from → to(source=merge)
+  var treeB = await ensurePath(t.deps, ["书房", "书桌"]);
+  var deskBId = treeB.nodes[1].location_id;
+  await locHandler(
+    { action: "linkItem", item_id: itemId, node_id: deskId, expected_version: 4, update_id: "u-hist-4" },
+    t.deps
+  );
+  var merged = await locHandler(
+    { action: "merge", source_node_id: deskId, target_node_id: deskBId },
+    t.deps
+  );
+  assert.equal(merged.ok, true, JSON.stringify(merged));
+  hist = await rawDocs(t.db, "item_location_history");
+  assert.equal(hist.length, 4, "重挂一条 link? 不:merge 直写,历史第 3 条为 link、第 4 条为 merge");
+  assert.equal(hist[2].source, "link");
+  assert.equal(hist[3].source, "merge");
+  assert.equal(hist[3].from_node_id, deskId);
+  assert.equal(hist[3].to_node_id, deskBId);
+
+  // applyScan:未挂载物品经向导挂载(source=apply_scan,from=null)
+  var created2 = await createItem(t.deps, "op-hist2", "备用钥匙", "客厅电视柜第二层");
+  var applied = await locHandler(
+    {
+      action: "applyScan",
+      operation_id: "op-apply-hist",
+      branches: [],
+      mounts: [{ item_id: created2.item.item_id, expected_version: 1, path: ["客厅", "电视柜"] }]
+    },
+    t.deps
+  );
+  assert.equal(applied.ok, true, JSON.stringify(applied));
+  hist = await rawDocs(t.db, "item_location_history");
+  assert.equal(hist.length, 5);
+  assert.equal(hist[4].source, "apply_scan");
+  assert.equal(hist[4].from_node_id, null);
+  assert.equal(hist[4].item_id, created2.item.item_id);
+
+  // 家庭隔离:history 行只属于本家庭(household_id 逐行断言)
+  for (var h = 0; h < hist.length; h++) {
+    assert.equal(hist[h].household_id, HOUSEHOLD_A);
+  }
+});
+
+test("TS-HIST2:另一家庭的历史行不串扰(household_id 随写入隔离)", async function () {
+  var db = freshDb();
+  var depsA = makeDeps(db, HOUSEHOLD_A);
+  var depsB = makeDeps(db, HOUSEHOLD_B);
+  var itemA = await itemsHandler(
+    { action: "create", operation_id: "op-ha", name: "充电宝A", location_text: "书房桌子" },
+    depsA
+  );
+  var itemB = await itemsHandler(
+    { action: "create", operation_id: "op-hb", name: "充电宝B", location_text: "客厅柜子" },
+    depsB
+  );
+  var treeA = await locHandler({ action: "ensurePath", path: ["书房", "桌子"] }, depsA);
+  var treeB = await locHandler({ action: "ensurePath", path: ["客厅", "柜子"] }, depsB);
+  await locHandler(
+    { action: "linkItem", item_id: itemA.item.item_id, node_id: treeA.nodes[1].location_id, expected_version: 1, update_id: "u-ha-1" },
+    depsA
+  );
+  await locHandler(
+    { action: "linkItem", item_id: itemB.item.item_id, node_id: treeB.nodes[1].location_id, expected_version: 1, update_id: "u-hb-1" },
+    depsB
+  );
+  var hist = await rawDocs(db, "item_location_history");
+  assert.equal(hist.length, 2);
+  var byHousehold = {};
+  for (var i = 0; i < hist.length; i++) {
+    byHousehold[hist[i].household_id] = hist[i];
+  }
+  assert.ok(byHousehold[HOUSEHOLD_A] && byHousehold[HOUSEHOLD_B], "两家庭各有一条且 household_id 正确");
+  assert.equal(byHousehold[HOUSEHOLD_A].item_id, itemA.item.item_id);
+  assert.equal(byHousehold[HOUSEHOLD_B].item_id, itemB.item.item_id);
+});

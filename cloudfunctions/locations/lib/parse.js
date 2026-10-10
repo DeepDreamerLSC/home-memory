@@ -328,12 +328,19 @@ async function parseLocation(event, deps) {
 // scanHousehold(§5.9):整户增量扫描,纯草案,零写库
 // ---------------------------------------------------------------------------
 
-/** 把件数组均分成至多 target 块、每块 ≤ size 件;空数组返回 [](1 件 1 块、4 件 3 块) */
+/**
+ * 把件数组均分成至多 target 块(round-robin 保序);若均分会使单块超过 size 件,
+ * 则改为按 size 上限切块(块数可能超过 target)。空数组返回 [](1 件 1 块、4 件 3 块)。
+ * SCAN_POOL_LIMIT ≤ 30 且 target=3/size=10 时,行为与「均分」完全一致(每块恰好 10)。
+ */
 function splitChunks(list, target, size) {
   if (list.length === 0) {
     return [];
   }
   var count = Math.min(target, Math.max(1, list.length));
+  if (Math.ceil(list.length / count) > size) {
+    count = Math.ceil(list.length / size);
+  }
   var chunks = [];
   for (var i = 0; i < count; i++) {
     chunks.push([]);
@@ -606,5 +613,6 @@ async function scanHousehold(event, deps) {
 
 module.exports = {
   parseLocation: parseLocation,
-  scanHousehold: scanHousehold
+  scanHousehold: scanHousehold,
+  splitChunks: splitChunks
 };
