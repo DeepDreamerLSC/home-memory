@@ -18,6 +18,7 @@ exports.cleanTranscript = cleanTranscript;
 exports.isMeaningfulTranscript = isMeaningfulTranscript;
 exports.resetVoiceCancelled = resetVoiceCancelled;
 exports.markVoiceCancelled = markVoiceCancelled;
+exports.createSessionGuard = createSessionGuard;
 exports.createVoiceController = createVoiceController;
 exports.loadTimings = loadTimings;
 exports.createDefaultVoiceDeps = createDefaultVoiceDeps;
@@ -78,7 +79,27 @@ function resetVoiceCancelled() {
 function markVoiceCancelled() {
     cancelled = true;
 }
-exports.VOICE_FORMAT = "wav";
+function createSessionGuard() {
+    let current = 0;
+    return {
+        begin() {
+            current += 1;
+            return current;
+        },
+        invalidate() {
+            current += 1;
+        },
+        isCurrent(session) {
+            return session === current;
+        },
+    };
+}
+/**
+ * 录音格式:mp3/16k/单声道/24kbps(压缩编码)。
+ * 不用 wav(PCM):60 秒约 1.9MB、base64 约 2.5MB,贴近调用与接口上限;
+ * mp3 下 60 秒仅约 180KB(base64 约 240KB),远小于 3MB 接口限额。
+ */
+exports.VOICE_FORMAT = "mp3";
 function createVoiceController(callbacks, deps) {
     let pressStartAt = 0;
     let stopAt = 0;
@@ -138,12 +159,13 @@ function createVoiceController(callbacks, deps) {
     return {
         start() {
             try {
-                // 16kHz 单声道 wav:腾讯云一句话识别推荐输入
+                // mp3/16k/单声道/24kbps:60 秒约 180KB,远小于 ASR 的 3MB(base64)限额
                 deps.recorder.start({
                     format: exports.VOICE_FORMAT,
                     duration: 60000,
                     sampleRate: 16000,
                     numberOfChannels: 1,
+                    encodeBitRate: 24000,
                     frameSize: 4
                 });
                 return true;

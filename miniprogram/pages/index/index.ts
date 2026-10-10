@@ -7,12 +7,14 @@ import {
 } from "../../utils/api";
 import {
   ensureRecordAuth,
+  createSessionGuard,
   createVoiceController,
   createDefaultVoiceDeps,
   isMeaningfulTranscript,
   isSlideUpCancel,
   markVoiceCancelled,
   resetVoiceCancelled,
+  type SessionGuard,
   type VoiceController,
 } from "../../utils/voice";
 import type { Draft, ItemSummary } from "../../types";
@@ -63,7 +65,11 @@ Page<
     touchStartY: number;
     /** 录音秒数计时器句柄 */
     recordTimer: number;
+    /** 按压会话守卫(授权竞态与生命周期失效) */
+    sessionGuard: SessionGuard | null;
     clearRecordTimer(): void;
+    invalidateVoiceSession(): void;
+    startRecording(session: number): Promise<void>;
     onExtractTap(): Promise<void>;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
@@ -76,7 +82,6 @@ Page<
     onTalkTouchMove(e: WechatMiniprogram.TouchEvent): void;
     onTalkTouchEnd(): void;
     onTalkTouchCancel(): void;
-    startRecording(): Promise<void>;
     finishRecording(): void;
     voiceFallbackToText(): void;
   }
@@ -103,8 +108,11 @@ Page<
   voiceCtrl: null,
   touchStartY: 0,
   recordTimer: 0,
+  /** 按压会话守卫:授权异步回调、录音、取消、识别结果都必须属于同一次有效按压 */
+  sessionGuard: null as SessionGuard | null,
 
   onLoad() {
+    this.sessionGuard = createSessionGuard();
     this.ensureVoiceCtrl();
   },
 
@@ -114,10 +122,27 @@ Page<
 
   onHide() {
     this.clearRecordTimer();
+    this.invalidateVoiceSession();
   },
 
   onUnload() {
     this.clearRecordTimer();
+    this.invalidateVoiceSession();
+  },
+
+  /**
+   * 作废当前按压会话并终止在途录音/识别:
+   * 松手早于授权返回、切换模式、离开页面时调用,防止"幽灵录音"与迟到的识别结果触发提取。
+   */
+  invalidateVoiceSession() {
+    if (this.sessionGuard !== null) {
+      this.sessionGuard.invalidate();
+    }
+    markVoiceCancelledIfRecording(this);
+    this.clearRecordTimer();
+    if (this.data.voiceState !== "idle" || this.data.transcribing) {
+      this.setData({ voiceState: "idle", transcribing: false, partialText: "" });
+    }
   },
 
   clearRecordTimer() {
@@ -132,8 +157,7 @@ Page<
   },
 
   onModeText() {
-    markVoiceCancelledIfRecording(this);
-    this.clearRecordTimer();
+    this.invalidateVoiceSession();
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
@@ -184,14 +208,15 @@ Page<
   },
 
   onTalkTouchStart(e) {
-    if (this.data.voiceState !== "idle") {
+    if (this.data.voiceState !== "idle" || this.data.transcribing) {
       return;
     }
     const touch = e.touches && e.touches[0];
     this.touchStartY = touch ? touch.clientY : 0;
     resetVoiceCancelled();
-    // 授权异步,授权通过后手指可能仍按着;直接尝试启动
-    void this.startRecording();
+    // 会话号:授权异步返回时若会话已被作废(松手/切换/离开),不得启动录音
+    const session = this.sessionGuard !== null ? this.sessionGuard.begin() : 0;
+    void this.startRecording(session);
   },
 
   onTalkTouchMove(e) {
@@ -215,16 +240,26 @@ Page<
   },
 
   onTalkTouchEnd() {
+    // 作废未完成的授权回调(松手早于授权返回的竞态),再正常收尾
+    if (this.sessionGuard !== null) {
+      this.sessionGuard.invalidate();
+    }
     this.finishRecording();
   },
 
   onTalkTouchCancel() {
     markVoiceCancelled();
+    if (this.sessionGuard !== null) {
+      this.sessionGuard.invalidate();
+    }
     this.finishRecording();
   },
 
-  async startRecording() {
+  async startRecording(session: number) {
     const auth = await ensureRecordAuth();
+    if (this.sessionGuard !== null && !this.sessionGuard.isCurrent(session)) {
+      return; // 松手/切换模式/离开页面后授权才返回:本次按压已作废,不启动
+    }
     if (auth === "denied") {
       wx.showModal({
         title: "需要录音权限",
@@ -264,8 +299,7 @@ Page<
   },
 
   voiceFallbackToText() {
-    markVoiceCancelledIfRecording(this);
-    this.clearRecordTimer();
+    this.invalidateVoiceSession();
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 

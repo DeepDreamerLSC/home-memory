@@ -22,12 +22,14 @@ var VERSION = "2019-06-14";
  */
 function recognizeOnce(audioBase64, voiceFormat, secretId, secretKey, timeoutMs) {
   return new Promise(function (resolve, reject) {
+    // DataLen 为官方接口 SourceType=1 时的条件必填参数:音频原始字节数(非 base64 长度)
     var payload = JSON.stringify({
       EngSerViceType: "16k_zh",
       SourceType: 1,
       VoiceFormat: voiceFormat,
       UsrAudioKey: "home-memory",
-      Data: audioBase64
+      Data: audioBase64,
+      DataLen: Buffer.byteLength(audioBase64, "base64")
     });
     var timestamp = Math.floor(Date.now() / 1000);
     var headers = buildSignedHeaders(secretId, secretKey, HOST, SERVICE, ACTION, VERSION, payload, timestamp);

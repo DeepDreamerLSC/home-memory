@@ -99,8 +99,8 @@ test("控制器:完整流程 start→录音→停止→读文件→云函数转�
 
   assert.equal(ctrl.start(), true);
   assert.deepEqual(deps.__recorder.__getOpts(), {
-    format: "wav", duration: 60000, sampleRate: 16000, numberOfChannels: 1, frameSize: 4
-  }, "录音参数:wav/16k/单声道,最长 60 秒");
+    format: "mp3", duration: 60000, sampleRate: 16000, numberOfChannels: 1, encodeBitRate: 24000, frameSize: 4
+  }, "录音参数:mp3/16k/单声道/24kbps");
   deps.__recorder.__fireStart();
   ctrl.stop();
   deps.__recorder.__fireStop({ tempFilePath: "/tmp/a.wav" });
@@ -170,4 +170,28 @@ test("isMeaningfulTranscript:语气词噪音不算有效输入,正常语音有�
   assert.equal(voice.isMeaningfulTranscript("钥匙在抽屉"), true);
   assert.equal(voice.isMeaningfulTranscript("啊,充电宝在书房"), true, "开头语气词剥除后仍有效");
   assert.equal(voice.isMeaningfulTranscript("哈密瓜放在茶几"), true, "含'哈'的真实词不受误伤");
+});
+
+test("会话守卫:松手/切换/离开后,迟到的授权回调不得启动录音", function () {
+  var guard = voice.createSessionGuard();
+  var s1 = guard.begin();
+  assert.equal(guard.isCurrent(s1), true, "刚按下的会话有效");
+  guard.invalidate(); // 模拟松手早于授权返回
+  assert.equal(guard.isCurrent(s1), false, "松手后原会话作废,授权回调不得启动录音");
+  var s2 = guard.begin();
+  assert.equal(guard.isCurrent(s2), true, "新按压新会话");
+  assert.equal(guard.isCurrent(s1), false, "旧会话不再复活");
+  guard.invalidate();
+  guard.invalidate();
+  assert.equal(guard.isCurrent(s2), false, "多次作废(切换模式/离开页面)同样生效");
+});
+
+test("录音参数:mp3/16k/单声道/24kbps(压缩编码,60 秒约 180KB,远小于 3MB 限额)", async function () {
+  var rec = collect();
+  var deps = makeDeps();
+  var ctrl = voice.createVoiceController(rec.cbs, deps);
+  ctrl.start();
+  assert.deepEqual(deps.__recorder.__getOpts(), {
+    format: "mp3", duration: 60000, sampleRate: 16000, numberOfChannels: 1, encodeBitRate: 24000, frameSize: 4
+  });
 });

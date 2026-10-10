@@ -9,7 +9,8 @@
 
 const { recognizeOnce } = require("./lib/asr");
 
-const MAX_AUDIO_BYTES = 1024 * 1024; // 与一句话识别 base64 ≤1MB 对齐(原始约 750KB)
+// 官方合同:录音最长 60 秒,base64 后不超过 3MB(mp3/16k/24kbps 下 60 秒约 240KB,余量充足)
+const MAX_AUDIO_BYTES = 3 * 1024 * 1024;
 const TIMEOUT_MS = 15000;
 
 cloudInit();

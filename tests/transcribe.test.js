@@ -87,7 +87,7 @@ test("transcribe 胶水:入参缺失/格式非法一律 INVALID_INPUT,绝不发�
   assert.equal(r2.error, "INVALID_INPUT");
   var r3 = await fn.main({ audio_base64: "", voice_format: "wav" });
   assert.equal(r3.error, "INVALID_INPUT");
-  var long = new Array(1024 * 1024 + 10).join("A");
+  var long = new Array(3 * 1024 * 1024 + 10).join("A");
   var r4 = await fn.main({ audio_base64: long, voice_format: "wav" });
-  assert.equal(r4.error, "INVALID_INPUT", "超长音频直接拒绝");
+  assert.equal(r4.error, "INVALID_INPUT", "超过 3MB 官方限额直接拒绝");
 });

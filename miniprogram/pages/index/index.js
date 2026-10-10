@@ -30,7 +30,10 @@ Page({
     voiceCtrl: null,
     touchStartY: 0,
     recordTimer: 0,
+    /** 按压会话守卫:授权异步回调、录音、取消、识别结果都必须属于同一次有效按压 */
+    sessionGuard: null,
     onLoad() {
+        this.sessionGuard = (0, voice_1.createSessionGuard)();
         this.ensureVoiceCtrl();
     },
     onShow() {
@@ -38,9 +41,25 @@ Page({
     },
     onHide() {
         this.clearRecordTimer();
+        this.invalidateVoiceSession();
     },
     onUnload() {
         this.clearRecordTimer();
+        this.invalidateVoiceSession();
+    },
+    /**
+     * 作废当前按压会话并终止在途录音/识别:
+     * 松手早于授权返回、切换模式、离开页面时调用,防止"幽灵录音"与迟到的识别结果触发提取。
+     */
+    invalidateVoiceSession() {
+        if (this.sessionGuard !== null) {
+            this.sessionGuard.invalidate();
+        }
+        markVoiceCancelledIfRecording(this);
+        this.clearRecordTimer();
+        if (this.data.voiceState !== "idle" || this.data.transcribing) {
+            this.setData({ voiceState: "idle", transcribing: false, partialText: "" });
+        }
     },
     clearRecordTimer() {
         if (this.recordTimer) {
@@ -52,8 +71,7 @@ Page({
         this.setData({ memoText: e.detail && e.detail.value ? e.detail.value : "" });
     },
     onModeText() {
-        markVoiceCancelledIfRecording(this);
-        this.clearRecordTimer();
+        this.invalidateVoiceSession();
         this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
     onModeVoice() {
@@ -98,14 +116,15 @@ Page({
         }, (0, voice_1.createDefaultVoiceDeps)());
     },
     onTalkTouchStart(e) {
-        if (this.data.voiceState !== "idle") {
+        if (this.data.voiceState !== "idle" || this.data.transcribing) {
             return;
         }
         const touch = e.touches && e.touches[0];
         this.touchStartY = touch ? touch.clientY : 0;
         (0, voice_1.resetVoiceCancelled)();
-        // 授权异步,授权通过后手指可能仍按着;直接尝试启动
-        void this.startRecording();
+        // 会话号:授权异步返回时若会话已被作废(松手/切换/离开),不得启动录音
+        const session = this.sessionGuard !== null ? this.sessionGuard.begin() : 0;
+        void this.startRecording(session);
     },
     onTalkTouchMove(e) {
         if (this.data.voiceState === "idle") {
@@ -128,14 +147,24 @@ Page({
         }
     },
     onTalkTouchEnd() {
+        // 作废未完成的授权回调(松手早于授权返回的竞态),再正常收尾
+        if (this.sessionGuard !== null) {
+            this.sessionGuard.invalidate();
+        }
         this.finishRecording();
     },
     onTalkTouchCancel() {
         (0, voice_1.markVoiceCancelled)();
+        if (this.sessionGuard !== null) {
+            this.sessionGuard.invalidate();
+        }
         this.finishRecording();
     },
-    async startRecording() {
+    async startRecording(session) {
         const auth = await (0, voice_1.ensureRecordAuth)();
+        if (this.sessionGuard !== null && !this.sessionGuard.isCurrent(session)) {
+            return; // 松手/切换模式/离开页面后授权才返回:本次按压已作废,不启动
+        }
         if (auth === "denied") {
             wx.showModal({
                 title: "需要录音权限",
@@ -174,8 +203,7 @@ Page({
         }
     },
     voiceFallbackToText() {
-        markVoiceCancelledIfRecording(this);
-        this.clearRecordTimer();
+        this.invalidateVoiceSession();
         this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
     /** 记一件:textarea → extractDraft,按契约分流 */

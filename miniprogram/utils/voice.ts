@@ -130,7 +130,42 @@ export function markVoiceCancelled(): void {
   cancelled = true;
 }
 
-export const VOICE_FORMAT = "wav";
+/**
+ * 轻量按压会话标识:确保「授权回调、录音、取消、识别结果」属于同一次按压。
+ * 解决的竞态:按下 → 请求录音授权(异步)→ 用户松手/离开页面/切换模式 →
+ * 授权才返回 —— 此时不得再启动录音;会话已作废。
+ */
+export interface SessionGuard {
+  /** 开始一次新的按压,返回本次会话号 */
+  begin(): number;
+  /** 作废当前会话(松手/离开/切换模式) */
+  invalidate(): void;
+  /** 会话是否仍有效 */
+  isCurrent(session: number): boolean;
+}
+
+export function createSessionGuard(): SessionGuard {
+  let current = 0;
+  return {
+    begin() {
+      current += 1;
+      return current;
+    },
+    invalidate() {
+      current += 1;
+    },
+    isCurrent(session) {
+      return session === current;
+    },
+  };
+}
+
+/**
+ * 录音格式:mp3/16k/单声道/24kbps(压缩编码)。
+ * 不用 wav(PCM):60 秒约 1.9MB、base64 约 2.5MB,贴近调用与接口上限;
+ * mp3 下 60 秒仅约 180KB(base64 约 240KB),远小于 3MB 接口限额。
+ */
+export const VOICE_FORMAT = "mp3";
 
 export function createVoiceController(
   callbacks: VoiceControllerCallbacks,
@@ -194,12 +229,13 @@ export function createVoiceController(
   return {
     start() {
       try {
-        // 16kHz 单声道 wav:腾讯云一句话识别推荐输入
+        // mp3/16k/单声道/24kbps:60 秒约 180KB,远小于 ASR 的 3MB(base64)限额
         deps.recorder.start({
           format: VOICE_FORMAT,
           duration: 60000,
           sampleRate: 16000,
           numberOfChannels: 1,
+          encodeBitRate: 24000,
           frameSize: 4
         });
         return true;
