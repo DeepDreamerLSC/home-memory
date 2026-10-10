@@ -72,7 +72,30 @@ async function main() {
     "卡片标题与预期不符:" + JSON.stringify(texts),
   );
 
-  // 2. 记一件:输入交互
+  // 2. 默认应为语音模式(语音极速录入是核心场景)
+  const tabs0 = await page.$$(".mode-tab");
+  assert(tabs0.length === 2, "应有 文字/语音 两个模式切换标签");
+  const talkDefault = await page.$(".talk-btn");
+  assert(talkDefault !== null, "默认应展示语音输入界面(按住说话)");
+
+  // 2.5 语音模式 UI:切文字再切回语音(文字回退路径)
+  const tabs = await page.$$(".mode-tab");
+  await tabs[0].tap();
+  await page.waitFor(400);
+  const textareaBack = await page.$(".memo-input");
+  assert(textareaBack !== null, "切回文字模式应显示输入框(文字回退可用)");
+  console.log("✔ 文字模式正常(文字回退可用)");
+  const tabsBack = await page.$$(".mode-tab");
+  await tabsBack[1].tap();
+  await page.waitFor(400);
+  const talkBtn = await page.$(".talk-btn");
+  assert(talkBtn !== null, "语音模式下应显示「按住说话」按钮");
+  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
+
+  // 2.6 文字输入交互(切到文字模式)
+  const tabsText = await page.$$(".mode-tab");
+  await tabsText[0].tap();
+  await page.waitFor(400);
   const textarea = await page.$(".memo-input");
   assert(textarea !== null, "应找到「记一件」输入框");
   await textarea.input("钥匙放在玄关第二个抽屉");
@@ -82,21 +105,28 @@ async function main() {
   console.log("✔ 输入后字数统计:", countText);
   assert(countText.includes("/500"), "字数统计应随输入更新");
 
-  // 3. 找东西:查询失败路径(云未配置/未部署时应出现页面内错误提示,不静默)
+  // 3. 找东西:查询结果如实呈现(云可用时空结果是正常结果;不可用时错误如实上屏)
   const searchInput = await page.$(".search-input");
   assert(searchInput !== null, "应找到「找东西」输入框");
   await searchInput.input("钥匙");
   const searchBtn = await page.$(".search-btn");
   assert(searchBtn !== null, "应找到「查一下」按钮");
   await searchBtn.tap();
-  console.log("已点击「查一下」,等待云调用失败回填错误文案…");
+  console.log("已点击「查一下」,等待查询结果…");
   await page.waitFor(4000);
   const errEls = await page.$$(".error-text");
+  const emptyEl = await page.$(".empty-text");
+  const rowEl = await page.$(".item-row");
   const errTexts = [];
   for (const el of errEls) errTexts.push(await el.text());
-  console.log("✔ 页面内错误提示:", JSON.stringify(errTexts));
-  assert(errTexts.length >= 1, "云不可用时页面应出现至少一条错误提示(失败不静默)");
-  for (const t of errTexts) assert(t.trim().length > 0, "错误提示不应为空字符串");
+  if (errTexts.length > 0) {
+    console.log("✔ 页面内错误提示(失败如实呈现):", JSON.stringify(errTexts));
+    for (const t of errTexts) assert(t.trim().length > 0, "错误提示不应为空字符串");
+  } else if (emptyEl !== null || rowEl !== null) {
+    console.log("✔ 查询结果如实呈现(空结果/命中,云可用时为正常路径)");
+  } else {
+    assert.fail("查询后应出现错误提示、空结果或命中之一,均无则为静默失败");
+  }
 
   // 4. 截图留档
   try {

@@ -2,3 +2,84 @@
 .memo-input {
   width: 100%;
 }
+
+/* 卡片头:标题 + 输入方式切换 */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.card-head .card-title {
+  margin-bottom: 0;
+}
+
+.mode-tabs {
+  display: flex;
+  border: 1rpx solid #d8dce3;
+  border-radius: 999rpx;
+  overflow: hidden;
+}
+
+.mode-tab {
+  padding: 6rpx 24rpx;
+  font-size: 24rpx;
+  color: #6b7280;
+  background: #fff;
+}
+
+.mode-tab.active {
+  color: #fff;
+  background: #3a6ea5;
+}
+
+/* 按住说话 */
+.talk-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  margin: 24rpx 0;
+  padding: 48rpx 0;
+  border: 2rpx dashed #b8c4d4;
+  border-radius: 20rpx;
+  background: #f7f9fc;
+  user-select: none;
+}
+
+.talk-btn.recording {
+  background: #eaf2fb;
+  border-color: #3a6ea5;
+  border-style: solid;
+}
+
+.talk-btn.cancel {
+  background: #fdf0f0;
+  border-color: #d93025;
+  border-style: solid;
+}
+
+.talk-icon {
+  font-size: 30rpx;
+  color: #3a6ea5;
+}
+
+.talk-btn.cancel .talk-icon {
+  color: #d93025;
+}
+
+.talk-label {
+  font-size: 28rpx;
+  color: #374151;
+}
+
+.partial-text {
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: #f4f5f7;
+  font-size: 28rpx;
+  color: #374151;
+  line-height: 1.5;
+}

@@ -53,7 +53,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:49 项(itemsApi 26 + extractDraft 20 + 胶水层 3),全部通过
+npm test             # 离线全量测试:61 项(itemsApi 26 + extractDraft 20 + 胶水层 3 + voice 7 + transcribe 5),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
@@ -110,6 +110,17 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 ### 7. 小程序里验证
 
 编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。
+
+### 8. 语音录入(可选,需腾讯云语音识别)
+
+首页「记一件」支持语音模式(按住说话,松开识别,自动提取)。采用**原生录音 + 腾讯云一句话识别**(微信「同声传译」插件不支持个人主体,故未采用):
+
+1. [腾讯云控制台](https://console.cloud.tencent.com) → 搜索「语音识别」→ 开通(有免费额度)
+2. 右上角头像 → 访问管理 → API 密钥管理 → 新建密钥(SecretId / SecretKey)
+3. 云开发控制台 → 云函数 → `transcribe` → 配置 → 环境变量:添加 `TENCENT_SECRET_ID` 与 `TENCENT_SECRET_KEY`
+4. 部署 `transcribe` 云函数(同步骤 6 的方式,或 CLI:`cli cloud functions deploy --env <环境ID> --names transcribe --project <项目根> -r`)
+
+未配密钥时语音如实返回「识别暂不可用」并引导文字输入;麦克风授权(`scope.record`)首次使用会弹窗,后台「用户隐私保护指引」需声明麦克风用途(提审前必办)。语音耗时埋点见 `docs/PR2.md`。
 
 ## 真实样例试运行(npm run samples:live)
 
