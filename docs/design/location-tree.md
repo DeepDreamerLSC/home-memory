@@ -130,7 +130,7 @@ cloudfunctions/locations/
 
 ### 4.3 deps 注入与 items 分页
 
-- **deps 注入**(离线可测的关键):`handler(event, deps)`,`deps = { db, now(), genId(), householdId, logger, callLLM? }`。`callLLM` 仅 LLM 类 action(parseLocation/scanHousehold)使用;离线测试注入 mock(照抄 `tests/extractDraft.test.js` 的 `seqMock`/`mockFromSample` 形态)。db 类 action(含 applyScan)不依赖 callLLM,未注入也可测。
+- **deps 注入**(离线可测的关键):`handler(event, deps)`,`deps = { db, now(), genId(), digest(s), householdId, logger, callLLM? }`。`digest(s)` 返回 sha256(s) 十六进制前 16 位,供内部派生标识使用(§5.8「内部派生标识规格」;index.js 以 node:crypto 实现,离线测试注入确定性实现,如直接 `crypto.createHash` 同款或固定映射)。`callLLM` 仅 LLM 类 action(parseLocation/scanHousehold)使用;离线测试注入 mock(照抄 `tests/extractDraft.test.js` 的 `seqMock`/`mockFromSample` 形态)。db 类 action(含 applyScan)不依赖 callLLM,未注入也可测。
 - **items 分页拉取**:照抄 `fetchActiveItems`(`itemsApi/handler.js:335-352`)的 skip/limit 逐页模式与 MAX_PAGES 护栏,落在 locations/lib/handler.js(scan、list 的挂载物品统计都要全量)。
 
 ---
@@ -144,8 +144,8 @@ cloudfunctions/locations/
 - **请求**:`{ action:"list", parent_id?: string }`。省略/空串 = home 根(房间层)。
 - **语义**:返回 parent 节点(或根)的直接子节点与**直接挂载**于该节点的未删物品。`item_count` 为**整棵子树**(该节点自身+全部后代)挂载的未删物品数,child_count 为直接子节点数——两个计数都需全量拉 nodes 与 items 后在内存计算(家庭规模下可行,与 itemsApi query 的内存匹配模式同构)。
 - **home 根惰性创建**:请求根层且 home 根不存在时,先创建 home 根(`created_from:"bootstrap"`),再查子节点(通常为空列表)。这是唯一会在 `list` 里发生的写,幂等(唯一索引 + E11000 回查复用)。
-- **未归位计数**:`unmounted_count` = 该家庭未删除且未挂载(location_node_id 缺失或 null)的物品数。它是首页/节点页「生成/更新空间树」常驻入口的诚实数据源(§7.1),也定义了 scanHousehold 的增量扫描池(§5.9)。
-- **读侧容忍(挂载不变量兜底,§1.1 第③层)**:计算挂载物品时,若某物品的 `location_node_id` 指向不存在的节点(悬挂,仅可能来自 §12.1 的并发残余窗口),**按未挂载处理并计入 `dangling_mounts` 字段如实上报**——浏览面永不因悬挂而丢物品或报错,运维可见异常计数。
+- **未归位计数(统一定义,全文档唯一口径)**:`unmounted_count` = 该家庭未删除且**未挂载**的物品数,「未挂载」= location_node_id **缺失、null,或指向不存在的节点**(悬挂,来源见 §12.1;悬挂件同时计入 `unmounted_count` 与 `dangling_mounts` 两个计数,后者单独标示其中多少是悬挂)。该定义同时是 scanHousehold 增量扫描池的取数口径(§5.9)——悬挂件因此**回流扫描池**,§12.1「经向导重挂自愈」的通道由此在公式上成立,而不是仅靠口头承诺。它是首页/节点页「生成/更新空间树」常驻入口的诚实数据源(§7.1)。
+- **读侧容忍(挂载不变量兜底,§1.1 第③层)**:计算挂载物品时,若某物品的 `location_node_id` 指向不存在的节点(悬挂,仅可能来自 §12.1 的并发残余窗口),**按未挂载处理**(即 §5.1 的统一「未挂载」定义)并计入 `dangling_mounts` 字段如实上报——浏览面永不因悬挂而丢物品或报错,运维可见异常计数。
 - **响应**:
 ```json
 { "ok": true,
@@ -208,7 +208,7 @@ cloudfunctions/locations/
 - **请求**:`{ action:"merge", source_node_id, target_node_id }`。
 - **校验**:两节点存在且属本家庭;source ≠ target(`NODE_CONFLICT`);二者 type 相同(否则 INVALID_INPUT,message「只能合并同类型的位置」);target 不是 source 的后代(否则 NODE_CONFLICT);**source 的直接子节点与 target 的直接子节点无 name_norm 重名**(有则 `NODE_CONFLICT`,响应附 `detail:{ clashing_names:[..] }` 供客户端展示——名称出现在响应里合法,出现在日志里违规)。
 - **执行顺序(逐件条件更新 + 冲突即中止 + 可重试收敛)**:
-  1. **物品阶段**:逐件处理直接挂在 source 上的未删物品。每件:读当前 version `v` → 条件更新 `where({ _id, household_id, deleted:false, version:v })` 置 `{ location_node_id: target._id, version: v+1, updated_at, last_update_id: "merge:"+source+"→"+target+":"+item_id(派生), last_update_fingerprint }`。**0 命中**(并发修改,如 itemsApi.update 或另一 linkItem)→ 重读一次:若该件 `location_node_id` 已等于 target(本次或上次 merge 已完成)则视为已完成继续下一件;否则**中止整个 merge**,返回 `{ ok:false, error:"VERSION_CONFLICT", message:"部分物品刚被修改,请重试", detail:{ conflicted:[{item_id, current_version}] } }`——**绝不无条件改写 version**,绝不覆盖并发修改。中止时已成功重挂的件**保持已挂 target**(语义无损,version 已正确 +1),source 未动,重试安全。
+  1. **物品阶段**:逐件处理直接挂在 source 上的未删物品。每件:读当前 version `v` → 条件更新 `where({ _id, household_id, deleted:false, version:v })` 置 `{ location_node_id: target._id, version: v+1, updated_at, last_update_id: "merge:"+digest(source_id+"→"+target_id+":"+item_id)(派生标识,规格见 §5.8), last_update_fingerprint }`。**0 命中**(并发修改,如 itemsApi.update 或另一 linkItem)→ 重读一次:若该件 `location_node_id` 已等于 target(本次或上次 merge 已完成)则视为已完成继续下一件;否则**中止整个 merge**,返回 `{ ok:false, error:"VERSION_CONFLICT", message:"部分物品刚被修改,请重试", detail:{ conflicted:[{item_id, current_version}] } }`——**绝不无条件改写 version**,绝不覆盖并发修改。中止时已成功重挂的件**保持已挂 target**(语义无损,version 已正确 +1),source 未动,重试安全(重放识别靠派生标识的确定性:同 source/target/item 输入恒得同标识,与 §5.10 收敛语义一致)。
   2. **后置校验(收窄 linkItem(source) 并发窗口)**:物品阶段完成后、删除 source 之前,再查一次 source 的直接挂载物品;若并发冒出新挂物品,对其执行同款条件重挂(0 命中且非已挂 → 同样中止);确认为空才继续。
   3. **结构阶段**:source 的直接子节点 parent_id 改指 target(其自身及后代 path 重写)。source 后代节点 **id 不变**,因此挂在后代上的物品无需任何改动——这是「merge 级联不破坏版本链」的关键。
   4. **硬删除 source,随即补偿扫描**(§1.1 第②层):查 `location_node_id = source._id` 的未删物品(后置校验之后仍可能有并发 linkItem 落进极窄窗口),命中则逐件条件摘除(置 null、version+1),计入响应 `compensated`。补偿本身 0 命中(又被并发修改)则跳过该件并计入 `compensated_skipped`——读侧容忍(§5.1)兜底,重进向导可再挂。
@@ -225,7 +225,7 @@ cloudfunctions/locations/
   - 统计子树(自身+后代)挂载的未删物品数 `item_count`、后代节点数 `descendant_count`。
   - `force` 缺省/false:`item_count > 0 || descendant_count > 0` → `NODE_NOT_EMPTY`(响应附 `detail:{ item_count, descendant_count }`,客户端展示「这里还有 N 件物品、M 个子位置」)。
   - `force=true`(用户在 UI 二次确认后):若子树内**仍有任何未删物品** → 依旧 `NODE_NOT_EMPTY`(物品永远不能被结构操作丢弃,必须先移走);无物品但有空的后代分支 → 允许删除,整支空分支一并硬删除。
-  - **删除后补偿扫描**(§1.1 第②层):对被删节点 id 集合查 `location_node_id ∈ ids` 的未删物品(拦截「计数时为 0 → 并发 linkItem 写入 → 硬删」交错),命中则逐件**条件**摘除(置 null、version+1、updated_at、last_update_id="compensate:"+node_id+":"+item_id、fingerprint 同款),计入响应 `compensated`。补偿件是用户可见行为:UI 在结果里如实展示「N 件刚挂上来的物品已自动摘除,可重新挂载」。
+  - **删除后补偿扫描**(§1.1 第②层):对被删节点 id 集合查 `location_node_id ∈ ids` 的未删物品(拦截「计数时为 0 → 并发 linkItem 写入 → 硬删」交错),命中则逐件**条件**摘除(置 null、version+1、updated_at、last_update_id="compensate:"+digest(node_id+":"+item_id)(派生标识,规格见 §5.8)、fingerprint 同款),计入响应 `compensated`。补偿件是用户可见行为:UI 在结果里如实展示「N 件刚挂上来的物品已自动摘除,可重新挂载」;被摘除件回到 §5.1 统一定义的「未挂载」口径,下次进向导即可重挂。
 - **响应**:`{ ok:true, deleted_nodes: 3, compensated: 0 }`(deleted_nodes 含自身)。
 - **错误码**:INVALID_INPUT、NOT_FOUND、NODE_NOT_EMPTY。
 - 残余窗口(补偿扫描之后、响应返回之前的并发 linkItem)无法在无事务下封死,由读侧容忍兜底,见 §12.1——**本节不宣称绝对闭环**。
@@ -234,6 +234,7 @@ cloudfunctions/locations/
 
 核心决策:**不绕开、不另造** items 的版本不变量,也不让 itemsApi 感知树。两 action 对 items 文档执行的更新与 `itemsApi.update`(`handler.js:275-309`)完全同构——同一版本计数器、同一 last_update_id/last_update_fingerprint 回写、同一三重条件重放识别——实现为 locations/lib/handler.js 内的同语义代码(云函数间无法共享模块,副本纪律见 §4.2),fingerprint 用同款 changesFingerprint 算法(键排序 JSON,`handler.js:67-75`)、仅覆盖 `{ location_node_id }`。**单一版本链原则:一件物品一个 version,itemsApi 与 locations 的所有写入方(含 merge/applyScan)一律条件更新它,任何一方过期即 VERSION_CONFLICT,系统内不存在对 items 的无条件 version 改写。** 交叉完整性由离线测试在同一 memoryDb 上同时驱动两个 handler 验证(§9 TS-LK1/LK3)。
 
+- **内部派生标识规格(merge/compensate/applyScan 的服务端写入统一遵守)**:locations 内部批量写入(§5.6 merge 重挂载、§5.7 补偿摘除、§5.10 applyScan)不接收客户端 update_id,改用**确定性派生标识**写入 `last_update_id`:`"<op>:" + digest(拼接串)`,`op ∈ merge|compensate|scan`,`digest(s)` 为 sha256(s) 十六进制前 16 位(经 deps 注入,见 §4.3),拼接串分别为 `source_id+"→"+target_id+":"+item_id`、`node_id+":"+item_id`、`operation_id+":"+item_id`。派生标识**恒 ≤27 字符**,与客户端 update_id 的「非空 ≤64」同档,可直接复用同款 validUpdateId 形状校验,不存在压线或超限;重放识别只做**相等比较**(与 itemsApi `handler.js:302` 一致,长度仅是写入纪律),确定性哈希保证同输入恒得同标识——这是 §5.6/§5.10 收敛式重试的前提。派生标识不要求可逆解析出原文 id。
 - **`linkItem` 请求**:`{ action:"linkItem", item_id, node_id, expected_version, update_id }`;**`unlinkItem` 请求**:`{ action:"unlinkItem", item_id, expected_version, update_id }`。
   - `expected_version`:正整数;`update_id`:非空 ≤64(客户端每次逻辑操作生成 uuid,失败重试同内容复用——照抄 `pages/item/item.ts:36-44` 的 pendingRetry 语义)。
 - **校验**:node 存在、属本家庭、type≠home(NOT_FOUND/INVALID_INPUT);item 存在、属本家庭、deleted=false(否则 NOT_FOUND);item 当前 `location_node_id` 已等于 node_id 且版本匹配 → 视为内容变化仅版本元数据的正常更新(照常 +1;不做「无变化短路」,保持与 itemsApi.update 相同语义)。
@@ -244,9 +245,9 @@ cloudfunctions/locations/
 ### 5.9 `scanHousehold` —— Phase 1 整户增量扫描(纯草案,零写库)
 
 - **请求**:`{ action:"scanHousehold" }`。
-- **取数规则(显式增量池)**:拉取本家庭**未删除且未挂载**(location_node_id 缺失或 null)的物品,updated_at 降序,上限 **30** 件、且 location_text 非空。已挂载物品不进扫描池——向导因此天然增量:第一次扫完挂载后,重进向导扫到的就是「此后新录入的树外物品」,与 §7.1 常驻入口的 `unmounted_count` 闭环(录入链路持续产生树外物品 → 计数上升 → 入口可见 → 向导增量归位)。
+- **取数规则(显式增量池,与 §5.1 unmounted_count 同一口径)**:拉取本家庭未删除且**未挂载**的物品——「未挂载」= location_node_id 缺失、null,**或指向不存在的节点**(悬挂件回流池,自愈通道成立);updated_at 降序,上限 **30** 件。**不排除 location_text 为空的件**:空位置件同样进池并占用 30 的名额,但不送 LLM,直接归入 `skipped`(reason:"位置为空")——三处口径(unmounted_count、扫描池、skipped)因此完全对齐,常驻入口的「N 件未归位」里每一件都能在向导里看到归属(可挂载 / 空位置待补),计数不是假信号。已挂载物品不进池——向导天然增量:扫完挂载后重进向导,扫到的就是「此后新录入的树外物品」,与 §7.1 常驻入口闭环(录入链路持续产生树外物品 → 计数上升 → 入口可见 → 向导增量归位)。`scanned` = 本次进池的 30 件(= mounts + skipped 件数),`unmounted_total` = 池总数。
 - **LLM 编排(并行分块 + 归并后近义提示,预算见下)**:
-  - 30 件分 **3 块并行**(每块 10 件),每块独立 prompt(含【既有空间树】上下文,同 parseLocation);单块 LLM 超时 15s,坏 JSON 带错误重试一次(照抄 `extractDraft/lib/handler.js:103-116`)。
+  - 30 件分 **3 块并行**(每块 10 件,**仅含 location_text 非空的件**;空位置件不送 LLM,服务端直接归入 skipped),每块独立 prompt(含【既有空间树】上下文,同 parseLocation);单块 LLM 超时 15s,坏 JSON 带错误重试一次(照抄 `extractDraft/lib/handler.js:103-116`)。
   - 任一块最终失败 → 整体 `AI_UNAVAILABLE`(不部分成功——草案必须完整才好确认,响应无半成品)。
   - **归并后近义提示调用(第 4 次 LLM 调用,块间近义的兜底)**:并行块的每一块只看得到 DB 既有树,看不到其他块已抽出的分段(「主卧」与「主人房」分属两块时,块内无法互见)。因此服务端把全部块的分段归并成候选树后,再发起**一次**轻量近义比对调用:输入仅为候选树**各层的名字列表**(不含用户原文,token 极小),输出近义组;超时 10s、重试一次。该调用失败 → 整体 `AI_UNAVAILABLE`(近义提示是 issue 验收「同义位置能够合并或提示」的必要组成,不做无提示的半成品)。
   - **耗时预算(串行界定明确,杜绝超上限)**:并行 3 块,单块最坏 15s×2(重试)≈ 30s;近义调用最坏 10s×2 = 20s,**串行加在并行之后**:总最坏 ≈ 50s < 60s(函数 config.json 上限);常态(每块 3-8s + 近义 2s)≈ 10s。客户端超时 70s,**严格大于**服务端函数上限,保证服务端错误先于客户端到点返回(照抄 `utils/api.ts:30-31` 的放宽原则)。
@@ -263,7 +264,7 @@ cloudfunctions/locations/
   - candidate_tree 由服务端从全部 mounts 的 segments 归并生成(同层 name_norm 去重),**结构一致性由构造保证**,不依赖模型自洽。
   - `synonym_groups`:近义组(同层、跨块或块内),来自归并后近义比对调用;服务端对同层 name_norm 相等的组不需要 LLM(去重已消)。UI 呈现「“主人房”与“主卧”可能是同一个?〔合并〕〔分开〕」,用户裁决后合并进同一条 path。
   - mounts 带该物品**当前 version**,供 applyScan 作为 expected_version(提交时冲突 → 该件按 `conflict` 跳过并如实报告,绝不静默覆盖)。
-  - skipped:位置为空(certain=false 录入)或分段为空的物品。
+  - skipped:**位置为空**(location_text 为空,不送 LLM、服务端直接归类,UI 引导「去详情页补个位置」后再挂载)或 LLM 判定**分段为空**的物品。两类都在向导里可见、可点进详情页处理,绝不静默消失。
   - `truncated:true` 时向导明示「未归位共 47 件,本次扫描最近 30 件」,不做假完整;其余未扫件下次进向导自然扫到(增量池)。
   - 每层的 need_confirm 规则同 parseLocation(置信 <0.8 / 有序锚定未通过 / 无合并覆盖),由服务端在归并时计算。
   - merge_hints 内嵌在 candidate_tree 节点上:`{ existing_location_id, existing_name, reason }`(同层 name_norm 相等由服务端自动判定;与既有树的近义由模型标注、服务端校验存在性)。
@@ -280,11 +281,11 @@ cloudfunctions/locations/
   "branches":[ { "path":["书房","桌子"] }, { "path":["主卧"] } ],
   "mounts":[ { "item_id":"it_..", "expected_version":3, "path":["书房","桌子","右边第二个抽屉"] } ] }
 ```
-  `operation_id`:本次向导提交的幂等键(uuid),失败重试/恢复时**原样复用**;branches 是确认后的去重路径(1-30 条,每条 1-6 段);mounts 逐件(1-30 件),path 必须以某条 branch 为前缀(否则 INVALID_INPUT——挂载点必须是被确认过的支)。
+  `operation_id`:本次向导提交的幂等键(uuid),失败重试/恢复时**原样复用**。**branches 与 mounts 是两个独立的确认单元,无前缀约束**:branches 是「建结构、暂无物品挂载」的纯结构确认(0-30 条,可为空数组,每条 path 1-6 段);**mounts 逐件(1-30 件),mount.path 即该件的完整确认路径**——向导 UI 上逐件草案展示并勾选的就是完整路径(含容器末段,如上例 mount 深于 branch),末段节点由本 action 自己沿路径创建,不要求(也不依赖)任何 branch 先建到该层。
+- **参数校验(执行前,零写入)**:operation_id 非空 ≤64;branches/mounts 数量与各 path 结构(1-6 段、每段去空白 1-30 字)不合法 → `INVALID_INPUT`,此时**任何写入都不发生**。
 - **执行(串行,全部条件更新)**:
   1. 对每条 branch 执行 ensurePath 同款逻辑(created_from:"scan"),得到每条的节点 id 序列;
-  2. 对每件 mount:按 path 解析目标节点(最后一段的节点 id;解析失败 → 该件 `not_found`)→ 条件更新 `where({ _id, household_id, deleted:false, version:expected_version })` 置 `{ location_node_id, version:+1, updated_at, last_update_id: operation_id+":"+item_id(派生,≤64), last_update_fingerprint }`;0 命中 → 回查:三重条件成立(版本恰为 expected+1、last_update_id 等于派生 id、fingerprint 一致)→ `already`(上次已完成的重放);`location_node_id` 已等于目标 → `already`;否则 `conflict`(并发修改,跳过不覆盖);文档不存在/已删/跨家庭 → `not_found`。
-  3. 目标节点 type=home 或不存在(并发被删)→ 该件 `not_found`,绝不挂到错节点。
+  2. 对每件 mount:先对该件的**完整 path** 执行 ensurePath 同款逻辑(沿路径 find-or-create 到容器末段,created_from:"scan",幂等——重放时已建节点全部复用),取**末段节点 id** 为挂载目标;再条件更新 `where({ _id, household_id, deleted:false, version:expected_version })` 置 `{ location_node_id, version:+1, updated_at, last_update_id: 派生标识(见 §5.8「内部派生标识规格」:"scan:"+digest(operation_id+":"+item_id)), last_update_fingerprint }`;0 命中 → 回查:三重条件成立(版本恰为 expected+1、last_update_id 等于派生标识、fingerprint 一致)→ `already`(上次已完成的重放);`location_node_id` 已等于目标 → `already`;否则 `conflict`(并发修改,跳过不覆盖);物品文档不存在/已删/跨家庭 → `not_found`。挂载目标节点在 ensure 之后被并发删除的窗口,由 §5.8 已声明的残余窗口机制兜底(读侧容忍+向导重挂),不单列 status。
 - **响应(逐件状态,零静默)**:
 ```json
 { "ok": true, "result": {
@@ -292,9 +293,9 @@ cloudfunctions/locations/
   "mounts":[ { "item_id":"it_..", "status":"mounted", "version":4 }, { "item_id":"it_..", "status":"conflict", "current_version":7 }, { "item_id":"it_..", "status":"already" }, { "item_id":"it_..", "status":"not_found" } ] } }
 ```
   `status ∈ mounted | already | conflict | not_found`。conflict/not_found 件由 UI 引导去详情页手动处理(挂载操作照常可用),绝不静默丢弃。
-- **收敛式幂等(如实定义,非快照式)**:applyScan 不落库存储执行结果,幂等由「路径幂等(ensurePath)+ 派生 update_id 重放识别(linkItem 三重条件)」实现——同一 operation_id 同一请求体重放时,已完成件识别为 `already`、未完成件继续执行,**收敛到全部完成**。因此重放的响应可能不同于首次响应(例:首调 `conflict` 的件,用户随后改了物品,重放可能变成 `mounted`)——这是收敛语义而非快照回放,文档与 UI 文案均按「重试会继续完成剩余挂载」表述,不承诺返回首次结果。
+- **收敛式幂等(如实定义,非快照式)**:applyScan 不落库存储执行结果,幂等由「路径幂等(ensurePath,branch 与 mount 完整 path 皆然)+ 派生标识重放识别(§5.8 规格的 "scan:"+digest,三重条件同 linkItem)」实现——同一 operation_id 同一请求体重放时,已完成件识别为 `already`、未完成件继续执行,**收敛到全部完成**。因此重放的响应可能不同于首次响应(例:首调 `conflict` 的件,用户随后改了物品,重放可能变成 `mounted`)——这是收敛语义而非快照回放,文档与 UI 文案均按「重试会继续完成剩余挂载」表述,不承诺返回首次结果。
 - **耗时预算**:无 LLM;≤30 件 × (读+条件写) + ≤30 条 branch × ≤6 段 ensurePath ≈ 最坏 ~100 次 DB 往返,常态 <15s,60s 函数上限内;客户端超时 70s(同 §5.9 理由,服务端错误优先)。
-- **错误码**:INVALID_INPUT(参数/前缀校验失败,此时**零写入**);逐件失败不产生整体错误码,走 status。基础设施异常照 §3 上抛(部分完成状态可重放收敛,同 §5.6 语义)。
+- **错误码**:INVALID_INPUT(参数结构校验失败,此时**零写入**);逐件失败不产生整体错误码,走 status。基础设施异常照 §3 上抛(部分完成状态可重放收敛,同 §5.6 语义)。
 
 ---
 
@@ -343,7 +344,7 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 
 1. **扫描**:进入即调 `scanHousehold`(扫描池=未挂载物品,增量),loading 如实展示;AI_UNAVAILABLE → 错误态 + 重试按钮 + 「先手动建房间」引导(去 locations 页)。truncated 时顶部黄条明示「未归位共 47 件,本次扫描最近 30 件」。
 2. **候选树确认**:candidate_tree 分支渲染(可折叠);置信分支默认勾选、need_confirm 分支默认**不勾选**且标黄「AI 不太确定,请核对」(order_violation 件标「顺序可疑」);每个节点可改名(inline 输入,只影响本草案)。`synonym_groups` 呈现为「“主人房”与“主卧”可能是同一个?〔合并〕〔分开〕」,合并=统一段名。merge_hints 呈现为「与已有的“书房”是同一个?〔用已有〕〔保留新建〕」。
-3. **挂载草案**:逐件列出 品名 → 候选路径(need_confirm 件默认不勾,可改选其他已确认分支或跳过)。
+3. **挂载草案**:逐件列出 品名 → 候选路径(need_confirm 件默认不勾,可改选其他已确认分支或跳过)。**skipped 区单列**(不做假消失):空位置件显示「没记过位置——去详情页补一句,下次扫描就能归位」并给「去详情页」按钮;分段为空件显示「这次没解析出位置,可手动选择位置」给 locations 选择模式入口。
 4. **提交(单次服务端调用)**:点击「确认入库」→ 组装 branches(勾选后的去重路径)+ mounts(勾选件,expected_version 用 scan 时 version)→ **一次** `applyScan`(operation_id = uuid,本次提交全程复用);loading 明示「正在入库…」。网络失败/超时/进程被杀 → 同 operation_id 同参数重放(收敛式,§5.10)。
 5. **中断恢复**:确认清单(applyScan 完整请求参数 + operation_id)在提交前写入 `wx.setStorage`(键 `location_scan_pending`);onLoad 检测到未清除的记录 → 弹「上次有未完成的挂载,继续完成?」〔继续〕=重放 applyScan 并按响应渲染结果,〔放弃〕=清除记录(已完成的件保持,不做假回滚)。提交成功(拿到响应)后清除记录。
 6. **结果页**:逐件渲染 status——mounted(成功)、already(上次已完成)、conflict(内容已变化,引导「去详情页重新挂载」)、not_found(已删除,如实说明);失败重试 = 重放同 operation_id(只推进未完成件)。零静默:每个状态都可展开看清单。
@@ -376,18 +377,18 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 | TS-ISO | **跨家庭隔离** | 同一 memoryDb 两个 householdId:A 建树后 B 的 list 为空(children=[]);B 对 A 的节点 rename/move/merge/delete/linkItem/applyScan 一律 NOT_FOUND 且 A 数据原样(raw 直查断言);B 的 parseLocation prompt 里不含 A 的节点名 |
 | TS-EP | **ensurePath 幂等** | 同 path 调两次:第二次 nodes 同 id、created 全 false;部分存在的路径只补缺失段;并发 E11000(memoryDb 唯一索引模拟)→ 回查复用,不双建;跨家庭 ensurePath 同名互不影响 |
 | TS-NC1 | **need_confirm 阻止静默建节点** | mock 低置信输出 → parseLocation 返回 need_confirm=true **且** locations/items 两集合文档数与内容零变化;未锚定段(编造名)强制 need_confirm;**错序段**(「桌子,书房」:每段都是子串但顺序违规)→ order_violation=true 且 need_confirm=true;merge_suggestions 引用不存在节点 id 被丢弃 |
-| TS-NC2 | scanHousehold 零写库 | mock 3 块 + 近义响应 → scan 成功返回后两集合零变化;任一块失败或近义调用失败 → 整体 AI_UNAVAILABLE 且零写入;truncated/unmounted_total 计数正确;扫描池只含未挂载物品(已挂载件不进 mounts) |
+| TS-NC2 | scanHousehold 零写库 | mock 3 块 + 近义响应 → scan 成功返回后两集合零变化;任一块失败或近义调用失败 → 整体 AI_UNAVAILABLE 且零写入;truncated/unmounted_total 计数正确;扫描池=§5.1 统一「未挂载」口径(已挂载件不进 mounts;**悬挂挂载件回流池**——注入悬挂后重扫,该件出现在 mounts 草案中);**空位置件**(location_text 为空)进池、不送 LLM(callLLM mock 断言收到的件数不含它)、归入 skipped(reason="位置为空") |
 | TS-MG | **merge 级联** | 全部条件重挂载成功:path 级联重写;source 直接物品 location_node_id → target、version+1、location_text/name/note 不变;source 后代节点 id 不变、其上物品 version 不变;source 消失;**并发冲突中止**:memoryDb 预置一件在 merge 读版本后被改的物品(测试内先读后改再触发)→ VERSION_CONFLICT 中止、source 仍在、已重挂件保持、重试收敛到完成;同名子节点 → NODE_CONFLICT 且带 clashing_names、数据零变化;source=target、跨 type、target 为 source 后代 → 拒绝 |
 | TS-DL | **delete 保护** | 有物品 → NODE_NOT_EMPTY(带 item_count);force 且子树有物品 → 仍 NODE_NOT_EMPTY;空分支 force → 整支删除且 deleted_nodes 计数;删后重建同名节点可行(硬删除语义);home 根删除 → INVALID_INPUT;**补偿**:直接往 memoryDb 注入「location_node_id 指向待删节点的物品」模拟交错 → delete 后该件被条件摘除(version+1)、compensated 计数如实 |
 | TS-LK1 | **linkItem 不破坏版本链** | itemsApi.create 建 v1 → locations.linkItem(v1)→ v2;**再用 itemsApi.update(v2) 改 note → v3 且 location_node_id 保留**;反之 linkItem 后 itemsApi.update 用旧版本 → VERSION_CONFLICT;**merge/applyScan 的重挂载同样以 itemsApi.update 验证交叉**(任一写入方过期即冲突,version 永不被无条件回写) |
 | TS-LK2 | linkItem 重放识别 | 响应丢失重试(同 update_id 同内容,expected_version 仍为旧值)→ replayed:true;同 update_id 不同 node → VERSION_CONFLICT(不吞新意图) |
 | TS-LK3 | unlinkItem | linkItem→unlinkItem→null;对未挂载物品 unlink 照常版本 +1;越权/已删 → NOT_FOUND |
-| TS-AS | applyScan 收敛幂等 | 首调:branches 建树(created 标志正确)+ mounts 逐件 mounted;**同 operation_id 重放**:已完成件 already、冲突件不被覆盖(version 不回拨)、结果收敛;conflict 件(预置版本推进)→ status=conflict 且该件 location_node_id 不变;mounts.path 不以 branch 为前缀 → INVALID_INPUT 且零写入;跨家庭 → NOT_FOUND/逐件 not_found |
+| TS-AS | applyScan 收敛幂等 | 首调:branches 建树(created 标志正确)+ mounts 逐件 mounted;**mount 深于 branch 的正路径**(branch=["书房","桌子"],mount=["书房","桌子","右边第二个抽屉"])→ mount 完整 path 被建到末段、末段节点存在且该件 status=mounted(scan→向导→入库主路径);**同 operation_id 重放**:已完成件 already、冲突件不被覆盖(version 不回拨)、结果收敛;conflict 件(预置版本推进)→ status=conflict 且该件 location_node_id 不变;参数结构非法(path 7 段/空段名/超量)→ INVALID_INPUT 且零写入;派生标识(last_update_id)≤64 且重放相等;跨家庭 → NOT_FOUND/逐件 not_found |
 | TS-SCAN | 扫描编排 | 3 块并行 mock 各自返回不同件 → mounts 归并正确、candidate_tree 同层去重;块 1 抽「主卧」块 2 抽「主人房」+ 近义调用归组 → synonym_groups 含该组(**块间近义可见性**);近义调用返回非法组(名字不在输入列表)→ 丢弃;每块只看到既有树(prompt 断言不含其他块的物品原文) |
 | TS-RN | rename 级联 | 改中层名,自身与全部后代 path 更新、items 的 location_text 不动;同级重名 → NODE_CONFLICT;home 根 → INVALID_INPUT |
 | TS-MV | move 防环 | move 到自身后代 → NODE_CONFLICT;移动后子树深度 >6 → INVALID_INPUT;成功后 path 前缀整体替换 |
-| TS-LST | list | 根层惰性建 home 根且幂等;item_count 含后代;unmounted_count 只数未挂载未删物品;dangling_mounts 如实计数;跨家庭 parent → NOT_FOUND;children 排序稳定 |
-| TS-INV | 挂载不变量(单线程) | 全部操作序列后扫描 items:每个未删物品的 location_node_id 都指向存在节点;**读侧容忍**:手动注入悬挂挂载(直接改 memoryDb)→ list 把该件按未挂载计入 unmounted_count、dangling_mounts=1、不报错不丢件 |
+| TS-LST | list | 根层惰性建 home 根且幂等;item_count 含后代;unmounted_count 按 §5.1 统一定义计数(含悬挂挂载件与空位置件,与 dangling_mounts 并存:悬挂件同时计入两者);dangling_mounts 如实计数;跨家庭 parent → NOT_FOUND;children 排序稳定 |
+| TS-INV | 挂载不变量(单线程) | 全部操作序列后扫描 items:每个未删物品的 location_node_id 都指向存在节点;**读侧容忍与口径统一**:手动注入悬挂挂载(直接改 memoryDb)→ list 按统一定义把该件计入 unmounted_count、dangling_mounts=1、不报错不丢件,且 scanHousehold 把它带回 mounts 草案(自愈通道断言) |
 | TS-LOG | 日志脱敏 | 捕获 logger 注入的 entry:字段仅 action/error/ms/count(或 LLM 类的计量字段),断言不含任何节点名/物品名/原文子串 |
 | TS-SRC | 副本同源 | normalize.js 与 deepseek.js 副本和 itemsApi/extractDraft 原文件逐字节一致(fs 比对,防漂移);副本文件头含「同源/双向同步」注释(读文件断言) |
 
@@ -444,5 +445,6 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 
 ## 修订记录
 
+- **v3(二轮评审修订)**:① §5.10 消除自相矛盾:去掉「mount.path 须以 branch 为前缀」约束,branches(纯结构确认,可空)与 mounts(逐件完整确认路径)改为**独立确认单元**,执行步骤 2 对 mount **完整 path** 复用 ensurePath 建到容器末段(修复「mount 深于 branch 必然 not_found」但示例却是 mounted 的矛盾),TS-AS 补该正路径用例;② 「未挂载」定义全文统一为「location_node_id 缺失、null **或指向不存在的节点**」(§5.1/§5.9/TS-INV/TS-LST 同一口径),悬挂件回流扫描池,§12.1「向导重挂自愈」与 §5.6「重进向导可再挂」在公式上成立;③ scanHousehold 取数**不再排除空位置件**:空位置件进池、不送 LLM、归入 skipped(reason:"位置为空"),消除「skipped 示例有它但取数规则挡它」与「unmounted_count 含它但向导永远看不见它」两处口径冲突,§7.3 加 skipped 分流引导(去详情页补位置);④ §5.8 新增「内部派生标识规格」:`<op>:"+digest(拼接串)`(sha256 前 16 hex,恒 ≤27 字符,与外部 update_id ≤64 同档),替换 merge/compensate/applyScan 三处原文拼接式派生 id(原 89/66/恰 64 字符),deps 增 `digest(s)` 注入(§4.3)。
 - **v2(评审修订)**:① §5.6 merge 重挂载由「读版本后无条件 +1」改为逐件**条件更新 + 冲突中止 + 收敛重试**,与 §5.8 单一版本链一致(原两节矛盾);② §5.7/§5.8 删除与 linkItem 的并发竞态改为如实表述:删除保护 + 后置校验 + 补偿摘除 + 读侧容忍三层机制,残余窗口列入 §12.1,不再宣称「闭环」;③ §5.9 增加归并后**近义比对 LLM 调用**与 synonym_groups,修复并行分块下块间近义不可见(issue 验收「同义位置能够合并或提示」);④ §5.9 明确**并行分块**并给出耗时预算(最坏 ~50s < 函数 60s),客户端超时改为严格大于服务端的 70s;⑤ 新增 **applyScan** action(§5.10)承接向导提交:一次调用、逐件条件更新、收敛式幂等、storage 中断恢复,替代数十次客户端编排;⑥ 向导入口由「空态限定」改为 **locations 页常驻入口** + unmounted_count,扫描池显式定义为未挂载物品(增量);⑦ 锚定校验由「子串」升级为**有序不重叠锚定**,错序/错切强制 need_confirm + order_violation;⑧ §4 拆出 §4.1/§4.2/§4.3,修复「§4.2」失实自引用。
 - v1:初版设计合同(提交 7f49dda)。
