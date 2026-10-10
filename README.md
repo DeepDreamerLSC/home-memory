@@ -70,7 +70,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:84 项(itemsApi 26 + extractDraft 20 + locations 21 + voice 10 + transcribe 4 + 胶水层 3),全部通过
+npm test             # 离线全量测试:86 项(itemsApi 26 + extractDraft 20 + locations 21 + locations-api 2 + voice 10 + transcribe 4 + 胶水层 3),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
