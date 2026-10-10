@@ -1,4 +1,40 @@
 <view class="page">
+  <view wx:if="{{ conflicts.length > 0 }}" class="conflict-card">
+    <view class="conflict-title">这些字段与最新记录冲突</view>
+    <view class="conflict-desc">
+      保存时检测到其他设备也修改了这些字段。请逐项选择保留哪一版后再次保存;其余字段不受影响。
+    </view>
+    <view wx:for="{{ conflicts }}" wx:key="key" class="conflict-item">
+      <view class="conflict-item-title">{{ item.label }}</view>
+      <view class="conflict-row">
+        <view class="conflict-side">
+          <view class="conflict-side-label">你的修改</view>
+          <view class="conflict-value">{{ item.localValue || '(空)' }}</view>
+        </view>
+        <view class="conflict-side">
+          <view class="conflict-side-label">最新记录</view>
+          <view class="conflict-value">{{ item.remoteValue || '(空)' }}</view>
+        </view>
+      </view>
+      <view class="conflict-actions">
+        <button
+          class="btn conflict-btn {{ item.choice === 'local' ? 'primary' : '' }}"
+          bindtap="onChooseLocal"
+          data-key="{{ item.key }}"
+        >
+          保留我的修改
+        </button>
+        <button
+          class="btn conflict-btn {{ item.choice === 'remote' ? 'primary' : '' }}"
+          bindtap="onChooseRemote"
+          data-key="{{ item.key }}"
+        >
+          采用最新记录
+        </button>
+      </view>
+    </view>
+  </view>
+
   <view class="card">
     <view class="meta">当前版本 v{{ version }} · 更新于 {{ updatedAtText }}</view>
 
@@ -40,6 +76,7 @@
     <button
       class="btn primary block"
       loading="{{ saving }}"
+      disabled="{{ conflictPending }}"
       bindtap="onSaveTap"
     >
       保存修改

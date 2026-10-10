@@ -2,3 +2,91 @@
 .field:last-of-type {
   margin-bottom: 0;
 }
+
+/* 版本冲突卡片(issue #6):逐字段并排展示「你的修改」与「最新记录」,
+   黄色横幅面与 AI 草稿横幅同族,提醒用户显式选择;全部用主题变量,双主题通用 */
+.conflict-card {
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+  border-radius: 24rpx;
+  padding: 24rpx;
+  margin: 24rpx;
+}
+
+.conflict-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.conflict-desc {
+  font-size: 24rpx;
+  color: var(--text-2);
+  margin: 8rpx 0 20rpx;
+  line-height: 1.5;
+}
+
+.conflict-item {
+  background: var(--card);
+  border-radius: 16rpx;
+  padding: 20rpx;
+  margin-bottom: 16rpx;
+}
+
+.conflict-item:last-child {
+  margin-bottom: 0;
+}
+
+.conflict-item-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12rpx;
+}
+
+.conflict-row {
+  display: flex;
+}
+
+.conflict-side {
+  flex: 1;
+  min-width: 0;
+  background: var(--card-inset);
+  border-radius: 12rpx;
+  padding: 16rpx;
+}
+
+.conflict-side + .conflict-side {
+  margin-left: 16rpx;
+}
+
+.conflict-side-label {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-bottom: 4rpx;
+}
+
+.conflict-value {
+  font-size: 26rpx;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.conflict-actions {
+  display: flex;
+  margin-top: 16rpx;
+}
+
+/* 未选中的选择按钮:内嵌深槽样式;选中态复用全局 button.btn.primary(明黄强调面) */
+button.conflict-btn {
+  flex: 1;
+  background: var(--card-inset);
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 2.2;
+  margin: 0;
+}
+
+button.conflict-btn + button.conflict-btn {
+  margin-left: 16rpx;
+}

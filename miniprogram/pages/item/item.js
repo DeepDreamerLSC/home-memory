@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
+const conflict_1 = require("../../utils/conflict");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -20,6 +21,8 @@ Page({
         updatedAtText: "",
         saving: false,
         deleting: false,
+        conflicts: [],
+        conflictPending: false,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -64,15 +67,65 @@ Page({
         this.applySummary(summary);
     },
     onNameInput(e) {
-        this.setData({ name: e.detail && e.detail.value ? e.detail.value : "" });
+        const value = e.detail && e.detail.value ? e.detail.value : "";
+        this.setData({ name: value });
+        this.syncConflictFromInput("name", value);
     },
     onLocationInput(e) {
-        this.setData({
-            locationText: e.detail && e.detail.value ? e.detail.value : "",
-        });
+        const value = e.detail && e.detail.value ? e.detail.value : "";
+        this.setData({ locationText: value });
+        this.syncConflictFromInput("location", value);
     },
     onNoteInput(e) {
-        this.setData({ note: e.detail && e.detail.value ? e.detail.value : "" });
+        const value = e.detail && e.detail.value ? e.detail.value : "";
+        this.setData({ note: value });
+        this.syncConflictFromInput("note", value);
+    },
+    /**
+     * 冲突态下用户直接编辑了冲突字段:视为对「你的修改」的最新表达,
+     * 同步面板上的本地值并按「保留我的修改」计;程序 setData 不触发 input 事件,
+     * 不会干扰「采用最新记录」按钮写入的值。
+     */
+    syncConflictFromInput(key, value) {
+        const idx = this.data.conflicts.findIndex((c) => c.key === key);
+        if (idx < 0) {
+            return;
+        }
+        const entry = this.data.conflicts[idx];
+        const patch = {};
+        if (entry.localValue !== value.trim()) {
+            patch["conflicts[" + idx + "].localValue"] = value.trim();
+        }
+        if (entry.choice !== "local") {
+            patch["conflicts[" + idx + "].choice"] = "local";
+            patch.conflictPending = this.data.conflicts.some((c, i) => i !== idx && !c.choice);
+        }
+        if (Object.keys(patch).length > 0) {
+            this.setData(patch);
+        }
+    },
+    /** 冲突面板:显式选择「保留我的修改」或「采用最新记录」 */
+    applyConflictChoice(key, choice) {
+        const idx = this.data.conflicts.findIndex((c) => c.key === key);
+        if (idx < 0) {
+            return;
+        }
+        const entry = this.data.conflicts[idx];
+        this.setData({
+            // 选定值回填表单:选远端即与最新基准一致(保存时无变化、不自动再写);
+            // 选本地则保留用户值,下次保存以最新 expected_version 提交该字段。
+            [key === "location" ? "locationText" : key]: (0, conflict_1.chosenValue)(entry, choice),
+            ["conflicts[" + idx + "].choice"]: choice,
+            conflictPending: this.data.conflicts.some((c, i) => i !== idx && !c.choice),
+        });
+    },
+    onChooseLocal(e) {
+        const key = e.currentTarget.dataset.key;
+        this.applyConflictChoice(key, "local");
+    },
+    onChooseRemote(e) {
+        const key = e.currentTarget.dataset.key;
+        this.applyConflictChoice(key, "remote");
     },
     applySummary(s) {
         this.original = {
@@ -87,11 +140,18 @@ Page({
             note: s.note,
             version: s.version,
             updatedAtText: (0, api_1.formatDateTime)(s.updated_at),
+            conflicts: [],
+            conflictPending: false,
         });
     },
     /** 保存修改:itemsApi update,带 expected_version */
     async onSaveTap() {
         if (this.data.saving || this.data.deleting) {
+            return;
+        }
+        if (this.data.conflictPending) {
+            // 冲突字段必须显式选择保留哪一版后才能再次提交(issue #6)
+            wx.showToast({ title: "请先为冲突字段选择保留哪一版", icon: "none" });
             return;
         }
         const name = this.data.name.trim();
@@ -105,16 +165,11 @@ Page({
             wx.showToast({ title: "位置为必填项,请填写位置", icon: "none" });
             return;
         }
-        const changes = {};
-        if (name !== this.original.name) {
-            changes.name = name;
-        }
-        if (locationText !== this.original.location) {
-            changes.location_text = locationText;
-        }
-        if (note !== this.original.note) {
-            changes.note = note;
-        }
+        const changes = (0, conflict_1.buildUpdateChanges)(this.original, {
+            name,
+            location: locationText,
+            note,
+        });
         if (Object.keys(changes).length === 0) {
             wx.showToast({ title: "内容没有变化", icon: "none" });
             return;
@@ -152,12 +207,8 @@ Page({
             // 记录失败的更新供重试复用 update_id(仅同样内容的重试)
             this.pendingRetry = { updateId, changes };
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
-                // 提示后只对齐版本与元数据,保留用户未保存的编辑(绝不无提示覆盖)
-                wx.showToast({
-                    title: "内容已被修改,已更新版本号,请检查后重试",
-                    icon: "none",
-                    duration: 2500,
-                });
+                // 刷新后:无冲突字段则维持原提示(静默三方合并);有冲突字段则进入冲突态,
+                // 面板逐字段并排展示「你的修改」与「最新记录」,选择后才允许再次提交。
                 const result = await this.refreshLatest();
                 if (result === "notfound") {
                     wx.showModal({
@@ -167,6 +218,15 @@ Page({
                         success: () => {
                             this.goBack();
                         },
+                    });
+                }
+                else if (result === "refreshed") {
+                    wx.showToast({
+                        title: this.data.conflictPending
+                            ? "部分字段与最新记录冲突,请逐项选择保留哪一版"
+                            : "内容已被修改,已更新版本号,请检查后重试",
+                        icon: "none",
+                        duration: 2500,
                     });
                 }
             }
@@ -184,30 +244,35 @@ Page({
     },
     /**
      * 拉取最新内容(get 按 id 单查,不受 list 分页截断影响)。
-     * 只对齐版本号/更新时间/基准内容,不覆盖表单里用户未保存的编辑。
+     * 只对齐版本号/更新时间/基准内容,不覆盖表单里用户未保存的编辑:
+     * - 非冲突字段:三方合并(用户改过保留用户值,否则采纳服务端值),与既有语义一致;
+     * - 冲突字段(双方都改且互不相同):进入冲突态,由用户显式选择,不做静默合并。
      */
     async refreshLatest() {
         try {
             const res = await (0, api_1.callItemsApi)({ action: "get", item_id: this.data.itemId });
-            // 字段级三方合并:用户真正编辑过的字段(与刷新前基准不同)保留用户的未提交编辑;
-            // 未编辑的字段采纳服务端最新值(可能来自另一设备),避免下次保存把别处的新改动连带覆盖。
-            const prev = this.original;
-            const mergedName = this.data.name.trim() !== prev.name ? this.data.name : res.item.name;
-            const mergedLocation = this.data.locationText.trim() !== prev.location
-                ? this.data.locationText
-                : res.item.location_text;
-            const mergedNote = this.data.note.trim() !== prev.note ? this.data.note : res.item.note;
+            const outcome = (0, conflict_1.mergeLatest)(this.original, {
+                name: this.data.name.trim(),
+                location: this.data.locationText.trim(),
+                note: this.data.note.trim(),
+            }, {
+                name: res.item.name,
+                location: res.item.location_text,
+                note: res.item.note,
+            });
             this.original = {
                 name: res.item.name,
                 location: res.item.location_text,
                 note: res.item.note,
             };
             this.setData({
-                name: mergedName,
-                locationText: mergedLocation,
-                note: mergedNote,
+                name: outcome.merged.name,
+                locationText: outcome.merged.location,
+                note: outcome.merged.note,
                 version: res.item.version,
                 updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+                conflicts: outcome.conflicts.map((c) => ({ ...c, choice: null })),
+                conflictPending: outcome.conflicts.length > 0,
             });
             return "refreshed";
         }
