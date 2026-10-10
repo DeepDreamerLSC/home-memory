@@ -261,7 +261,9 @@ export async function callExtractDraft(
           typeof d.location_text === "string" &&
           typeof d.certain === "boolean" &&
           Array.isArray(d.qualifiers) &&
-          typeof (d as { source_quote?: unknown }).source_quote === "string",
+          typeof (d as { source_quote?: unknown }).source_quote === "string" &&
+          (typeof (d as { anchor_shared?: unknown }).anchor_shared === "boolean" ||
+            typeof (d as { anchor_shared?: unknown }).anchor_shared === "undefined"),
       )
     ) {
       throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
@@ -276,6 +278,7 @@ export async function callExtractDraft(
           (q): q is string => typeof q === "string",
         ),
         source_quote: (d as { source_quote: string }).source_quote,
+        anchor_shared: (d as { anchor_shared?: boolean }).anchor_shared === true,
       })),
       original_text: result.original_text,
       truncated: result.truncated === true,

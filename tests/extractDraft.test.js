@@ -739,3 +739,30 @@ test("v2 漏报反例:模型只回 5 件且 has_more=false 时校验器无法判
   assert.equal(result.truncated, false, "漏报时校验器确实无法察觉");
   // 因此确认页对 rows.length>=5 一律显示核对提示(不依赖 has_more),见 confirm.wxml
 });
+
+// ---------- anchor_shared(三轮:整句证据含多件名 → 待人工核对) ----------
+
+test("v2 锚定共享:quote 是含两件名称的整句 → anchor_shared=true(不默认确认)", function () {
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙放在玄关抽屉,充电宝放在客厅电视柜" },
+      { name: "充电宝", location_text: "客厅电视柜", certain: true, qualifiers: [], source_quote: "钥匙放在玄关抽屉,充电宝放在客厅电视柜" },
+    ]),
+    "钥匙放在玄关抽屉,充电宝放在客厅电视柜",
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].anchor_shared, true, "整句含他件名称 → 归属无法确定性排除,须人工核对");
+  assert.equal(result.drafts[1].anchor_shared, true);
+});
+
+test("v2 锚定共享:专属片段(只含本件名)→ anchor_shared=false,可默认勾选", function () {
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙放在玄关抽屉" },
+      { name: "充电宝", location_text: "客厅电视柜", certain: true, qualifiers: [], source_quote: "充电宝放在客厅电视柜" },
+    ]),
+    "钥匙放在玄关抽屉,充电宝放在客厅电视柜",
+  );
+  assert.equal(result.drafts[0].anchor_shared, false);
+  assert.equal(result.drafts[1].anchor_shared, false);
+});

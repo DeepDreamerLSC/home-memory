@@ -63,6 +63,11 @@ export function batchSummary(rows: BatchRow[]): {
   return { total: rows.length, checked, saved, failed };
 }
 
+/** 默认勾选决策(下沉以便测试):有专属原话证据且锚定不共享才默认勾选,其余一律人工核对后手动勾 */
+export function shouldDefaultChecked(sourceQuote: string, anchorShared: boolean): boolean {
+  return sourceQuote !== "" && !anchorShared;
+}
+
 /** 单行写入(注入真实 create 或测试替身) */
 export type CreateFn<T extends BatchRow> = (row: T) => Promise<void>;
 

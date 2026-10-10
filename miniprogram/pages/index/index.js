@@ -23,6 +23,8 @@ Page({
         recentLoading: false,
         recentError: "",
         inputMode: "voice",
+        /** 未完成草稿会话恢复入口(非空时显示横幅) */
+        resumeSession: null,
         voiceState: "idle",
         transcribing: false,
         recordSeconds: 0,
@@ -40,6 +42,13 @@ Page({
     },
     onShow() {
         this.loadRecent();
+        // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
+        const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
+        this.setData({
+            resumeSession: unfinished === null
+                ? null
+                : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+        });
     },
     onHide() {
         this.clearRecordTimer();
@@ -323,6 +332,14 @@ Page({
         if (item) {
             this.openItem(item);
         }
+    },
+    onResumeTap() {
+        const resume = this.data.resumeSession;
+        if (resume === null) {
+            return;
+        }
+        this.setData({ resumeSession: null });
+        this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
     },
     onRecentTap(e) {
         const index = Number(e.currentTarget.dataset.index);

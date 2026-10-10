@@ -10,6 +10,7 @@ exports.rowsToSave = rowsToSave;
 exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
 exports.batchSummary = batchSummary;
+exports.shouldDefaultChecked = shouldDefaultChecked;
 exports.runBatchSave = runBatchSave;
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
 function rowsToSave(rows) {
@@ -48,6 +49,10 @@ function batchSummary(rows) {
             failed += 1;
     }
     return { total: rows.length, checked, saved, failed };
+}
+/** 默认勾选决策(下沉以便测试):有专属原话证据且锚定不共享才默认勾选,其余一律人工核对后手动勾 */
+function shouldDefaultChecked(sourceQuote, anchorShared) {
+    return sourceQuote !== "" && !anchorShared;
 }
 /**
  * 逐行保存编排(在传入快照的拷贝上推进,绝不引用调用方可变状态):

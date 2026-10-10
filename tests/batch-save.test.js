@@ -140,3 +140,9 @@ test("runBatchSave:onRowUpdate 携带行状态与原始错误(调用方分类 OP
   assert.equal(events[1].status, "failed");
   assert.strictEqual(events[1].error, fakeConflict, "原始错误透传给调用方分类");
 });
+
+test("shouldDefaultChecked:有专属证据且锚定不共享才默认勾选", function () {
+  assert.equal(bs.shouldDefaultChecked("钥匙放在玄关抽屉", false), true, "专属证据默认勾");
+  assert.equal(bs.shouldDefaultChecked("钥匙和充电宝都在玄关抽屉", true), false, "共享锚定不默认勾");
+  assert.equal(bs.shouldDefaultChecked("", false), false, "无证据不默认勾");
+});

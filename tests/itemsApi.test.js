@@ -717,3 +717,29 @@ test("重放内容校验:同 update_id 但内容不同,一律 VERSION_CONFLICT �
   assert.equal(replay.ok, true);
   assert.equal(replay.replayed, true);
 });
+
+// ---------- PR #17 三轮:真实响应丢失下的幂等恢复 ----------
+
+test("响应丢失恢复:服务端已写入但客户端收到超时 → 原键原内容重试只产生一条记录", async function () {
+  var t = fresh();
+  // 第一次写入成功,但客户端没收到响应(超时)——服务端事实:已有一条
+  var lost = await handler(createEvent("op-lost", "护照", "书房保险盒"), t.deps);
+  assert.equal(lost.ok, true);
+  // 客户端不知情,以原键原内容重试(批量保存失败行重试的真实形态)
+  var retry = await handler(createEvent("op-lost", "护照", "书房保险盒"), t.deps);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.duplicated, true, "原键原内容重试必须幂等返回 duplicated");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1, "响应丢失 + 原键重试不得重复建档");
+});
+
+test("响应丢失恢复:重试时内容已改(同键异内容)→ OPERATION_CONFLICT 附已有记录,绝不静默建第二件", async function () {
+  var t = fresh();
+  await handler(createEvent("op-lost2", "护照", "书房保险盒"), t.deps);
+  var res = await handler(createEvent("op-lost2", "护照", "玄关抽屉"), t.deps);
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "OPERATION_CONFLICT");
+  assert.ok(res.existing && res.existing.item_id, "冲突必须附已有记录供引导");
+  var raw = await rawItems(t.db);
+  assert.equal(raw.data.length, 1);
+});

@@ -42,6 +42,8 @@ export interface Draft {
 /** 协议 v2 草稿:附带原话证据片段(非子串时服务端置空,确认页标「来源不充分」) */
 export interface DraftWithQuote extends Draft {
   source_quote: string;
+  /** 证据片段同时含其他物品名称(如整句原话):归属无法确定性排除交叉配对,须人工核对(默认不勾选) */
+  anchor_shared?: boolean;
 }
 
 /** query 的匹配层级 */

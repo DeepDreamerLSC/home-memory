@@ -101,6 +101,7 @@
         </view>
 
         <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>
+        <view wx:if="{{ item.anchorShared }}" class="row-meta warn">这段原话里有两件东西,位置请核对后再勾选</view>
         <view wx:if="{{ item.sourceQuote }}" class="row-meta quote">原话:{{ item.sourceQuote }}</view>
         <view wx:elif="{{ item.status !== 'saved' }}" class="row-meta warn">AI 没给出这段的原话依据,请自行核对</view>
 
@@ -116,7 +117,7 @@
         disabled="{{ checkedCount === 0 }}"
         bindtap="onSaveBatchTap"
       >
-        记住了,保存勾选的({{ checkedCount }})
+        确认保存 {{ checkedCount }} 件
       </button>
     </view>
   </block>

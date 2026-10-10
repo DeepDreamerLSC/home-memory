@@ -43,15 +43,31 @@ Page({
             key: "row-" + i,
             name: d.name,
             locationText: d.location_text,
-            // 无原话证据的候选默认不勾选:先经用户核对,再勾上保存
-            checked: d.source_quote !== "",
+            // 默认勾选决策下沉 utils:有专属证据且锚定不共享才默认勾,其余(无证据/整句共享)人工核对后手动勾
+            checked: (0, batch_save_1.shouldDefaultChecked)(d.source_quote, d.anchor_shared === true),
             status: "pending",
             failMsg: "",
             operationId: (0, api_1.uuid)(),
             certain: d.certain,
             qualifiersText: d.qualifiers.join("、"),
             sourceQuote: d.source_quote,
+            anchorShared: d.anchor_shared === true,
         }));
+        // 恢复上次未完成的行状态:沿用原 operation_id(幂等恢复,不重复建档),
+        // 已保存行保持 saved 不再提交
+        if (payload.rows && payload.rows.length === rows.length) {
+            payload.rows.forEach((saved, i) => {
+                rows[i] = {
+                    ...rows[i],
+                    name: saved.name,
+                    locationText: saved.locationText,
+                    checked: saved.checked,
+                    status: saved.status,
+                    failMsg: saved.failMsg,
+                    operationId: saved.operationId,
+                };
+            });
+        }
         this.setData({
             isManual: false,
             originalText: payload.originalText,
@@ -60,8 +76,30 @@ Page({
             checkedCount: (0, batch_save_1.batchSummary)(rows).checked,
         });
     },
+    /** 行状态序列化回写会话(供进程回收后恢复原幂等键与已保存状态) */
+    persistRows() {
+        if (this.sid === "") {
+            return;
+        }
+        const rows = this.data.rows.map((r) => ({
+            key: r.key,
+            name: r.name,
+            locationText: r.locationText,
+            checked: r.checked,
+            status: r.status,
+            failMsg: r.failMsg,
+            operationId: r.operationId,
+        }));
+        (0, draft_session_1.updateDraftSessionRows)(this.sid, rows);
+    },
     onUnload() {
-        if (this.sid !== "") {
+        if (this.sid === "") {
+            return;
+        }
+        // 中途退出且仍有结果未知的勾选行:保留会话供首页「继续核对」恢复(原键原状态,
+        // 已保存行不再提交);全部完成或已无勾选 = 干净离场,即清。
+        const summary = (0, batch_save_1.batchSummary)(this.data.rows);
+        if (summary.checked === summary.saved) {
             (0, draft_session_1.clearDraftSession)(this.sid);
         }
     },
@@ -232,6 +270,7 @@ Page({
                 patch["rows[" + index + "].itemId"] = error.existing.item_id;
             }
             this.setData(patch);
+            this.persistRows();
         });
         this.setData({ batchSaving: false });
         const summary = (0, batch_save_1.batchSummary)(finalRows);

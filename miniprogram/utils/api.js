@@ -168,7 +168,9 @@ async function callExtractDraft(text, opts) {
                 typeof d.location_text === "string" &&
                 typeof d.certain === "boolean" &&
                 Array.isArray(d.qualifiers) &&
-                typeof d.source_quote === "string")) {
+                typeof d.source_quote === "string" &&
+                (typeof d.anchor_shared === "boolean" ||
+                    typeof d.anchor_shared === "undefined"))) {
             throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
         }
         return {
@@ -179,6 +181,7 @@ async function callExtractDraft(text, opts) {
                 certain: d.certain,
                 qualifiers: d.qualifiers.filter((q) => typeof q === "string"),
                 source_quote: d.source_quote,
+                anchor_shared: d.anchor_shared === true,
             })),
             original_text: result.original_text,
             truncated: result.truncated === true,

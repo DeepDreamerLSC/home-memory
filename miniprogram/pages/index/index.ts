@@ -18,7 +18,7 @@ import {
   type VoiceController,
 } from "../../utils/voice";
 import type { ItemSummary } from "../../types";
-import { createDraftSession } from "../../utils/draft-session";
+import { createDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
@@ -53,6 +53,8 @@ Page<
     recordSeconds: number;
     /** 录音中/识别中的提示文本 */
     partialText: string;
+    /** 未完成草稿会话恢复入口(非空时显示横幅) */
+    resumeSession: { sid: string; count: number } | null;
   },
   {
     onMemoInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
@@ -78,6 +80,7 @@ Page<
     onQueryTap(): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     onRecentTap(e: WechatMiniprogram.CustomEvent): void;
+    onResumeTap(): void;
     loadRecent(): Promise<void>;
     openItem(item: DisplayItem): void;
     goToConfirm(url: string): void;
@@ -101,6 +104,8 @@ Page<
     recentLoading: false,
     recentError: "",
     inputMode: "voice",
+    /** 未完成草稿会话恢复入口(非空时显示横幅) */
+    resumeSession: null as { sid: string; count: number } | null,
     voiceState: "idle",
     transcribing: false,
     recordSeconds: 0,
@@ -121,6 +126,14 @@ Page<
 
   onShow() {
     this.loadRecent();
+    // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
+    const unfinished = getUnfinishedDraftSession();
+    this.setData({
+      resumeSession:
+        unfinished === null
+          ? null
+          : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+    });
   },
 
   onHide() {
@@ -417,6 +430,15 @@ Page<
     if (item) {
       this.openItem(item);
     }
+  },
+
+  onResumeTap() {
+    const resume = this.data.resumeSession;
+    if (resume === null) {
+      return;
+    }
+    this.setData({ resumeSession: null });
+    this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
   },
 
   onRecentTap(e) {

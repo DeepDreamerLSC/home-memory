@@ -195,6 +195,21 @@ function validateDrafts(rawText, originalText) {
     }
     drafts.push(Object.assign({}, draft, { source_quote: sourceQuote }));
   }
+  // 锚定共享标记:证据片段同时含其他物品的名称(典型:模型把整句原话当 quote,
+  // 多件多位置都在其中,交叉配对无法排除)——这类候选必须人工核对,
+  // 前端默认不勾选。专属片段(只含本件名称)锚定可信,可默认勾选。
+  for (const d of drafts) {
+    const normalizedQuote = stripWhitespace(d.source_quote);
+    d.anchor_shared =
+      normalizedQuote !== "" &&
+      drafts.some(
+        (other) =>
+          other !== d &&
+          other.name !== d.name &&
+          other.name.length >= 2 &&
+          normalizedQuote.indexOf(other.name) !== -1,
+      );
+  }
   return { ok: true, drafts, truncated: hasMore };
 }
 

@@ -5,6 +5,11 @@
     <view class="brand-sub">东西放哪儿了?我记得。</view>
   </view>
 
+  <!-- 未完成草稿恢复(中途退出/进程回收;原幂等键续存) -->
+  <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">
+    上次有 {{ resumeSession.count }} 件没记完,继续核对 ›
+  </view>
+
   <!-- 找东西:紧跟品牌,打开就能找 -->
   <view class="search-wrap">
     <view class="section-title">找东西</view>
