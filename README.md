@@ -128,11 +128,11 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft` 与 `cloudfunctions/locations` →「**上传并部署:云端安装依赖**」。三个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations --project <项目根> -r`。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
 ### 7. 小程序里验证
 
-编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。空间树:首页「我的家」→ 进入生成向导把已录入物品的位置整理成「房间 → 家具 → 抽屉」的树,确认入库后即可在「我的家」里逐层浏览物品。
+编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。空间树:首页「我的家」→ 进入生成向导把已录入物品的位置整理成「房间 → 家具 → 抽屉」的树,确认入库后即可在「我的家」里逐层浏览物品。自动化端到端:`node tests/e2e/smoke.js`、`node tests/e2e/full-loop.js`、`node tests/e2e/locations.js`(需先开自动化端口,见各文件头注释);其中 locations.js 覆盖「录入 → 生成向导 → 确认入库 → 逐层下钻到物品」的完整闭环——未配置 DEEPSEEK_API_KEY 或超时仍为默认 3 秒时,向导扫描会如实报「AI 暂时不可用」,两项控制台配置(上文步骤 5、6)完成后重跑 `node tests/e2e/locations.js` 即可补全向导全流程验证。
 
 ### 8. 语音录入(可选,需腾讯云语音识别)
 
