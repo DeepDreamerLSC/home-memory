@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,仅一个 `items` 集合。
+- **数据库**:CloudBase 文档数据库,`items` 与 `locations` 两个集合(issue #18 起位置沉淀为可浏览的空间树)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -23,9 +23,12 @@ miniprogram/             小程序端(TypeScript,strict)
   config.ts              云环境 ID 配置(cloudEnv,占位 YOUR_ENV_ID)
   types.ts               与契约一致的领域类型
   utils/api.ts           云函数调用封装、超时与错误映射、operation_id 的 uuid
-  pages/index            首页:记一件(AI 提取)/ 找东西(查询)/ 最近记录
+  utils/locations-api.ts locations 云函数调用封装(issue #18 空间树)
+  pages/index            首页:记一件(AI 提取)/ 找东西(查询)/ 最近记录 / 我的家入口
   pages/confirm          确认页:AI 草稿确认与手动录入
-  pages/item             详情页:查看 / 修改 / 删除
+  pages/item             详情页:查看 / 修改 / 删除 / 挂到空间
+  pages/locations        我的家:空间树逐层浏览 + 节点管理 + 位置选择模式
+  pages/locationScan     生成空间树向导:候选树确认 → 一次 applyScan 入库
 cloudfunctions/
   itemsApi/              items 集合的 create/update/delete/query/list
     index.js             薄适配层(wx-server-sdk 胶水,OPENID 派生 household_id)
@@ -36,14 +39,28 @@ cloudfunctions/
     lib/handler.js       纯函数:prompt 构造、坏 JSON 重试一次、结果分流
     lib/deepseek.js      DeepSeek HTTP 客户端(Node 内置 https,20 秒超时)
     lib/validate.js      服务端草稿校验(幻觉防护、needs_split、长度规则)
+  locations/             空间树(issue #18):浏览/建节点/编辑/挂载/整户扫描
+    index.js             胶水层(OPENID 派生 household_id 与 itemsApi 同款;LLM action 检查 DEEPSEEK_API_KEY)
+    config.json          超时 60 秒(整户扫描最坏 ~50 秒)
+    lib/handler.js       db 类 action:list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan
+    lib/parse.js         LLM 类 action:parseLocation/scanHousehold(并行分块 + 近义比对)
+    lib/validate.js      LLM 输出校验 + 有序不重叠锚定(防编造、防错序)
+    lib/tree.js          纯函数:子树收集 / path 级联重写 / 深度计算
+    lib/normalize.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
+    lib/deepseek.js      与 extractDraft 逐字节同源的副本(测试强制不漂移)
 tests/                   离线测试(node:test + node:assert,零外部依赖)
-  helpers/memoryDb.js    内存版 CloudBase 语义(含云函数端 get() 单次 100 条上限)
-  itemsApi.test.js       itemsApi 契约测试(18 项)
-  extractDraft.test.js   extractDraft 契约测试(20 项)
+  helpers/memoryDb.js    内存版 CloudBase 语义(含云函数端 get() 单次 100 条上限、唯一索引 E11000 模拟)
+  itemsApi.test.js       itemsApi 契约测试
+  extractDraft.test.js   extractDraft 契约测试
+  locations.test.js      locations 契约测试(隔离/幂等/版本链交叉/扫描编排等 18 项)
+  transcribe.test.js     语音识别云函数契约测试
+  glue.test.js           云函数入口胶水层测试(stub wx-server-sdk 真实加载)
+  voice.test.js          语音控制器与会话守卫测试
   samples-live.js        真实调用 DeepSeek 的样例集验证脚本
   fixtures/samples/      16 条中文样例(s01–s16,覆盖八类情形)
 docs/
   API_CONTRACT.md        接口契约(唯一事实源)
+  design/location-tree.md issue #18 Location Tree 设计合同
   PR1.md                 PR1 交付说明
 ```
 
@@ -53,7 +70,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:61 项(itemsApi 26 + extractDraft 20 + 胶水层 3 + voice 7 + transcribe 5),全部通过
+npm test             # 离线全量测试:81 项(itemsApi 26 + extractDraft 20 + locations 18 + voice 10 + transcribe 4 + 胶水层 3),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
@@ -77,39 +94,45 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 把 `miniprogram/config.ts` 里的 `cloudEnv = "YOUR_ENV_ID"` 替换为你的环境 ID。未替换时小程序启动会弹窗如实提示(见 `miniprogram/app.ts`),云函数调用无法成功。
 
-### 4. 创建 items 集合、唯一索引与权限(必做,缺一不可)
+### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 创建集合 `items`。随后完成两项配置:
+云开发控制台 → 数据库 → 分别创建集合 `items` 与 `locations`(后者为 issue #18 空间树)。随后完成配置:
 
-**① 组合唯一索引**:
+**① items 组合唯一索引**:
 
 > items 集合 → 索引管理 → 添加索引:字段一 `household_id`(升序)+ 字段二 `operation_id`(升序),勾选「**唯一**」。
 
 **为什么必须建**:`create` 的幂等在代码层是「先查后插 + 同键同内容比对」(`cloudfunctions/itemsApi/lib/handler.js` 的 `createItem`),对先后到达的重放有效;但对**并发**重放(两笔同 `operation_id` 的请求几乎同时到达)不是原子的。唯一索引在数据库层兜底:第二笔插入被数据库拒绝后,服务端捕获该错误回查并返回稳定结果(同内容 `duplicated: true`;异内容或命中已删文档 `OPERATION_CONFLICT`),绝不静默双写。
 
-**② 权限设置(安全必做)**:
+**② locations 组合唯一索引**:
 
-> items 集合 → 权限设置 → 选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
+> locations 集合 → 索引管理 → 添加索引:字段一 `household_id`(升序)+ 字段二 `parent_id`(升序)+ 字段三 `name_norm`(升序),勾选「**唯一**」。
+
+作用:同一层下并发创建同名位置(如两次同时从扫描向导确认「书房」)时,数据库拒绝第二笔插入,服务端捕获后回查复用已有节点,绝不双建;home 根节点的每家庭唯一性也由该索引自然覆盖。
+
+**③ 权限设置(安全必做,items 与 locations 都要)**:
+
+> 两个集合 → 权限设置 → 均选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
 
 **为什么必须改**:所有业务访问都经云函数(管理端身份,不受权限规则约束),客户端不需要任何直连权限。默认权限曾实测允许任意客户端直读全集合(见 `docs/security-evidence.md` 证据 1)——不改等于向所有用户开放全部家庭数据。
 
-### 5. 为 extractDraft 配置 DEEPSEEK_API_KEY
+### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
-云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。
+云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
 
-- Key **只**从这个环境变量读取(`cloudfunctions/extractDraft/index.js`),绝不出现在代码、小程序端或日志中。
-- 未配置时 extractDraft 一律返回 `AI_UNAVAILABLE` 并提示「可手动录入」,小程序会弹窗引导进入手动录入模式——这是设计内行为,不是故障。
+- Key **只**从云函数环境变量读取(`cloudfunctions/extractDraft/index.js` 与 `cloudfunctions/locations/index.js`),绝不出现在代码、小程序端或日志中。
+- 未配置时 extractDraft 一律返回 `AI_UNAVAILABLE` 并提示「可手动录入」,locations 的解析/整户扫描同样返回 `AI_UNAVAILABLE` 并提示「可手动选择位置」——这是设计内行为,不是故障。
 - itemsApi 不需要任何环境变量。
 
-### 6. 部署两个云函数
+### 6. 部署三个云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi` 与 `cloudfunctions/extractDraft` →「**上传并部署:云端安装依赖**」。两个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft` 与 `cloudfunctions/locations` →「**上传并部署:云端安装依赖**」。三个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft --project <项目根> -r`。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations --project <项目根> -r`。
 
 ### 7. 小程序里验证
 
-编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。
+编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。空间树:首页「我的家」→ 进入生成向导把已录入物品的位置整理成「房间 → 家具 → 抽屉」的树,确认入库后即可在「我的家」里逐层浏览物品。
 
 ### 8. 语音录入(可选,需腾讯云语音识别)
 
