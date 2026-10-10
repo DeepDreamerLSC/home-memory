@@ -1,0 +1,13 @@
+{
+  "id": "s08",
+  "category": "口语化模糊位置",
+  "text": "那卷宽胶带估计被我塞到不知道哪里去了",
+  "expect": {
+    "draft": {
+      "name": "宽胶带",
+      "location_text": "",
+      "certain": false,
+      "qualifiers": []
+    }
+  }
+}

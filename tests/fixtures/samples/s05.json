@@ -1,0 +1,8 @@
+{
+  "id": "s05",
+  "category": "多件需拆分",
+  "text": "钥匙放在玄关的碗里,充电线在客厅沙发扶手上",
+  "expect": {
+    "needs_split": true
+  }
+}

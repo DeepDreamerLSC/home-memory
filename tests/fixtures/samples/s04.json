@@ -1,0 +1,16 @@
+{
+  "id": "s04",
+  "category": "带限定语",
+  "text": "指甲刀在玄关柜第二个抽屉右边",
+  "expect": {
+    "draft": {
+      "name": "指甲刀",
+      "location_text": "玄关柜第二个抽屉右边",
+      "certain": true,
+      "qualifiers": [
+        "第二个",
+        "右边"
+      ]
+    }
+  }
+}

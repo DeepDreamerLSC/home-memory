@@ -1,0 +1,9 @@
+{
+  "name": "extractDraft",
+  "version": "1.0.0",
+  "description": "家庭物品记忆助手 PR1:一句话提取物品位置草稿",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

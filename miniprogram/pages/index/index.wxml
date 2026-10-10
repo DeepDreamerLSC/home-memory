@@ -1,0 +1,87 @@
+<view class="page">
+  <!-- 记一件 -->
+  <view class="card">
+    <view class="card-title">记一件</view>
+    <view class="hint">用一句话说出物品和位置,AI 帮你整理成草稿</view>
+    <textarea
+      class="memo-input"
+      placeholder="例如:降压药放在厨房第二个抽屉"
+      placeholder-class="placeholder"
+      value="{{ memoText }}"
+      maxlength="500"
+      auto-height
+      bindinput="onMemoInput"
+    />
+    <view class="char-count">{{ memoText.length }}/500</view>
+    <button
+      class="btn primary block"
+      loading="{{ extracting }}"
+      bindtap="onExtractTap"
+    >
+      提取并确认
+    </button>
+  </view>
+
+  <!-- 找东西 -->
+  <view class="card">
+    <view class="card-title">找东西</view>
+    <view class="search-row">
+      <input
+        class="search-input"
+        placeholder="输入物品名称"
+        placeholder-class="placeholder"
+        value="{{ queryText }}"
+        confirm-type="search"
+        bindinput="onQueryInput"
+        bindconfirm="onQueryTap"
+      />
+      <button
+        class="btn primary search-btn"
+        loading="{{ querying }}"
+        bindtap="onQueryTap"
+      >
+        查一下
+      </button>
+    </view>
+
+    <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
+
+    <block wx:if="{{ queried && !queryError }}">
+      <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
+        没有找到「{{ queryKeyword }}」相关的记录
+      </view>
+      <view
+        wx:for="{{ queryResults }}"
+        wx:key="item_id"
+        class="item-row"
+        data-index="{{ index }}"
+        bindtap="onResultTap"
+      >
+        <view class="item-name">{{ item.name }}</view>
+        <view class="item-location">{{ item.location_text }}</view>
+        <view class="item-time">更新于 {{ item.updated_at_text }}</view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 最近记录 -->
+  <view class="card">
+    <view class="card-title">最近记录</view>
+    <view wx:if="{{ recentError }}" class="error-text">{{ recentError }}</view>
+    <view wx:elif="{{ recentLoading }}" class="empty-text">加载中…</view>
+    <view wx:elif="{{ recentItems.length === 0 }}" class="empty-text">
+      还没有记录,先记一件吧
+    </view>
+    <view
+      wx:for="{{ recentItems }}"
+      wx:key="item_id"
+      class="item-row"
+      data-index="{{ index }}"
+      bindtap="onRecentTap"
+    >
+      <view class="item-name">{{ item.name }}</view>
+      <view class="item-location">{{ item.location_text }}</view>
+      <view class="item-time">更新于 {{ item.updated_at_text }}</view>
+    </view>
+  </view>
+</view>

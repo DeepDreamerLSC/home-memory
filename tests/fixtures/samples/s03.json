@@ -1,0 +1,15 @@
+{
+  "id": "s03",
+  "category": "带限定语",
+  "text": "遥控器在电视柜最下层",
+  "expect": {
+    "draft": {
+      "name": "遥控器",
+      "location_text": "电视柜最下层",
+      "certain": true,
+      "qualifiers": [
+        "最下层"
+      ]
+    }
+  }
+}

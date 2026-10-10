@@ -1,0 +1,8 @@
+{
+  "id": "s06",
+  "category": "多件需拆分",
+  "text": "感冒药收进药箱了,体温计在床头柜抽屉",
+  "expect": {
+    "needs_split": true
+  }
+}

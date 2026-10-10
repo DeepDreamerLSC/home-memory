@@ -1,0 +1,13 @@
+{
+  "id": "s10",
+  "category": "无位置信息",
+  "text": "今天新买了一个手电筒",
+  "expect": {
+    "draft": {
+      "name": "手电筒",
+      "location_text": "",
+      "certain": false,
+      "qualifiers": []
+    }
+  }
+}

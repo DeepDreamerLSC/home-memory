@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+.preview-qr.txt
+
+# 本机工具目录(ZCode 工作流草稿、插件缓存)
+.zcode/
+.v2c/
+.video_agent/

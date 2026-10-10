@@ -1,0 +1,13 @@
+{
+  "id": "s02",
+  "category": "典型一句话",
+  "text": "护照在书房的保险柜里",
+  "expect": {
+    "draft": {
+      "name": "护照",
+      "location_text": "书房的保险柜里",
+      "certain": true,
+      "qualifiers": []
+    }
+  }
+}

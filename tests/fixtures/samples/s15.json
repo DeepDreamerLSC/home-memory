@@ -1,0 +1,8 @@
+{
+  "id": "s15",
+  "category": "无法提取名称",
+  "text": "呃我忘了我要记什么来了",
+  "expect": {
+    "error": "AI_UNAVAILABLE"
+  }
+}
