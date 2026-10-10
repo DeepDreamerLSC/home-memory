@@ -16,6 +16,7 @@ exports.summarizeTimings = summarizeTimings;
 exports.isSlideUpCancel = isSlideUpCancel;
 exports.cleanTranscript = cleanTranscript;
 exports.isMeaningfulTranscript = isMeaningfulTranscript;
+exports.isVoiceEntryBusy = isVoiceEntryBusy;
 exports.createSessionGuard = createSessionGuard;
 exports.createVoiceController = createVoiceController;
 exports.loadTimings = loadTimings;
@@ -68,6 +69,14 @@ function cleanTranscript(text) {
 function isMeaningfulTranscript(text) {
     const stripped = text.replace(/[嗯啊哦呃唉诶呀哈\s,。、,.\?!!?~～]/g, "");
     return stripped.length >= 2;
+}
+/**
+ * 语音入口忙碌门禁:录音中/识别中/AI 提取中都不允许再次按压启动新录音。
+ * 松开 ≠ 处理结束——识别/提取在途时再按压,会与跳转确认页互相打断
+ * (A 的提取完成跳页会把 B 的录音打断成无响应按压)。
+ */
+function isVoiceEntryBusy(voiceState, transcribing, extracting) {
+    return voiceState !== "idle" || transcribing || extracting;
 }
 function createSessionGuard() {
     let current = 0;
