@@ -61,18 +61,21 @@ async function main() {
 
   await page.waitFor(1000);
 
-  // 1. 品牌头部与三张卡片(Issue #8 v0.1:找东西在前)
+  // 1. 品牌头部 + 搜索区紧跟 + 两张卡片(用户 UI 示意:搜索在品牌下方)
   const brandName = await page.$(".brand-name");
   const brandText = brandName === null ? "" : await brandName.text();
   console.log("✔ 品牌头部:", brandText);
   assert(brandText.trim() === "我靠东西呢", "品牌名应为「我靠东西呢」,实际:" + brandText);
+  const searchInputTop = await page.$(".search-wrap .search-input");
+  assert(searchInputTop !== null, "搜索输入应紧跟品牌头部(打开就能找)");
+  console.log("✔ 搜索区紧跟品牌头部");
   const titles = await page.$$(".card-title");
   const texts = [];
   for (const t of titles) texts.push(await t.text());
   console.log("✔ 卡片标题:", texts.join(" / "));
-  assert(texts.length === 3, "首页应有「找东西/顺手记一件/最近记住的」三张卡片,实际 " + texts.length + " 张");
+  assert(texts.length === 2, "应有「顺手记一件/最近记住的」两张卡片,实际 " + texts.length + " 张");
   assert(
-    texts[0] === "找东西" && texts[1] === "顺手记一件" && texts[2] === "最近记住的",
+    texts[0] === "顺手记一件" && texts[1] === "最近记住的",
     "卡片标题与预期不符:" + JSON.stringify(texts),
   );
 

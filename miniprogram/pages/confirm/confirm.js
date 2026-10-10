@@ -97,7 +97,7 @@ Page({
                 location_text: locationText,
                 note,
             });
-            wx.showToast({ title: "已记住", icon: "success" });
+            wx.showToast({ title: "记住了,下次问我。", icon: "success" });
             setTimeout(() => {
                 this.backToHome();
             }, 800);

@@ -5,13 +5,12 @@
     <view class="brand-sub">东西放哪儿了?我记得。</view>
   </view>
 
-  <!-- 找东西(任务一:打开就能找) -->
-  <view class="card">
-    <view class="card-title">找东西</view>
+  <!-- 搜索:紧跟品牌,打开就能找 -->
+  <view class="search-wrap">
     <view class="search-row">
       <input
         class="search-input"
-        placeholder="东西名,如:降压药"
+        placeholder="搜钥匙、证件、充电宝…"
         placeholder-class="placeholder"
         value="{{ queryText }}"
         confirm-type="search"
@@ -27,7 +26,7 @@
 
     <block wx:if="{{ queried && !queryError }}">
       <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
-        还没记过「{{ queryKeyword }}」。要记一件?往下按住说话。
+        糟了,这件我还真没记住。要记一件?往下按住说话。
       </view>
       <view
         wx:for="{{ queryResults }}"
@@ -42,19 +41,19 @@
     </block>
   </view>
 
-  <!-- 顺手记一件(任务二:按住就能记;默认语音) -->
+  <!-- 顺手记一件:一屏唯一主视觉,按住就能记 -->
   <view class="card">
     <view class="card-head">
       <view class="card-title">顺手记一件</view>
       <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
-        {{ inputMode === 'voice' ? '改用文字' : '改用语音' }}
+        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
       </view>
     </view>
 
     <!-- 语音模式:按住说话 -->
     <block wx:if="{{ inputMode === 'voice' }}">
       <view class="voice-state">
-        {{ extracting ? 'AI 整理草稿中…' : transcribing ? '识别中…' : voiceState === 'recording' ? '松开识别 · 上滑取消' : voiceState === 'cancelPending' ? '松手取消本次' : '按住说话,松开识别' }}
+        {{ voiceState === 'cancelPending' ? '松手取消本次' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '' }}
       </view>
       <view
         class="talk-btn {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
@@ -63,11 +62,11 @@
         catchtouchend="onTalkTouchEnd"
         catchtouchcancel="onTalkTouchCancel"
       >
-        <view class="talk-icon">{{ voiceState === 'cancelPending' ? '已取消' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
-        <view class="talk-label">按住说话</view>
+        <view class="talk-icon">{{ voiceState === 'cancelPending' ? '好,当我没听见。' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
+        <view class="talk-label">按住说话,松开记住</view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
-      <view class="example">试试说:「降压药放在厨房第二个抽屉」</view>
+      <view class="example">比如说:"充电宝放在书房抽屉里"</view>
     </block>
 
     <!-- 文字模式:次级入口,保留用户输入 -->
@@ -93,7 +92,7 @@
     </block>
   </view>
 
-  <!-- 最近记住的(紧凑,可点击) -->
+  <!-- 最近记住的:紧凑,可点击 -->
   <view class="card">
     <view class="card-title">最近记住的</view>
     <view wx:if="{{ recentError }}" class="error-text">{{ recentError }}</view>

@@ -18,6 +18,11 @@
   color: #8a8577;
 }
 
+/* 搜索:紧跟品牌头部的独立区(打开就能找) */
+.search-wrap {
+  margin: 16rpx 24rpx;
+}
+
 /* 搜索执行按钮:紧凑方块,明确可点 */
 .search-go {
   width: 88rpx;
