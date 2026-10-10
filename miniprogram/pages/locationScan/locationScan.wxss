@@ -1,0 +1,89 @@
+/* 生成空间树向导:复用 app.wxss 的卡片/横幅语言,颜色只用全局 CSS 变量 */
+
+/* 候选分支 / 挂载草案行(缩进表达层级,checkbox 用字符以复用主题变量) */
+.tree-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 18rpx 8rpx;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.tree-row:last-child {
+  border-bottom: none;
+}
+
+.tree-check {
+  width: 44rpx;
+  flex-shrink: 0;
+  font-size: 32rpx;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/* AI 拿不准:黄底横幅语言(与「AI 草稿待确认」视觉一致) */
+.warn-row {
+  background: var(--banner-bg);
+  border-radius: 12rpx;
+}
+
+.row-warn {
+  font-size: 22rpx;
+  color: var(--text-2);
+  margin-top: 4rpx;
+}
+
+.node-type {
+  display: inline-block;
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  background: var(--card-inset);
+  color: var(--text-3);
+  font-size: 20rpx;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
+.rename-link {
+  margin-left: 12rpx;
+  padding: 8rpx 0 8rpx 20rpx;
+  font-size: 24rpx;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+/* 近义组操作 */
+.syn-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex-shrink: 0;
+}
+
+.syn-btn {
+  padding: 10rpx 24rpx;
+  border-radius: 999rpx;
+  background: var(--accent-dim);
+  color: var(--text-2);
+  font-size: 24rpx;
+}
+
+.syn-done {
+  padding: 14rpx 0;
+  font-size: 24rpx;
+  color: var(--text-3);
+  border-bottom: 1rpx solid var(--line);
+}
+
+.syn-done:last-child {
+  border-bottom: none;
+}
+
+/* 结果状态 */
+.result-warn {
+  color: var(--danger);
+}
+
+.result-dim {
+  color: var(--text-3);
+}

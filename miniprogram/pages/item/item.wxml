@@ -45,11 +45,53 @@
       保存修改
     </button>
     <button
+      class="btn block"
+      loading="{{ mounting }}"
+      bindtap="onMountTap"
+    >
+      挂到空间
+    </button>
+    <button
       class="btn danger block"
       loading="{{ deleting }}"
       bindtap="onDeleteTap"
     >
       删除这条记录
     </button>
+  </view>
+
+  <!-- 挂到空间:AI 候选分段,逐段核对后确认(ensurePath 只在确认后建节点) -->
+  <view wx:if="{{ mountPanelOpen }}" class="card">
+    <view class="card-title">挂到空间(AI 草案,请核对)</view>
+    <view class="hint">
+      从大到小逐段核对,可以直接改;{{ mountOrderViolation ? '分段顺序与原文对不上,务必逐段核对。' : '' }}确认后才会创建位置并挂载。
+    </view>
+    <view
+      wx:for="{{ mountSegments }}"
+      wx:key="idx"
+      class="field"
+    >
+      <view class="label">
+        第 {{ index + 1 }} 段 · {{ item.typeText }} · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · AI 不太确定' : '' }}
+      </view>
+      <input
+        class="input {{ item.needConfirm ? 'input-warn' : '' }}"
+        value="{{ item.name }}"
+        maxlength="30"
+        data-index="{{ index }}"
+        bindinput="onMountSegmentInput"
+      />
+      <view wx:if="{{ item.hintName }}" class="hint">
+        与已有的「{{ item.hintName }}」同名,入库会直接用已有位置
+      </view>
+    </view>
+    <button
+      class="btn primary block"
+      loading="{{ mountSaving }}"
+      bindtap="confirmMount"
+    >
+      确认挂载
+    </button>
+    <button class="btn block" bindtap="cancelMount">取消</button>
   </view>
 </view>

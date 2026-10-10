@@ -19,6 +19,12 @@ export interface ItemRecord {
   operation_id: string;
   created_at: string;
   updated_at: string;
+  /**
+   * 空间树挂载目标(locations 集合节点 id)。缺失/null = 未挂载;
+   * 唯一写入方是 locations 云函数(linkItem/unlinkItem/merge/applyScan),
+   * itemsApi 对该字段一律忽略、投影亦不含它——此处仅作文档类型注释。
+   */
+  location_node_id?: string | null;
 }
 
 /** query / list 返回的精简条目 */
@@ -182,3 +188,270 @@ export type ExtractDraftResponse =
   | ExtractDraftNeedsSplitResponse
   | ExtractDraftMultiResponse
   | ExtractDraftErrorResponse;
+
+/* ---------------- locations 空间树(issue #18) ---------------- */
+
+/** 位置节点类型(按深度映射:1=room、2=furniture、≥3=container;home 为根哨兵) */
+export type LocationType = "home" | "room" | "furniture" | "container";
+
+/** 节点创建来源 */
+export type LocationCreatedFrom = "bootstrap" | "scan" | "parse" | "manual";
+
+/** 节点摘要(list/ensurePath/rename/move/merge 响应共用) */
+export interface LocationNodeSummary {
+  location_id: string;
+  name: string;
+  type: LocationType;
+  /** 从根(不含 home 根)到本节点(含)的名字数组;home 根为 [] */
+  path: string[];
+  /** 整棵子树(自身+全部后代)挂载的未删物品数 */
+  item_count: number;
+  /** 直接子节点数 */
+  child_count: number;
+  created_from: LocationCreatedFrom;
+  updated_at: string;
+}
+
+/** parseLocation 的单条层级候选段 */
+export interface ParseSegment {
+  name: string;
+  type: LocationType;
+  /** 0-1;低于服务端阈值(0.8)时强制 need_confirm */
+  confidence: number;
+}
+
+/** 与既有树同名/近义的合并建议(服务端已校验存在性) */
+export interface MergeSuggestion {
+  segment_index: number;
+  existing_location_id: string;
+  existing_name: string;
+  reason: string;
+}
+
+/** parseLocation 响应体 */
+export interface ParseResult {
+  segments: ParseSegment[];
+  /** true = 只是候选,客户端必须让用户核对后才可 ensurePath */
+  need_confirm: boolean;
+  /** true = 段顺序与原文不符(锚定校验未通过),必须人工核对 */
+  order_violation: boolean;
+  merge_suggestions: MergeSuggestion[];
+}
+
+/** scanHousehold 候选树节点(结构一致性由服务端构造保证) */
+export interface CandidateNode {
+  name: string;
+  type: LocationType;
+  confidence: number;
+  need_confirm: boolean;
+  children: CandidateNode[];
+  /** 与既有树同名节点的提示(同名段入库时 ensurePath 会直接复用已有节点) */
+  merge_hints?: MergeSuggestion[];
+}
+
+/** 归并后近义比对产出的近义组(合并与否永远由用户裁决) */
+export interface SynonymGroup {
+  /** 层下标(0 起,0=房间层) */
+  level: number;
+  names: string[];
+  reason: string;
+}
+
+/** 单件挂载草案(带当前 version,供 applyScan 作 expected_version) */
+export interface MountDraft {
+  item_id: string;
+  name: string;
+  location_text: string;
+  version: number;
+  path: string[];
+  confidence: number;
+  need_confirm: boolean;
+  order_violation: boolean;
+}
+
+/** 扫描后无法自动归位的物品(位置为空 / 分段为空),向导里如实单列 */
+export interface SkippedDraft {
+  item_id: string;
+  name: string;
+  reason: string;
+}
+
+/** scanHousehold 响应体(纯草案,零写库) */
+export interface ScanResult {
+  scanned: number;
+  unmounted_total: number;
+  truncated: boolean;
+  candidate_tree: CandidateNode[];
+  synonym_groups: SynonymGroup[];
+  mounts: MountDraft[];
+  skipped: SkippedDraft[];
+}
+
+/** applyScan 逐件挂载状态(零静默:每个状态都如实呈现) */
+export type ApplyScanMountStatus = "mounted" | "already" | "conflict" | "not_found";
+
+export interface ApplyScanBranchResult {
+  path: string[];
+  created: boolean[];
+  location_ids: string[];
+}
+
+export interface ApplyScanMountResult {
+  item_id: string;
+  status: ApplyScanMountStatus;
+  /** mounted/already 时的最新版本号 */
+  version?: number;
+  /** conflict 时的当前版本号(引导用户去详情页重新挂载) */
+  current_version?: number;
+}
+
+export interface ApplyScanResult {
+  branches: ApplyScanBranchResult[];
+  mounts: ApplyScanMountResult[];
+}
+
+/** locations 协议错误码(契约固定 7 个) */
+export type LocationsApiErrorCode =
+  | "INVALID_INPUT"
+  | "NOT_FOUND"
+  | "UNAUTHORIZED"
+  | "VERSION_CONFLICT"
+  | "NODE_NOT_EMPTY"
+  | "NODE_CONFLICT"
+  | "AI_UNAVAILABLE";
+
+export interface LocationsApiErrorResponse {
+  ok: false;
+  error: LocationsApiErrorCode;
+  /** 中文文案,可直接给用户看 */
+  message: string;
+  /** 结构化补充(冲突清单、计数等;只出现在响应,绝不进日志) */
+  detail?: Record<string, unknown>;
+  /** AI_UNAVAILABLE 时为 true,引导手动兜底 */
+  manual_fallback?: boolean;
+}
+
+/* ---------------- locations 请求(11 个 action 的判别联合) ---------------- */
+
+export type LocationsApiEvent =
+  | { action: "list"; parent_id?: string }
+  | {
+      action: "ensurePath";
+      /** 从根起的完整段序列,1-6 段,每段去空白 1-30 字 */
+      path: string[];
+      created_from?: "scan" | "parse" | "manual";
+    }
+  | { action: "rename"; node_id: string; name: string }
+  | { action: "move"; node_id: string; new_parent_id: string }
+  | { action: "merge"; source_node_id: string; target_node_id: string }
+  | { action: "delete"; node_id: string; force?: boolean }
+  | {
+      action: "linkItem";
+      item_id: string;
+      node_id: string;
+      expected_version: number;
+      /** 同一次逻辑挂载的标识(uuid):失败重试同内容复用,服务端据此识别重放 */
+      update_id: string;
+    }
+  | {
+      action: "unlinkItem";
+      item_id: string;
+      expected_version: number;
+      update_id: string;
+    }
+  | { action: "parseLocation"; text: string }
+  | { action: "scanHousehold" }
+  | {
+      action: "applyScan";
+      /** 本次向导提交的幂等键(uuid),失败重试/恢复时原样复用 */
+      operation_id: string;
+      /** 纯结构确认(可空):建分支但本次无物品挂载 */
+      branches: Array<{ path: string[] }>;
+      /** 逐件完整确认路径(含容器末段),expected_version 用扫描时的 version */
+      mounts: Array<{
+        item_id: string;
+        expected_version: number;
+        path: string[];
+      }>;
+    };
+
+/* ---------------- locations 响应 ---------------- */
+
+export interface ListLocationsResponse {
+  ok: true;
+  node: LocationNodeSummary;
+  children: LocationNodeSummary[];
+  /** 直接挂载于该节点的未删物品 */
+  items: ItemSummary[];
+  /** 未删除且未挂载(缺失/null/悬挂)物品数 */
+  unmounted_count: number;
+  dangling_mounts: number;
+}
+
+export interface EnsurePathResponse {
+  ok: true;
+  nodes: LocationNodeSummary[];
+  created: boolean[];
+}
+
+export interface RenameLocationResponse {
+  ok: true;
+  node: LocationNodeSummary;
+}
+
+export interface MoveLocationResponse {
+  ok: true;
+  node: LocationNodeSummary;
+}
+
+export interface MergeLocationResponse {
+  ok: true;
+  node: LocationNodeSummary;
+  remounted: number;
+  compensated: number;
+  compensated_skipped: number;
+  detail?: { already_merged?: boolean };
+}
+
+export interface DeleteLocationResponse {
+  ok: true;
+  deleted_nodes: number;
+  compensated: number;
+  compensated_skipped: number;
+}
+
+export interface LinkItemResponse {
+  ok: true;
+  item: { item_id: string; version: number; updated_at: string };
+  /** true = 同 update_id 的重放(上次已写入成功) */
+  replayed?: boolean;
+}
+
+export interface ParseLocationResponse {
+  ok: true;
+  parse: ParseResult;
+}
+
+export interface ScanHouseholdResponse {
+  ok: true;
+  scan: ScanResult;
+}
+
+export interface ApplyScanResponse {
+  ok: true;
+  result: ApplyScanResult;
+}
+
+export type LocationsApiOkResponse =
+  | ListLocationsResponse
+  | EnsurePathResponse
+  | RenameLocationResponse
+  | MoveLocationResponse
+  | MergeLocationResponse
+  | DeleteLocationResponse
+  | LinkItemResponse
+  | ParseLocationResponse
+  | ScanHouseholdResponse
+  | ApplyScanResponse;
+
+export type LocationsApiResponse = LocationsApiOkResponse | LocationsApiErrorResponse;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
+const locations_api_1 = require("../../utils/locations-api");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -10,6 +11,12 @@ function safeDecode(s) {
         return s;
     }
 }
+const TYPE_TEXT = {
+    home: "",
+    room: "房间",
+    furniture: "家具",
+    container: "容器",
+};
 Page({
     data: {
         itemId: "",
@@ -20,11 +27,24 @@ Page({
         updatedAtText: "",
         saving: false,
         deleting: false,
+        mounting: false,
+        mountPanelOpen: false,
+        mountSegments: [],
+        mountNeedConfirm: false,
+        mountOrderViolation: false,
+        mountSaving: false,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
     pendingRetry: null,
     onLoad(options) {
+        const rawItemId = options.item_id;
+        if (rawItemId) {
+            // 按 id 直接打开(生成向导的 skipped 件、结果页跳转):get 单查不受 list 分页影响
+            this.setData({ itemId: safeDecode(rawItemId) });
+            void this.loadById(safeDecode(rawItemId));
+            return;
+        }
         const raw = options.data;
         let summary = null;
         if (raw) {
@@ -266,5 +286,220 @@ Page({
                 wx.reLaunch({ url: "/pages/index/index" });
             },
         });
+    },
+    async loadById(id) {
+        try {
+            const res = await (0, api_1.callItemsApi)({ action: "get", item_id: id });
+            this.applySummary(res.item);
+        }
+        catch (e) {
+            wx.showModal({
+                title: "无法打开",
+                content: (0, api_1.errorMessage)(e),
+                showCancel: false,
+                success: () => {
+                    this.goBack();
+                },
+            });
+        }
+    },
+    /**
+     * 挂到空间:parseLocation 零写库出候选分段 → 用户逐段核对(可改)→
+     * ensurePath + linkItem。AI 不可用时兜底为手动选位置(选择模式)。
+     */
+    async onMountTap() {
+        if (this.data.saving || this.data.deleting || this.data.mounting) {
+            return;
+        }
+        const text = this.data.locationText.trim();
+        if (!text) {
+            wx.showToast({ title: "先填一句位置描述,再挂到空间", icon: "none" });
+            return;
+        }
+        this.setData({ mounting: true });
+        try {
+            const res = await (0, locations_api_1.callLocationsApi)({
+                action: "parseLocation",
+                text,
+            });
+            const parse = res.parse;
+            const hints = new Map();
+            for (const s of parse.merge_suggestions) {
+                if (!hints.has(s.segment_index)) {
+                    hints.set(s.segment_index, s.existing_name);
+                }
+            }
+            this.setData({
+                mountPanelOpen: true,
+                mountNeedConfirm: parse.need_confirm,
+                mountOrderViolation: parse.order_violation,
+                mountSegments: parse.segments.map((seg, i) => ({
+                    idx: i,
+                    name: seg.name,
+                    typeText: TYPE_TEXT[seg.type] || "",
+                    confidenceText: Math.round(seg.confidence * 100) + "%",
+                    needConfirm: seg.confidence < 0.8,
+                    hintName: hints.get(i) || "",
+                })),
+            });
+        }
+        catch (e) {
+            if ((0, locations_api_1.isLocationsApiErrorWithCode)(e, "AI_UNAVAILABLE")) {
+                wx.showModal({
+                    title: "AI 暂时不可用",
+                    content: "解析不了这句位置,要改为手动选一个已有位置吗?",
+                    confirmText: "手动选位置",
+                    cancelText: "取消",
+                    success: (r) => {
+                        if (r.confirm) {
+                            this.openLocationPicker();
+                        }
+                    },
+                });
+                return;
+            }
+            wx.showModal({
+                title: "解析失败",
+                content: (0, api_1.errorMessage)(e),
+                showCancel: false,
+            });
+        }
+        finally {
+            this.setData({ mounting: false });
+        }
+    },
+    onMountSegmentInput(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const value = e.detail && e.detail.value ? e.detail.value : "";
+        const rows = this.data.mountSegments.slice();
+        if (!rows[index]) {
+            return;
+        }
+        rows[index] = { ...rows[index], name: value };
+        this.setData({ mountSegments: rows });
+    },
+    /** AI 不可用的手动兜底:进 locations 选择模式,选中后直接 linkItem */
+    openLocationPicker() {
+        wx.navigateTo({
+            url: "/pages/locations/locations?picker=1&title=" +
+                encodeURIComponent("把「" + (this.data.name || "这件物品") + "」挂到…"),
+            events: {
+                pickNode: (d) => {
+                    void this.doLinkToNode(d.location_id);
+                },
+            },
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    async doLinkToNode(nodeId) {
+        this.setData({ mountSaving: true });
+        try {
+            const res = await (0, locations_api_1.callLocationsApi)({
+                action: "linkItem",
+                item_id: this.data.itemId,
+                node_id: nodeId,
+                expected_version: this.data.version,
+                update_id: (0, api_1.uuid)(),
+            });
+            this.setData({
+                version: res.item.version,
+                updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+            });
+            wx.showToast({ title: "已挂到空间", icon: "success" });
+        }
+        catch (e) {
+            if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
+                wx.showToast({
+                    title: "内容已被修改,已更新版本号,请重试",
+                    icon: "none",
+                    duration: 2500,
+                });
+                await this.refreshLatest();
+            }
+            else {
+                wx.showModal({
+                    title: "挂载失败",
+                    content: (0, api_1.errorMessage)(e),
+                    showCancel: false,
+                });
+            }
+        }
+        finally {
+            this.setData({ mountSaving: false });
+        }
+    },
+    /** 确认候选分段:ensurePath(用户确认后的唯一建节点入口)→ linkItem(版本条件更新) */
+    async confirmMount() {
+        if (this.data.mountSaving) {
+            return;
+        }
+        const names = this.data.mountSegments
+            .map((s) => s.name.trim())
+            .filter((n) => n.length > 0);
+        if (names.length === 0) {
+            wx.showToast({ title: "至少填一段位置", icon: "none" });
+            return;
+        }
+        this.setData({ mountSaving: true });
+        try {
+            const ensured = await (0, locations_api_1.callLocationsApi)({
+                action: "ensurePath",
+                path: names,
+                created_from: "parse",
+            });
+            const target = ensured.nodes[ensured.nodes.length - 1];
+            if (!target) {
+                throw new Error("服务返回异常");
+            }
+            const res = await (0, locations_api_1.callLocationsApi)({
+                action: "linkItem",
+                item_id: this.data.itemId,
+                node_id: target.location_id,
+                expected_version: this.data.version,
+                update_id: (0, api_1.uuid)(),
+            });
+            this.setData({
+                version: res.item.version,
+                updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+                mountPanelOpen: false,
+            });
+            wx.showToast({ title: "已挂到空间", icon: "success" });
+        }
+        catch (e) {
+            if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
+                // 物品被并发修改:走既有刷新逻辑对齐版本(保留未保存编辑),由用户检查后重试
+                wx.showToast({
+                    title: "内容已被修改,已更新版本号,请重试",
+                    icon: "none",
+                    duration: 2500,
+                });
+                const result = await this.refreshLatest();
+                if (result === "notfound") {
+                    wx.showModal({
+                        title: "记录不存在",
+                        content: "没有找到这条记录,可能已被删除。",
+                        showCancel: false,
+                        success: () => {
+                            this.goBack();
+                        },
+                    });
+                }
+            }
+            else {
+                wx.showModal({
+                    title: "挂载失败",
+                    content: (0, api_1.errorMessage)(e),
+                    showCancel: false,
+                });
+            }
+        }
+        finally {
+            this.setData({ mountSaving: false });
+        }
+    },
+    cancelMount() {
+        this.setData({ mountPanelOpen: false, mountSegments: [] });
     },
 });
