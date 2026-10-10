@@ -126,7 +126,7 @@ Page({
         }, (0, voice_1.createDefaultVoiceDeps)());
     },
     onTalkTouchStart(e) {
-        if (this.data.voiceState !== "idle" || this.data.transcribing) {
+        if ((0, voice_1.isVoiceEntryBusy)(this.data.voiceState, this.data.transcribing, this.data.extracting)) {
             return;
         }
         const touch = e.touches && e.touches[0];
