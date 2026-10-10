@@ -1,0 +1,10 @@
+{
+  "name": "locations",
+  "version": "1.0.0",
+  "description": "家庭物品记忆助手 issue #18:locations 空间树云函数(list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/parseLocation/scanHousehold/applyScan)",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
