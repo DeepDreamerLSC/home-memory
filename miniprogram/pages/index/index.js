@@ -23,32 +23,54 @@ Page({
         recentError: "",
         inputMode: "text",
         voiceState: "idle",
+        transcribing: false,
+        recordSeconds: 0,
         partialText: "",
     },
     voiceCtrl: null,
     touchStartY: 0,
+    recordTimer: 0,
     onShow() {
         this.loadRecent();
+    },
+    onHide() {
+        this.clearRecordTimer();
+    },
+    onUnload() {
+        this.clearRecordTimer();
+    },
+    clearRecordTimer() {
+        if (this.recordTimer) {
+            clearInterval(this.recordTimer);
+            this.recordTimer = 0;
+        }
     },
     onMemoInput(e) {
         this.setData({ memoText: e.detail && e.detail.value ? e.detail.value : "" });
     },
     onModeText() {
         markVoiceCancelledIfRecording(this);
-        this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
+        this.clearRecordTimer();
+        this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
     onModeVoice() {
-        this.setData({ inputMode: "voice", voiceState: "idle", partialText: "" });
+        this.setData({ inputMode: "voice", voiceState: "idle", transcribing: false, partialText: "", recordSeconds: 0 });
         if (this.voiceCtrl === null) {
-            this.voiceCtrl = (0, voice_1.initVoiceController)({
+            this.voiceCtrl = (0, voice_1.createVoiceController)({
                 onStart: () => {
-                    this.setData({ voiceState: "recording", partialText: "" });
+                    this.clearRecordTimer();
+                    this.setData({ voiceState: "recording", partialText: "", recordSeconds: 0 });
+                    this.recordTimer = setInterval(() => {
+                        this.setData({ recordSeconds: this.data.recordSeconds + 1 });
+                    }, 1000);
                 },
-                onRecognize: (partial) => {
-                    this.setData({ partialText: partial });
+                onTranscribing: () => {
+                    this.clearRecordTimer();
+                    this.setData({ transcribing: true, partialText: "识别中…" });
                 },
                 onStop: (text) => {
-                    this.setData({ voiceState: "idle", partialText: text });
+                    this.clearRecordTimer();
+                    this.setData({ voiceState: "idle", transcribing: false, partialText: text });
                     if (!text) {
                         wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
                         return;
@@ -58,28 +80,11 @@ Page({
                     this.onExtractTap();
                 },
                 onError: (code, message) => {
-                    this.setData({ voiceState: "idle" });
-                    if (code === "PERMISSION") {
-                        wx.showModal({
-                            title: "需要录音权限",
-                            content: "语音记一件需要使用麦克风。可以到设置中开启,或改用文字输入。",
-                            confirmText: "去设置",
-                            cancelText: "用文字",
-                            success: (r) => {
-                                if (r.confirm) {
-                                    wx.openSetting({});
-                                }
-                                else {
-                                    this.voiceFallbackToText();
-                                }
-                            },
-                        });
-                    }
-                    else {
-                        wx.showToast({ title: message, icon: "none", duration: 2500 });
-                    }
+                    this.clearRecordTimer();
+                    this.setData({ voiceState: "idle", transcribing: false });
+                    wx.showToast({ title: message, icon: "none", duration: 2500 });
                 },
-            });
+            }, (0, voice_1.createDefaultVoiceDeps)());
         }
     },
     onTalkTouchStart(e) {
@@ -154,12 +159,14 @@ Page({
         }
         // 状态在 onStop/onError 回调里复位;取消场景这里立即复位视觉
         if (this.data.voiceState === "cancelPending") {
+            this.clearRecordTimer();
             this.setData({ voiceState: "idle", partialText: "" });
         }
     },
     voiceFallbackToText() {
         markVoiceCancelledIfRecording(this);
-        this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
+        this.clearRecordTimer();
+        this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
     /** 记一件:textarea → extractDraft,按契约分流 */
     async onExtractTap() {

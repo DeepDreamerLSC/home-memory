@@ -40,16 +40,16 @@
     <!-- 语音模式:按住说话 -->
     <block wx:else>
       <view class="hint">
-        {{ voiceState === 'recording' ? '松开识别 · 上滑取消' : voiceState === 'cancelPending' ? '松手取消本次录音' : '按住下方按钮说话,说完松开' }}
+        {{ transcribing ? '识别中…' : voiceState === 'recording' ? '松开识别 · 上滑取消' : voiceState === 'cancelPending' ? '松手取消本次录音' : '按住下方按钮说话,说完松开' }}
       </view>
       <view
-        class="talk-btn {{ voiceState === 'recording' ? 'recording' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+        class="talk-btn {{ (voiceState === 'recording' || transcribing) && voiceState !== 'cancelPending' ? 'recording' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
         bindtouchstart="onTalkTouchStart"
         bindtouchmove="onTalkTouchMove"
         bindtouchend="onTalkTouchEnd"
         bindtouchcancel="onTalkTouchCancel"
       >
-        <view class="talk-icon">{{ voiceState === 'idle' ? '🎤' : (voiceState === 'cancelPending' ? '已取消' : '录音中') }}</view>
+        <view class="talk-icon">{{ transcribing ? '识别中…' : voiceState === 'cancelPending' ? '已取消' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
         <view class="talk-label">按住说话</view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>

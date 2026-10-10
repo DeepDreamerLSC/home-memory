@@ -1,0 +1,10 @@
+{
+  "name": "transcribe",
+  "version": "1.0.0",
+  "description": "音频 base64 → 文字(腾讯云一句话识别,零依赖)",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

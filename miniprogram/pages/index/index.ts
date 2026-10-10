@@ -7,7 +7,8 @@ import {
 } from "../../utils/api";
 import {
   ensureRecordAuth,
-  initVoiceController,
+  createVoiceController,
+  createDefaultVoiceDeps,
   isSlideUpCancel,
   markVoiceCancelled,
   resetVoiceCancelled,
@@ -42,7 +43,11 @@ Page<
     inputMode: "text" | "voice";
     /** 语音状态:idle 空闲 / recording 录音中 / cancelPending 已上滑待松手 */
     voiceState: "idle" | "recording" | "cancelPending";
-    /** 实时转写文本 */
+    /** 录音停止后云端识别中 */
+    transcribing: boolean;
+    /** 本次录音秒数(展示用) */
+    recordSeconds: number;
+    /** 录音中/识别中的提示文本 */
     partialText: string;
   },
   {
@@ -53,6 +58,9 @@ Page<
     voiceCtrl: VoiceController | null;
     /** 本次按住的起点 Y(上滑取消判定) */
     touchStartY: number;
+    /** 录音秒数计时器句柄 */
+    recordTimer: number;
+    clearRecordTimer(): void;
     onExtractTap(): Promise<void>;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
@@ -84,14 +92,32 @@ Page<
     recentError: "",
     inputMode: "text",
     voiceState: "idle",
+    transcribing: false,
+    recordSeconds: 0,
     partialText: "",
   },
 
   voiceCtrl: null,
   touchStartY: 0,
+  recordTimer: 0,
 
   onShow() {
     this.loadRecent();
+  },
+
+  onHide() {
+    this.clearRecordTimer();
+  },
+
+  onUnload() {
+    this.clearRecordTimer();
+  },
+
+  clearRecordTimer() {
+    if (this.recordTimer) {
+      clearInterval(this.recordTimer);
+      this.recordTimer = 0;
+    }
   },
 
   onMemoInput(e) {
@@ -100,50 +126,45 @@ Page<
 
   onModeText() {
     markVoiceCancelledIfRecording(this);
-    this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
+    this.clearRecordTimer();
+    this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
   onModeVoice() {
-    this.setData({ inputMode: "voice", voiceState: "idle", partialText: "" });
+    this.setData({ inputMode: "voice", voiceState: "idle", transcribing: false, partialText: "", recordSeconds: 0 });
     if (this.voiceCtrl === null) {
-      this.voiceCtrl = initVoiceController({
-        onStart: () => {
-          this.setData({ voiceState: "recording", partialText: "" });
-        },
-        onRecognize: (partial) => {
-          this.setData({ partialText: partial });
-        },
-        onStop: (text) => {
-          this.setData({ voiceState: "idle", partialText: text });
-          if (!text) {
-            wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
-            return;
-          }
-          // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)
-          this.setData({ memoText: text, inputMode: "text" });
-          this.onExtractTap();
-        },
-        onError: (code, message) => {
-          this.setData({ voiceState: "idle" });
-          if (code === "PERMISSION") {
-            wx.showModal({
-              title: "需要录音权限",
-              content: "语音记一件需要使用麦克风。可以到设置中开启,或改用文字输入。",
-              confirmText: "去设置",
-              cancelText: "用文字",
-              success: (r) => {
-                if (r.confirm) {
-                  wx.openSetting({});
-                } else {
-                  this.voiceFallbackToText();
-                }
-              },
-            });
-          } else {
+      this.voiceCtrl = createVoiceController(
+        {
+          onStart: () => {
+            this.clearRecordTimer();
+            this.setData({ voiceState: "recording", partialText: "", recordSeconds: 0 });
+            this.recordTimer = setInterval(() => {
+              this.setData({ recordSeconds: this.data.recordSeconds + 1 });
+            }, 1000);
+          },
+          onTranscribing: () => {
+            this.clearRecordTimer();
+            this.setData({ transcribing: true, partialText: "识别中…" });
+          },
+          onStop: (text) => {
+            this.clearRecordTimer();
+            this.setData({ voiceState: "idle", transcribing: false, partialText: text });
+            if (!text) {
+              wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
+              return;
+            }
+            // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)
+            this.setData({ memoText: text, inputMode: "text" });
+            this.onExtractTap();
+          },
+          onError: (code, message) => {
+            this.clearRecordTimer();
+            this.setData({ voiceState: "idle", transcribing: false });
             wx.showToast({ title: message, icon: "none", duration: 2500 });
-          }
+          },
         },
-      });
+        createDefaultVoiceDeps(),
+      );
     }
   },
 
@@ -222,13 +243,15 @@ Page<
     }
     // 状态在 onStop/onError 回调里复位;取消场景这里立即复位视觉
     if (this.data.voiceState === "cancelPending") {
+      this.clearRecordTimer();
       this.setData({ voiceState: "idle", partialText: "" });
     }
   },
 
   voiceFallbackToText() {
     markVoiceCancelledIfRecording(this);
-    this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
+    this.clearRecordTimer();
+    this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
   /** 记一件:textarea → extractDraft,按契约分流 */

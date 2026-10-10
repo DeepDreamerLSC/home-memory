@@ -53,3 +53,13 @@ system prompt 要点:家庭物品位置提取器;从一句话提取一件物品�
 
 ## 样例集
 tests/fixtures/samples/ 下至少 15 条中文样例 JSON,每条 { id, text, expect },expect 为 { draft:{...} } 或 { needs_split:true } 或 { error:"AI_UNAVAILABLE" };覆盖典型一句话、带限定语、多件需拆分、口语化模糊位置、无位置信息、可容忍别字、长度边界。extractDraft.test.js 用样例驱动 mock callLLM。samples-live.js:未设 DEEPSEEK_API_KEY 时打印操作指引并以退出码 0 结束;设置后真调 API,逐条与 expect 对比,结果表写入 docs/samples-evidence.md。
+
+## transcribe 协议(PR2 新增,提请评审确认)
+微信「同声传译」插件不支持个人主体,语音转文字改为独立云函数:原生录音(wav/16k/单声道,≤60 秒)→ base64 → 腾讯云一句话识别 → 文字。这回到 issue #1 最初的模型最窄入口设计 transcribe(audio)→text,与 extract_items(text) 分离;无状态、不落库、输入输出即焚。
+
+event = { audio_base64(非空,≤1MB), voice_format(字母数字,如 "wav") }。
+- 校验失败 → { ok:false, error:"INVALID_INPUT", message(中文) },绝不发起调用
+- 密钥(TENCENT_SECRET_ID/TENCENT_SECRET_KEY)缺失或 ASR 调用失败/超时(15s) → { ok:false, error:"ASR_UNAVAILABLE", message:"语音识别暂不可用…", manual_fallback:true },客户端回退文字输入
+- 成功 → { ok:true, text(已 trim) }
+- 日志只记:音频字符数、格式、耗时、错误码;绝不打印音频数据与识别结果。密钥仅云函数环境变量,绝不入库/入码/入日志。
+- 超时 20 秒(config.json);除 wx-server-sdk 外零 npm 依赖(TC3 签名手写纯函数)。
