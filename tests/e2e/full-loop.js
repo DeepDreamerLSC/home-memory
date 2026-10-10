@@ -60,8 +60,13 @@ async function main() {
   const sentence = itemName + "放在厨房左边第二个抽屉";
   const newLocation = "客厅电视柜最下层";
 
-  // ---- 1. 记一件:真实 AI 提取 ----
+  // ---- 1. 记一件:真实 AI 提取(默认语音模式,先切文字模式) ----
   console.log("【1】记一件:", sentence);
+  const modeLink = await page.$(".mode-link");
+  if (modeLink !== null) {
+    await modeLink.tap();
+    await page.waitFor(400);
+  }
   const textarea = await page.$(".memo-input");
   await textarea.input(sentence);
   const extractBtn = await page.$(".btn.primary.block");
@@ -111,7 +116,7 @@ async function main() {
   console.log("【2】找东西:查询", itemName);
   const searchInput = await page.$(".search-input");
   await searchInput.input(itemName);
-  const searchBtn = await page.$(".search-btn");
+  const searchBtn = await page.$(".search-go");
   const tQ = Date.now();
   await searchBtn.tap();
   const row = await waitFor(
@@ -167,7 +172,7 @@ async function main() {
   assert(page.path === "pages/index/index", "应回到首页");
   const searchInput2 = await page.$(".search-input");
   await searchInput2.input(itemName);
-  await (await page.$(".search-btn")).tap();
+  await (await page.$(".search-go")).tap();
   // 旧查询结果仍渲染在页面上,需轮询等新位置替换旧位置
   const finalLocation = await waitFor(
     async () => {

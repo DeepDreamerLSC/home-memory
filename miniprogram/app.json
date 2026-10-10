@@ -5,10 +5,10 @@
     "pages/item/item"
   ],
   "window": {
-    "navigationBarTitleText": "家庭物品记忆",
-    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTitleText": "我靠东西呢",
+    "navigationBarBackgroundColor": "#FAF8F2",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f4f5f7",
+    "backgroundColor": "#FAF8F2",
     "backgroundTextStyle": "dark"
   },
   "style": "v2",

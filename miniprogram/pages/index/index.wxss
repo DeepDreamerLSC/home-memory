@@ -1,85 +1,112 @@
-/* 首页补充样式(其余复用 app.wxss) */
-.memo-input {
-  width: 100%;
+/* 首页样式:品牌「我靠东西呢」(其余复用 app.wxss) */
+
+/* 品牌头部 */
+.brand {
+  padding: 24rpx 32rpx 8rpx;
 }
 
-/* 卡片头:标题 + 输入方式切换 */
-.card-head {
+.brand-name {
+  font-size: 52rpx;
+  font-weight: 800;
+  color: #191919;
+  letter-spacing: 2rpx;
+}
+
+.brand-sub {
+  margin-top: 4rpx;
+  font-size: 26rpx;
+  color: #8a8577;
+}
+
+/* 搜索执行按钮:紧凑方块,明确可点 */
+.search-go {
+  width: 88rpx;
+  height: 76rpx;
+  margin-left: 16rpx;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8rpx;
+  justify-content: center;
+  background: #191919;
+  color: #ffe15a;
+  border-radius: 16rpx;
+  font-size: 30rpx;
+  font-weight: 700;
 }
 
-.card-head .card-title {
-  margin-bottom: 0;
+.search-go.busy {
+  opacity: 0.5;
 }
 
-.mode-tabs {
-  display: flex;
-  border: 1rpx solid #d8dce3;
+/* 模式切换:次级链接 */
+.mode-link {
+  font-size: 26rpx;
+  color: #4c483e;
+  padding: 8rpx 20rpx;
+  border: 2rpx solid #e8e3d6;
   border-radius: 999rpx;
-  overflow: hidden;
+  background: #faf8f2;
 }
 
-.mode-tab {
-  padding: 6rpx 24rpx;
-  font-size: 24rpx;
-  color: #6b7280;
-  background: #fff;
+/* 语音状态行 */
+.voice-state {
+  font-size: 26rpx;
+  color: #4c483e;
+  margin: 8rpx 0 16rpx;
+  min-height: 40rpx;
 }
 
-.mode-tab.active {
-  color: #fff;
-  background: #3a6ea5;
-}
-
-/* 按住说话 */
+/* 按住说话:实心大按钮,一屏唯一强调面 */
 .talk-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8rpx;
-  margin: 24rpx 0;
-  padding: 48rpx 0;
-  border: 2rpx dashed #b8c4d4;
-  border-radius: 20rpx;
-  background: #f7f9fc;
+  margin: 8rpx 0 20rpx;
+  padding: 56rpx 0;
+  background: #ffe15a;
+  border: none;
+  border-radius: 28rpx;
+  color: #191919;
   user-select: none;
+  box-shadow: 0 6rpx 0 #e5c431;
 }
 
-.talk-btn.recording {
-  background: #eaf2fb;
-  border-color: #3a6ea5;
-  border-style: solid;
+.talk-btn.busy {
+  background: #f3edd9;
+  box-shadow: none;
+  color: #8a8577;
 }
 
 .talk-btn.cancel {
-  background: #fdf0f0;
-  border-color: #d93025;
-  border-style: solid;
-}
-
-.talk-icon {
-  font-size: 30rpx;
-  color: #3a6ea5;
-}
-
-.talk-btn.cancel .talk-icon {
+  background: #fdecec;
+  box-shadow: 0 6rpx 0 #ecc2c0;
   color: #d93025;
 }
 
+.talk-icon {
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
 .talk-label {
-  font-size: 28rpx;
-  color: #374151;
+  font-size: 26rpx;
+  opacity: 0.75;
 }
 
 .partial-text {
   padding: 16rpx 20rpx;
-  border-radius: 12rpx;
-  background: #f4f5f7;
+  border-radius: 16rpx;
+  background: #faf8f2;
+  border: 2rpx solid #e8e3d6;
   font-size: 28rpx;
-  color: #374151;
+  color: #191919;
   line-height: 1.5;
+}
+
+.example {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #a39d8d;
+  text-align: center;
 }

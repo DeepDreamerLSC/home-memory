@@ -61,47 +61,46 @@ async function main() {
 
   await page.waitFor(1000);
 
-  // 1. 三张卡片渲染
+  // 1. 品牌头部与三张卡片(Issue #8 v0.1:找东西在前)
+  const brandName = await page.$(".brand-name");
+  const brandText = brandName === null ? "" : await brandName.text();
+  console.log("✔ 品牌头部:", brandText);
+  assert(brandText.trim() === "我靠东西呢", "品牌名应为「我靠东西呢」,实际:" + brandText);
   const titles = await page.$$(".card-title");
   const texts = [];
   for (const t of titles) texts.push(await t.text());
   console.log("✔ 卡片标题:", texts.join(" / "));
-  assert(texts.length === 3, "首页应有「记一件/找东西/最近记录」三张卡片,实际 " + texts.length + " 张");
+  assert(texts.length === 3, "首页应有「找东西/顺手记一件/最近记住的」三张卡片,实际 " + texts.length + " 张");
   assert(
-    texts[0] === "记一件" && texts[1] === "找东西" && texts[2] === "最近记录",
+    texts[0] === "找东西" && texts[1] === "顺手记一件" && texts[2] === "最近记住的",
     "卡片标题与预期不符:" + JSON.stringify(texts),
   );
 
-  // 2. 默认应为语音模式(语音极速录入是核心场景)
-  const tabs0 = await page.$$(".mode-tab");
-  assert(tabs0.length === 2, "应有 文字/语音 两个模式切换标签");
+  // 2. 默认应为语音模式(按住就能记);改用文字/改回语音来回切换
   const talkDefault = await page.$(".talk-btn");
   assert(talkDefault !== null, "默认应展示语音输入界面(按住说话)");
 
-  // 2.5 语音模式 UI:切文字再切回语音(文字回退路径)
-  const tabs = await page.$$(".mode-tab");
-  await tabs[0].tap();
+  const modeLink = await page.$(".mode-link");
+  assert(modeLink !== null, "应有「改用文字」次级切换入口");
+  await modeLink.tap();
   await page.waitFor(400);
   const textareaBack = await page.$(".memo-input");
-  assert(textareaBack !== null, "切回文字模式应显示输入框(文字回退可用)");
+  assert(textareaBack !== null, "切文字模式应显示输入框(文字回退可用)");
   console.log("✔ 文字模式正常(文字回退可用)");
-  const tabsBack = await page.$$(".mode-tab");
-  await tabsBack[1].tap();
-  await page.waitFor(400);
-  const talkBtn = await page.$(".talk-btn");
-  assert(talkBtn !== null, "语音模式下应显示「按住说话」按钮");
-  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
 
-  // 2.6 文字输入交互(切到文字模式)
-  const tabsText = await page.$$(".mode-tab");
-  await tabsText[0].tap();
-  await page.waitFor(400);
-  const textarea = await page.$(".memo-input");
-  assert(textarea !== null, "应找到「记一件」输入框");
-  await textarea.input("钥匙放在玄关第二个抽屉");
+  await textareaBack.input("钥匙放在玄关第二个抽屉");
   await page.waitFor(300);
   const countEl = await page.$(".char-count");
   const countText = countEl === null ? "" : await countEl.text();
+  console.log("✔ 输入后字数统计:", countText);
+  assert(countText.includes("/500"), "字数统计应随输入更新");
+
+  const modeLink2 = await page.$(".mode-link");
+  await modeLink2.tap();
+  await page.waitFor(400);
+  const talkBtn = await page.$(".talk-btn");
+  assert(talkBtn !== null, "切回语音模式应显示「按住说话」按钮");
+  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
   console.log("✔ 输入后字数统计:", countText);
   assert(countText.includes("/500"), "字数统计应随输入更新");
 
@@ -109,10 +108,10 @@ async function main() {
   const searchInput = await page.$(".search-input");
   assert(searchInput !== null, "应找到「找东西」输入框");
   await searchInput.input("钥匙");
-  const searchBtn = await page.$(".search-btn");
-  assert(searchBtn !== null, "应找到「查一下」按钮");
-  await searchBtn.tap();
-  console.log("已点击「查一下」,等待查询结果…");
+  const searchGo = await page.$(".search-go");
+  assert(searchGo !== null, "应找到「找」执行按钮");
+  await searchGo.tap();
+  console.log("已点击「找」,等待查询结果…");
   await page.waitFor(4000);
   const errEls = await page.$$(".error-text");
   const emptyEl = await page.$(".empty-text");

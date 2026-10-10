@@ -1,7 +1,7 @@
-/* 全局样式:简洁卡片式布局,全中文文案配合 */
+/* 全局样式:品牌「我靠东西呢」——奶油白 #FAF8F2 / 明黄 #FFE15A / 墨黑 #191919 */
 page {
-  background: #f4f5f7;
-  color: #333333;
+  background: #faf8f2;
+  color: #191919;
   font-size: 28rpx;
   line-height: 1.6;
 }
@@ -12,35 +12,47 @@ page {
 
 .card {
   background: #ffffff;
-  border-radius: 20rpx;
+  border-radius: 24rpx;
   padding: 32rpx 28rpx;
   margin: 24rpx;
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2rpx 8rpx rgba(25, 25, 25, 0.04);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.card-head .card-title {
+  margin-bottom: 0;
 }
 
 .card-title {
   font-size: 32rpx;
-  font-weight: 600;
-  color: #1f2430;
+  font-weight: 700;
+  color: #191919;
   margin-bottom: 20rpx;
 }
 
 .hint {
   font-size: 24rpx;
-  color: #8a919f;
+  color: #8a8577;
   margin-bottom: 12rpx;
 }
 
 .placeholder {
-  color: #b9c0cc;
+  color: #b8b2a4;
 }
 
-/* 输入控件 */
+/* 输入控件:白底墨字,细边 */
 .memo-input {
   width: 100%;
   min-height: 140rpx;
-  background: #f4f5f7;
-  border-radius: 12rpx;
+  background: #faf8f2;
+  border: 2rpx solid #e8e3d6;
+  border-radius: 16rpx;
   padding: 20rpx;
   box-sizing: border-box;
   font-size: 28rpx;
@@ -49,13 +61,14 @@ page {
 .char-count {
   text-align: right;
   font-size: 22rpx;
-  color: #b9c0cc;
+  color: #b8b2a4;
   margin: 8rpx 0 16rpx;
 }
 
 .input {
-  background: #f4f5f7;
-  border-radius: 12rpx;
+  background: #faf8f2;
+  border: 2rpx solid #e8e3d6;
+  border-radius: 16rpx;
   padding: 16rpx 20rpx;
   font-size: 28rpx;
 }
@@ -63,8 +76,9 @@ page {
 .textarea {
   width: 100%;
   min-height: 120rpx;
-  background: #f4f5f7;
-  border-radius: 12rpx;
+  background: #faf8f2;
+  border: 2rpx solid #e8e3d6;
+  border-radius: 16rpx;
   padding: 16rpx 20rpx;
   box-sizing: border-box;
   font-size: 28rpx;
@@ -77,22 +91,24 @@ page {
 
 .search-input {
   flex: 1;
-  background: #f4f5f7;
-  border-radius: 12rpx;
-  padding: 14rpx 20rpx;
+  background: #faf8f2;
+  border: 2rpx solid #e8e3d6;
+  border-radius: 16rpx;
+  padding: 16rpx 20rpx;
   font-size: 28rpx;
 }
 
 .search-btn {
-  width: 170rpx;
+  width: 110rpx;
   margin-left: 16rpx;
 }
 
-/* 按钮 */
+/* 按钮:明黄主操作(一屏一个强调面) */
 button.btn {
-  border-radius: 12rpx;
+  border-radius: 16rpx;
   font-size: 30rpx;
   line-height: 2.4;
+  font-weight: 600;
   padding-left: 0;
   padding-right: 0;
 }
@@ -102,8 +118,13 @@ button.btn::after {
 }
 
 button.btn.primary {
-  background: #3f6ff2;
-  color: #ffffff;
+  background: #ffe15a;
+  color: #191919;
+}
+
+button.btn.primary[disabled] {
+  background: #f3edd9;
+  color: #b8b2a4;
 }
 
 button.btn.danger {
@@ -117,10 +138,10 @@ button.btn.block {
   margin-top: 24rpx;
 }
 
-/* 列表条目 */
+/* 列表条目:紧凑 */
 .item-row {
-  padding: 20rpx 0;
-  border-bottom: 1rpx solid #f0f1f4;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0ede4;
 }
 
 .item-row:last-child {
@@ -130,24 +151,24 @@ button.btn.block {
 .item-name {
   font-size: 30rpx;
   font-weight: 600;
-  color: #1f2430;
+  color: #191919;
 }
 
 .item-location {
   font-size: 26rpx;
-  color: #4b5563;
-  margin-top: 4rpx;
+  color: #4c483e;
+  margin-top: 2rpx;
 }
 
 .item-time {
   font-size: 22rpx;
-  color: #9aa3af;
-  margin-top: 4rpx;
+  color: #a39d8d;
+  margin-top: 2rpx;
 }
 
 .empty-text {
   text-align: center;
-  color: #9aa3af;
+  color: #a39d8d;
   padding: 32rpx 0;
   font-size: 26rpx;
 }
@@ -158,25 +179,29 @@ button.btn.block {
   padding: 16rpx 0;
 }
 
-/* 确认页 / 详情页表单 */
+/* 确认页 / 详情页表单:AI 草稿 = 黄底横幅(与已确认事实视觉分离) */
 .banner {
   margin: 24rpx;
   padding: 20rpx 24rpx;
-  background: #e8efff;
-  color: #2b5fd9;
-  border-radius: 12rpx;
+  background: #fff3bf;
+  color: #191919;
+  border: 2rpx solid #ffe15a;
+  border-radius: 16rpx;
   font-size: 28rpx;
+  font-weight: 600;
 }
 
 .banner.manual {
-  background: #eef1f5;
-  color: #4b5563;
+  background: #f4f1e6;
+  color: #4c483e;
+  border-color: #e8e3d6;
+  font-weight: 400;
 }
 
 .qualifiers {
   margin: 12rpx 24rpx 0;
   font-size: 24rpx;
-  color: #6b7280;
+  color: #6b6659;
 }
 
 .qualifiers.warn {
@@ -189,12 +214,12 @@ button.btn.block {
 
 .label {
   font-size: 26rpx;
-  color: #4b5563;
+  color: #4c483e;
   margin-bottom: 8rpx;
 }
 
 .meta {
   font-size: 24rpx;
-  color: #9aa3af;
+  color: #a39d8d;
   margin-bottom: 20rpx;
 }
