@@ -5,8 +5,9 @@
     <view class="brand-sub">东西放哪儿了?我记得。</view>
   </view>
 
-  <!-- 搜索:紧跟品牌,打开就能找 -->
+  <!-- 找东西:紧跟品牌,打开就能找 -->
   <view class="search-wrap">
+    <view class="section-title">找东西</view>
     <view class="search-row">
       <input
         class="search-input"
@@ -35,26 +36,23 @@
         data-index="{{ index }}"
         bindtap="onResultTap"
       >
-        <view class="item-name">{{ item.name }}</view>
-        <view class="item-location">上次记录:{{ item.location_text }}</view>
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">上次记录:{{ item.location_text }}</view>
+        </view>
+        <view class="chevron">›</view>
       </view>
     </block>
   </view>
 
   <!-- 顺手记一件:一屏唯一主视觉,按住就能记 -->
   <view class="card">
-    <view class="card-head">
-      <view class="card-title">顺手记一件</view>
-      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
-        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
-      </view>
-    </view>
+    <view class="card-title">顺手记一件</view>
 
     <!-- 语音模式:按住说话 -->
     <block wx:if="{{ inputMode === 'voice' }}">
-      <view class="voice-state">
-        {{ voiceState === 'cancelPending' ? '松手取消本次' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '' }}
-      </view>
+      <view class="example">比如说:"充电宝放在书房抽屉里"</view>
       <view
         class="talk-btn {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
         catchtouchstart="onTalkTouchStart"
@@ -62,11 +60,24 @@
         catchtouchend="onTalkTouchEnd"
         catchtouchcancel="onTalkTouchCancel"
       >
-        <view class="talk-icon">{{ voiceState === 'cancelPending' ? '好,当我没听见。' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
-        <view class="talk-label">按住说话,松开记住</view>
+        <view class="mic-circle">
+          <block wx:if="{{ voiceState === 'recording' }}">
+            <view class="mic-seconds">{{ recordSeconds }}s</view>
+          </block>
+          <block wx:else>
+            <view class="mic-cap"></view>
+            <view class="mic-stand"></view>
+            <view class="mic-base"></view>
+          </block>
+        </view>
+        <view class="talk-label">
+          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开记住' }}
+        </view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
-      <view class="example">比如说:"充电宝放在书房抽屉里"</view>
+      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
+        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
+      </view>
     </block>
 
     <!-- 文字模式:次级入口,保留用户输入 -->
@@ -89,6 +100,9 @@
       >
         提取并确认
       </button>
+      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
+        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
+      </view>
     </block>
   </view>
 
@@ -107,9 +121,12 @@
       data-index="{{ index }}"
       bindtap="onRecentTap"
     >
-      <view class="item-name">{{ item.name }}</view>
-      <view class="item-location">上次记录:{{ item.location_text }}</view>
-      <view class="item-time">{{ item.updated_at_text }}</view>
+      <view class="item-icon">{{ item.name[0] }}</view>
+      <view class="item-main">
+        <view class="item-name">{{ item.name }}</view>
+        <view class="item-location">上次记录:{{ item.location_text }}</view>
+      </view>
+      <view class="chevron">›</view>
     </view>
   </view>
 </view>

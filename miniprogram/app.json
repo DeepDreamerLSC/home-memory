@@ -6,11 +6,13 @@
   ],
   "window": {
     "navigationBarTitleText": "我靠东西呢",
-    "navigationBarBackgroundColor": "#FAF8F2",
-    "navigationBarTextStyle": "black",
-    "backgroundColor": "#FAF8F2",
-    "backgroundTextStyle": "dark"
+    "navigationBarBackgroundColor": "@navBgColor",
+    "navigationBarTextStyle": "@navTxtStyle",
+    "backgroundColor": "@bgColor",
+    "backgroundTextStyle": "@bgTxtStyle"
   },
   "style": "v2",
-  "sitemapLocation": "sitemap.json"
+  "sitemapLocation": "sitemap.json",
+  "darkmode": true,
+  "themeLocation": "theme.json"
 }

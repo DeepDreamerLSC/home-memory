@@ -119,17 +119,18 @@ async function main() {
   const searchBtn = await page.$(".search-go");
   const tQ = Date.now();
   await searchBtn.tap();
+  // 只认搜索结果区内的行:「最近记住的」卡片同样渲染 .item-row,查询未返回时会抢先命中
   const row = await waitFor(
     async () => {
-      const el = await page.$(".item-row");
+      const el = await page.$(".search-wrap .item-row");
       return el;
     },
     20000,
     "查询结果出现",
   );
   timings.query = Date.now() - tQ;
-  const rowName = await (await page.$(".item-name")).text();
-  const rowLocation = await (await page.$(".item-location")).text();
+  const rowName = await (await row.$(".item-name")).text();
+  const rowLocation = await (await row.$(".item-location")).text();
   console.log("✔ 查询命中:名称=" + rowName + " 位置=" + rowLocation + "(耗时 " + fmt(timings.query) + ")");
   assert(rowName.includes(itemName), "查询结果名称应匹配");
   assert(rowLocation.includes("厨房"), "查询结果位置应为原位置");
@@ -176,7 +177,7 @@ async function main() {
   // 旧查询结果仍渲染在页面上,需轮询等新位置替换旧位置
   const finalLocation = await waitFor(
     async () => {
-      const loc = await page.$(".item-location");
+      const loc = await page.$(".search-wrap .item-location");
       if (!loc) return null;
       const text = await loc.text();
       return text.includes("客厅") ? text : null;
