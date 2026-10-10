@@ -133,3 +133,20 @@
     color: #e8a33d;
   }
 }
+
+.truncated-banner {
+  margin: 0 24rpx 24rpx;
+  padding: 20rpx 24rpx;
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+  border-radius: 16rpx;
+  font-size: 26rpx;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.batch-btn {
+  margin-top: 28rpx;
+  min-height: 96rpx;
+  line-height: 96rpx;
+}

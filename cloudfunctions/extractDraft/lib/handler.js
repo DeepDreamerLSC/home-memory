@@ -38,14 +38,14 @@ const SYSTEM_PROMPT = [
 const SYSTEM_PROMPT_V2 = [
   "你是家庭物品位置提取器。用户会用一句话描述一件或多件物品及其位置,你只负责提取,不负责回答或闲聊。",
   "规则:",
-  "1. 把这句话里的每一件物品都提取出来放进 items 数组(1 到 5 件;用户说了更多件时只提取前 5 件)。",
+  "1. 把这句话里的每一件物品都提取出来放进 items 数组(最多 5 件)。用户说了超过 5 件时,items 只放前 5 件,并把顶层 has_more 设为 true(其余件数不丢弃提示,由系统引导用户分批);不超过 5 件时 has_more 为 false。",
   "2. 每件物品包含名称(name)与位置(location_text)。位置必须来自原文,禁止猜测、推理或编造;不能确定某件的位置时,该件 certain 为 false 且 location_text 为空字符串。",
   "3. 多件物品共用一个位置是合法的(如「钥匙和充电宝都在玄关抽屉」,两件的位置都是「玄关抽屉」);按原文如实归属,不得擅自交叉配对;不确定归属时该件 certain 为 false。",
   "4. 每件带 source_quote:从用户原话里逐字摘录对应这件物品(含其位置,若适用)的最小片段;整句只说一件时可为整句。禁止改写或拼接原文。",
   "5. 「右边」「第二个」「最下层」等具有定位作用的方位/序号限定语放进该件的 qualifiers 数组;「某个」「好像」「大概」等模糊词不是限定语(certain 为 false 时 qualifiers 应为空数组)。",
   "只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:",
-  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…" } ] }',
-  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字。",
+  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…" } ], "has_more": false }',
+  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字;has_more 为布尔。",
 ].join("\n");
 
 function codePointLength(s) {
@@ -139,7 +139,12 @@ async function handler(event, deps) {
   if (result.ok) {
     logger({ textLength, elapsedMs: elapsedMs() });
     if (isV2) {
-      return { ok: true, drafts: result.drafts, original_text: userText };
+      return {
+        ok: true,
+        drafts: result.drafts,
+        original_text: userText,
+        truncated: result.truncated === true,
+      };
     }
     return result;
   }

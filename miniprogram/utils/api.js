@@ -160,10 +160,11 @@ async function callExtractDraft(text, opts) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     if (Array.isArray(result.drafts)) {
-        const drafts = result.drafts.filter(isRecord);
-        if (drafts.length < 1 ||
+        // 严格校验:任一件形状非法整次抛错,绝不静默丢弃异常件(部分消费会让用户以为全记了)
+        if (result.drafts.length < 1 ||
+            !result.drafts.every(isRecord) ||
             typeof result.original_text !== "string" ||
-            !drafts.every((d) => typeof d.name === "string" &&
+            !result.drafts.every((d) => typeof d.name === "string" &&
                 typeof d.location_text === "string" &&
                 typeof d.certain === "boolean" &&
                 Array.isArray(d.qualifiers) &&
@@ -172,7 +173,7 @@ async function callExtractDraft(text, opts) {
         }
         return {
             ok: true,
-            drafts: drafts.map((d) => ({
+            drafts: result.drafts.map((d) => ({
                 name: d.name,
                 location_text: d.location_text,
                 certain: d.certain,
@@ -180,6 +181,7 @@ async function callExtractDraft(text, opts) {
                 source_quote: d.source_quote,
             })),
             original_text: result.original_text,
+            truncated: result.truncated === true,
         };
     }
     if (result.needs_split === true) {

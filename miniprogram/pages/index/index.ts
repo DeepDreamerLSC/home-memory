@@ -335,7 +335,7 @@ Page<
       const res = await callExtractDraft(text, { protocol: 2 });
       if ("drafts" in res) {
         // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
-        const sid = createDraftSession(res.original_text, res.drafts);
+        const sid = createDraftSession(res.original_text, res.drafts, res.truncated);
         this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
         return;
       }
@@ -349,7 +349,7 @@ Page<
         return;
       }
       // v1 单草稿兜底:同样入会话走列表页
-      const sid = createDraftSession(text, [{ ...res.draft, source_quote: text }]);
+      const sid = createDraftSession(text, [{ ...res.draft, source_quote: text }], false);
       this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
     } catch (e) {
       if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") {

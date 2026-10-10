@@ -54,6 +54,9 @@
       <view class="quote-label">你说的原话</view>
       <view class="quote-text">{{ originalText }}</view>
     </view>
+    <view wx:if="{{ truncated }}" class="truncated-banner">
+      这句话里的东西超过 5 件,先记住下面这 5 件,剩下的回头再说一句。
+    </view>
 
     <view class="card batch-card">
       <view wx:for="{{ rows }}" wx:key="key" class="row {{ item.status }}">
@@ -78,7 +81,7 @@
             placeholder-class="placeholder"
             value="{{ item.name }}"
             maxlength="50"
-            disabled="{{ item.status === 'saving' || item.status === 'saved' }}"
+            disabled="{{ batchSaving || item.status === 'saving' || item.status === 'saved' }}"
             data-index="{{ index }}"
             bindinput="onRowNameInput"
           />
@@ -91,7 +94,7 @@
             placeholder-class="placeholder"
             value="{{ item.locationText }}"
             maxlength="200"
-            disabled="{{ item.status === 'saving' || item.status === 'saved' }}"
+            disabled="{{ batchSaving || item.status === 'saving' || item.status === 'saved' }}"
             data-index="{{ index }}"
             bindinput="onRowLocationInput"
           />
@@ -108,11 +111,12 @@
       </view>
 
       <button
-        class="btn primary block"
+        class="btn primary block batch-btn"
         loading="{{ batchSaving }}"
+        disabled="{{ checkedCount === 0 }}"
         bindtap="onSaveBatchTap"
       >
-        记住了,保存勾选的
+        记住了,保存勾选的({{ checkedCount }})
       </button>
     </view>
   </block>

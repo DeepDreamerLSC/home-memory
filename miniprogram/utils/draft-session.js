@@ -15,9 +15,9 @@ function prune(now) {
     }
 }
 /** 存入一批草稿,返回会话 id(由确认页 URL 携带) */
-function createDraftSession(originalText, drafts) {
+function createDraftSession(originalText, drafts, truncated) {
     const sid = (0, api_1.uuid)();
-    sessions.set(sid, { originalText, drafts, createdAt: Date.now() });
+    sessions.set(sid, { originalText, drafts, truncated, createdAt: Date.now() });
     return sid;
 }
 /** 按 sid 取会话;过期或不存在返回 null(调用方如实提示,不编造空草稿) */

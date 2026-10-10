@@ -11,6 +11,8 @@ import type { DraftWithQuote } from "../types";
 export interface DraftSessionPayload {
   originalText: string;
   drafts: DraftWithQuote[];
+  /** 原话超过 5 件被截取前 5(确认页提示分批,绝不静默) */
+  truncated: boolean;
   createdAt: number;
 }
 
@@ -27,9 +29,13 @@ function prune(now: number): void {
 }
 
 /** 存入一批草稿,返回会话 id(由确认页 URL 携带) */
-export function createDraftSession(originalText: string, drafts: DraftWithQuote[]): string {
+export function createDraftSession(
+  originalText: string,
+  drafts: DraftWithQuote[],
+  truncated: boolean,
+): string {
   const sid = uuid();
-  sessions.set(sid, { originalText, drafts, createdAt: Date.now() });
+  sessions.set(sid, { originalText, drafts, truncated, createdAt: Date.now() });
   return sid;
 }
 

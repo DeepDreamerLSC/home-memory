@@ -629,3 +629,46 @@ test("handler 路由:不带 protocol 的旧客户端维持 v1 行为(兼容硬�
   });
   assert.deepEqual(result, { ok: true, needs_split: true, message: "一次只记一件物品,请分开说" });
 });
+
+// ---------- has_more 截断提示(评审阻断 1:超 5 件绝不静默) ----------
+
+test("v2 校验:has_more=true 透传 truncated(超 5 件前 5 条 + 截断标记)", function () {
+  const items = Array.from({ length: 5 }, (_, i) => ({
+    name: "物品" + i,
+    location_text: "桌上",
+    certain: true,
+    qualifiers: [],
+    source_quote: "物品" + i,
+  }));
+  const result = validateDrafts(JSON.stringify({ items, has_more: true }), "物品0物品1物品2物品3物品4还有更多");
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts.length, 5);
+  assert.equal(result.truncated, true, "截断必须显式透传,不得静默");
+});
+
+test("v2 校验:has_more 缺省为 false;非布尔拒绝", function () {
+  const ok = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关" }]),
+    "钥匙在玄关",
+  );
+  assert.equal(ok.truncated, false);
+  const bad = validateDrafts(
+    JSON.stringify({ items: [{ name: "钥匙", certain: true, qualifiers: [], source_quote: "钥匙", location_text: "玄关" }], has_more: "yes" }),
+    "钥匙在玄关",
+  );
+  assert.equal(bad.ok, false);
+});
+
+test("handler v2:响应透传 truncated", async function () {
+  const result = await handler({ text: "甲在桌上乙在桌上丙在桌上丁在桌上戊在桌上还有很多", protocol: 2 }, {
+    logger() {},
+    callLLM() {
+      return Promise.resolve(JSON.stringify({
+        items: Array.from({ length: 5 }, (_, i) => ({ name: "物" + i, location_text: "桌上", certain: true, qualifiers: [], source_quote: "物" + i })),
+        has_more: true,
+      }));
+    },
+  });
+  assert.equal(result.truncated, true);
+  assert.equal(result.ok, true);
+});

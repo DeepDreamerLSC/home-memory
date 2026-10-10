@@ -239,7 +239,7 @@ Page({
             const res = await (0, api_1.callExtractDraft)(text, { protocol: 2 });
             if ("drafts" in res) {
                 // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
-                const sid = (0, draft_session_1.createDraftSession)(res.original_text, res.drafts);
+                const sid = (0, draft_session_1.createDraftSession)(res.original_text, res.drafts, res.truncated);
                 this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
                 return;
             }
@@ -253,7 +253,7 @@ Page({
                 return;
             }
             // v1 单草稿兜底:同样入会话走列表页
-            const sid = (0, draft_session_1.createDraftSession)(text, [{ ...res.draft, source_quote: text }]);
+            const sid = (0, draft_session_1.createDraftSession)(text, [{ ...res.draft, source_quote: text }], false);
             this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
         }
         catch (e) {

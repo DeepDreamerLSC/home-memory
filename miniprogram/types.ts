@@ -167,11 +167,12 @@ export interface ExtractDraftMultiEvent extends ExtractDraftEvent {
   protocol: 2;
 }
 
-/** 协议 v2 响应:一句话(1-5 件)拆分后的草稿数组,单件时长度也为 1 */
+/** 协议 v2 响应:一句话(1-5 件)拆分后的草稿数组,单件时长度也为 1;truncated=原话超 5 件被截取(须引导分批,绝不静默) */
 export interface ExtractDraftMultiResponse {
   ok: true;
   drafts: DraftWithQuote[];
   original_text: string;
+  truncated: boolean;
 }
 
 export type ExtractDraftResponse =

@@ -137,8 +137,9 @@ function validateDraft(rawText, originalText) {
 }
 
 /*
- * 协议 v2:模型输出 { items: [ { name, location_text, certain, qualifiers, source_quote } ] }。
- * source_quote 非原话子串时置空(证据缺失),其余字段按单件规则校验。
+ * 协议 v2:模型输出 { items: [ { name, location_text, certain, qualifiers, source_quote } ], has_more }。
+ * source_quote 非原话子串时置空(证据缺失),其余字段按单件规则校验;
+ * has_more 为 true 表示原话超过 5 件被截取前 5(绝不静默:透传 truncated 由确认页引导分批)。
  */
 function validateDrafts(rawText, originalText) {
   const parsed = extractJsonObject(rawText);
@@ -155,6 +156,11 @@ function validateDrafts(rawText, originalText) {
   }
   if (parsed.items.length > ITEMS_MAX) {
     return unavailable();
+  }
+  let hasMore = false;
+  if (Object.prototype.hasOwnProperty.call(parsed, "has_more")) {
+    if (typeof parsed.has_more !== "boolean") return unavailable();
+    hasMore = parsed.has_more;
   }
   const normalizedOriginal = stripWhitespace(String(originalText || ""));
   const drafts = [];
@@ -177,7 +183,7 @@ function validateDrafts(rawText, originalText) {
     }
     drafts.push(Object.assign({}, result.draft, { source_quote: sourceQuote }));
   }
-  return { ok: true, drafts };
+  return { ok: true, drafts, truncated: hasMore };
 }
 
 module.exports = { validateDraft, validateDrafts };

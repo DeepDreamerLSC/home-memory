@@ -12,9 +12,10 @@ Page({
         saving: false,
         operationId: "",
         originalText: "",
+        truncated: false,
         rows: [],
         batchSaving: false,
-        doneCount: "",
+        checkedCount: 0,
     },
     /** 草稿会话 id(onUnload 清理用) */
     sid: "",
@@ -42,7 +43,8 @@ Page({
             key: "row-" + i,
             name: d.name,
             locationText: d.location_text,
-            checked: true,
+            // 无原话证据的候选默认不勾选:先经用户核对,再勾上保存
+            checked: d.source_quote !== "",
             status: "pending",
             failMsg: "",
             operationId: (0, api_1.uuid)(),
@@ -50,7 +52,13 @@ Page({
             qualifiersText: d.qualifiers.join("、"),
             sourceQuote: d.source_quote,
         }));
-        this.setData({ isManual: false, originalText: payload.originalText, rows });
+        this.setData({
+            isManual: false,
+            originalText: payload.originalText,
+            truncated: payload.truncated,
+            rows,
+            checkedCount: (0, batch_save_1.batchSummary)(rows).checked,
+        });
     },
     onUnload() {
         if (this.sid !== "") {
@@ -154,10 +162,16 @@ Page({
     onRowToggle(e) {
         const index = Number(e.currentTarget.dataset.index);
         const row = this.data.rows[index];
+        // 整批提交中冻结全部勾选状态:本轮开始时的选择即本轮写入的选择
+        if (this.data.batchSaving) {
+            return;
+        }
         if (!row || row.status === "saving" || row.status === "saved") {
             return; // 已保存的行不可取消(事实已入库)
         }
-        this.setData({ ["rows[" + index + "].checked"]: !row.checked });
+        const rows = this.data.rows.slice();
+        rows[index] = { ...row, checked: !row.checked };
+        this.setData({ ["rows[" + index + "].checked"]: !row.checked, checkedCount: (0, batch_save_1.batchSummary)(rows).checked });
     },
     onRowDetail(e) {
         const index = Number(e.currentTarget.dataset.index);
