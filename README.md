@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items` 与 `locations` 两个集合(issue #18 起位置沉淀为可浏览的空间树)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations` 与 `item_location_history` 三个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,仅 locations 云函数写入,无需人工维护)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -52,7 +52,7 @@ tests/                   离线测试(node:test + node:assert,零外部依赖)
   helpers/memoryDb.js    内存版 CloudBase 语义(含云函数端 get() 单次 100 条上限、唯一索引 E11000 模拟)
   itemsApi.test.js       itemsApi 契约测试
   extractDraft.test.js   extractDraft 契约测试
-  locations.test.js      locations 契约测试(隔离/幂等/版本链交叉/扫描编排等 18 项)
+  locations.test.js      locations 契约测试(隔离/幂等/版本链交叉/扫描编排/分块/位置变更历史等 21 项)
   transcribe.test.js     语音识别云函数契约测试
   glue.test.js           云函数入口胶水层测试(stub wx-server-sdk 真实加载)
   voice.test.js          语音控制器与会话守卫测试
@@ -70,7 +70,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:81 项(itemsApi 26 + extractDraft 20 + locations 18 + voice 10 + transcribe 4 + 胶水层 3),全部通过
+npm test             # 离线全量测试:84 项(itemsApi 26 + extractDraft 20 + locations 21 + voice 10 + transcribe 4 + 胶水层 3),全部通过
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
@@ -96,7 +96,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items` 与 `locations`(后者为 issue #18 空间树)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations` 与 `item_location_history`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -110,11 +110,17 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 作用:同一层下并发创建同名位置(如两次同时从扫描向导确认「书房」)时,数据库拒绝第二笔插入,服务端捕获后回查复用已有节点,绝不双建;home 根节点的每家庭唯一性也由该索引自然覆盖。
 
-**③ 权限设置(安全必做,items 与 locations 都要)**:
+**③ 权限设置(安全必做,三个集合都要)**:
 
-> 两个集合 → 权限设置 → 均选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
+> 三个集合 → 权限设置 → 均选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
 
 **为什么必须改**:所有业务访问都经云函数(管理端身份,不受权限规则约束),客户端不需要任何直连权限。默认权限曾实测允许任意客户端直读全集合(见 `docs/security-evidence.md` 证据 1)——不改等于向所有用户开放全部家庭数据。
+
+**④ item_location_history(位置变更历史预留层)**:
+
+> 按上文创建集合并把权限并入 ③(「所有用户不可读不可写」)即可;**无需建任何索引**。
+
+该集合是 append-only 的预留审计层:locations 云函数在每次真实挂载变更(挂上/摘除/合并重挂/向导入库/补偿摘除)后追加一行,只插不改不删,V1 没有读取入口。除「创建集合 + 设权限」外无需任何人工维护。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
