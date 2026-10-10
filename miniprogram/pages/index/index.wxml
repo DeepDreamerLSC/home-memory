@@ -44,10 +44,10 @@
       </view>
       <view
         class="talk-btn {{ (voiceState === 'recording' || transcribing) && voiceState !== 'cancelPending' ? 'recording' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
-        bindtouchstart="onTalkTouchStart"
-        bindtouchmove="onTalkTouchMove"
-        bindtouchend="onTalkTouchEnd"
-        bindtouchcancel="onTalkTouchCancel"
+        catchtouchstart="onTalkTouchStart"
+        catchtouchmove="onTalkTouchMove"
+        catchtouchend="onTalkTouchEnd"
+        catchtouchcancel="onTalkTouchCancel"
       >
         <view class="talk-icon">{{ transcribing ? '识别中…' : voiceState === 'cancelPending' ? '已取消' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
         <view class="talk-label">按住说话</view>

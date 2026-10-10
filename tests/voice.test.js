@@ -160,3 +160,14 @@ test("控制器:读录音文件失败 → READ_FAIL;录音器报错 → RECORD_F
   deps2.__recorder.__fireError({ errMsg: "fail" });
   assert.ok(rec2.events[0].indexOf("error:RECORD_FAIL") === 0);
 });
+
+test("isMeaningfulTranscript:语气词噪音不算有效输入,正常语音有效", function () {
+  assert.equal(voice.isMeaningfulTranscript("嗯。"), false, "典型环境噪音转写");
+  assert.equal(voice.isMeaningfulTranscript("啊"), false);
+  assert.equal(voice.isMeaningfulTranscript("嗯嗯嗯"), false);
+  assert.equal(voice.isMeaningfulTranscript(""), false);
+  assert.equal(voice.isMeaningfulTranscript("  哦。 "), false);
+  assert.equal(voice.isMeaningfulTranscript("钥匙在抽屉"), true);
+  assert.equal(voice.isMeaningfulTranscript("啊,充电宝在书房"), true, "开头语气词剥除后仍有效");
+  assert.equal(voice.isMeaningfulTranscript("哈密瓜放在茶几"), true, "含'哈'的真实词不受误伤");
+});

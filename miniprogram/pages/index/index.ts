@@ -9,6 +9,7 @@ import {
   ensureRecordAuth,
   createVoiceController,
   createDefaultVoiceDeps,
+  isMeaningfulTranscript,
   isSlideUpCancel,
   markVoiceCancelled,
   resetVoiceCancelled,
@@ -162,7 +163,9 @@ Page<
         onStop: (text) => {
           this.clearRecordTimer();
           this.setData({ voiceState: "idle", transcribing: false, partialText: text });
-          if (!text) {
+          // 空结果或纯语气词(环境噪音)不算有效输入:如实提示,不进提取,
+          // 避免噪音文本被误报成"AI 不可用"
+          if (!text || !isMeaningfulTranscript(text)) {
             wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
             return;
           }

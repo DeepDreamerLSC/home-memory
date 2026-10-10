@@ -15,6 +15,7 @@ exports.voiceErrorMessage = voiceErrorMessage;
 exports.summarizeTimings = summarizeTimings;
 exports.isSlideUpCancel = isSlideUpCancel;
 exports.cleanTranscript = cleanTranscript;
+exports.isMeaningfulTranscript = isMeaningfulTranscript;
 exports.resetVoiceCancelled = resetVoiceCancelled;
 exports.markVoiceCancelled = markVoiceCancelled;
 exports.createVoiceController = createVoiceController;
@@ -59,6 +60,15 @@ function cleanTranscript(text) {
         .trim()
         .replace(/^[,。、,.\s]+/, "")
         .replace(/[,。、,.\s]+$/, "");
+}
+/**
+ * 转写是否有可提取的有效内容:剥掉语气填充词(嗯/啊/哦等)与标点后
+ * 不足 2 字视为环境噪音(如"嗯。"),不应进入 AI 提取——
+ * 否则噪音文本会被判"提不出物品名"而误报 AI 不可用。
+ */
+function isMeaningfulTranscript(text) {
+    const stripped = text.replace(/[嗯啊哦呃唉诶呀哈\s,。、,.\?!!?~～]/g, "");
+    return stripped.length >= 2;
 }
 /** 录音识别中标记为取消:丢弃最终结果,不再回调 onStop */
 let cancelled = false;
