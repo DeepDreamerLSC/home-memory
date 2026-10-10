@@ -10,6 +10,7 @@ exports.rowsToSave = rowsToSave;
 exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
 exports.batchSummary = batchSummary;
+exports.runBatchSave = runBatchSave;
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
 function rowsToSave(rows) {
     return rows.filter((r) => r.checked && r.status !== "saved");
@@ -47,4 +48,30 @@ function batchSummary(rows) {
             failed += 1;
     }
     return { total: rows.length, checked, saved, failed };
+}
+/**
+ * 逐行保存编排(在传入快照的拷贝上推进,绝不引用调用方可变状态):
+ * 勾选且未 saved 的行依次 saving → create → saved/failed;
+ * 已保存行跳过;失败行保留原 operation_id 供重试(同键同内容幂等)。
+ * 返回推进后的新数组,调用方据此判定收尾(allCheckedSaved/batchSummary)。
+ */
+async function runBatchSave(rows, create, onRowUpdate) {
+    const work = rows.map((r) => ({ ...r }));
+    const todo = rowsToSave(work);
+    for (const row of todo) {
+        row.status = "saving";
+        row.failMsg = "";
+        onRowUpdate(row);
+        try {
+            await create(row);
+            row.status = "saved";
+            onRowUpdate(row);
+        }
+        catch (e) {
+            row.status = "failed";
+            row.failMsg = e instanceof Error && e.message ? e.message : String(e);
+            onRowUpdate(row, e);
+        }
+    }
+    return work;
 }

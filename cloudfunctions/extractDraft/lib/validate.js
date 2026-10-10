@@ -181,7 +181,19 @@ function validateDrafts(rawText, originalText) {
         sourceQuote = item.source_quote.trim();
       }
     }
-    drafts.push(Object.assign({}, result.draft, { source_quote: sourceQuote }));
+
+    // 位置锚定校验(确定性的归属防线,合法片段不得为错误配对背书):
+    // certain=true 时位置必须出现在其证据片段内(source_quote 为空时退而要求在原话内),
+    // 否则按「不肯定」降级——位置清空,交确认页让用户补,不废件也不放行。
+    let draft = result.draft;
+    if (draft.certain && draft.location_text !== "") {
+      const normalizedQuote = stripWhitespace(sourceQuote);
+      const anchor = normalizedQuote !== "" ? normalizedQuote : normalizedOriginal;
+      if (anchor.indexOf(draft.location_text) === -1) {
+        draft = Object.assign({}, draft, { certain: false, location_text: "" });
+      }
+    }
+    drafts.push(Object.assign({}, draft, { source_quote: sourceQuote }));
   }
   return { ok: true, drafts, truncated: hasMore };
 }

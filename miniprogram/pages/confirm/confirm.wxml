@@ -54,8 +54,8 @@
       <view class="quote-label">你说的原话</view>
       <view class="quote-text">{{ originalText }}</view>
     </view>
-    <view wx:if="{{ truncated }}" class="truncated-banner">
-      这句话里的东西超过 5 件,先记住下面这 5 件,剩下的回头再说一句。
+    <view wx:if="{{ truncated || rows.length >= 5 }}" class="truncated-banner">
+      {{ truncated ? '这句话里的东西超过 5 件,先记住下面这 5 件,剩下的回头再说一句。' : '这句话正好列了 5 件,如果还有没列出来的,回头再补说一句。' }}
     </view>
 
     <view class="card batch-card">

@@ -67,3 +67,76 @@ test("batchSummary:勾选/已保存/失败计数正确", function () {
   ];
   assert.deepEqual(bs.batchSummary(rows), { total: 4, checked: 3, saved: 1, failed: 1 });
 });
+
+// ---------- runBatchSave 故障注入(评审二轮:部分成功、原键重试、快照隔离) ----------
+
+const bs2 = require("../miniprogram/utils/batch-save.js");
+
+function batchRow(overrides) {
+  return Object.assign(
+    { key: "r", name: "钥匙", locationText: "玄关", checked: true, status: "pending", failMsg: "", operationId: "op-r" },
+    overrides,
+  );
+}
+
+test("runBatchSave:首行成功、次行超时、末行成功 —— 状态逐行如实推进,失败行保留原键", async function () {
+  const rows = [batchRow({ key: "a", operationId: "op-a" }), batchRow({ key: "b", operationId: "op-b" }), batchRow({ key: "c", operationId: "op-c" })];
+  const calls = [];
+  const finalRows = await bs2.runBatchSave(
+    rows,
+    (row) => {
+      calls.push(row.operationId);
+      if (row.key === "b") return Promise.reject(new Error("timeout"));
+      return Promise.resolve();
+    },
+    () => {},
+  );
+  assert.deepEqual(calls, ["op-a", "op-b", "op-c"], "三行都应尝试提交");
+  assert.equal(finalRows[0].status, "saved");
+  assert.equal(finalRows[1].status, "failed");
+  assert.equal(finalRows[1].failMsg, "timeout");
+  assert.equal(finalRows[1].operationId, "op-b", "失败行保留原幂等键");
+  assert.equal(finalRows[2].status, "saved", "失败不阻断后续行");
+  assert.equal(bs2.rowsToSave(finalRows).map((r) => r.key).join(","), "b", "重试只含失败行");
+});
+
+test("runBatchSave:原键重试且内容已改 —— 键不变内容变(服务端同键幂等/异内容冲突兜底)", async function () {
+  let rows = [batchRow({ key: "a", operationId: "op-a", locationText: "玄关" })];
+  rows = await bs2.runBatchSave(rows, () => Promise.reject(new Error("timeout")), () => {});
+  assert.equal(rows[0].status, "failed");
+  // 用户在失败行上改了位置后重试:快照内容变,幂等键不变
+  const retried = Object.assign({}, rows[0], { locationText: "客厅" });
+  const seen = [];
+  const out = await bs2.runBatchSave([retried], (row) => {
+    seen.push({ id: row.operationId, loc: row.locationText });
+    return Promise.resolve();
+  }, () => {});
+  assert.deepEqual(seen, [{ id: "op-a", loc: "客厅" }], "重试沿用原键提交新内容");
+  assert.equal(out[0].status, "saved");
+});
+
+test("runBatchSave:在快照拷贝上推进,绝不改动调用方数组;已保存行不重复提交", async function () {
+  const rows = [batchRow({ key: "a", status: "saved", operationId: "op-a" }), batchRow({ key: "b", operationId: "op-b" })];
+  const calls = [];
+  const out = await bs2.runBatchSave(rows, (row) => {
+    calls.push(row.key);
+    return Promise.resolve();
+  }, () => {});
+  assert.deepEqual(calls, ["b"], "已保存行不再提交");
+  assert.equal(rows[0].status, "saved");
+  assert.equal(rows[1].status, "pending", "原数组不被触碰(快照隔离)");
+  assert.equal(out[1].status, "saved");
+});
+
+test("runBatchSave:onRowUpdate 携带行状态与原始错误(调用方分类 OPERATION_CONFLICT)", async function () {
+  const events = [];
+  const fakeConflict = Object.assign(new Error("conflict"), { code: "OPERATION_CONFLICT" });
+  await bs2.runBatchSave(
+    [batchRow({ key: "a" })],
+    () => Promise.reject(fakeConflict),
+    (row, error) => events.push({ key: row.key, status: row.status, error }),
+  );
+  assert.equal(events.length, 2, "saving + failed 两次回调");
+  assert.equal(events[1].status, "failed");
+  assert.strictEqual(events[1].error, fakeConflict, "原始错误透传给调用方分类");
+});

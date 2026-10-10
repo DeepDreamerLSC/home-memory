@@ -672,3 +672,70 @@ test("handler v2:响应透传 truncated", async function () {
   assert.equal(result.truncated, true);
   assert.equal(result.ok, true);
 });
+
+// ---------- 位置锚定校验(评审二轮:合法片段不得为错误配对背书) ----------
+
+test("v2 位置锚定:位置不在其证据片段内 → 按「不肯定」降级,不废件也不放行(交叉配对反例)", function () {
+  // 原话两件两位置,模型把钥匙配到「客厅」(充电宝的位置):quote 合法但配对错误
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "客厅电视柜", certain: true, qualifiers: [], source_quote: "钥匙放在玄关抽屉" },
+    ]),
+    "钥匙放在玄关抽屉,充电宝放在客厅电视柜",
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].certain, false, "位置未锚定在证据内必须降级为不肯定");
+  assert.equal(result.drafts[0].location_text, "", "降级时位置清空,交用户补填");
+  assert.equal(result.drafts[0].name, "钥匙", "物品本身保留");
+  assert.equal(result.drafts[0].source_quote, "钥匙放在玄关抽屉", "合法证据仍保留展示");
+});
+
+test("v2 位置锚定:编造的位置(原话完全没有)同样降级;正确配对不受影响", function () {
+  const fabricated = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "冰箱里", certain: true, qualifiers: [], source_quote: "钥匙在桌上" }]),
+    "钥匙在桌上",
+  );
+  assert.equal(fabricated.drafts[0].certain, false, "编造位置降级");
+
+  const ok = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "桌上", certain: true, qualifiers: [], source_quote: "钥匙在桌上" }]),
+    "钥匙在桌上",
+  );
+  assert.equal(ok.drafts[0].certain, true, "位置锚定在证据内则保留");
+  assert.equal(ok.drafts[0].location_text, "桌上");
+});
+
+test("v2 位置锚定:共享位置合法通过(两件 quote 均含共同位置)", function () {
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙和充电宝都在玄关抽屉" },
+      { name: "充电宝", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙和充电宝都在玄关抽屉" },
+    ]),
+    "钥匙和充电宝都在玄关抽屉",
+  );
+  assert.equal(result.drafts[0].certain, true);
+  assert.equal(result.drafts[1].certain, true);
+});
+
+test("v2 位置锚定:source_quote 为空时以整句原话为锚(证据缺失不放松位置防线)", function () {
+  const result = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "冰箱里", certain: true, qualifiers: [], source_quote: "编造的引用" }]),
+    "钥匙在桌上",
+  );
+  // quote 非子串被置空 → 锚退化为整句原话,「冰箱里」不在原话 → 降级
+  assert.equal(result.drafts[0].source_quote, "");
+  assert.equal(result.drafts[0].certain, false);
+});
+
+test("v2 漏报反例:模型只回 5 件且 has_more=false 时校验器无法判漏 —— 由前端「恰好 5 件也提示核对」兜底", async function () {
+  const five = Array.from({ length: 5 }, (_, i) => ({ name: "物" + i, location_text: "桌上", certain: true, qualifiers: [], source_quote: "物" + i }));
+  const result = await handler({ text: "物0物1物2物3物4在桌上,还有物5物6", protocol: 2 }, {
+    logger() {},
+    callLLM() {
+      return Promise.resolve(JSON.stringify({ items: five, has_more: false })); // 模型漏报
+    },
+  });
+  assert.equal(result.drafts.length, 5);
+  assert.equal(result.truncated, false, "漏报时校验器确实无法察觉");
+  // 因此确认页对 rows.length>=5 一律显示核对提示(不依赖 has_more),见 confirm.wxml
+});

@@ -3,7 +3,7 @@ import {
   allCheckedSaved,
   batchSummary,
   firstInvalidMsg,
-  rowsToSave,
+  runBatchSave,
   type BatchRow,
 } from "../../utils/batch-save";
 import { clearDraftSession, getDraftSession } from "../../utils/draft-session";
@@ -203,6 +203,9 @@ Page<
   // ---------- 批量列表(Issue #14) ----------
 
   onRowNameInput(e) {
+    if (this.data.batchSaving) {
+      return; // 整批提交中冻结输入:本轮写入的就是本轮开始时看到的
+    }
     const index = Number(e.currentTarget.dataset.index);
     this.setData({
       ["rows[" + index + "].name"]: e.detail && e.detail.value ? e.detail.value : "",
@@ -210,6 +213,9 @@ Page<
   },
 
   onRowLocationInput(e) {
+    if (this.data.batchSaving) {
+      return; // 整批提交中冻结输入
+    }
     const index = Number(e.currentTarget.dataset.index);
     this.setData({
       ["rows[" + index + "].locationText"]: e.detail && e.detail.value ? e.detail.value : "",
@@ -243,8 +249,9 @@ Page<
   },
 
   /**
-   * 批量保存:逐行 create(行内固定 operation_id,重试沿用同键同内容走幂等);
-   * 「一次确认」不是数据库原子事务——逐行如实反馈,失败行可重试,已保存行不再提交。
+   * 批量保存:提交瞬间对整页行做不可变快照,快照里的名称/位置/幂等键即本轮写入内容
+   * (UI 冻结之外的第二道防线);逐行 create 由 runBatchSave 编排,行内固定
+   * operation_id,失败行重试沿用原键。「一次确认」不是数据库原子事务——逐行如实反馈。
    */
   async onSaveBatchTap() {
     if (this.data.batchSaving) {
@@ -255,46 +262,46 @@ Page<
       wx.showToast({ title: invalid, icon: "none" });
       return;
     }
-    const todo = rowsToSave(this.data.rows);
-    if (todo.length === 0) {
+    const snapshot = this.data.rows.map((r) => ({ ...r }));
+    if (batchSummary(snapshot).checked === 0) {
       wx.showToast({ title: "没有要保存的物品", icon: "none" });
       return;
     }
     this.setData({ batchSaving: true });
-    for (const row of todo) {
-      const index = this.data.rows.findIndex((r) => r.key === row.key);
-      if (index === -1) continue;
-      this.setData({ ["rows[" + index + "].status"]: "saving", ["rows[" + index + "].failMsg"]: "" });
-      try {
-        await callItemsApi({
+    const finalRows = await runBatchSave(
+      snapshot,
+      (row) =>
+        callItemsApi({
           action: "create",
           operation_id: row.operationId,
           name: row.name.trim(),
           location_text: row.locationText.trim(),
-        });
-        this.setData({ ["rows[" + index + "].status"]: "saved" });
-      } catch (e) {
-        // 部分失败:只标当前行,其余行继续;绝不整批回滚或静默
-        let failMsg = errorMessage(e);
-        if (e instanceof ApiError && e.code === "OPERATION_CONFLICT") {
-          failMsg = "这条已保存过且内容不同,请到详情页修改";
-          const existing = e.existing;
-          if (existing && existing.item_id) {
-            this.setData({
-              ["rows[" + index + "].existing"]: existing,
-              ["rows[" + index + "].itemId"]: existing.item_id,
-            });
-          }
+        }).then(() => undefined),
+      (row, error) => {
+        const index = this.data.rows.findIndex((r) => r.key === row.key);
+        if (index === -1) {
+          return;
         }
-        this.setData({
-          ["rows[" + index + "].status"]: "failed",
-          ["rows[" + index + "].failMsg"]: failMsg,
-        });
-      }
-    }
+        const patch: Record<string, unknown> = {
+          ["rows[" + index + "].status"]: row.status,
+          ["rows[" + index + "].failMsg"]: row.failMsg,
+        };
+        if (
+          error instanceof ApiError &&
+          error.code === "OPERATION_CONFLICT" &&
+          error.existing &&
+          error.existing.item_id
+        ) {
+          patch["rows[" + index + "].failMsg"] = "这条已保存过且内容不同,请到详情页修改";
+          patch["rows[" + index + "].existing"] = error.existing;
+          patch["rows[" + index + "].itemId"] = error.existing.item_id;
+        }
+        this.setData(patch);
+      },
+    );
     this.setData({ batchSaving: false });
-    const summary = batchSummary(this.data.rows);
-    if (allCheckedSaved(this.data.rows)) {
+    const summary = batchSummary(finalRows);
+    if (allCheckedSaved(finalRows)) {
       wx.showToast({ title: "记住了,下次问我。", icon: "success" });
       setTimeout(() => {
         this.backToHome();

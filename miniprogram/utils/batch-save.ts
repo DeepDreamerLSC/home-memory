@@ -21,7 +21,7 @@ export interface BatchRow {
 }
 
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
-export function rowsToSave(rows: BatchRow[]): BatchRow[] {
+export function rowsToSave<T extends BatchRow>(rows: T[]): T[] {
   return rows.filter((r) => r.checked && r.status !== "saved");
 }
 
@@ -61,4 +61,40 @@ export function batchSummary(rows: BatchRow[]): {
     if (r.status === "failed") failed += 1;
   }
   return { total: rows.length, checked, saved, failed };
+}
+
+/** 单行写入(注入真实 create 或测试替身) */
+export type CreateFn<T extends BatchRow> = (row: T) => Promise<void>;
+
+/** 每次行状态变化回调(成功 error 为 undefined,失败携带原始异常供调用方分类) */
+export type RowUpdateFn<T extends BatchRow> = (row: T, error?: unknown) => void;
+
+/**
+ * 逐行保存编排(在传入快照的拷贝上推进,绝不引用调用方可变状态):
+ * 勾选且未 saved 的行依次 saving → create → saved/failed;
+ * 已保存行跳过;失败行保留原 operation_id 供重试(同键同内容幂等)。
+ * 返回推进后的新数组,调用方据此判定收尾(allCheckedSaved/batchSummary)。
+ */
+export async function runBatchSave<T extends BatchRow>(
+  rows: T[],
+  create: CreateFn<T>,
+  onRowUpdate: RowUpdateFn<T>,
+): Promise<T[]> {
+  const work = rows.map((r) => ({ ...r }));
+  const todo = rowsToSave(work);
+  for (const row of todo) {
+    row.status = "saving";
+    row.failMsg = "";
+    onRowUpdate(row);
+    try {
+      await create(row);
+      row.status = "saved";
+      onRowUpdate(row);
+    } catch (e) {
+      row.status = "failed";
+      row.failMsg = e instanceof Error && e.message ? e.message : String(e);
+      onRowUpdate(row, e);
+    }
+  }
+  return work;
 }
