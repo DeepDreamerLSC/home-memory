@@ -1,56 +1,119 @@
 <view class="page">
-  <view wx:if="{{ isManual }}" class="banner manual">手动录入</view>
-  <block wx:else>
-    <view class="banner">AI 草稿,请确认</view>
-    <view wx:if="{{ qualifiersText }}" class="qualifiers">
-      位置限定语:{{ qualifiersText }}
-    </view>
-    <view wx:if="{{ !certain }}" class="qualifiers warn">
-      AI 未能确定位置,请补充填写
+  <!-- 手动录入:单表单(旧路径) -->
+  <block wx:if="{{ isManual }}">
+    <view class="banner manual">手动录入</view>
+    <view class="card">
+      <view class="field">
+        <view class="label">名称</view>
+        <input
+          class="input"
+          placeholder="物品名称(必填)"
+          placeholder-class="placeholder"
+          value="{{ name }}"
+          maxlength="50"
+          bindinput="onNameInput"
+        />
+      </view>
+      <view class="field">
+        <view class="label">位置(必填)</view>
+        <input
+          class="input"
+          placeholder="放在哪里"
+          placeholder-class="placeholder"
+          value="{{ locationText }}"
+          maxlength="200"
+          bindinput="onLocationInput"
+        />
+      </view>
+      <view class="field">
+        <view class="label">备注</view>
+        <textarea
+          class="textarea"
+          placeholder="选填,最多 200 字"
+          placeholder-class="placeholder"
+          value="{{ note }}"
+          maxlength="200"
+          auto-height
+          bindinput="onNoteInput"
+        />
+      </view>
+      <button
+        class="btn primary block"
+        loading="{{ saving }}"
+        bindtap="onSaveTap"
+      >
+        保存
+      </button>
     </view>
   </block>
 
-  <view class="card">
-    <view class="field">
-      <view class="label">名称</view>
-      <input
-        class="input"
-        placeholder="物品名称(必填)"
-        placeholder-class="placeholder"
-        value="{{ name }}"
-        maxlength="50"
-        bindinput="onNameInput"
-      />
+  <!-- AI 草稿:列表式批量确认(Issue #14) -->
+  <block wx:else>
+    <view class="banner">AI 草稿,请确认({{ rows.length }} 件)</view>
+    <view class="quote-card">
+      <view class="quote-label">你说的原话</view>
+      <view class="quote-text">{{ originalText }}</view>
     </view>
-    <view class="field">
-      <view class="label">位置(必填)</view>
-      <input
-        class="input"
-        placeholder="放在哪里"
-        placeholder-class="placeholder"
-        value="{{ locationText }}"
-        maxlength="200"
-        bindinput="onLocationInput"
-      />
+
+    <view class="card batch-card">
+      <view wx:for="{{ rows }}" wx:key="key" class="row {{ item.status }}">
+        <view class="row-head">
+          <view
+            class="check {{ item.checked ? 'on' : '' }} {{ item.status === 'saved' ? 'fixed' : '' }}"
+            data-index="{{ index }}"
+            bindtap="onRowToggle"
+          >{{ item.status === 'saved' ? '✓' : item.checked ? '✓' : '' }}</view>
+          <view class="row-status">
+            <text wx:if="{{ item.status === 'saved' }}" class="st saved">已记住</text>
+            <text wx:elif="{{ item.status === 'saving' }}" class="st saving">保存中…</text>
+            <text wx:elif="{{ item.status === 'failed' }}" class="st failed">未保存</text>
+          </view>
+        </view>
+
+        <view class="field">
+          <view class="label">名称</view>
+          <input
+            class="input row-name"
+            placeholder="物品名称(必填)"
+            placeholder-class="placeholder"
+            value="{{ item.name }}"
+            maxlength="50"
+            disabled="{{ item.status === 'saving' || item.status === 'saved' }}"
+            data-index="{{ index }}"
+            bindinput="onRowNameInput"
+          />
+        </view>
+        <view class="field">
+          <view class="label">位置(必填)</view>
+          <input
+            class="input row-location"
+            placeholder="{{ item.certain ? '放在哪里' : 'AI 没听准位置,请补填' }}"
+            placeholder-class="placeholder"
+            value="{{ item.locationText }}"
+            maxlength="200"
+            disabled="{{ item.status === 'saving' || item.status === 'saved' }}"
+            data-index="{{ index }}"
+            bindinput="onRowLocationInput"
+          />
+        </view>
+
+        <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>
+        <view wx:if="{{ item.sourceQuote }}" class="row-meta quote">原话:{{ item.sourceQuote }}</view>
+        <view wx:elif="{{ item.status !== 'saved' }}" class="row-meta warn">AI 没给出这段的原话依据,请自行核对</view>
+
+        <view wx:if="{{ item.status === 'failed' }}" class="row-fail">
+          <text class="fail-msg">{{ item.failMsg }}</text>
+          <text wx:if="{{ item.itemId }}" class="fail-link" data-index="{{ index }}" catchtap="onRowDetail">去详情页</text>
+        </view>
+      </view>
+
+      <button
+        class="btn primary block"
+        loading="{{ batchSaving }}"
+        bindtap="onSaveBatchTap"
+      >
+        记住了,保存勾选的
+      </button>
     </view>
-    <view class="field">
-      <view class="label">备注</view>
-      <textarea
-        class="textarea"
-        placeholder="选填,最多 200 字"
-        placeholder-class="placeholder"
-        value="{{ note }}"
-        maxlength="200"
-        auto-height
-        bindinput="onNoteInput"
-      />
-    </view>
-    <button
-      class="btn primary block"
-      loading="{{ saving }}"
-      bindtap="onSaveTap"
-    >
-      保存
-    </button>
-  </view>
+  </block>
 </view>

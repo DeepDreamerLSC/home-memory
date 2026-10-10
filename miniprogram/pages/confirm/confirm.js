@@ -1,66 +1,63 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
-/** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
-function safeDecode(s) {
-    try {
-        return decodeURIComponent(s);
-    }
-    catch {
-        return s;
-    }
-}
+const batch_save_1 = require("../../utils/batch-save");
+const draft_session_1 = require("../../utils/draft-session");
 Page({
     data: {
         isManual: false,
-        certain: true,
-        qualifiersText: "",
         name: "",
         locationText: "",
         note: "",
         saving: false,
         operationId: "",
+        originalText: "",
+        rows: [],
+        batchSaving: false,
+        doneCount: "",
     },
+    /** 草稿会话 id(onUnload 清理用) */
+    sid: "",
     onLoad(options) {
-        const operationId = (0, api_1.uuid)();
         if (options.manual === "true") {
-            this.setData({ operationId, isManual: true });
+            this.setData({ isManual: true, operationId: (0, api_1.uuid)() });
             return;
         }
-        const raw = options.draft;
-        if (raw) {
-            try {
-                const parsed = JSON.parse(safeDecode(raw));
-                const name = typeof parsed.name === "string" ? parsed.name : "";
-                const locationText = typeof parsed.location_text === "string" ? parsed.location_text : "";
-                const certain = parsed.certain === true;
-                const qualifiers = Array.isArray(parsed.qualifiers)
-                    ? parsed.qualifiers
-                        .filter((q) => typeof q === "string")
-                        .slice(0, 5)
-                    : [];
-                this.setData({
-                    operationId,
-                    isManual: false,
-                    certain,
-                    qualifiersText: qualifiers.join("、"),
-                    name,
-                    locationText,
-                    note: "",
-                });
-                return;
-            }
-            catch (e) {
-                console.error("[confirm] 草稿解析失败", e);
-                wx.showToast({
-                    title: "草稿加载失败,请手动填写",
-                    icon: "none",
-                    duration: 2500,
-                });
-            }
+        const sid = options.sid;
+        if (!sid) {
+            this.setData({ isManual: true, operationId: (0, api_1.uuid)() });
+            return;
         }
-        this.setData({ operationId, isManual: true });
+        const payload = (0, draft_session_1.getDraftSession)(sid);
+        if (payload === null) {
+            // 会话过期/进程回收:如实提示并回首页重新提取,绝不编造空草稿
+            wx.showToast({ title: "草稿已过期,请重新提取", icon: "none", duration: 2000 });
+            setTimeout(() => {
+                wx.reLaunch({ url: "/pages/index/index" });
+            }, 800);
+            return;
+        }
+        this.sid = sid;
+        const rows = payload.drafts.map((d, i) => ({
+            key: "row-" + i,
+            name: d.name,
+            locationText: d.location_text,
+            checked: true,
+            status: "pending",
+            failMsg: "",
+            operationId: (0, api_1.uuid)(),
+            certain: d.certain,
+            qualifiersText: d.qualifiers.join("、"),
+            sourceQuote: d.source_quote,
+        }));
+        this.setData({ isManual: false, originalText: payload.originalText, rows });
     },
+    onUnload() {
+        if (this.sid !== "") {
+            (0, draft_session_1.clearDraftSession)(this.sid);
+        }
+    },
+    // ---------- 手动单表单(旧路径) ----------
     onNameInput(e) {
         this.setData({ name: e.detail && e.detail.value ? e.detail.value : "" });
     },
@@ -140,6 +137,104 @@ Page({
         finally {
             this.setData({ saving: false });
         }
+    },
+    // ---------- 批量列表(Issue #14) ----------
+    onRowNameInput(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        this.setData({
+            ["rows[" + index + "].name"]: e.detail && e.detail.value ? e.detail.value : "",
+        });
+    },
+    onRowLocationInput(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        this.setData({
+            ["rows[" + index + "].locationText"]: e.detail && e.detail.value ? e.detail.value : "",
+        });
+    },
+    onRowToggle(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const row = this.data.rows[index];
+        if (!row || row.status === "saving" || row.status === "saved") {
+            return; // 已保存的行不可取消(事实已入库)
+        }
+        this.setData({ ["rows[" + index + "].checked"]: !row.checked });
+    },
+    onRowDetail(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const row = this.data.rows[index];
+        if (!row || !row.itemId) {
+            return;
+        }
+        wx.navigateTo({
+            url: "/pages/item/item?data=" + encodeURIComponent(JSON.stringify(row.existing)),
+        });
+    },
+    /**
+     * 批量保存:逐行 create(行内固定 operation_id,重试沿用同键同内容走幂等);
+     * 「一次确认」不是数据库原子事务——逐行如实反馈,失败行可重试,已保存行不再提交。
+     */
+    async onSaveBatchTap() {
+        if (this.data.batchSaving) {
+            return;
+        }
+        const invalid = (0, batch_save_1.firstInvalidMsg)(this.data.rows);
+        if (invalid !== "") {
+            wx.showToast({ title: invalid, icon: "none" });
+            return;
+        }
+        const todo = (0, batch_save_1.rowsToSave)(this.data.rows);
+        if (todo.length === 0) {
+            wx.showToast({ title: "没有要保存的物品", icon: "none" });
+            return;
+        }
+        this.setData({ batchSaving: true });
+        for (const row of todo) {
+            const index = this.data.rows.findIndex((r) => r.key === row.key);
+            if (index === -1)
+                continue;
+            this.setData({ ["rows[" + index + "].status"]: "saving", ["rows[" + index + "].failMsg"]: "" });
+            try {
+                await (0, api_1.callItemsApi)({
+                    action: "create",
+                    operation_id: row.operationId,
+                    name: row.name.trim(),
+                    location_text: row.locationText.trim(),
+                });
+                this.setData({ ["rows[" + index + "].status"]: "saved" });
+            }
+            catch (e) {
+                // 部分失败:只标当前行,其余行继续;绝不整批回滚或静默
+                let failMsg = (0, api_1.errorMessage)(e);
+                if (e instanceof api_1.ApiError && e.code === "OPERATION_CONFLICT") {
+                    failMsg = "这条已保存过且内容不同,请到详情页修改";
+                    const existing = e.existing;
+                    if (existing && existing.item_id) {
+                        this.setData({
+                            ["rows[" + index + "].existing"]: existing,
+                            ["rows[" + index + "].itemId"]: existing.item_id,
+                        });
+                    }
+                }
+                this.setData({
+                    ["rows[" + index + "].status"]: "failed",
+                    ["rows[" + index + "].failMsg"]: failMsg,
+                });
+            }
+        }
+        this.setData({ batchSaving: false });
+        const summary = (0, batch_save_1.batchSummary)(this.data.rows);
+        if ((0, batch_save_1.allCheckedSaved)(this.data.rows)) {
+            wx.showToast({ title: "记住了,下次问我。", icon: "success" });
+            setTimeout(() => {
+                this.backToHome();
+            }, 800);
+            return;
+        }
+        wx.showToast({
+            title: "已保存 " + summary.saved + " 件," + summary.failed + " 件失败可重试",
+            icon: "none",
+            duration: 2500,
+        });
     },
     backToHome() {
         wx.navigateBack({

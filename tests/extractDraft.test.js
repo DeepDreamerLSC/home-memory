@@ -512,3 +512,120 @@ test("buildPrompt:包含契约要点、用户输入与重试上下文", () => {
   assert.ok(retryPrompt.includes("【上次输出】\n上次烂输出"));
   assert.ok(retryPrompt.includes("【解析错误】\n输出不是合法的 JSON 对象"));
 });
+
+// ---------- 协议 v2:多件拆分 validateDrafts ----------
+
+const { validateDrafts } = require("../cloudfunctions/extractDraft/lib/validate");
+
+function rawItems(items) {
+  return JSON.stringify({ items });
+}
+
+test("v2 校验:一句话两件正确拆分,source_quote 为原话子串", function () {
+  const original = "钥匙放在玄关抽屉,充电宝放在客厅电视柜";
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙放在玄关抽屉" },
+      { name: "充电宝", location_text: "客厅电视柜", certain: true, qualifiers: [], source_quote: "充电宝放在客厅电视柜" },
+    ]),
+    original,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts.length, 2);
+  assert.equal(result.drafts[0].source_quote, "钥匙放在玄关抽屉");
+  assert.equal(result.drafts[1].location_text, "客厅电视柜");
+});
+
+test("v2 校验:多件共用同一位置合法(评审点名的串配防护场景)", function () {
+  const original = "钥匙和充电宝都在玄关抽屉";
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙和充电宝都在玄关抽屉" },
+      { name: "充电宝", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙和充电宝都在玄关抽屉" },
+    ]),
+    original,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].location_text, "玄关抽屉");
+  assert.equal(result.drafts[1].location_text, "玄关抽屉");
+});
+
+test("v2 校验:source_quote 不是原话子串时置空(证据缺失标记),不废整件", function () {
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙在火星" },
+    ]),
+    "钥匙放在玄关抽屉",
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].source_quote, "", "编造的证据必须被置空");
+  assert.equal(result.drafts[0].name, "钥匙", "证据缺失不影响物品本身");
+});
+
+test("v2 校验:单件也走数组形态(长度 1)", function () {
+  const result = validateDrafts(
+    rawItems([{ name: "药膏", location_text: "", certain: false, qualifiers: [], source_quote: "药膏放哪来着" }]),
+    "药膏放哪来着",
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].certain, false);
+  assert.equal(result.drafts[0].location_text, "", "certain=false 强制空位置(幻觉防护延续)");
+});
+
+test("v2 校验:items 为空 / 超过 5 件 / 坏 JSON 的拒绝路径", function () {
+  assert.equal(validateDrafts(rawItems([]), "随便说").ok, false);
+  const six = Array.from({ length: 6 }, (_, i) => ({
+    name: "物品" + i,
+    location_text: "桌上",
+    certain: true,
+    qualifiers: [],
+    source_quote: "物品" + i,
+  }));
+  assert.notEqual(validateDrafts(rawItems(six), "物品0物品1物品2物品3物品4物品5").ok, true, "超上限必须拒绝(重试兜底)");
+  const bad = validateDrafts("这不是JSON", "原文");
+  assert.equal(bad.retryable, true, "坏 JSON 走重试");
+});
+
+test("v2 校验:某件名称非法整次拒绝(不静默丢件)", function () {
+  const result = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关" },
+      { name: "   ", location_text: "桌上", certain: true, qualifiers: [], source_quote: "桌上" },
+    ]),
+    "钥匙在玄关,还有个东西在桌上",
+  );
+  assert.equal(result.ok, false);
+});
+
+// ---------- 协议 v2:handler 路由 ----------
+
+test("handler 路由:protocol:2 走 v2 prompt 与 drafts 响应", async function () {
+  const original = "钥匙放玄关抽屉,充电宝放客厅电视柜";
+  const reply = rawItems([
+    { name: "钥匙", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "钥匙放玄关抽屉" },
+    { name: "充电宝", location_text: "客厅电视柜", certain: true, qualifiers: [], source_quote: "充电宝放客厅电视柜" },
+  ]);
+  let seenPrompt = "";
+  const result = await handler({ text: original, protocol: 2 }, {
+    logger() {},
+    callLLM(prompt) {
+      seenPrompt = prompt;
+      return Promise.resolve(reply);
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts.length, 2);
+  assert.equal(result.original_text, original);
+  assert.ok(seenPrompt.indexOf("items") !== -1, "v2 请求必须用拆分版 prompt");
+});
+
+test("handler 路由:不带 protocol 的旧客户端维持 v1 行为(兼容硬门)", async function () {
+  const result = await handler({ text: "钥匙放玄关抽屉,充电宝放客厅" }, {
+    logger() {},
+    callLLM() {
+      return Promise.resolve(JSON.stringify({ needs_split: true }));
+    },
+  });
+  assert.deepEqual(result, { ok: true, needs_split: true, message: "一次只记一件物品,请分开说" });
+});

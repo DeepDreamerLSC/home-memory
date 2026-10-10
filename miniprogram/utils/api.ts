@@ -12,6 +12,8 @@ import type {
   DeleteItemResponse,
   ExtractDraftEvent,
   ExtractDraftNeedsSplitResponse,
+  ExtractDraftMultiEvent,
+  ExtractDraftMultiResponse,
   ExtractDraftOkResponse,
   GetItemResponse,
   ItemsApiEvent,
@@ -221,13 +223,18 @@ export async function callItemsApi(
 }
 
 /**
- * 调用 extractDraft。ok:false(含 AI_UNAVAILABLE)一律抛 ApiError,
- * 正常返回只可能是草稿或 needs_split 两种形态。
+ * 调用 extractDraft。ok:false(含 AI_UNAVAILABLE)一律抛 ApiError。
+ * 传 { protocol: 2 } 走多件拆分协议:正常返回 drafts[](单件时长度 1);
+ * v1 形态(草稿/needs_split)仅作防御性兜底(旧服务端未升级窗口)。
  */
 export async function callExtractDraft(
   text: string,
-): Promise<ExtractDraftOkResponse | ExtractDraftNeedsSplitResponse> {
-  const event: ExtractDraftEvent = { text };
+  opts?: { protocol?: 2 },
+): Promise<
+  ExtractDraftMultiResponse | ExtractDraftOkResponse | ExtractDraftNeedsSplitResponse
+> {
+  const event: ExtractDraftEvent | ExtractDraftMultiEvent =
+    opts && opts.protocol === 2 ? { text, protocol: 2 } : { text };
   const result = await callCloudFunction(
     EXTRACT_DRAFT_FUNCTION,
     event,
@@ -241,6 +248,36 @@ export async function callExtractDraft(
   }
   if (result.ok !== true) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (Array.isArray(result.drafts)) {
+    const drafts = result.drafts.filter(isRecord);
+    if (
+      drafts.length < 1 ||
+      typeof result.original_text !== "string" ||
+      !drafts.every(
+        (d) =>
+          typeof d.name === "string" &&
+          typeof d.location_text === "string" &&
+          typeof d.certain === "boolean" &&
+          Array.isArray(d.qualifiers) &&
+          typeof (d as { source_quote?: unknown }).source_quote === "string",
+      )
+    ) {
+      throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    return {
+      ok: true,
+      drafts: drafts.map((d) => ({
+        name: d.name as string,
+        location_text: d.location_text as string,
+        certain: d.certain as boolean,
+        qualifiers: (d.qualifiers as unknown[]).filter(
+          (q): q is string => typeof q === "string",
+        ),
+        source_quote: (d as { source_quote: string }).source_quote,
+      })),
+      original_text: result.original_text,
+    };
   }
   if (result.needs_split === true) {
     const message =

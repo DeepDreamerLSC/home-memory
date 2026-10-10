@@ -17,7 +17,8 @@ import {
   type SessionGuard,
   type VoiceController,
 } from "../../utils/voice";
-import type { Draft, ItemSummary } from "../../types";
+import type { ItemSummary } from "../../types";
+import { createDraftSession } from "../../utils/draft-session";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
@@ -319,7 +320,7 @@ Page<
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
-  /** 记一件:textarea → extractDraft,按契约分流 */
+  /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
   async onExtractTap() {
     const text = this.data.memoText.trim();
     if (!text) {
@@ -331,8 +332,15 @@ Page<
     }
     this.setData({ extracting: true });
     try {
-      const res = await callExtractDraft(text);
+      const res = await callExtractDraft(text, { protocol: 2 });
+      if ("drafts" in res) {
+        // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
+        const sid = createDraftSession(res.original_text, res.drafts);
+        this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
+        return;
+      }
       if ("needs_split" in res) {
+        // 防御:服务端未升级窗口内仍可能返回旧形态
         wx.showToast({
           title: res.message || "一次只记一件物品,请分开说",
           icon: "none",
@@ -340,10 +348,9 @@ Page<
         });
         return;
       }
-      const draft: Draft = res.draft;
-      this.goToConfirm(
-        "/pages/confirm/confirm?draft=" + encodeURIComponent(JSON.stringify(draft)),
-      );
+      // v1 单草稿兜底:同样入会话走列表页
+      const sid = createDraftSession(text, [{ ...res.draft, source_quote: text }]);
+      this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
     } catch (e) {
       if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") {
         // 契约流程:AI 不可用时征得确认后进入手动录入

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const voice_1 = require("../../utils/voice");
+const draft_session_1 = require("../../utils/draft-session");
 function toDisplayItems(items) {
     return items.map((item) => ({
         ...item,
@@ -223,7 +224,7 @@ Page({
         this.invalidateVoiceSession();
         this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
-    /** 记一件:textarea → extractDraft,按契约分流 */
+    /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
     async onExtractTap() {
         const text = this.data.memoText.trim();
         if (!text) {
@@ -235,8 +236,15 @@ Page({
         }
         this.setData({ extracting: true });
         try {
-            const res = await (0, api_1.callExtractDraft)(text);
+            const res = await (0, api_1.callExtractDraft)(text, { protocol: 2 });
+            if ("drafts" in res) {
+                // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
+                const sid = (0, draft_session_1.createDraftSession)(res.original_text, res.drafts);
+                this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
+                return;
+            }
             if ("needs_split" in res) {
+                // 防御:服务端未升级窗口内仍可能返回旧形态
                 wx.showToast({
                     title: res.message || "一次只记一件物品,请分开说",
                     icon: "none",
@@ -244,8 +252,9 @@ Page({
                 });
                 return;
             }
-            const draft = res.draft;
-            this.goToConfirm("/pages/confirm/confirm?draft=" + encodeURIComponent(JSON.stringify(draft)));
+            // v1 单草稿兜底:同样入会话走列表页
+            const sid = (0, draft_session_1.createDraftSession)(text, [{ ...res.draft, source_quote: text }]);
+            this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "AI_UNAVAILABLE") {

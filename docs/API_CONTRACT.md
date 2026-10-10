@@ -36,6 +36,10 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 - handler 是纯函数:handler(event, deps),deps = { db, now(), genId(), householdId, logger },依赖注入以便离线测试;index.js 只做 wx-server-sdk 胶水。logger 只输出 action、错误码、耗时、计数,绝不输出原文、身份、物品名、位置。
 
 ## extractDraft 协议
+### v2 多件拆分协议(Issue #14,2026-10-10)
+event = { text, protocol: 2 }:显式 protocol:2 时走多件拆分;不带 protocol 的旧客户端完全维持 v1 单件行为(兼容硬门,旧客户端不受影响)。v2 prompt 要求把一句话里的 1-5 件物品逐件输出到 items 数组,每件含 name/location_text/certain/qualifiers/source_quote;多件共用位置合法(按原文归属,不确定则该件 certain=false);source_quote 必须是原话逐字子串(去空白比对),不是则服务端置空字符串(确认页标「来源不充分」,不废整件);items 为空或超 5 件返回 AI_UNAVAILABLE(重试机制兜底);某件名称等硬校验失败整次拒绝(不静默丢件)。成功返回 { ok:true, drafts:[{ name, location_text, certain, qualifiers, source_quote }], original_text },单件时 drafts 长度为 1。前端:草稿经 utils/draft-session 临时会话(10 分钟 TTL)传给确认页(URL 只带 sid),确认页列表式批量确认,逐行走 create(行内固定 operation_id,失败单行重试幂等,已保存行不再提交)。
+
+### v1 单件协议(旧)
 event = { text },text 去空白后 1-500 字,否则 INVALID_INPUT。服务端调用 DeepSeek Chat Completions(地址 https://api.deepseek.com/chat/completions),model 为 "deepseek-flash",temperature 0.1,请求体显式包含 "thinking":{"type":"disabled"} 禁用思考,要求只输出 JSON,超时 20 秒。API key 只从云函数环境变量 DEEPSEEK_API_KEY 读取,绝不硬编码、绝不出现在小程序端与日志。
 system prompt 要点:家庭物品位置提取器;从一句话提取一件物品的名称与位置;位置必须来自原文,禁止猜测编造,不肯定时 certain 为 false 且 location_text 为空字符串;「右边」「第二个」「最下层」等限定语放 qualifiers;一句话含多件物品时 needs_split 为 true;只输出 JSON,字段:name(≤50)、location_text(≤200,可为空)、certain(布尔)、qualifiers(字符串数组,每项 ≤20 字,最多 5 个)、needs_split(布尔,默认 false)。
 服务端校验 validateDraft:JSON 解析失败则把错误提示回传 LLM 重试一次,仍失败返回 AI_UNAVAILABLE;needs_split 为 true 返回 { ok:true, needs_split:true, message:"一次只记一件物品,请分开说" };certain 为 false 时强制 location_text 为空字符串;certain 为 true 但 location_text 为空则按不肯定处理;name 去空白后为空返回 AI_UNAVAILABLE;长度与类型不符按上述规则拒绝,仅允许对 qualifiers 数量截断。callLLM 抛错、超时、HTTP 非 200 返回 { ok:false, error:"AI_UNAVAILABLE", message:"AI 暂时不可用,可手动录入", manual_fallback:true }。成功返回 { ok:true, draft:{ name, location_text, certain, qualifiers } }。handler 为纯函数,deps = { callLLM(text), logger }。日志只记:文本长度、耗时、错误码;禁止记录原文与提取结果。

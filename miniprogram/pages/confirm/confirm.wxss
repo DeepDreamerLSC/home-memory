@@ -2,3 +2,134 @@
 .field:last-of-type {
   margin-bottom: 0;
 }
+
+/* ---------- 列表式批量确认(Issue #14) ---------- */
+
+.quote-card {
+  margin: 24rpx;
+  padding: 20rpx 24rpx;
+  background: var(--card);
+  border-radius: 16rpx;
+}
+
+.quote-label {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-bottom: 6rpx;
+}
+
+.quote-text {
+  font-size: 28rpx;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.batch-card {
+  padding-top: 12rpx;
+}
+
+.row {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.row:last-of-type {
+  border-bottom: none;
+}
+
+.row.saved .input {
+  opacity: 0.65;
+}
+
+.row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8rpx;
+}
+
+.check {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  border: 3rpx solid var(--text-3);
+  color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.check.on {
+  background: #191919;
+  border-color: #191919;
+  color: #ffe15a;
+}
+
+.check.fixed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #191919;
+}
+
+.st {
+  font-size: 24rpx;
+}
+
+.st.saved {
+  color: #2e7d32;
+}
+
+.st.saving {
+  color: var(--text-3);
+}
+
+.st.failed {
+  color: var(--danger);
+}
+
+.row-meta {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-top: 6rpx;
+}
+
+.row-meta.quote {
+  color: var(--text-2);
+}
+
+.row-meta.warn {
+  color: #b45309;
+}
+
+.row-fail {
+  margin-top: 10rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.fail-msg {
+  font-size: 24rpx;
+  color: var(--danger);
+  flex: 1;
+}
+
+.fail-link {
+  font-size: 24rpx;
+  color: var(--text-2);
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .st.saved {
+    color: #7fce84;
+  }
+
+  .row-meta.warn {
+    color: #e8a33d;
+  }
+}
