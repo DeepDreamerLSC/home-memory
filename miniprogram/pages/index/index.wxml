@@ -1,25 +1,59 @@
 <view class="page">
   <!-- 记一件 -->
   <view class="card">
-    <view class="card-title">记一件</view>
-    <view class="hint">用一句话说出物品和位置,AI 帮你整理成草稿</view>
-    <textarea
-      class="memo-input"
-      placeholder="例如:降压药放在厨房第二个抽屉"
-      placeholder-class="placeholder"
-      value="{{ memoText }}"
-      maxlength="500"
-      auto-height
-      bindinput="onMemoInput"
-    />
-    <view class="char-count">{{ memoText.length }}/500</view>
-    <button
-      class="btn primary block"
-      loading="{{ extracting }}"
-      bindtap="onExtractTap"
-    >
-      提取并确认
-    </button>
+    <view class="card-head">
+      <view class="card-title">记一件</view>
+      <view class="mode-tabs">
+        <view
+          class="mode-tab {{ inputMode === 'text' ? 'active' : '' }}"
+          bindtap="onModeText"
+        >文字</view>
+        <view
+          class="mode-tab {{ inputMode === 'voice' ? 'active' : '' }}"
+          bindtap="onModeVoice"
+        >语音</view>
+      </view>
+    </view>
+
+    <!-- 文字模式 -->
+    <block wx:if="{{ inputMode === 'text' }}">
+      <view class="hint">用一句话说出物品和位置,AI 帮你整理成草稿</view>
+      <textarea
+        class="memo-input"
+        placeholder="例如:降压药放在厨房第二个抽屉"
+        placeholder-class="placeholder"
+        value="{{ memoText }}"
+        maxlength="500"
+        auto-height
+        bindinput="onMemoInput"
+      />
+      <view class="char-count">{{ memoText.length }}/500</view>
+      <button
+        class="btn primary block"
+        loading="{{ extracting }}"
+        bindtap="onExtractTap"
+      >
+        提取并确认
+      </button>
+    </block>
+
+    <!-- 语音模式:按住说话 -->
+    <block wx:else>
+      <view class="hint">
+        {{ voiceState === 'recording' ? '松开识别 · 上滑取消' : voiceState === 'cancelPending' ? '松手取消本次录音' : '按住下方按钮说话,说完松开' }}
+      </view>
+      <view
+        class="talk-btn {{ voiceState === 'recording' ? 'recording' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+        bindtouchstart="onTalkTouchStart"
+        bindtouchmove="onTalkTouchMove"
+        bindtouchend="onTalkTouchEnd"
+        bindtouchcancel="onTalkTouchCancel"
+      >
+        <view class="talk-icon">{{ voiceState === 'idle' ? '🎤' : (voiceState === 'cancelPending' ? '已取消' : '录音中') }}</view>
+        <view class="talk-label">按住说话</view>
+      </view>
+      <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
+    </block>
   </view>
 
   <!-- 找东西 -->

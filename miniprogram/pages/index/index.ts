@@ -5,6 +5,14 @@ import {
   errorMessage,
   formatDateTime,
 } from "../../utils/api";
+import {
+  ensureRecordAuth,
+  initVoiceController,
+  isSlideUpCancel,
+  markVoiceCancelled,
+  resetVoiceCancelled,
+  type VoiceController,
+} from "../../utils/voice";
 import type { Draft, ItemSummary } from "../../types";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
@@ -30,9 +38,21 @@ Page<
     recentItems: DisplayItem[];
     recentLoading: boolean;
     recentError: string;
+    /** 记一件的输入方式:text 文字 / voice 按住说话 */
+    inputMode: "text" | "voice";
+    /** 语音状态:idle 空闲 / recording 录音中 / cancelPending 已上滑待松手 */
+    voiceState: "idle" | "recording" | "cancelPending";
+    /** 实时转写文本 */
+    partialText: string;
   },
   {
     onMemoInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    onModeText(): void;
+    onModeVoice(): void;
+    /** 语音控制器(进入语音模式时惰性创建) */
+    voiceCtrl: VoiceController | null;
+    /** 本次按住的起点 Y(上滑取消判定) */
+    touchStartY: number;
     onExtractTap(): Promise<void>;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
@@ -41,6 +61,13 @@ Page<
     loadRecent(): Promise<void>;
     openItem(item: DisplayItem): void;
     goToConfirm(url: string): void;
+    onTalkTouchStart(e: WechatMiniprogram.TouchEvent): void;
+    onTalkTouchMove(e: WechatMiniprogram.TouchEvent): void;
+    onTalkTouchEnd(): void;
+    onTalkTouchCancel(): void;
+    startRecording(): Promise<void>;
+    finishRecording(): void;
+    voiceFallbackToText(): void;
   }
 >({
   data: {
@@ -55,7 +82,13 @@ Page<
     recentItems: [],
     recentLoading: false,
     recentError: "",
+    inputMode: "text",
+    voiceState: "idle",
+    partialText: "",
   },
+
+  voiceCtrl: null,
+  touchStartY: 0,
 
   onShow() {
     this.loadRecent();
@@ -65,8 +98,137 @@ Page<
     this.setData({ memoText: e.detail && e.detail.value ? e.detail.value : "" });
   },
 
-  onQueryInput(e) {
-    this.setData({ queryText: e.detail && e.detail.value ? e.detail.value : "" });
+  onModeText() {
+    markVoiceCancelledIfRecording(this);
+    this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
+  },
+
+  onModeVoice() {
+    this.setData({ inputMode: "voice", voiceState: "idle", partialText: "" });
+    if (this.voiceCtrl === null) {
+      this.voiceCtrl = initVoiceController({
+        onStart: () => {
+          this.setData({ voiceState: "recording", partialText: "" });
+        },
+        onRecognize: (partial) => {
+          this.setData({ partialText: partial });
+        },
+        onStop: (text) => {
+          this.setData({ voiceState: "idle", partialText: text });
+          if (!text) {
+            wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
+            return;
+          }
+          // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)
+          this.setData({ memoText: text, inputMode: "text" });
+          this.onExtractTap();
+        },
+        onError: (code, message) => {
+          this.setData({ voiceState: "idle" });
+          if (code === "PERMISSION") {
+            wx.showModal({
+              title: "需要录音权限",
+              content: "语音记一件需要使用麦克风。可以到设置中开启,或改用文字输入。",
+              confirmText: "去设置",
+              cancelText: "用文字",
+              success: (r) => {
+                if (r.confirm) {
+                  wx.openSetting({});
+                } else {
+                  this.voiceFallbackToText();
+                }
+              },
+            });
+          } else {
+            wx.showToast({ title: message, icon: "none", duration: 2500 });
+          }
+        },
+      });
+    }
+  },
+
+  onTalkTouchStart(e) {
+    if (this.data.voiceState !== "idle") {
+      return;
+    }
+    const touch = e.touches && e.touches[0];
+    this.touchStartY = touch ? touch.clientY : 0;
+    resetVoiceCancelled();
+    // 授权异步,授权通过后手指可能仍按着;直接尝试启动
+    void this.startRecording();
+  },
+
+  onTalkTouchMove(e) {
+    if (this.data.voiceState === "idle") {
+      return;
+    }
+    const touch = e.touches && e.touches[0];
+    if (!touch) {
+      return;
+    }
+    if (isSlideUpCancel(this.touchStartY, touch.clientY)) {
+      if (this.data.voiceState !== "cancelPending") {
+        markVoiceCancelled();
+        this.setData({ voiceState: "cancelPending" });
+      }
+    } else if (this.data.voiceState === "cancelPending") {
+      // 滑回按钮范围,恢复录音
+      resetVoiceCancelled();
+      this.setData({ voiceState: "recording" });
+    }
+  },
+
+  onTalkTouchEnd() {
+    this.finishRecording();
+  },
+
+  onTalkTouchCancel() {
+    markVoiceCancelled();
+    this.finishRecording();
+  },
+
+  async startRecording() {
+    const auth = await ensureRecordAuth();
+    if (auth === "denied") {
+      wx.showModal({
+        title: "需要录音权限",
+        content: "语音记一件需要使用麦克风。可以到设置中开启,或改用文字输入。",
+        confirmText: "去设置",
+        cancelText: "用文字",
+        success: (r) => {
+          if (r.confirm) {
+            wx.openSetting({});
+          } else {
+            this.voiceFallbackToText();
+          }
+        },
+      });
+      return;
+    }
+    if (this.voiceCtrl === null) {
+      // 授权通过后控制器缺失(不应发生):回退文字
+      this.voiceFallbackToText();
+      return;
+    }
+    this.voiceCtrl.start();
+  },
+
+  finishRecording() {
+    if (this.data.voiceState === "idle") {
+      return;
+    }
+    if (this.voiceCtrl !== null) {
+      this.voiceCtrl.stop();
+    }
+    // 状态在 onStop/onError 回调里复位;取消场景这里立即复位视觉
+    if (this.data.voiceState === "cancelPending") {
+      this.setData({ voiceState: "idle", partialText: "" });
+    }
+  },
+
+  voiceFallbackToText() {
+    markVoiceCancelledIfRecording(this);
+    this.setData({ inputMode: "text", voiceState: "idle", partialText: "" });
   },
 
   /** 记一件:textarea → extractDraft,按契约分流 */
@@ -121,6 +283,10 @@ Page<
   },
 
   /** 找东西:输入名称 → itemsApi query */
+  onQueryInput(e) {
+    this.setData({ queryText: e.detail && e.detail.value ? e.detail.value : "" });
+  },
+
   async onQueryTap() {
     const q = this.data.queryText.trim();
     if (!q) {
@@ -197,3 +363,16 @@ Page<
     });
   },
 });
+
+/** 切换/离开时若仍在录音,标记取消并停止(不产生识别结果) */
+function markVoiceCancelledIfRecording(page: {
+  voiceCtrl: VoiceController | null;
+  data: { voiceState: "idle" | "recording" | "cancelPending" };
+}): void {
+  if (page.data.voiceState !== "idle") {
+    markVoiceCancelled();
+    if (page.voiceCtrl !== null) {
+      page.voiceCtrl.stop();
+    }
+  }
+}

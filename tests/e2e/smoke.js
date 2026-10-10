@@ -82,6 +82,21 @@ async function main() {
   console.log("✔ 输入后字数统计:", countText);
   assert(countText.includes("/500"), "字数统计应随输入更新");
 
+  // 2.5 语音模式 UI:切换可见性与回退
+  const tabs = await page.$$(".mode-tab");
+  assert(tabs.length === 2, "应有 文字/语音 两个模式切换标签");
+  await tabs[1].tap();
+  await page.waitFor(400);
+  const talkBtn = await page.$(".talk-btn");
+  assert(talkBtn !== null, "语音模式下应显示「按住说话」按钮");
+  console.log("✔ 语音模式 UI 正常(按住说话按钮可见)");
+  const tabsBack = await page.$$(".mode-tab");
+  await tabsBack[0].tap();
+  await page.waitFor(400);
+  const textareaBack = await page.$(".memo-input");
+  assert(textareaBack !== null, "切回文字模式应恢复输入框(文字回退路径)");
+  console.log("✔ 切回文字模式正常(文字回退可用)");
+
   // 3. 找东西:查询失败路径(云未配置/未部署时应出现页面内错误提示,不静默)
   const searchInput = await page.$(".search-input");
   assert(searchInput !== null, "应找到「找东西」输入框");
