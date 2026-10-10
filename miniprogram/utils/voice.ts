@@ -86,6 +86,19 @@ export function isMeaningfulTranscript(text: string): boolean {
 }
 
 /**
+ * 语音入口忙碌门禁:录音中/识别中/AI 提取中都不允许再次按压启动新录音。
+ * 松开 ≠ 处理结束——识别/提取在途时再按压,会与跳转确认页互相打断
+ * (A 的提取完成跳页会把 B 的录音打断成无响应按压)。
+ */
+export function isVoiceEntryBusy(
+  voiceState: string,
+  transcribing: boolean,
+  extracting: boolean,
+): boolean {
+  return voiceState !== "idle" || transcribing || extracting;
+}
+
+/**
  * 轻量按压会话标识(页面用于「授权异步返回」窗口):
  * 按下 → 请求录音授权(异步)→ 用户松手/离开页面/切换模式 → 授权才返回 ——
  * 此时会话已作废,不得再发起录音会话。

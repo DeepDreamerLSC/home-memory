@@ -12,6 +12,7 @@ import {
   createDefaultVoiceDeps,
   isMeaningfulTranscript,
   isSlideUpCancel,
+  isVoiceEntryBusy,
   type VoiceSession,
   type SessionGuard,
   type VoiceController,
@@ -200,8 +201,10 @@ Page<
             wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
             return;
           }
-          // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)
-          this.setData({ memoText: text, inputMode: "text" });
+          // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)。
+          // 保留语音视图显示「AI 整理草稿中…」;memoText 同步保存,
+          // 用户切「改用文字」时输入仍在(不丢用户文本)。
+          this.setData({ memoText: text });
           this.onExtractTap();
         },
         onError: (code, message) => {
@@ -216,7 +219,7 @@ Page<
   },
 
   onTalkTouchStart(e) {
-    if (this.data.voiceState !== "idle" || this.data.transcribing) {
+    if (isVoiceEntryBusy(this.data.voiceState, this.data.transcribing, this.data.extracting)) {
       return;
     }
     const touch = e.touches && e.touches[0];

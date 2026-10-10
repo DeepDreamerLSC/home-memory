@@ -5,12 +5,14 @@
     "pages/item/item"
   ],
   "window": {
-    "navigationBarTitleText": "家庭物品记忆",
-    "navigationBarBackgroundColor": "#ffffff",
-    "navigationBarTextStyle": "black",
-    "backgroundColor": "#f4f5f7",
-    "backgroundTextStyle": "dark"
+    "navigationBarTitleText": "我靠东西呢",
+    "navigationBarBackgroundColor": "@navBgColor",
+    "navigationBarTextStyle": "@navTxtStyle",
+    "backgroundColor": "@bgColor",
+    "backgroundTextStyle": "@bgTxtStyle"
   },
   "style": "v2",
-  "sitemapLocation": "sitemap.json"
+  "sitemapLocation": "sitemap.json",
+  "darkmode": true,
+  "themeLocation": "theme.json"
 }

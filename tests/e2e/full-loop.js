@@ -60,8 +60,13 @@ async function main() {
   const sentence = itemName + "放在厨房左边第二个抽屉";
   const newLocation = "客厅电视柜最下层";
 
-  // ---- 1. 记一件:真实 AI 提取 ----
+  // ---- 1. 记一件:真实 AI 提取(默认语音模式,先切文字模式) ----
   console.log("【1】记一件:", sentence);
+  const modeLink = await page.$(".mode-link");
+  if (modeLink !== null) {
+    await modeLink.tap();
+    await page.waitFor(400);
+  }
   const textarea = await page.$(".memo-input");
   await textarea.input(sentence);
   const extractBtn = await page.$(".btn.primary.block");
@@ -111,20 +116,21 @@ async function main() {
   console.log("【2】找东西:查询", itemName);
   const searchInput = await page.$(".search-input");
   await searchInput.input(itemName);
-  const searchBtn = await page.$(".search-btn");
+  const searchBtn = await page.$(".search-go");
   const tQ = Date.now();
   await searchBtn.tap();
+  // 只认搜索结果区内的行:「最近记住的」卡片同样渲染 .item-row,查询未返回时会抢先命中
   const row = await waitFor(
     async () => {
-      const el = await page.$(".item-row");
+      const el = await page.$(".search-wrap .item-row");
       return el;
     },
     20000,
     "查询结果出现",
   );
   timings.query = Date.now() - tQ;
-  const rowName = await (await page.$(".item-name")).text();
-  const rowLocation = await (await page.$(".item-location")).text();
+  const rowName = await (await row.$(".item-name")).text();
+  const rowLocation = await (await row.$(".item-location")).text();
   console.log("✔ 查询命中:名称=" + rowName + " 位置=" + rowLocation + "(耗时 " + fmt(timings.query) + ")");
   assert(rowName.includes(itemName), "查询结果名称应匹配");
   assert(rowLocation.includes("厨房"), "查询结果位置应为原位置");
@@ -167,11 +173,11 @@ async function main() {
   assert(page.path === "pages/index/index", "应回到首页");
   const searchInput2 = await page.$(".search-input");
   await searchInput2.input(itemName);
-  await (await page.$(".search-btn")).tap();
+  await (await page.$(".search-go")).tap();
   // 旧查询结果仍渲染在页面上,需轮询等新位置替换旧位置
   const finalLocation = await waitFor(
     async () => {
-      const loc = await page.$(".item-location");
+      const loc = await page.$(".search-wrap .item-location");
       if (!loc) return null;
       const text = await loc.text();
       return text.includes("客厅") ? text : null;

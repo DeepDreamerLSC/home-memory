@@ -1,22 +1,87 @@
 <view class="page">
-  <!-- 记一件 -->
-  <view class="card">
-    <view class="card-head">
-      <view class="card-title">记一件</view>
-      <view class="mode-tabs">
-        <view
-          class="mode-tab {{ inputMode === 'text' ? 'active' : '' }}"
-          bindtap="onModeText"
-        >文字</view>
-        <view
-          class="mode-tab {{ inputMode === 'voice' ? 'active' : '' }}"
-          bindtap="onModeVoice"
-        >语音</view>
+  <!-- 品牌头部 -->
+  <view class="brand">
+    <view class="brand-name">我靠东西呢</view>
+    <view class="brand-sub">东西放哪儿了?我记得。</view>
+  </view>
+
+  <!-- 找东西:紧跟品牌,打开就能找 -->
+  <view class="search-wrap">
+    <view class="section-title">找东西</view>
+    <view class="search-row">
+      <input
+        class="search-input"
+        placeholder="搜钥匙、证件、充电宝…"
+        placeholder-class="placeholder"
+        value="{{ queryText }}"
+        confirm-type="search"
+        bindinput="onQueryInput"
+        bindconfirm="onQueryTap"
+      />
+      <view class="search-go {{ querying ? 'busy' : '' }}" bindtap="onQueryTap">
+        {{ querying ? '…' : '找' }}
       </view>
     </view>
 
-    <!-- 文字模式 -->
-    <block wx:if="{{ inputMode === 'text' }}">
+    <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
+
+    <block wx:if="{{ queried && !queryError }}">
+      <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
+        糟了,这件我还真没记住。要记一件?往下按住说话。
+      </view>
+      <view
+        wx:for="{{ queryResults }}"
+        wx:key="item_id"
+        class="item-row"
+        data-index="{{ index }}"
+        bindtap="onResultTap"
+      >
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">上次记录:{{ item.location_text }}</view>
+        </view>
+        <view class="chevron">›</view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 顺手记一件:一屏唯一主视觉,按住就能记 -->
+  <view class="card">
+    <view class="card-title">顺手记一件</view>
+
+    <!-- 语音模式:按住说话 -->
+    <block wx:if="{{ inputMode === 'voice' }}">
+      <view class="example">比如说:"充电宝放在书房抽屉里"</view>
+      <view
+        class="talk-btn {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+        catchtouchstart="onTalkTouchStart"
+        catchtouchmove="onTalkTouchMove"
+        catchtouchend="onTalkTouchEnd"
+        catchtouchcancel="onTalkTouchCancel"
+      >
+        <view class="mic-icon">
+          <block wx:if="{{ voiceState === 'recording' }}">
+            <view class="mic-seconds">{{ recordSeconds }}s</view>
+          </block>
+          <block wx:else>
+            <view class="mic-cap"></view>
+            <view class="mic-stand"></view>
+            <view class="mic-base"></view>
+          </block>
+        </view>
+        <view class="talk-label">
+          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开识别' }}
+        </view>
+      </view>
+      <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
+      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
+        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
+      </view>
+    </block>
+
+    <!-- 文字模式:次级入口,保留用户输入 -->
+    <block wx:else>
       <view class="hint">用一句话说出物品和位置,AI 帮你整理成草稿</view>
       <textarea
         class="memo-input"
@@ -35,76 +100,19 @@
       >
         提取并确认
       </button>
-    </block>
-
-    <!-- 语音模式:按住说话 -->
-    <block wx:else>
-      <view class="hint">
-        {{ transcribing ? '识别中…' : voiceState === 'recording' ? '松开识别 · 上滑取消' : voiceState === 'cancelPending' ? '松手取消本次录音' : '按住下方按钮说话,说完松开' }}
-      </view>
-      <view
-        class="talk-btn {{ (voiceState === 'recording' || transcribing) && voiceState !== 'cancelPending' ? 'recording' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
-        catchtouchstart="onTalkTouchStart"
-        catchtouchmove="onTalkTouchMove"
-        catchtouchend="onTalkTouchEnd"
-        catchtouchcancel="onTalkTouchCancel"
-      >
-        <view class="talk-icon">{{ transcribing ? '识别中…' : voiceState === 'cancelPending' ? '已取消' : voiceState === 'recording' ? '录音中 ' + recordSeconds + 's' : '🎤' }}</view>
-        <view class="talk-label">按住说话</view>
-      </view>
-      <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
-    </block>
-  </view>
-
-  <!-- 找东西 -->
-  <view class="card">
-    <view class="card-title">找东西</view>
-    <view class="search-row">
-      <input
-        class="search-input"
-        placeholder="输入物品名称"
-        placeholder-class="placeholder"
-        value="{{ queryText }}"
-        confirm-type="search"
-        bindinput="onQueryInput"
-        bindconfirm="onQueryTap"
-      />
-      <button
-        class="btn primary search-btn"
-        loading="{{ querying }}"
-        bindtap="onQueryTap"
-      >
-        查一下
-      </button>
-    </view>
-
-    <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
-
-    <block wx:if="{{ queried && !queryError }}">
-      <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
-        没有找到「{{ queryKeyword }}」相关的记录
-      </view>
-      <view
-        wx:for="{{ queryResults }}"
-        wx:key="item_id"
-        class="item-row"
-        data-index="{{ index }}"
-        bindtap="onResultTap"
-      >
-        <view class="item-name">{{ item.name }}</view>
-        <view class="item-location">{{ item.location_text }}</view>
-        <view class="item-time">更新于 {{ item.updated_at_text }}</view>
+      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
+        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
       </view>
     </block>
   </view>
 
-  <!-- 最近记录 -->
+  <!-- 最近记住的:紧凑,可点击 -->
   <view class="card">
-    <view class="card-title">最近记录</view>
+    <view class="card-title">最近记住的</view>
     <view wx:if="{{ recentError }}" class="error-text">{{ recentError }}</view>
     <view wx:elif="{{ recentLoading }}" class="empty-text">加载中…</view>
     <view wx:elif="{{ recentItems.length === 0 }}" class="empty-text">
-      还没有记录,先记一件吧
+      还没记过东西。按住上面的按钮,说一句就行。
     </view>
     <view
       wx:for="{{ recentItems }}"
@@ -113,9 +121,12 @@
       data-index="{{ index }}"
       bindtap="onRecentTap"
     >
-      <view class="item-name">{{ item.name }}</view>
-      <view class="item-location">{{ item.location_text }}</view>
-      <view class="item-time">更新于 {{ item.updated_at_text }}</view>
+      <view class="item-icon">{{ item.name[0] }}</view>
+      <view class="item-main">
+        <view class="item-name">{{ item.name }}</view>
+        <view class="item-location">上次记录:{{ item.location_text }}</view>
+      </view>
+      <view class="chevron">›</view>
     </view>
   </view>
 </view>
