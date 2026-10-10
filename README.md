@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations` 与 `item_location_history` 三个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,仅 locations 云函数写入,无需人工维护)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations` 与 `item_location_history` 三个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 

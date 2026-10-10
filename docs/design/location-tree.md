@@ -466,13 +466,13 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 - **V1 不引入 embedding**:近义判定 = 服务端 name_norm 相等(确定规则,§5.2)+ 归并后一次轻量 LLM 名单比对(§6.2,输入仅各层名字列表),不做向量检索。
 - **理由**:空间树是长期资产,**错误合并一次的损害大于重复一次**——合并会改挂两支物品,事后难以凭直觉发现与撤销;重复节点无害且可逆,用 merge 四件套(§5.6)事后清理即可。
 
-### 13.3 §5.11 位置变更历史(item_location_history,append-only 预留层)
+### 13.3 §5.11 位置变更历史(item_location_history,append-only best-effort 预留层)
 
 采纳初审建议「V1 可不展示,但数据层别丢」,作为 §5.10 applyScan 之后的第十一节契约落位:
 
 - **集合与字段**:新集合 `item_location_history`,每行 `{ household_id(服务端派生,随写入隔离), item_id, from_node_id(可 null), to_node_id(可 null), changed_at(ISO), source }`;`source` 枚举五个值,与五个挂载写入方一一对应:`"link"` / `"unlink"` / `"merge"`(重挂)/ `"apply_scan"` / `"compensate"`(删除与 merge 的补偿摘除)。
 - **append-only**:只插入、不更新不删除,追加日志语义,无唯一索引需求;**唯一写入方是 locations 云函数**——所有挂载写入在 `conditionalMountUpdate` 收口,真实变更(from ≠ to)顺带追加一行(L385-402);itemsApi 对此集合无任何写入。权限与其他集合同款「所有用户不可读不可写」(README 部署步骤 4)。
-- **不记与不阻断**:from == to 的空变更不记;update_id/派生标识重放走版本条件更新的 0 命中回查分支,不进入历史写入,天然不重复;**历史写失败 try/catch 吞掉,不阻断挂载主流程**——挂载结果是事实,历史是预留审计层。
+- **不记与不阻断**:from == to 的空变更不记;update_id/派生标识重放走版本条件更新的 0 命中回查分支,不进入历史写入,天然不重复;**历史写失败 try/catch 吞掉,不阻断挂载主流程**——挂载结果是事实,历史是 best-effort 预留层:**不是完整无缺的审计日志**,追加失败即静默跳过该行,不得作为审计或合规依据依赖。
 - **V1 无读取入口**:无查询 action、无 UI;API 契约不承诺任何查询接口(见 docs/API_CONTRACT.md locations 段增补)。「这东西上周还在书房」类时间线以此数据为基础另行设计,不在本 MVP。
 - 测试:TS-HIST1(五 source 全覆盖、重放不记、空变更不记、household_id 逐行隔离)、TS-HIST2(双家庭历史行不串扰)。
 
