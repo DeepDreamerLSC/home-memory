@@ -264,3 +264,10 @@ test("回归④取消不上传:读文件期间取消 → 不得上传音频", as
   assert.equal(deps.uploaded.length, 0, "已取消的会话不得上传音频");
   assert.deepEqual(rec.events, ["start", "transcribing"], "不得出现结果回调,也不得误报错误");
 });
+
+test("回归⑤AI 提取期间不得再次启动录音(入口忙碌门禁)", function () {
+  assert.equal(voice.isVoiceEntryBusy("idle", false, false), false, "空闲时允许按压");
+  assert.equal(voice.isVoiceEntryBusy("recording", false, false), true, "录音中必须拒绝");
+  assert.equal(voice.isVoiceEntryBusy("idle", true, false), true, "识别中必须拒绝");
+  assert.equal(voice.isVoiceEntryBusy("idle", false, true), true, "AI 提取中必须拒绝:A 提取完成跳确认页会打断 B 的录音");
+});

@@ -71,7 +71,7 @@
           </block>
         </view>
         <view class="talk-label">
-          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开记住' }}
+          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开识别' }}
         </view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>

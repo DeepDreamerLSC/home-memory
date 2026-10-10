@@ -12,6 +12,7 @@ import {
   createDefaultVoiceDeps,
   isMeaningfulTranscript,
   isSlideUpCancel,
+  isVoiceEntryBusy,
   type VoiceSession,
   type SessionGuard,
   type VoiceController,
@@ -218,7 +219,7 @@ Page<
   },
 
   onTalkTouchStart(e) {
-    if (this.data.voiceState !== "idle" || this.data.transcribing) {
+    if (isVoiceEntryBusy(this.data.voiceState, this.data.transcribing, this.data.extracting)) {
       return;
     }
     const touch = e.touches && e.touches[0];
