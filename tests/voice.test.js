@@ -36,6 +36,7 @@ function makeDeps(opts) {
   var recorder = mockRecorder();
   var uploaded = [];
   var pendingTranscribes = [];
+  var pendingReads = [];
   return {
     recorder: recorder,
     uploaded: uploaded,
@@ -43,7 +44,15 @@ function makeDeps(opts) {
       if (opts.readFail) {
         return Promise.reject(new Error("readFile fail: permission"));
       }
+      if (opts.deferRead) {
+        return new Promise(function (resolve) { pendingReads.push(resolve); });
+      }
       return Promise.resolve("QVVESU8=");
+    },
+    __flushRead: function () {
+      var r = pendingReads.shift();
+      if (!r) { throw new Error("没有挂起的读文件"); }
+      r("QVVESU8=");
     },
     transcribe: function (b64, fmt) {
       if (opts.deferTranscribe) {
@@ -184,7 +193,7 @@ test("回归②旧结果复活:A 的 ASR 在途被替代,A 返回必须丢弃,B 
   assert.ok(rec.events.indexOf("stop:B的新结果") !== -1, "B 正常完成(标点已清洗)");
 });
 
-test("回归②-变体:取消后 ASR 返回,同样丢弃", async function () {
+test("回归③松手后转写阶段取消(模拟切换文字模式/退后台):ASR 返回必须丢弃", async function () {
   var rec = collect();
   var deps = makeDeps({ deferTranscribe: true });
   var ctrl = voice.createVoiceController(rec.cbs, deps);
@@ -237,4 +246,21 @@ test("控制器:错误归因(ASR 失败/太短/读文件失败/录音器报错)"
   deps4.recorder.__fireStart();
   deps4.recorder.__fireError({ errMsg: "fail" });
   assert.ok(rec4.events[1].indexOf("error:RECORD_FAIL") === 0, "有效会话内的录音器错误如实上抛");
+});
+
+test("回归④取消不上传:读文件期间取消 → 不得上传音频", async function () {
+  var rec = collect();
+  var deps = makeDeps({ deferRead: true });
+  var ctrl = voice.createVoiceController(rec.cbs, deps);
+  var session = ctrl.begin();
+  deps.recorder.__fireStart();
+  ctrl.stop(session); // 正常松手 → 进入识别,读文件挂起
+  deps.recorder.__fireStop({ tempFilePath: "/tmp/a.mp3" });
+  await settle();
+  assert.equal(rec.events.indexOf("transcribing") !== -1, true, "已进入识别阶段");
+  ctrl.cancel(session); // 读文件期间切换文字模式/离开页面
+  deps.__flushRead(); // 读文件此刻完成
+  await settle();
+  assert.equal(deps.uploaded.length, 0, "已取消的会话不得上传音频");
+  assert.deepEqual(rec.events, ["start", "transcribing"], "不得出现结果回调,也不得误报错误");
 });

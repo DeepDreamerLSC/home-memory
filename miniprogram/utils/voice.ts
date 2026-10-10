@@ -215,6 +215,11 @@ export function createVoiceController(
     void (async () => {
       try {
         const base64 = await deps.readFileBase64(res.tempFilePath);
+        // 上传前校验会话:读文件期间被取消/替代 → 不上传已取消的音频
+        if (s.cancelled || active !== s) {
+          endIfActive(s);
+          return;
+        }
         const result = await deps.transcribe(base64, VOICE_FORMAT);
         // 转写返回时再次校验:被取消或已被新会话替代 → 旧结果永久失效
         if (s.cancelled || active !== s) {

@@ -192,6 +192,7 @@ Page<
         },
         onStop: (text) => {
           this.clearRecordTimer();
+          this.activeVoiceSession = null; // 语音处理结束,释放会话引用
           this.setData({ voiceState: "idle", transcribing: false, partialText: text });
           // 空结果或纯语气词(环境噪音)不算有效输入:如实提示,不进提取,
           // 避免噪音文本被误报成"AI 不可用"
@@ -205,6 +206,7 @@ Page<
         },
         onError: (code, message) => {
           this.clearRecordTimer();
+          this.activeVoiceSession = null; // 语音处理结束(失败),释放会话引用
           this.setData({ voiceState: "idle", transcribing: false });
           wx.showToast({ title: message, icon: "none", duration: 2500 });
         },
@@ -249,7 +251,6 @@ Page<
       this.sessionGuard.invalidate();
     }
     const session = this.activeVoiceSession;
-    this.activeVoiceSession = null;
     if (session === null) {
       return; // 录音会话尚未建立(授权未返回):无事可收尾
     }
@@ -257,10 +258,14 @@ Page<
       return;
     }
     if (this.data.voiceState === "cancelPending") {
-      this.voiceCtrl.cancel(session); // 上滑取消:永久作废
+      this.voiceCtrl.cancel(session); // 上滑取消:永久作废,立即释放引用
+      this.activeVoiceSession = null;
       this.setData({ voiceState: "idle", partialText: "" });
     } else {
-      this.voiceCtrl.stop(session); // 正常松手:停止并进入转写
+      // 正常松手:停止并进入转写。保留会话引用——"手指松开"不等于
+      // "语音处理结束":识别中阶段仍可经 invalidateVoiceSession 取消;
+      // 引用在 onStop/onError 回调(处理完成)时释放。
+      this.voiceCtrl.stop(session);
     }
   },
 
