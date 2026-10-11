@@ -14,6 +14,7 @@ import {
   CLIENT_NETWORK,
   CLIENT_TIMEOUT,
 } from "./api";
+import { clearLocationsCache } from "./locations-cache";
 import type {
   ApplyScanResponse,
   DeleteLocationResponse,
@@ -234,6 +235,21 @@ function timeoutForAction(action: string): number {
   return LOCATIONS_DB_TIMEOUT_MS;
 }
 
+/**
+ * 会改变空间树或挂载关系的 action:成功后整棵树缓存失效(issue #23,第一版
+ * 全量失效,不做节点级精细化)。list/parseLocation/scanHousehold 只读,不清。
+ */
+const LOCATIONS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
+  "ensurePath",
+  "rename",
+  "move",
+  "merge",
+  "delete",
+  "linkItem",
+  "unlinkItem",
+  "applyScan",
+]);
+
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "list" }>,
 ): Promise<ListLocationsResponse>;
@@ -285,6 +301,10 @@ export async function callLocationsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   validateLocationsOkResponse(event.action, result);
+  if (LOCATIONS_MUTATING_ACTIONS.has(event.action)) {
+    // 失效收口在 API 层:变更成功即整树失效,页面不自己记「该清哪层」
+    clearLocationsCache();
+  }
   return result as unknown as LocationsApiOkResponse;
 }
 

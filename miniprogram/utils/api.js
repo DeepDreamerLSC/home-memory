@@ -7,6 +7,7 @@ exports.callExtractDraft = callExtractDraft;
 exports.uuid = uuid;
 exports.formatDateTime = formatDateTime;
 exports.errorMessage = errorMessage;
+const locations_cache_1 = require("./locations-cache");
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 /** itemsApi 为薄适配层,正常应在数秒内返回 */
@@ -140,6 +141,13 @@ async function callItemsApi(event) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     validateItemsOkResponse(event.action, result);
+    if (event.action === "create" ||
+        event.action === "update" ||
+        event.action === "delete") {
+        // 物品写入会影响空间树各层数据(create 影响「未归位」计数,update/delete
+        // 影响层级物品摘要):整树缓存失效,失效收口在 API 层(issue #23)
+        (0, locations_cache_1.clearLocationsCache)();
+    }
     return result;
 }
 /**

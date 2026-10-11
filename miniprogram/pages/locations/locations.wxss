@@ -1,9 +1,94 @@
 /* 我的家(空间树)页面:复用 app.wxss 的卡片/条目语言,颜色只用全局 CSS 变量 */
 
-.crumb {
+/* 面包屑行:路径 + 后台刷新轻量指示(不整页 loading) */
+.crumb-row {
+  display: flex;
+  align-items: center;
   margin: 24rpx 32rpx 0;
+}
+
+.crumb {
   font-size: 24rpx;
   color: var(--text-3);
+}
+
+.refresh-flag {
+  margin-left: 16rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+/* 刷新失败:保留旧树,如实提示上次记录(可点按重试) */
+.stale-banner {
+  margin: 16rpx 32rpx 0;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+  font-size: 24rpx;
+  color: var(--text);
+}
+
+/* 首载骨架屏:占位几何与真实条目一致(图标块 + 两行文字) */
+.skeleton .skel-crumb {
+  margin: 24rpx 32rpx 0;
+  width: 220rpx;
+  height: 26rpx;
+  border-radius: 8rpx;
+  background: var(--card-inset);
+}
+
+.skel-row {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 0;
+}
+
+.skel-icon {
+  width: 72rpx;
+  height: 72rpx;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+  border-radius: 18rpx;
+  background: var(--card-inset);
+}
+
+.skel-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.skel-line {
+  border-radius: 8rpx;
+  background: var(--card-inset);
+}
+
+.skel-line-name {
+  width: 40%;
+  height: 28rpx;
+  margin-bottom: 12rpx;
+}
+
+.skel-line-sub {
+  width: 60%;
+  height: 22rpx;
+}
+
+/* 轻微呼吸(只动透明度,不引入新颜色) */
+.skel-crumb,
+.skel-icon,
+.skel-line {
+  animation: skel-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes skel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 /* 生成 / 更新空间树常驻入口(次级行,item-row 同款节奏) */

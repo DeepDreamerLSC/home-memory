@@ -2,9 +2,20 @@ import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
 } from "../../utils/locations-api";
+import {
+  captureCacheGeneration,
+  createRequestSeq,
+  isCacheGenerationCurrent,
+  isLocationsCacheFresh,
+  planLocationsLoad,
+  readLocationsLayer,
+  writeLocationsLayer,
+} from "../../utils/locations-cache";
+import type { LocationsRequestSeq } from "../../utils/locations-cache";
 import { errorMessage, formatDateTime, uuid } from "../../utils/api";
 import type {
   ItemSummary,
+  ListLocationsResponse,
   LocationNodeSummary,
   LocationType,
 } from "../../types";
@@ -52,7 +63,12 @@ Page<
     /** browse = 空间浏览;pick = 选择模式(移动/合并/物品移动的目标选择) */
     mode: "browse" | "pick";
     pickTitle: string;
+    /** 无缓存首载:整页骨架屏(约束 1:不再是干巴巴一行「加载中」) */
     loading: boolean;
+    /** 屏上已有旧树、后台刷新中:轻量指示,不整页 loading */
+    refreshing: boolean;
+    /** 后台刷新失败:保留旧树,如实提示「当前为上次记录」+ 可重试 */
+    stale: boolean;
     loadError: string;
     breadcrumbText: string;
     isRoot: boolean;
@@ -75,9 +91,16 @@ Page<
     pickExcludePath: string;
     /** 发起页注册的选择回调(picker 选中回传后执行 move/merge/linkItem) */
     pendingPick: ((picked: PickedLocation) => void) | null;
+    /** 请求序号(约束 4):迟到响应不上屏、不写缓存 */
+    requestSeq: LocationsRequestSeq;
+    /** 本页实例是否已上屏过任意 list 内容(缓存或服务端),决定骨架还是轻量刷新 */
+    renderedOnce: boolean;
     onLoad(options: Record<string, string | undefined>): void;
     onShow(): void;
-    loadNode(): Promise<void>;
+    onPullDownRefresh(): void;
+    loadNode(force?: boolean, retryOnStaleGen?: boolean): Promise<void>;
+    renderList(res: ListLocationsResponse): void;
+    onRetryTap(): void;
     decorate(children: LocationNodeSummary[]): DisplayNode[];
     onChildTap(e: WechatMiniprogram.CustomEvent): void;
     onPickTap(e: WechatMiniprogram.CustomEvent): void;
@@ -117,6 +140,8 @@ Page<
     mode: "browse",
     pickTitle: "选择位置",
     loading: false,
+    refreshing: false,
+    stale: false,
     loadError: "",
     breadcrumbText: "我的家",
     isRoot: true,
@@ -134,8 +159,13 @@ Page<
   pickType: "",
   pickExcludePath: "",
   pendingPick: null as ((picked: PickedLocation) => void) | null,
+  requestSeq: createRequestSeq(),
+  renderedOnce: false,
 
   onLoad(options) {
+    // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
+    this.requestSeq = createRequestSeq();
+    this.renderedOnce = false;
     const isPicker = options.picker === "1";
     this.nodeId = safeDecode(options.node_id);
     this.pickType = isPicker ? safeDecode(options.type) : "";
@@ -156,41 +186,108 @@ Page<
     void this.loadNode();
   },
 
-  /** 拉取当前层:list(parent_id 缺省 = home 根层,服务端惰性建根) */
-  async loadNode() {
-    if (this.data.loading) {
+  /** 下拉刷新:强制绕过 TTL 直连服务端,完成后收起原生转圈(约束 1/3) */
+  async onPullDownRefresh() {
+    try {
+      await this.loadNode(true);
+    } finally {
+      wx.stopPullDownRefresh({ fail: () => {} });
+    }
+  },
+
+  /** 失败态重试按钮 / 「上次记录」提示条:点按强制刷新 */
+  onRetryTap() {
+    void this.loadNode(true);
+  },
+
+  /**
+   * 拉取当前层:缓存先行 + 条件刷新(issue #23,感知层优化——冷启动客观时长不变)。
+   * force=true(下拉/重试)绕过 TTL 直连服务端;选择模式(picker)一律直连,
+   * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存;
+   * 失效代数变化(P1-1,在途期间其他页面写过数据)同样作废本次响应并补拉一次。
+   */
+  async loadNode(force?: boolean, retryOnStaleGen?: boolean): Promise<void> {
+    const seq = this.requestSeq.next();
+    const gen = captureCacheGeneration();
+    const pickMode = this.data.mode === "pick";
+    const cached = pickMode ? null : readLocationsLayer(this.nodeId);
+    const plan = planLocationsLoad({
+      cached,
+      fresh: cached !== null && isLocationsCacheFresh(cached),
+      force: force === true,
+      pickMode,
+      rendered: this.renderedOnce,
+    });
+    if (plan.useCache && cached !== null) {
+      // 缓存先行上屏:有旧树绝不整页 loading
+      this.renderList(cached.response);
+    }
+    this.setData({
+      loading: plan.skeleton,
+      refreshing: plan.fetch && !plan.skeleton,
+      stale: false,
+      loadError: "",
+    });
+    if (!plan.fetch) {
+      // TTL 内直接用缓存、不触发云函数:降低冷启动触发频率的主路径
       return;
     }
-    this.setData({ loading: true, loadError: "" });
     try {
       const res = await callLocationsApi(
         this.nodeId
           ? { action: "list", parent_id: this.nodeId }
           : { action: "list" },
       );
-      const isRoot = res.node.type === "home";
-      this.nodePath = res.node.path || [];
-      const items: DisplayItem[] = res.items.map((it) => ({
-        ...it,
-        updated_at_text: formatDateTime(it.updated_at),
-      }));
-      this.setData({
-        breadcrumbText: isRoot
-          ? "我的家"
-          : "我的家 / " + res.node.path.join(" / "),
-        isRoot,
-        children: this.decorate(res.children),
-        items,
-        unmountedCount: res.unmounted_count,
-        danglingMounts: res.dangling_mounts,
-        hasRooms: res.children.length > 0,
-        canScan: res.unmounted_count > 0,
-      });
+      if (!this.requestSeq.isCurrent(seq)) {
+        return; // 迟到响应:既不 setData 也不写缓存(约束 4)
+      }
+      if (!isCacheGenerationCurrent(gen)) {
+        // P1-1:在途期间发生过写失效(其他页面移动/挂载/改名…),这是旧树——
+        // 不上屏不写缓存,补拉一次;连续写场景由 retryOnStaleGen 挡住不无限循环
+        if (retryOnStaleGen !== false) {
+          void this.loadNode(force, false);
+        } else {
+          this.setData({ loading: false, refreshing: false, stale: true });
+        }
+        return;
+      }
+      writeLocationsLayer(this.nodeId, res, Date.now(), gen);
+      this.renderList(res); // 刷新成功:原位 setData 更新,不闪屏
+      this.setData({ loading: false, refreshing: false, stale: false, loadError: "" });
     } catch (e) {
-      this.setData({ loadError: errorMessage(e) });
-    } finally {
-      this.setData({ loading: false });
+      if (!this.requestSeq.isCurrent(seq)) {
+        return;
+      }
+      if (this.renderedOnce) {
+        // 刷新失败:保留旧树 + 如实提示可重试;不更新缓存的任何时间戳(约束 1/3)
+        this.setData({ loading: false, refreshing: false, stale: true });
+      } else {
+        this.setData({ loading: false, refreshing: false, loadError: errorMessage(e) });
+      }
     }
+  },
+
+  /** list 响应(缓存或服务端)→ 上屏数据;原位 setData */
+  renderList(res: ListLocationsResponse) {
+    const isRoot = res.node.type === "home";
+    this.nodePath = res.node.path || [];
+    const items: DisplayItem[] = res.items.map((it) => ({
+      ...it,
+      updated_at_text: formatDateTime(it.updated_at),
+    }));
+    this.renderedOnce = true;
+    this.setData({
+      breadcrumbText: isRoot
+        ? "我的家"
+        : "我的家 / " + res.node.path.join(" / "),
+      isRoot,
+      children: this.decorate(res.children),
+      items,
+      unmountedCount: res.unmounted_count,
+      danglingMounts: res.dangling_mounts,
+      hasRooms: res.children.length > 0,
+      canScan: res.unmounted_count > 0,
+    });
   },
 
   /** 子节点渲染装饰:类型/计数文案;选择模式下计算禁用与原因 */

@@ -14,6 +14,7 @@ exports.isLocationsApiErrorWithCode = isLocationsApiErrorWithCode;
  * 本模块不读取、不传输任何身份字段;household_id/openid 一律由服务端派生。
  */
 const api_1 = require("./api");
+const locations_cache_1 = require("./locations-cache");
 const LOCATIONS_API_FUNCTION = "locations";
 /** db 类 action 为薄操作,正常应在数秒内返回 */
 const LOCATIONS_DB_TIMEOUT_MS = 15000;
@@ -174,6 +175,20 @@ function timeoutForAction(action) {
     }
     return LOCATIONS_DB_TIMEOUT_MS;
 }
+/**
+ * 会改变空间树或挂载关系的 action:成功后整棵树缓存失效(issue #23,第一版
+ * 全量失效,不做节点级精细化)。list/parseLocation/scanHousehold 只读,不清。
+ */
+const LOCATIONS_MUTATING_ACTIONS = new Set([
+    "ensurePath",
+    "rename",
+    "move",
+    "merge",
+    "delete",
+    "linkItem",
+    "unlinkItem",
+    "applyScan",
+]);
 async function callLocationsApi(event) {
     const result = await callCloudFunction(LOCATIONS_API_FUNCTION, event, timeoutForAction(event.action));
     if (!isRecord(result)) {
@@ -186,6 +201,10 @@ async function callLocationsApi(event) {
         throw new api_1.ApiError(api_1.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     validateLocationsOkResponse(event.action, result);
+    if (LOCATIONS_MUTATING_ACTIONS.has(event.action)) {
+        // 失效收口在 API 层:变更成功即整树失效,页面不自己记「该清哪层」
+        (0, locations_cache_1.clearLocationsCache)();
+    }
     return result;
 }
 /** locations 协议错误码判断(用于分支处理,如 AI_UNAVAILABLE 的手动兜底) */

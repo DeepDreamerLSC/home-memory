@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const locations_api_1 = require("../../utils/locations-api");
+const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
 const TYPE_TEXT = {
     home: "",
@@ -25,6 +26,8 @@ Page({
         mode: "browse",
         pickTitle: "选择位置",
         loading: false,
+        refreshing: false,
+        stale: false,
         loadError: "",
         breadcrumbText: "我的家",
         isRoot: true,
@@ -41,7 +44,12 @@ Page({
     pickType: "",
     pickExcludePath: "",
     pendingPick: null,
+    requestSeq: (0, locations_cache_1.createRequestSeq)(),
+    renderedOnce: false,
     onLoad(options) {
+        // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
+        this.requestSeq = (0, locations_cache_1.createRequestSeq)();
+        this.renderedOnce = false;
         const isPicker = options.picker === "1";
         this.nodeId = safeDecode(options.node_id);
         this.pickType = isPicker ? safeDecode(options.type) : "";
@@ -60,41 +68,107 @@ Page({
     onShow() {
         void this.loadNode();
     },
-    /** 拉取当前层:list(parent_id 缺省 = home 根层,服务端惰性建根) */
-    async loadNode() {
-        if (this.data.loading) {
+    /** 下拉刷新:强制绕过 TTL 直连服务端,完成后收起原生转圈(约束 1/3) */
+    async onPullDownRefresh() {
+        try {
+            await this.loadNode(true);
+        }
+        finally {
+            wx.stopPullDownRefresh({ fail: () => { } });
+        }
+    },
+    /** 失败态重试按钮 / 「上次记录」提示条:点按强制刷新 */
+    onRetryTap() {
+        void this.loadNode(true);
+    },
+    /**
+     * 拉取当前层:缓存先行 + 条件刷新(issue #23,感知层优化——冷启动客观时长不变)。
+     * force=true(下拉/重试)绕过 TTL 直连服务端;选择模式(picker)一律直连,
+     * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存;
+     * 失效代数变化(P1-1,在途期间其他页面写过数据)同样作废本次响应并补拉一次。
+     */
+    async loadNode(force, retryOnStaleGen) {
+        const seq = this.requestSeq.next();
+        const gen = (0, locations_cache_1.captureCacheGeneration)();
+        const pickMode = this.data.mode === "pick";
+        const cached = pickMode ? null : (0, locations_cache_1.readLocationsLayer)(this.nodeId);
+        const plan = (0, locations_cache_1.planLocationsLoad)({
+            cached,
+            fresh: cached !== null && (0, locations_cache_1.isLocationsCacheFresh)(cached),
+            force: force === true,
+            pickMode,
+            rendered: this.renderedOnce,
+        });
+        if (plan.useCache && cached !== null) {
+            // 缓存先行上屏:有旧树绝不整页 loading
+            this.renderList(cached.response);
+        }
+        this.setData({
+            loading: plan.skeleton,
+            refreshing: plan.fetch && !plan.skeleton,
+            stale: false,
+            loadError: "",
+        });
+        if (!plan.fetch) {
+            // TTL 内直接用缓存、不触发云函数:降低冷启动触发频率的主路径
             return;
         }
-        this.setData({ loading: true, loadError: "" });
         try {
             const res = await (0, locations_api_1.callLocationsApi)(this.nodeId
                 ? { action: "list", parent_id: this.nodeId }
                 : { action: "list" });
-            const isRoot = res.node.type === "home";
-            this.nodePath = res.node.path || [];
-            const items = res.items.map((it) => ({
-                ...it,
-                updated_at_text: (0, api_1.formatDateTime)(it.updated_at),
-            }));
-            this.setData({
-                breadcrumbText: isRoot
-                    ? "我的家"
-                    : "我的家 / " + res.node.path.join(" / "),
-                isRoot,
-                children: this.decorate(res.children),
-                items,
-                unmountedCount: res.unmounted_count,
-                danglingMounts: res.dangling_mounts,
-                hasRooms: res.children.length > 0,
-                canScan: res.unmounted_count > 0,
-            });
+            if (!this.requestSeq.isCurrent(seq)) {
+                return; // 迟到响应:既不 setData 也不写缓存(约束 4)
+            }
+            if (!(0, locations_cache_1.isCacheGenerationCurrent)(gen)) {
+                // P1-1:在途期间发生过写失效(其他页面移动/挂载/改名…),这是旧树——
+                // 不上屏不写缓存,补拉一次;连续写场景由 retryOnStaleGen 挡住不无限循环
+                if (retryOnStaleGen !== false) {
+                    void this.loadNode(force, false);
+                }
+                else {
+                    this.setData({ loading: false, refreshing: false, stale: true });
+                }
+                return;
+            }
+            (0, locations_cache_1.writeLocationsLayer)(this.nodeId, res, Date.now(), gen);
+            this.renderList(res); // 刷新成功:原位 setData 更新,不闪屏
+            this.setData({ loading: false, refreshing: false, stale: false, loadError: "" });
         }
         catch (e) {
-            this.setData({ loadError: (0, api_1.errorMessage)(e) });
+            if (!this.requestSeq.isCurrent(seq)) {
+                return;
+            }
+            if (this.renderedOnce) {
+                // 刷新失败:保留旧树 + 如实提示可重试;不更新缓存的任何时间戳(约束 1/3)
+                this.setData({ loading: false, refreshing: false, stale: true });
+            }
+            else {
+                this.setData({ loading: false, refreshing: false, loadError: (0, api_1.errorMessage)(e) });
+            }
         }
-        finally {
-            this.setData({ loading: false });
-        }
+    },
+    /** list 响应(缓存或服务端)→ 上屏数据;原位 setData */
+    renderList(res) {
+        const isRoot = res.node.type === "home";
+        this.nodePath = res.node.path || [];
+        const items = res.items.map((it) => ({
+            ...it,
+            updated_at_text: (0, api_1.formatDateTime)(it.updated_at),
+        }));
+        this.renderedOnce = true;
+        this.setData({
+            breadcrumbText: isRoot
+                ? "我的家"
+                : "我的家 / " + res.node.path.join(" / "),
+            isRoot,
+            children: this.decorate(res.children),
+            items,
+            unmountedCount: res.unmounted_count,
+            danglingMounts: res.dangling_mounts,
+            hasRooms: res.children.length > 0,
+            canScan: res.unmounted_count > 0,
+        });
     },
     /** 子节点渲染装饰:类型/计数文案;选择模式下计算禁用与原因 */
     decorate(children) {

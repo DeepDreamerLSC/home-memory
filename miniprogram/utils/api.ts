@@ -23,6 +23,7 @@ import type {
   QueryItemsResponse,
   UpdateItemResponse,
 } from "../types";
+import { clearLocationsCache } from "./locations-cache";
 
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
@@ -219,6 +220,15 @@ export async function callItemsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   validateItemsOkResponse(event.action, result);
+  if (
+    event.action === "create" ||
+    event.action === "update" ||
+    event.action === "delete"
+  ) {
+    // 物品写入会影响空间树各层数据(create 影响「未归位」计数,update/delete
+    // 影响层级物品摘要):整树缓存失效,失效收口在 API 层(issue #23)
+    clearLocationsCache();
+  }
   return result as unknown as ItemsApiOkResponse;
 }
 
