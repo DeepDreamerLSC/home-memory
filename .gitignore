@@ -10,3 +10,12 @@ node_modules/
 # UI 示意网页存档(本地参考,不入库)
 UI示意.html
 UI示意_files/
+
+# 卡通化实验:真实物品照片与生成图不入库(隐私红线)
+scripts/experiments/cartoon-spike/inputs/
+scripts/experiments/cartoon-spike/outputs/
+scripts/experiments/cartoon-spike/style-ref/
+
+# Level 1 视觉增强实验:真实物品照片与处理产物不入库(隐私红线)
+scripts/experiments/level1-spike/inputs/
+scripts/experiments/level1-spike/outputs/
