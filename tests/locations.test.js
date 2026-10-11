@@ -2049,3 +2049,151 @@ test("TS-HIST2:另一家庭的历史行不串扰(household_id 随写入隔离)",
   assert.equal(byHousehold[HOUSEHOLD_A].item_id, itemA.item.item_id);
   assert.equal(byHousehold[HOUSEHOLD_B].item_id, itemB.item.item_id);
 });
+
+// ---------- TS-LOC:方位词规则(issue #21,真机验收反馈) ----------
+
+function locSeg(name, confidence) {
+  return { name: name, type: "container", confidence: confidence };
+}
+
+test("TS-LOC1:纯方位段并入前一实体段——「书房的桌子上」不再产出「上」子节点", async function () {
+  var t = fresh();
+  var mock = seqMock([
+    parseRaw([
+      { name: "书房", type: "room", confidence: 0.95 },
+      { name: "桌子", type: "furniture", confidence: 0.9 },
+      locSeg("上", 0.9)
+    ])
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "平板电脑在书房的桌子上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.parse.segments.length, 2, "「上」被并入桌子段,不单独成节点");
+  assert.equal(res.parse.segments[0].name, "书房");
+  assert.equal(res.parse.segments[1].name, "桌子");
+  assert.equal(res.parse.need_confirm, false, "全锚定高置信且无方位根:无需确认");
+});
+
+test("TS-LOC2:首段即纯方位词保留但强制 need_confirm;指向被并入段的模型建议被丢弃", async function () {
+  var t = fresh();
+  await ensurePath(t.deps, ["书房", "桌子"]);
+
+  // 模型建议(下标 2)指向被并入的「上」段:应整体丢弃,不越界不复活
+  var mock = seqMock([
+    parseRaw(
+      [
+        { name: "书房", type: "room", confidence: 0.95 },
+        { name: "桌子", type: "furniture", confidence: 0.9 },
+        locSeg("上", 0.9)
+      ],
+      [{ segment_index: 2, name: "桌子", reason: "近义" }]
+    )
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "台灯在书房桌子上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.parse.segments.length, 2);
+  for (var i = 0; i < res.parse.merge_suggestions.length; i++) {
+    assert.ok(
+      res.parse.merge_suggestions[i].segment_index < res.parse.segments.length,
+      "建议下标不得指向已并入的段"
+    );
+  }
+
+  // 首段纯方位:方位词不能单独成为位置根,强制人工确认
+  var mock2 = seqMock([parseRaw([{ name: "上", type: "room", confidence: 0.95 }])]);
+  var res2 = await locHandler(
+    { action: "parseLocation", text: "充电宝在上" },
+    Object.assign({}, t.deps, { callLLM: mock2.callLLM })
+  );
+  assert.equal(res2.ok, true);
+  assert.equal(res2.parse.segments.length, 1);
+  assert.equal(res2.parse.need_confirm, true, "方位词作为位置根必须人工确认");
+});
+
+test("TS-LOC3:可比名近义建议——既有「桌子」时候选「桌上」/「冰箱里」提示合并(用户裁决)", async function () {
+  var t = fresh();
+  await ensurePath(t.deps, ["书房", "桌子"]);
+  await ensurePath(t.deps, ["厨房", "冰箱"]);
+
+  var mock = seqMock([
+    parseRaw([
+      { name: "书房", type: "room", confidence: 0.95 },
+      { name: "桌上", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "电脑在书房桌上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.parse.segments.length, 2, "「桌上」非纯方位词,保留为段;近义靠建议解决");
+  var near = res.parse.merge_suggestions.filter(function (s) {
+    return s.reason === "近义" && s.segment_index === 1;
+  })[0];
+  assert.ok(near, "桌上 应触发对既有 桌子 的近义建议");
+  assert.equal(near.existing_name, "桌子");
+
+  var mock2 = seqMock([
+    parseRaw([{ name: "冰箱里", type: "room", confidence: 0.9 }])
+  ]);
+  var res2 = await locHandler(
+    { action: "parseLocation", text: "面条在冰箱里" },
+    Object.assign({}, t.deps, { callLLM: mock2.callLLM })
+  );
+  assert.equal(res2.ok, true);
+  var near2 = res2.parse.merge_suggestions.filter(function (s) {
+    return s.reason === "近义" && s.segment_index === 0;
+  })[0];
+  assert.ok(near2, "冰箱里 应触发对既有 冰箱 的近义建议");
+  assert.equal(near2.existing_name, "冰箱");
+});
+
+test("TS-LOC4:scanHousehold 同款规则——床上→[卧室,床],桌上/桌子 进同义组交用户裁决", async function () {
+  var t = fresh();
+  var a = await createItem(t.deps, "op-loc4a", "电脑", "书房桌上");
+  var b = await createItem(t.deps, "op-loc4b", "台灯", "书房桌子");
+  var c = await createItem(t.deps, "op-loc4c", "毯子", "卧室床上");
+  var mock = routingMock(
+    {
+      "书房桌上": [
+        { name: "书房", type: "room", confidence: 0.95 },
+        { name: "桌上", type: "furniture", confidence: 0.9 }
+      ],
+      "书房桌子": [
+        { name: "书房", type: "room", confidence: 0.95 },
+        { name: "桌子", type: "furniture", confidence: 0.9 }
+      ],
+      "卧室床上": [
+        { name: "卧室", type: "room", confidence: 0.95 },
+        { name: "床", type: "furniture", confidence: 0.9 },
+        locSeg("上", 0.9)
+      ]
+    },
+    '{"groups":[]}'
+  );
+  var res = await locHandler(
+    { action: "scanHousehold" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.scan.scanned, 3);
+
+  var blanket = res.scan.mounts.filter(function (m) {
+    return m.item_id === c.item.item_id;
+  })[0];
+  assert.deepEqual(blanket.path, ["卧室", "床"], "「上」并入床段,不产生床→上");
+
+  var group = res.scan.synonym_groups.filter(function (g) {
+    return g.names.indexOf("桌上") !== -1;
+  })[0];
+  assert.ok(group, "桌上/桌子 应进入同义组(可比名同为「桌」)");
+  assert.equal(group.level, 1);
+  assert.ok(group.names.indexOf("桌子") !== -1, "组内应同时含 桌上 与 桌子:" + JSON.stringify(group.names));
+  // 未用变量 linter 安抚
+  void a; void b;
+});

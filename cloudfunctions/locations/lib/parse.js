@@ -36,7 +36,9 @@ var SYSTEM_PROMPT = [
   "2. 每段名字必须逐字取自原文且按原文顺序,禁止改写、概括、推理、调序。",
   "3. 每段给 confidence(0 到 1 的小数),拿不准就给低分,宁可低分不可编造。",
   "4. 与【既有空间树】中同层同名或近义(如「主卧」与「主人房」)的段,在 merge_suggestions 里给出建议。",
-  "5. 只输出一个 JSON 对象,无任何其他文字或代码块围栏。"
+  "5. 方位词(上/下/里/内/中/左边/右边等)绝不单独成段:「床上」「沙发左边」取实体段(床/沙发)即可,方位不另立层级。",
+  "6. 同一实体保持一致称呼:原文「床上」「床头上面」在层级里就是床,不要另造「床上」段。",
+  "7. 只输出一个 JSON 对象,无任何其他文字或代码块围栏。"
 ].join("\n");
 
 var PARSE_SCHEMA = [
@@ -74,6 +76,70 @@ function codePointLength(s) {
 
 function stripAllWhitespace(s) {
   return s.replace(/\s+/g, "");
+}
+
+// ---------------------------------------------------------------------------
+// 方位词规则(issue #21):纯方位段并入前一实体段、首段方位强制人工确认、
+// 可比名(剥方位后缀)用于近义提示。确定性后处理,不依赖模型自觉。
+// ---------------------------------------------------------------------------
+
+/** 单独成为一段即无语义的纯方位词(闭集;「左边抽屉」「最下层」等复合名不受影响) */
+var PURE_LOCATIVES = [
+  "上面", "下面", "里面", "上边", "下边", "里边", "左边", "右边",
+  "左侧", "右侧", "中间", "旁边", "附近", "上方", "下方", "上", "下", "里", "内", "中"
+];
+
+/** 可比名剥后缀顺序(长在前):方位词 + 家具通名后缀「子」(桌上/桌子→桌);
+ * 保留长度下限:剥完为空则原样返回。仅用于近义比对,不用于存储 */
+var LOCATIVE_SUFFIXES = [
+  "上面", "下面", "里面", "上边", "下边", "里边", "旁边", "上方", "下方", "上", "下", "里", "内", "中", "子"
+];
+
+function isPureLocative(name) {
+  return PURE_LOCATIVES.indexOf(normalizeName(name)) !== -1;
+}
+
+/** 可比名:循环剥掉尾部方位后缀(桌上→桌、冰箱里→冰箱),用于近义比对,不用于存储 */
+function comparableName(nameNorm) {
+  var s = nameNorm;
+  var changed = true;
+  while (changed) {
+    changed = false;
+    for (var i = 0; i < LOCATIVE_SUFFIXES.length; i++) {
+      var suf = LOCATIVE_SUFFIXES[i];
+      if (s.length > suf.length && s.slice(s.length - suf.length) === suf) {
+        s = s.slice(0, s.length - suf.length);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return s;
+}
+
+/**
+ * 应用方位词规则:indexMap 记录原始下标→存活下标(-1=被并入丢弃),
+ * 供调用方重映射模型 merge_suggestions 的 segment_index。
+ */
+function applyLocativeRules(segments) {
+  var kept = [];
+  var indexMap = [];
+  var locativeRoot = false;
+  for (var i = 0; i < segments.length; i++) {
+    if (isPureLocative(segments[i].name)) {
+      if (kept.length === 0) {
+        locativeRoot = true; // 首段即纯方位:方位词不能单独成为位置根,保留但强制人工确认
+        indexMap[i] = kept.length;
+        kept.push(segments[i]);
+      } else {
+        indexMap[i] = -1; // 并入前一实体段(丢弃)
+      }
+      continue;
+    }
+    indexMap[i] = kept.length;
+    kept.push(segments[i]);
+  }
+  return { segments: kept, locativeRoot: locativeRoot, indexMap: indexMap };
 }
 
 function logParse(deps, entry) {
@@ -248,15 +314,23 @@ async function parseLocation(event, deps) {
   }
 
   var parsed = call.result.parse;
-  var segments = parsed.segments;
+  // 方位词规则先于锚定/建议:被并入的段不参与后续下标(issue #21)
+  var loc = applyLocativeRules(parsed.segments);
+  var segments = loc.segments;
   var anchoring = validate.anchorSegments(segments, userText);
 
   // merge_suggestions:模型建议按「全树 name_norm 匹配」校验存在性(找不到丢弃),
   // 服务端对下钻命中的同名节点自动补全(不依赖模型)。
+  // 模型给的下标基于原始分段:先经 indexMap 重映射,被并入段的建议一并丢弃。
   var suggestions = [];
   var seen = Object.create(null); // segment_index + "|" + location_id 去重
   for (var i = 0; i < parsed.merge_suggestions.length; i++) {
     var s = parsed.merge_suggestions[i];
+    var mapped = loc.indexMap[s.segment_index];
+    if (mapped === undefined || mapped === -1) {
+      continue; // 指向被并入的方位段或越界:丢弃
+    }
+    s.segment_index = mapped;
     var norm = normalizeName(s.name);
     var matched = null;
     for (var k = 0; k < nodes.length; k++) {
@@ -299,6 +373,35 @@ async function parseLocation(event, deps) {
       reason: "同名"
     });
   }
+  // 可比名近义(issue #21):桌上≈桌子、冰箱里≈冰箱——确定性补全建议,仍由用户裁决合并。
+  // 全部节点按可比名建索引(裸实体与带后缀变体都进),同可比名取路径最短。
+  var byComparable = Object.create(null);
+  for (var cn = 0; cn < nodes.length; cn++) {
+    var comp = comparableName(nodes[cn].name_norm);
+    var prev = byComparable[comp];
+    if (prev === undefined || nodes[cn].path.length < prev.path.length) {
+      byComparable[comp] = nodes[cn]; // 同可比名取路径最短(最接近房间层)
+    }
+  }
+  for (var q = 0; q < segments.length; q++) {
+    var segNormQ = normalizeName(segments[q].name);
+    var segComp = comparableName(segNormQ);
+    var near = byComparable[segComp];
+    if (!near || near.name_norm === segNormQ) {
+      continue; // 无同根的既有节点,或精确同名已由 descendTree 覆盖
+    }
+    var nearKey = q + "|" + near._id;
+    if (seen[nearKey]) {
+      continue;
+    }
+    seen[nearKey] = true;
+    suggestions.push({
+      segment_index: q,
+      existing_location_id: near._id,
+      existing_name: near.name,
+      reason: "近义"
+    });
+  }
   suggestions.sort(function (a, b) {
     return a.segment_index - b.segment_index;
   });
@@ -308,7 +411,7 @@ async function parseLocation(event, deps) {
     });
   });
 
-  var needConfirm = computeNeedConfirm(segments, anchoring, covered, parsed.uncertain);
+  var needConfirm = computeNeedConfirm(segments, anchoring, covered, parsed.uncertain) || loc.locativeRoot;
   var outSegments = segments.map(function (seg) {
     return { name: seg.name, type: seg.type, confidence: seg.confidence };
   });
@@ -514,7 +617,9 @@ async function scanHousehold(event, deps) {
         skipped.push({ item_id: item._id, name: item.name, reason: "分段为空" });
         continue;
       }
-      var segments = parsed.segments;
+      // 方位词规则与 parseLocation 同款(issue #21):纯方位段并入前段,首段方位强制确认
+      var loc = applyLocativeRules(parsed.segments);
+      var segments = loc.segments;
       var anchoring = validate.anchorSegments(segments, item.location_text);
       var hits = descendTree(nodes, segments);
       // 同名 merge_hints:候选树节点上内嵌(§5.9),同层 name_norm 相等由服务端自动判定
@@ -552,7 +657,7 @@ async function scanHousehold(event, deps) {
           minConf = segments[m].confidence;
         }
       }
-      var needConfirm = computeNeedConfirm(segments, anchoring, covered, parsed.uncertain);
+      var needConfirm = computeNeedConfirm(segments, anchoring, covered, parsed.uncertain) || loc.locativeRoot;
       if (needConfirm) {
         mergeIntoCandidate(candidateRoots, segments, true); // 任一件需确认 → 该路径树节点 need_confirm
       }
@@ -594,6 +699,58 @@ async function scanHousehold(event, deps) {
     synonymGroups = synCall.result.groups.map(function (g) {
       return { level: g.level, names: g.names, reason: "近义" };
     });
+  }
+  // 可比名归并(issue #21,确定性):同层剥后缀后同根的名字(桌上/桌子→桌、冰箱里/冰箱)
+  // 补进同义组交向导用户裁决;与 LLM 组有交集时并入,不另开新组;凑不满 2 个不建组。
+  for (var lv = 0; lv < levelNames.length; lv++) {
+    var norms = levelNames[lv].map(function (nm) {
+      return normalizeName(nm);
+    });
+    var byComp = Object.create(null);
+    for (var n1 = 0; n1 < norms.length; n1++) {
+      var c1 = comparableName(norms[n1]);
+      if (c1 === norms[n1]) {
+        continue; // 无后缀的一方在下一步作为「根名」加入
+      }
+      if (byComp[c1] === undefined) {
+        byComp[c1] = [levelNames[lv][n1]];
+      } else {
+        byComp[c1].push(levelNames[lv][n1]);
+      }
+    }
+    for (var compKey in byComp) {
+      var members = byComp[compKey].slice();
+      var rootIdx = norms.indexOf(compKey);
+      if (rootIdx !== -1) {
+        members.unshift(levelNames[lv][rootIdx]); // 根名(桌/冰箱)排最前
+      }
+      if (members.length < 2) {
+        continue; // 只有带后缀的变体、没有根名或第二个变体:不构成归并提示
+      }
+      var merged = null;
+      for (var g2 = 0; g2 < synonymGroups.length; g2++) {
+        if (synonymGroups[g2].level !== lv) {
+          continue;
+        }
+        var overlap = synonymGroups[g2].names.some(function (nm) {
+          return members.indexOf(nm) !== -1;
+        });
+        if (overlap) {
+          var uniq = synonymGroups[g2].names.slice();
+          for (var m2 = 0; m2 < members.length; m2++) {
+            if (uniq.indexOf(members[m2]) === -1) {
+              uniq.push(members[m2]);
+            }
+          }
+          synonymGroups[g2].names = uniq;
+          merged = synonymGroups[g2];
+          break;
+        }
+      }
+      if (!merged) {
+        synonymGroups.push({ level: lv, names: members, reason: "近义" });
+      }
+    }
   }
 
   logParse(deps, { action: "scanHousehold", items_scanned: pool.length, chunks: chunks.length, elapsed_ms: elapsedMs() });
