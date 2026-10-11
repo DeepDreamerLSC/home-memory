@@ -105,6 +105,43 @@ function isPayload(v: unknown): v is LocationsCachePayload {
     (v as { layers: unknown }).layers !== null;
 }
 
+/**
+ * 缓存条目内部形状校验(P1-2 收尾,窄复核):旧版本残留/损坏的条目——如
+ * response 为 null、node/children/items 缺失——不得进入渲染路径,否则
+ * renderList 访问 res.node.type 直接 TypeError 且发生在请求 try 之前,
+ * 页面永远回退不了云端。非法条目视 cache miss,并 best-effort 删掉该层。
+ */
+function isUsableEntry(v: unknown): v is LocationsCacheEntry {
+  if (typeof v !== "object" || v === null) {
+    return false;
+  }
+  const entry = v as { savedAt?: unknown; response?: unknown };
+  if (typeof entry.savedAt !== "number" || !Number.isFinite(entry.savedAt)) {
+    return false;
+  }
+  const response = entry.response;
+  if (typeof response !== "object" || response === null) {
+    return false;
+  }
+  const node = (response as { node?: { type?: unknown } }).node;
+  if (typeof node !== "object" || node === null || typeof node.type !== "string") {
+    return false;
+  }
+  if (!Array.isArray((response as { children?: unknown }).children)) {
+    return false;
+  }
+  if (!Array.isArray((response as { items?: unknown }).items)) {
+    return false;
+  }
+  if (typeof (response as { unmounted_count?: unknown }).unmounted_count !== "number") {
+    return false;
+  }
+  if (typeof (response as { dangling_mounts?: unknown }).dangling_mounts !== "number") {
+    return false;
+  }
+  return true;
+}
+
 function readPayload(): LocationsCachePayload {
   const storage = activeStorage();
   if (storage !== null) {
@@ -152,6 +189,13 @@ export function readLocationsLayer(
   const key = locationsLayerKey(parentId);
   const entry = payload.layers[key];
   if (!entry) {
+    return null;
+  }
+  if (!isUsableEntry(entry)) {
+    // 内部损坏(形状合法的持久层里嵌着坏条目):降级为 miss 并顺手清掉,
+    // 页面因此照常走云端请求,绝不让坏数据进入渲染路径
+    delete payload.layers[key];
+    writePayload(payload);
     return null;
   }
   if (isExpired(entry, now)) {

@@ -566,3 +566,38 @@ test("STO-4:app 启动清理遇 storage 异常不抛(prune best-effort);malforme
   fake.setStorageSync(key, "不是一个合法的缓存对象"); // 模拟持久层损坏
   assert.equal(cache.readLocationsLayer(""), null, "malformed 条目降级为 miss,不让页面拿到坏数据");
 });
+
+test("STO-5:嵌套层条目内部损坏(response:null 等)→ 降级为 miss,不进渲染路径,照常请求云端", async function () {
+  var fake = makeFakeStorage();
+  cache.__setLocationsCacheStorageForTest(fake);
+  // 先种一个合法条目拿到真实 storage key,再换成「形状合法但内层损坏」的持久层
+  cache.writeLocationsLayer("", makeListResponse({ itemCount: 9 }), Date.now());
+  var key = Object.keys(fake.__dump())[0];
+  fake.setStorageSync(key, {
+    layers: { root: { savedAt: Date.now(), response: null } },
+  });
+  assert.equal(cache.readLocationsLayer(""), null, "response:null 的条目必须降级为 miss");
+
+  // 页面同款决策序列:miss → 发请求 → 服务端结果照常渲染,无异常无错误态
+  var page = makePageLike();
+  await page.loadNode(false, function () {
+    return Promise.resolve(makeListResponse({ itemCount: 4 }));
+  });
+  assert.equal(page.state.rendered.node.item_count, 4, "云端结果照常上屏");
+  assert.equal(page.state.loadError, "", "坏条目不得冒充错误,也不得炸渲染");
+
+  // 其他同源畸形:savedAt 非数字 / node 缺 type / children 非数组
+  fake.setStorageSync(key, { layers: { root: { savedAt: "not-a-number", response: makeListResponse() } } });
+  assert.equal(cache.readLocationsLayer(""), null, "savedAt 非有限数字 → miss");
+  var brokenNode = makeListResponse();
+  brokenNode.node = { no_type: true };
+  fake.setStorageSync(key, { layers: { root: { savedAt: Date.now(), response: brokenNode } } });
+  assert.equal(cache.readLocationsLayer(""), null, "node 缺 type → miss");
+  var brokenChildren = makeListResponse();
+  brokenChildren.children = "not-an-array";
+  fake.setStorageSync(key, { layers: { root: { savedAt: Date.now(), response: brokenChildren } } });
+  assert.equal(cache.readLocationsLayer(""), null, "children 非数组 → miss");
+  // 坏条目被顺手清掉:同 key 再读仍是 miss,且持久层不再含 root
+  var dumpAfter = fake.__dump()[key];
+  assert.ok(!dumpAfter || !dumpAfter.layers || !dumpAfter.layers.root, "损坏条目已被 best-effort 清除");
+});
