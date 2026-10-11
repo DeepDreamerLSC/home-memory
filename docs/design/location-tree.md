@@ -328,7 +328,8 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 
 ### 7.1 `pages/locations` —— 我的家(树浏览 + 节点管理)
 
-- **入口参数**:`?node_id=<location_id>`(缺省=根层)与 `?picker=1&exclude=..&type=..`(选择模式,§7.1 末)。onLoad/onShow 调 `list`。
+- **入口参数**:`?node_id=<location_id>`(缺省=根层)与 `?picker=1&exclude=..&type=..`(选择模式,§7.1 末)。onShow 调 `loadNode`(缓存先行 + 条件刷新,见下条)。
+- **加载策略(冷启动感知优化,issue #23)**:云函数冷启动实测 3-4s、热态 0.5s,本策略只改感知不改客观时长。`utils/locations-cache.ts` 按层缓存 list 响应(只含节点结构与物品摘要,与页面已展示的同级数据;不缓存语音原文/prompt;key 不加用户维度——小程序 storage 按账号隔离,取舍见模块注释)。渲染分四态:无缓存首载=骨架屏;有缓存=旧树立即上屏(`requestSeq` 递增序号防迟到响应覆盖新数据,不上屏不写缓存);刷新成功=原位 setData;刷新失败=保留旧树 + 「当前为上次记录,下拉或点按重试」。TTL 2 分钟只是性能策略:TTL 内不发请求(降低冷启动触发频率);下拉刷新(enablePullDownRefresh)、选择模式(picker=1,影响真实数据操作前的校验)一律绕过 TTL 直连服务端;缓存带 24h 绝对过期,app onLaunch 清理。失效为第一版全量:任何一次成功写操作(locations 变更类 action、itemsApi create/update/delete)清空整棵树缓存,收口在 API 层封装(utils/locations-api.ts、utils/api.ts),页面不自己记「该清哪层」;后台刷新失败不更新缓存的任何时间戳。
 - **结构**:面包屑(path 渲染:「我的家 / 书房 / 桌子」)+ 子节点列表(item-row 样式,右侧显示 `item_count` 件 + chevron 下钻)+ 该层物品列表(直接挂载;显示物品名与原始 location_text 小字;点击进 pages/item 详情)。
 - **「生成/更新空间树」常驻入口(非空态限定)**:根层页头常驻一行入口——空树时呈现为主引导卡(「还没建过空间,从已录入物品生成」),已有房间时呈现为次级行「生成 / 更新空间树 · N 件未归位」(N=list 响应的 `unmounted_count`,N=0 时显示「全部已归位」)。入口永久可用:录入链路持续产生树外物品,该入口是浏览面与真实库存持续对齐的回流通道(扫描池=未挂载物品,§5.9)。`dangling_mounts>0` 时入口行附如实提示「N 件挂载异常,建议重新挂载」。
 - **手动添加房间**:次级入口(showModal editable 输入名称 → ensurePath created_from:"manual"),任何层级可用(建子节点)。

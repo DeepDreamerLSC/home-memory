@@ -1,7 +1,10 @@
 import { cloudEnv, isCloudEnvPlaceholder } from "./config";
+import { pruneLocationsCache } from "./utils/locations-cache";
 
 App({
   onLaunch() {
+    // 清理超过 24 小时的空间树缓存层(issue #23:缓存带绝对过期,启动时收口)
+    pruneLocationsCache();
     if (!wx.cloud) {
       console.error("当前基础库不支持云开发能力,请升级微信或基础库版本");
       wx.showModal({

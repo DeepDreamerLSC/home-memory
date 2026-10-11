@@ -5,17 +5,35 @@
     <view class="hint">点一条即确认选择;点 › 可继续往里找。不能选的位置会标出原因。</view>
   </view>
 
-  <view wx:if="{{ loading }}" class="card">
-    <view class="empty-text">加载中…</view>
+  <!-- 无缓存首载:骨架屏(占位几何与真实列表一致,不再是一行干巴巴的「加载中」) -->
+  <view wx:if="{{ loading }}" class="skeleton">
+    <view class="skel-crumb"></view>
+    <view class="card">
+      <view class="skel-row" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this">
+        <view class="skel-icon"></view>
+        <view class="skel-main">
+          <view class="skel-line skel-line-name"></view>
+          <view class="skel-line skel-line-sub"></view>
+        </view>
+      </view>
+    </view>
   </view>
 
   <view wx:elif="{{ loadError }}" class="card">
     <view class="error-text">{{ loadError }}</view>
-    <button class="btn block" bindtap="loadNode">重试</button>
+    <button class="btn block" bindtap="onRetryTap">重试</button>
   </view>
 
   <block wx:else>
-    <view class="crumb">{{ breadcrumbText }}</view>
+    <view class="crumb-row">
+      <view class="crumb">{{ breadcrumbText }}</view>
+      <view wx:if="{{ refreshing }}" class="refresh-flag">同步中…</view>
+    </view>
+
+    <!-- 后台刷新失败:保留旧树,如实提示并可重试(点按=强制刷新) -->
+    <view wx:if="{{ stale }}" class="stale-banner" bindtap="onRetryTap">
+      当前为上次记录(刷新失败),下拉或点按重试
+    </view>
 
     <!-- 根层常驻入口:生成 / 更新空间树(浏览模式) -->
     <view wx:if="{{ mode === 'browse' && isRoot && (canScan || hasRooms) }}" class="card">
