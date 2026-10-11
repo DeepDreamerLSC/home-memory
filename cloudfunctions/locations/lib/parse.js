@@ -319,9 +319,25 @@ async function parseLocation(event, deps) {
   var segments = loc.segments;
   var anchoring = validate.anchorSegments(segments, userText);
 
-  // merge_suggestions:模型建议按「全树 name_norm 匹配」校验存在性(找不到丢弃),
+  // merge_suggestions 作用域(issue #22 终审):候选必须挂在该段的父节点下
+  // (首段=根,其余=上一命中段)且 type 与该段一致;父级未命中/无法确定时不给建议,
+  // 保留人工选择——绝不做全树同名择一(「卧室/桌上」不得被建议到「书房/桌子」)。
   // 服务端对下钻命中的同名节点自动补全(不依赖模型)。
   // 模型给的下标基于原始分段:先经 indexMap 重映射,被并入段的建议一并丢弃。
+  var hits = descendTree(nodes, segments);
+  var rootId = null;
+  for (var rn = 0; rn < nodes.length; rn++) {
+    if (nodes[rn].parent_id === "") {
+      rootId = nodes[rn]._id;
+      break;
+    }
+  }
+  function scopeParentId(segIdx) {
+    if (segIdx === 0) {
+      return rootId;
+    }
+    return hits[segIdx - 1] ? hits[segIdx - 1]._id : null;
+  }
   var suggestions = [];
   var seen = Object.create(null); // segment_index + "|" + location_id 去重
   for (var i = 0; i < parsed.merge_suggestions.length; i++) {
@@ -333,16 +349,21 @@ async function parseLocation(event, deps) {
     s.segment_index = mapped;
     var norm = normalizeName(s.name);
     var matched = null;
-    for (var k = 0; k < nodes.length; k++) {
-      if (nodes[k].name_norm !== norm) {
-        continue;
-      }
-      if (matched === null || nodes[k].path.length < matched.path.length) {
-        matched = nodes[k]; // 多个同名节点取路径最短(最接近房间层)
+    var scopePid = scopeParentId(mapped);
+    if (scopePid !== null && segments[mapped]) {
+      for (var k = 0; k < nodes.length; k++) {
+        if (
+          nodes[k].name_norm === norm &&
+          nodes[k].parent_id === scopePid &&
+          nodes[k].type === segments[mapped].type
+        ) {
+          matched = nodes[k]; // 同父同型下 name_norm 唯一(组合唯一索引),无需择一
+          break;
+        }
       }
     }
     if (!matched) {
-      continue; // 引用不存在的节点:丢弃该条,不失败
+      continue; // 父级无法确定/跨父/类型不符/不存在:丢弃该条,不失败
     }
     var key = s.segment_index + "|" + matched._id;
     if (seen[key]) {
@@ -356,10 +377,12 @@ async function parseLocation(event, deps) {
       reason: s.reason
     });
   }
-  var hits = descendTree(nodes, segments);
   for (var d = 0; d < hits.length; d++) {
     if (!hits[d]) {
       continue;
+    }
+    if (segments[d] && hits[d].type !== segments[d].type) {
+      continue; // 同名同父但类型不一致:不自动列为候选(issue #22 终审,交人工确认)
     }
     var autoKey = d + "|" + hits[d]._id;
     if (seen[autoKey]) {
@@ -374,33 +397,40 @@ async function parseLocation(event, deps) {
     });
   }
   // 可比名近义(issue #21):桌上≈桌子、冰箱里≈冰箱——确定性补全建议,仍由用户裁决合并。
-  // 全部节点按可比名建索引(裸实体与带后缀变体都进),同可比名取路径最短。
-  var byComparable = Object.create(null);
-  for (var cn = 0; cn < nodes.length; cn++) {
-    var comp = comparableName(nodes[cn].name_norm);
-    var prev = byComparable[comp];
-    if (prev === undefined || nodes[cn].path.length < prev.path.length) {
-      byComparable[comp] = nodes[cn]; // 同可比名取路径最短(最接近房间层)
-    }
-  }
+  // 同样受父节点+类型作用域约束(issue #22 终审):只在该段父节点的孩子里匹配,
+  // 父级未命中不越级建议(错误合并比重复更有害)。
   for (var q = 0; q < segments.length; q++) {
     var segNormQ = normalizeName(segments[q].name);
     var segComp = comparableName(segNormQ);
-    var near = byComparable[segComp];
-    if (!near || near.name_norm === segNormQ) {
-      continue; // 无同根的既有节点,或精确同名已由 descendTree 覆盖
+    if (!segComp || segComp === segNormQ) {
+      continue; // 无后缀可比变体的裸实体名,精确同名已由下钻覆盖
     }
-    var nearKey = q + "|" + near._id;
-    if (seen[nearKey]) {
-      continue;
+    var parentIdQ = scopeParentId(q);
+    if (parentIdQ === null) {
+      continue; // 父级未命中:不给确定性近义建议
     }
-    seen[nearKey] = true;
-    suggestions.push({
-      segment_index: q,
-      existing_location_id: near._id,
-      existing_name: near.name,
-      reason: "近义"
-    });
+    for (var cn = 0; cn < nodes.length; cn++) {
+      var cand = nodes[cn];
+      if (
+        cand.parent_id !== parentIdQ ||
+        cand.type !== segments[q].type ||
+        cand.name_norm === segNormQ ||
+        comparableName(cand.name_norm) !== segComp
+      ) {
+        continue;
+      }
+      var nearKey = q + "|" + cand._id;
+      if (seen[nearKey]) {
+        continue;
+      }
+      seen[nearKey] = true;
+      suggestions.push({
+        segment_index: q,
+        existing_location_id: cand._id,
+        existing_name: cand.name,
+        reason: "近义"
+      });
+    }
   }
   suggestions.sort(function (a, b) {
     return a.segment_index - b.segment_index;
@@ -532,6 +562,93 @@ function levelNamesOf(rootChildren) {
     queue = next;
   }
   return levels;
+}
+
+/**
+ * 按父节点收集可比名同义组(issue #22 终审):只在同一父节点的孩子里剥后缀同根
+ * (桌上/桌子→桌、冰箱里/冰箱);跨父不归并——levelNames 的「同层」不等于「同一个父节点」,
+ * 卧室/桌上 与 书房/桌子 不是一组。根名(桌/冰箱)排最前,凑不满 2 个不建组。
+ */
+function comparableSiblingGroups(rootChildren) {
+  var groups = [];
+  function scanSiblings(children, level) {
+    var byComp = Object.create(null);
+    var rootByName = Object.create(null);
+    for (var i = 0; i < children.length; i++) {
+      var norm = normalizeName(children[i].name);
+      var comp = comparableName(norm);
+      if (comp === norm) {
+        if (rootByName[comp] === undefined) {
+          rootByName[comp] = children[i].name; // 无后缀的一方作为「根名」
+        }
+      } else if (byComp[comp] === undefined) {
+        byComp[comp] = [children[i].name];
+      } else {
+        byComp[comp].push(children[i].name);
+      }
+    }
+    for (var key in byComp) {
+      var members = byComp[key].slice();
+      if (rootByName[key] !== undefined) {
+        members.unshift(rootByName[key]);
+      }
+      if (members.length >= 2) {
+        groups.push({ level: level, names: members });
+      }
+    }
+    for (var j = 0; j < children.length; j++) {
+      scanSiblings(children[j].children, level + 1);
+    }
+  }
+  scanSiblings(rootChildren, 0);
+  return groups;
+}
+
+/** 名字在候选树 depth 层(0 起)出现处的父路径列表(重名会得到多条) */
+function parentPathsOfName(rootChildren, name, depth) {
+  var paths = [];
+  function walk(nodes, prefix, d) {
+    for (var i = 0; i < nodes.length; i++) {
+      if (d === depth && nodes[i].name === name) {
+        paths.push(prefix);
+      }
+      if (d < depth) {
+        walk(nodes[i].children, prefix.concat([nodes[i].name]), d + 1);
+      }
+    }
+  }
+  walk(rootChildren, [], 0);
+  return paths;
+}
+
+/**
+ * 同父终检(issue #22 终审):向导的同义组「合并」按层全树改名,跨父组会误改别的子树,
+ * 故组内每个名字必须在该层唯一解析到一个候选节点且全部同父;否则整组丢弃
+ * (建议是可选提示,丢弃无损失;错误合并比重复更有害)。
+ */
+function filterSameParentGroups(groups, rootChildren) {
+  var kept = [];
+  for (var g = 0; g < groups.length; g++) {
+    var shared = null;
+    var ok = groups[g].names.length >= 2;
+    for (var m = 0; m < groups[g].names.length && ok; m++) {
+      var parents = parentPathsOfName(rootChildren, groups[g].names[m], groups[g].level);
+      if (parents.length !== 1) {
+        ok = false; // 名字缺失或该层重名:无法唯一确定作用域
+        break;
+      }
+      var pathKey = parents[0].join("/");
+      if (shared === null) {
+        shared = pathKey;
+      } else if (pathKey !== shared) {
+        ok = false; // 成员分属不同父节点
+      }
+    }
+    if (ok && shared !== null) {
+      kept.push(groups[g]);
+    }
+  }
+  return kept;
 }
 
 async function scanHousehold(event, deps) {
@@ -700,58 +817,39 @@ async function scanHousehold(event, deps) {
       return { level: g.level, names: g.names, reason: "近义" };
     });
   }
-  // 可比名归并(issue #21,确定性):同层剥后缀后同根的名字(桌上/桌子→桌、冰箱里/冰箱)
+  // 可比名归并(issue #21,确定性):同一父节点孩子里剥后缀同根(桌上/桌子→桌、冰箱里/冰箱)
   // 补进同义组交向导用户裁决;与 LLM 组有交集时并入,不另开新组;凑不满 2 个不建组。
-  for (var lv = 0; lv < levelNames.length; lv++) {
-    var norms = levelNames[lv].map(function (nm) {
-      return normalizeName(nm);
-    });
-    var byComp = Object.create(null);
-    for (var n1 = 0; n1 < norms.length; n1++) {
-      var c1 = comparableName(norms[n1]);
-      if (c1 === norms[n1]) {
-        continue; // 无后缀的一方在下一步作为「根名」加入
+  // 跨父不归并(issue #22 终审):确定性组按父节点收集;所有组(含 LLM 组)最后过同父终检,
+  // 跨父或名字无法唯一归属的组整组丢弃——向导「合并」是按层全树改名,跨父组会误改别的子树。
+  var detGroups = comparableSiblingGroups(candidateRoots);
+  for (var dg = 0; dg < detGroups.length; dg++) {
+    var members = detGroups[dg].names;
+    var detLevel = detGroups[dg].level;
+    var merged = null;
+    for (var g2 = 0; g2 < synonymGroups.length; g2++) {
+      if (synonymGroups[g2].level !== detLevel) {
+        continue;
       }
-      if (byComp[c1] === undefined) {
-        byComp[c1] = [levelNames[lv][n1]];
-      } else {
-        byComp[c1].push(levelNames[lv][n1]);
+      var overlap = synonymGroups[g2].names.some(function (nm) {
+        return members.indexOf(nm) !== -1;
+      });
+      if (overlap) {
+        var uniq = synonymGroups[g2].names.slice();
+        for (var m2 = 0; m2 < members.length; m2++) {
+          if (uniq.indexOf(members[m2]) === -1) {
+            uniq.push(members[m2]);
+          }
+        }
+        synonymGroups[g2].names = uniq;
+        merged = synonymGroups[g2];
+        break;
       }
     }
-    for (var compKey in byComp) {
-      var members = byComp[compKey].slice();
-      var rootIdx = norms.indexOf(compKey);
-      if (rootIdx !== -1) {
-        members.unshift(levelNames[lv][rootIdx]); // 根名(桌/冰箱)排最前
-      }
-      if (members.length < 2) {
-        continue; // 只有带后缀的变体、没有根名或第二个变体:不构成归并提示
-      }
-      var merged = null;
-      for (var g2 = 0; g2 < synonymGroups.length; g2++) {
-        if (synonymGroups[g2].level !== lv) {
-          continue;
-        }
-        var overlap = synonymGroups[g2].names.some(function (nm) {
-          return members.indexOf(nm) !== -1;
-        });
-        if (overlap) {
-          var uniq = synonymGroups[g2].names.slice();
-          for (var m2 = 0; m2 < members.length; m2++) {
-            if (uniq.indexOf(members[m2]) === -1) {
-              uniq.push(members[m2]);
-            }
-          }
-          synonymGroups[g2].names = uniq;
-          merged = synonymGroups[g2];
-          break;
-        }
-      }
-      if (!merged) {
-        synonymGroups.push({ level: lv, names: members, reason: "近义" });
-      }
+    if (!merged) {
+      synonymGroups.push({ level: detLevel, names: members, reason: "近义" });
     }
   }
+  synonymGroups = filterSameParentGroups(synonymGroups, candidateRoots);
 
   logParse(deps, { action: "scanHousehold", items_scanned: pool.length, chunks: chunks.length, elapsed_ms: elapsedMs() });
   return {

@@ -2138,6 +2138,8 @@ test("TS-LOC3:可比名近义建议——既有「桌子」时候选「桌上」
   assert.ok(near, "桌上 应触发对既有 桌子 的近义建议");
   assert.equal(near.existing_name, "桌子");
 
+  // 作用域约束(issue #22 终审):单段「冰箱里」的父级是根,而既有冰箱挂在厨房下,
+  // 跨深度不做确定性建议(need_confirm 交人工);带上父段「厨房」后同父近义恢复
   var mock2 = seqMock([
     parseRaw([{ name: "冰箱里", type: "room", confidence: 0.9 }])
   ]);
@@ -2146,11 +2148,30 @@ test("TS-LOC3:可比名近义建议——既有「桌子」时候选「桌上」
     Object.assign({}, t.deps, { callLLM: mock2.callLLM })
   );
   assert.equal(res2.ok, true);
-  var near2 = res2.parse.merge_suggestions.filter(function (s) {
-    return s.reason === "近义" && s.segment_index === 0;
+  assert.equal(
+    res2.parse.merge_suggestions.filter(function (s) {
+      return s.reason === "近义";
+    }).length,
+    0,
+    "父级(根)下无同根孩子:不给跨深度近义建议"
+  );
+
+  var mock3 = seqMock([
+    parseRaw([
+      { name: "厨房", type: "room", confidence: 0.95 },
+      { name: "冰箱里", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res3 = await locHandler(
+    { action: "parseLocation", text: "面条在厨房冰箱里" },
+    Object.assign({}, t.deps, { callLLM: mock3.callLLM })
+  );
+  assert.equal(res3.ok, true);
+  var near3 = res3.parse.merge_suggestions.filter(function (s) {
+    return s.reason === "近义" && s.segment_index === 1;
   })[0];
-  assert.ok(near2, "冰箱里 应触发对既有 冰箱 的近义建议");
-  assert.equal(near2.existing_name, "冰箱");
+  assert.ok(near3, "父级命中厨房后,冰箱里 应触发对既有 冰箱 的近义建议");
+  assert.equal(near3.existing_name, "冰箱");
 });
 
 test("TS-LOC4:scanHousehold 同款规则——床上→[卧室,床],桌上/桌子 进同义组交用户裁决", async function () {
@@ -2196,4 +2217,175 @@ test("TS-LOC4:scanHousehold 同款规则——床上→[卧室,床],桌上/桌�
   assert.ok(group.names.indexOf("桌子") !== -1, "组内应同时含 桌上 与 桌子:" + JSON.stringify(group.names));
   // 未用变量 linter 安抚
   void a; void b;
+});
+
+// ---------- TS-SCOPE:近义建议父级作用域(issue #22 终审 P1,跨房间回归) ----------
+
+test("TS-LOC5:跨房间近义阻断——书房/桌子 与 卧室/桌上 并存,「卧室桌子上」只提卧室/桌上", async function () {
+  var t = fresh();
+  var studyTree = await ensurePath(t.deps, ["书房", "桌子"]);
+  var bedTree = await ensurePath(t.deps, ["卧室", "桌上"]);
+  var studyDeskId = studyTree.nodes[1].location_id;
+  var bedDeskTopId = bedTree.nodes[1].location_id;
+
+  var mock = seqMock([
+    parseRaw([
+      { name: "卧室", type: "room", confidence: 0.95 },
+      { name: "桌子", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "充电宝在卧室桌子上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  var near = res.parse.merge_suggestions.filter(function (s) {
+    return s.reason === "近义";
+  });
+  assert.equal(
+    near.length,
+    1,
+    "只应有一条近义建议:" + JSON.stringify(res.parse.merge_suggestions)
+  );
+  assert.equal(near[0].segment_index, 1);
+  assert.equal(near[0].existing_location_id, bedDeskTopId, "近义应指向 卧室/桌上");
+  for (var i = 0; i < res.parse.merge_suggestions.length; i++) {
+    assert.notEqual(
+      res.parse.merge_suggestions[i].existing_location_id,
+      studyDeskId,
+      "任何建议不得跨房间指向 书房/桌子"
+    );
+  }
+});
+
+test("TS-LOC6:父级下无同根孩子时不越房间建议——卧室为空房间时不得把 书房/桌子 列为候选", async function () {
+  var t = fresh();
+  var studyTree = await ensurePath(t.deps, ["书房", "桌子"]);
+  var bedTree = await ensurePath(t.deps, ["卧室"]);
+  var studyDeskId = studyTree.nodes[1].location_id;
+  assert.equal(bedTree.nodes.length, 1, "前置:卧室只是空房间");
+
+  var mock = seqMock([
+    parseRaw([
+      { name: "卧室", type: "room", confidence: 0.95 },
+      { name: "桌子", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "充电宝在卧室桌子上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true);
+  assert.equal(
+    res.parse.merge_suggestions.filter(function (s) {
+      return s.reason === "近义";
+    }).length,
+    0,
+    "卧室下无同根孩子:不得产生任何确定性近义建议"
+  );
+  for (var i = 0; i < res.parse.merge_suggestions.length; i++) {
+    assert.notEqual(
+      res.parse.merge_suggestions[i].existing_location_id,
+      studyDeskId,
+      "不得跨房间指向 书房/桌子"
+    );
+  }
+});
+
+test("TS-LOC7:类型不符不列候选——既有同名节点 type 异常时不自动列为候选", async function () {
+  var t = fresh();
+  var bedTree = await ensurePath(t.deps, ["卧室"]);
+  var bedId = bedTree.nodes[0].location_id;
+  // 直接注入历史异常数据:深度 2 的节点 type 却是 container(正常按深度应为 furniture)
+  var anomalyId = "lc_seed_type_anomaly";
+  await t.db.collection("locations").add({
+    data: {
+      _id: anomalyId,
+      household_id: t.deps.householdId,
+      parent_id: bedId,
+      name: "桌上",
+      name_norm: normalizeName("桌上"),
+      type: "container",
+      path: ["我的家", "卧室"],
+      created_from: "seed",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    }
+  });
+
+  var mock = seqMock([
+    parseRaw([
+      { name: "卧室", type: "room", confidence: 0.95 },
+      { name: "桌上", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res = await locHandler(
+    { action: "parseLocation", text: "遥控器在卧室桌上" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true);
+  assert.equal(
+    res.parse.merge_suggestions.filter(function (s) {
+      return s.segment_index === 1;
+    }).length,
+    0,
+    "同名同父但类型不一致:不得自动列为候选:" + JSON.stringify(res.parse.merge_suggestions)
+  );
+});
+
+test("TS-SCAN2:同义组同父终检——跨父不建组(卧室/桌上 vs 书房/桌子);同父保留(卧室内 桌上/桌子)", async function () {
+  // 场景一:桌上在卧室下、桌子在书房下,LLM 故意给出跨父组 → 必须整组丢弃
+  var t = fresh();
+  await createItem(t.deps, "op-sc2a", "电脑", "卧室桌上");
+  await createItem(t.deps, "op-sc2b", "台灯", "书房桌子");
+  var deskTopSegs = [
+    { name: "卧室", type: "room", confidence: 0.95 },
+    { name: "桌上", type: "furniture", confidence: 0.9 }
+  ];
+  var deskSegs = [
+    { name: "书房", type: "room", confidence: 0.95 },
+    { name: "桌子", type: "furniture", confidence: 0.9 }
+  ];
+  var synRaw = JSON.stringify({ groups: [{ level: 1, names: ["桌上", "桌子"] }] });
+  var mock = routingMock(
+    { 卧室桌上: deskTopSegs, 书房桌子: deskSegs },
+    synRaw
+  );
+  var res = await locHandler(
+    { action: "scanHousehold" },
+    Object.assign({}, t.deps, { callLLM: mock.callLLM })
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(
+    res.scan.synonym_groups.length,
+    0,
+    "跨父组必须丢弃(向导合并是按层全树改名,跨父会误改别的房间子树):" +
+      JSON.stringify(res.scan.synonym_groups)
+  );
+
+  // 场景二:桌上/桌子 都在卧室下且名字在该层唯一 → 组保留,交用户裁决
+  var t2 = fresh();
+  await createItem(t2.deps, "op-sc2c", "电脑", "卧室桌上");
+  await createItem(t2.deps, "op-sc2d", "台灯", "卧室桌子");
+  var mock2 = routingMock(
+    {
+      卧室桌上: deskTopSegs,
+      卧室桌子: [
+        { name: "卧室", type: "room", confidence: 0.95 },
+        { name: "桌子", type: "furniture", confidence: 0.9 }
+      ]
+    },
+    '{"groups":[]}'
+  );
+  var res2 = await locHandler(
+    { action: "scanHousehold" },
+    Object.assign({}, t2.deps, { callLLM: mock2.callLLM })
+  );
+  assert.equal(res2.ok, true);
+  assert.equal(res2.scan.synonym_groups.length, 1, "同父的桌上/桌子应建组");
+  assert.equal(res2.scan.synonym_groups[0].level, 1);
+  assert.deepEqual(
+    res2.scan.synonym_groups[0].names.slice().sort(),
+    ["桌上", "桌子"]
+  );
 });
