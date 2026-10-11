@@ -1,0 +1,170 @@
+{
+ "手机": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   147,
+   896,
+   2915,
+   3049
+  ],
+  "bbox_w_h": [
+   2769,
+   2154
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   0,
+   680,
+   3071,
+   3264
+  ],
+  "fg_ratio": 0.2372,
+  "crop_size": [
+   3072,
+   2585
+  ],
+  "sec": 1.5
+ },
+ "游戏手柄": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   238,
+   961,
+   3071,
+   3313
+  ],
+  "bbox_w_h": [
+   2834,
+   2353
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   0,
+   725,
+   3071,
+   3548
+  ],
+  "fg_ratio": 0.308,
+  "crop_size": [
+   3072,
+   2824
+  ],
+  "sec": 0.8
+ },
+ "猕猴桃": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   561,
+   1081,
+   2386,
+   2809
+  ],
+  "bbox_w_h": [
+   1826,
+   1729
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   378,
+   908,
+   2568,
+   2981
+  ],
+  "fg_ratio": 0.1745,
+  "crop_size": [
+   2191,
+   2074
+  ],
+  "sec": 0.7
+ },
+ "美工刀": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   326,
+   1011,
+   2846,
+   2501
+  ],
+  "bbox_w_h": [
+   2521,
+   1491
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   73,
+   861,
+   3071,
+   2650
+  ],
+  "fg_ratio": 0.0642,
+  "crop_size": [
+   2999,
+   1790
+  ],
+  "sec": 0.7
+ },
+ "麦克风": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   1083,
+   1341,
+   1892,
+   2087
+  ],
+  "bbox_w_h": [
+   810,
+   747
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   1002,
+   1266,
+   1973,
+   2161
+  ],
+  "fg_ratio": 0.0353,
+  "crop_size": [
+   972,
+   896
+  ],
+  "sec": 0.7
+ },
+ "鼠标": {
+  "src_size": [
+   3072,
+   4096
+  ],
+  "mask_bbox_alpha_gt_128": [
+   189,
+   911,
+   2670,
+   2670
+  ],
+  "bbox_w_h": [
+   2482,
+   1760
+  ],
+  "crop_box_expanded_10pct_clamped": [
+   0,
+   735,
+   2918,
+   2846
+  ],
+  "fg_ratio": 0.2443,
+  "crop_size": [
+   2919,
+   2112
+  ],
+  "sec": 0.7
+ }
+}
