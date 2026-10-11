@@ -2,3 +2,9 @@
 .field:last-of-type {
   margin-bottom: 0;
 }
+
+/* 挂到空间:AI 拿不准的分段标黄(横幅语言,与「AI 草稿待确认」视觉一致) */
+.input-warn {
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+}

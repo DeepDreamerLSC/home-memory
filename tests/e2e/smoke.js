@@ -59,7 +59,8 @@ async function main() {
 
   await page.waitFor(1000);
 
-  // 1. 品牌头部 + 搜索区紧跟 + 两张卡片(用户 UI 示意:搜索在品牌下方)
+  // 1. 品牌头部 + 搜索区紧跟 + 三张卡片(用户 UI 示意:搜索在品牌下方;
+  //    issue #18 起首页含「我的家」次级卡:顺手记一件/我的家/最近记住的)
   const brandName = await page.$(".brand-name");
   const brandText = brandName === null ? "" : await brandName.text();
   console.log("✔ 品牌头部:", brandText);
@@ -71,9 +72,9 @@ async function main() {
   const texts = [];
   for (const t of titles) texts.push(await t.text());
   console.log("✔ 卡片标题:", texts.join(" / "));
-  assert(texts.length === 2, "应有「顺手记一件/最近记住的」两张卡片,实际 " + texts.length + " 张");
+  assert(texts.length === 3, "应有「顺手记一件/我的家/最近记住的」三张卡片,实际 " + texts.length + " 张");
   assert(
-    texts[0] === "顺手记一件" && texts[1] === "最近记住的",
+    texts[0] === "顺手记一件" && texts[1] === "我的家" && texts[2] === "最近记住的",
     "卡片标题与预期不符:" + JSON.stringify(texts),
   );
 

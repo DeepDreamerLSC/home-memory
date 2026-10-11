@@ -88,6 +88,8 @@ Page<
     loadRecent(): Promise<void>;
     openItem(item: DisplayItem): void;
     goToConfirm(url: string): void;
+    /** 「我的家」次级入口:进空间树浏览页(不抢语音主入口) */
+    onHomeTreeTap(): void;
     onTalkTouchStart(e: WechatMiniprogram.TouchEvent): void;
     onTalkTouchMove(e: WechatMiniprogram.TouchEvent): void;
     onTalkTouchEnd(): void;
@@ -534,6 +536,15 @@ Page<
   goToConfirm(url: string) {
     wx.navigateTo({
       url,
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  onHomeTreeTap() {
+    wx.navigateTo({
+      url: "/pages/locations/locations",
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },

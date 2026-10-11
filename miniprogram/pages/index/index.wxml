@@ -111,6 +111,19 @@
     </block>
   </view>
 
+  <!-- 我的家:按空间浏览(次级入口,不抢语音主视觉) -->
+  <view class="card">
+    <view class="card-title">我的家</view>
+    <view class="item-row" bindtap="onHomeTreeTap">
+      <view class="item-icon">家</view>
+      <view class="item-main">
+        <view class="item-name">按空间浏览</view>
+        <view class="item-location">房间 → 家具 → 抽屉,东西在哪儿一目了然</view>
+      </view>
+      <view class="chevron">›</view>
+    </view>
+  </view>
+
   <!-- 最近记住的:紧凑,可点击 -->
   <view class="card">
     <view class="card-title">最近记住的</view>

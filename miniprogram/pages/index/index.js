@@ -432,4 +432,12 @@ Page({
             },
         });
     },
+    onHomeTreeTap() {
+        wx.navigateTo({
+            url: "/pages/locations/locations",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
 });

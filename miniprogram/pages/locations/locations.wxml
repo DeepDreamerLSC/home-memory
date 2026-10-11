@@ -1,0 +1,91 @@
+<view class="page">
+  <!-- 选择模式说明头 -->
+  <view wx:if="{{ mode === 'pick' }}" class="card">
+    <view class="card-title">{{ pickTitle }}</view>
+    <view class="hint">点一条即确认选择;点 › 可继续往里找。不能选的位置会标出原因。</view>
+  </view>
+
+  <view wx:if="{{ loading }}" class="card">
+    <view class="empty-text">加载中…</view>
+  </view>
+
+  <view wx:elif="{{ loadError }}" class="card">
+    <view class="error-text">{{ loadError }}</view>
+    <button class="btn block" bindtap="loadNode">重试</button>
+  </view>
+
+  <block wx:else>
+    <view class="crumb">{{ breadcrumbText }}</view>
+
+    <!-- 根层常驻入口:生成 / 更新空间树(浏览模式) -->
+    <view wx:if="{{ mode === 'browse' && isRoot && (canScan || hasRooms) }}" class="card">
+      <view class="scan-entry" bindtap="onScanTap">
+        <view class="item-main">
+          <view class="item-name">{{ hasRooms ? '生成 / 更新空间树' : '从已录入物品生成空间' }}</view>
+          <view class="item-location">
+            {{ canScan ? unmountedCount + ' 件未归位' : '全部已归位' }}{{ hasRooms ? '' : ',AI 整理后逐条让你确认' }}
+          </view>
+        </view>
+        <view class="chevron">›</view>
+      </view>
+      <view wx:if="{{ danglingMounts > 0 }}" class="warn-line">
+        {{ danglingMounts }} 件挂载异常(位置可能刚被移动或删除),建议进来重新挂载
+      </view>
+    </view>
+    <view wx:elif="{{ mode === 'browse' && isRoot }}" class="card">
+      <view class="empty-text">还没建过空间。先去首页记几件东西,再回来生成空间树。</view>
+    </view>
+
+    <!-- 子位置列表 -->
+    <view class="card">
+      <view class="card-head">
+        <view class="card-title">位置</view>
+        <view wx:if="{{ mode === 'browse' }}" class="add-link" bindtap="onAddTap">+ 添加</view>
+      </view>
+      <view wx:if="{{ children.length === 0 }}" class="empty-text">
+        {{ isRoot ? '还没有房间。右上角「添加」,或从上方生成空间树。' : '这里还没有更细的位置。' }}
+      </view>
+      <view
+        wx:for="{{ children }}"
+        wx:key="location_id"
+        class="item-row {{ item.disabled ? 'row-disabled' : '' }}"
+        data-index="{{ index }}"
+        bindtap="onChildTap"
+      >
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">
+            {{ item.name }}<text wx:if="{{ item.typeText }}" class="node-type">{{ item.typeText }}</text>
+          </view>
+          <view class="item-location">{{ item.countText }}</view>
+        </view>
+        <view wx:if="{{ mode === 'pick' && item.disabled }}" class="row-note">{{ item.disabledReason }}</view>
+        <view wx:if="{{ mode === 'pick' && !item.disabled }}" class="row-actions">
+          <view class="pick-check" catchtap="onPickTap" data-index="{{ index }}">选这个</view>
+          <view wx:if="{{ item.child_count > 0 }}" class="chevron" catchtap="onChildTap" data-index="{{ index }}">›</view>
+        </view>
+        <view wx:if="{{ mode === 'browse' }}" class="row-more" catchtap="onChildMore">⋯</view>
+        <view wx:if="{{ mode === 'browse' }}" class="chevron">›</view>
+      </view>
+    </view>
+
+    <!-- 本层物品(浏览模式;物品不允许直接挂 home 根,根层恒为空故不显示) -->
+    <view wx:if="{{ mode === 'browse' && items.length > 0 }}" class="card">
+      <view class="card-title">这里的物品</view>
+      <view
+        wx:for="{{ items }}"
+        wx:key="item_id"
+        class="item-row"
+        data-index="{{ index }}"
+        bindtap="onItemTap"
+      >
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">原始记录:{{ item.location_text }}</view>
+        </view>
+        <view class="row-more" catchtap="onItemMore">⋯</view>
+      </view>
+    </view>
+  </block>
+</view>

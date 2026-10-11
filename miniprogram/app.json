@@ -2,7 +2,9 @@
   "pages": [
     "pages/index/index",
     "pages/confirm/confirm",
-    "pages/item/item"
+    "pages/item/item",
+    "pages/locations/locations",
+    "pages/locationScan/locationScan"
   ],
   "window": {
     "navigationBarTitleText": "我靠东西呢",

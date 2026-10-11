@@ -1,0 +1,149 @@
+<view class="page">
+  <!-- 扫描中 -->
+  <view wx:if="{{ phase === 'loading' }}" class="card">
+    <view class="empty-text">正在扫描已录入的物品位置…最多约 1 分钟,请稍候</view>
+  </view>
+
+  <!-- 扫描失败 -->
+  <view wx:elif="{{ phase === 'error' }}" class="card">
+    <view class="error-text">{{ scanError }}</view>
+    <button class="btn primary block" bindtap="onRetryScan">重试扫描</button>
+    <button class="btn block" bindtap="onManualBuild">先手动建房间</button>
+  </view>
+
+  <!-- 没有未归位物品 -->
+  <view wx:elif="{{ phase === 'empty' }}" class="card">
+    <view class="empty-text">
+      全部已归位,没有需要生成的空间。记了新东西再来,这里会自动接着整理。
+    </view>
+    <button class="btn block" bindtap="onDone">回到我的家</button>
+  </view>
+
+  <!-- 提交中 -->
+  <view wx:elif="{{ phase === 'submitting' }}" class="card">
+    <view class="empty-text">正在入库…别关掉这一页</view>
+  </view>
+
+  <!-- 确认草案 -->
+  <block wx:elif="{{ phase === 'confirm' }}">
+    <view wx:if="{{ truncatedTip }}" class="banner manual">{{ truncatedTip }}</view>
+
+    <view class="card">
+      <view class="card-title">候选空间(AI 草案,请核对)</view>
+      <view class="hint">{{ scannedText }}。AI 拿不准的分支默认不勾选并标黄;名字可以改。</view>
+      <view wx:if="{{ treeRows.length === 0 }}" class="empty-text">
+        这次没有解析出新的空间分支,下面只处理物品归位。
+      </view>
+      <view
+        wx:for="{{ treeRows }}"
+        wx:key="uid"
+        class="tree-row {{ item.needConfirm ? 'warn-row' : '' }}"
+        style="padding-left: {{ 8 + item.depth * 44 }}rpx"
+        data-uid="{{ item.uid }}"
+        bindtap="onTreeToggle"
+      >
+        <view class="tree-check">{{ item.checked ? '☑' : '☐' }}</view>
+        <view class="item-main">
+          <view class="item-name">
+            {{ item.name }}<text wx:if="{{ item.typeText }}" class="node-type">{{ item.typeText }}</text>
+          </view>
+          <view class="item-location">
+            把握 {{ item.confidenceText }}{{ item.hintName ? ' · 与已有的「' + item.hintName + '」同名,入库会直接用已有位置' : '' }}
+          </view>
+          <view wx:if="{{ item.needConfirm }}" class="row-warn">AI 不太确定,请核对</view>
+        </view>
+        <view class="rename-link" catchtap="onTreeRename" data-uid="{{ item.uid }}">改名</view>
+      </view>
+    </view>
+
+    <view wx:if="{{ synonymRows.length > 0 }}" class="card">
+      <view class="card-title">可能是同一个地方?</view>
+      <view class="hint">合并与否由你决定,不影响已有数据。</view>
+      <block wx:for="{{ synonymRows }}" wx:key="key">
+        <view wx:if="{{ item.status === 'pending' }}" class="item-row">
+          <view class="item-main">
+            <view class="item-name">{{ item.namesText }}</view>
+            <view class="item-location">{{ item.levelText }}这两个可能是同一个位置</view>
+          </view>
+          <view class="syn-actions">
+            <view class="syn-btn" catchtap="onSynonymMerge" data-index="{{ index }}">合并</view>
+            <view class="syn-btn" catchtap="onSynonymDismiss" data-index="{{ index }}">分开</view>
+          </view>
+        </view>
+        <view wx:elif="{{ item.status === 'merged' }}" class="syn-done">
+          {{ item.namesText }}已合并为「{{ item.keptName }}」
+        </view>
+      </block>
+    </view>
+
+    <view class="card">
+      <view class="card-title">物品归位({{ mountCountText }})</view>
+      <view class="hint">默认只勾选 AI 有把握的;标黄的请核对后再勾。</view>
+      <view
+        wx:for="{{ mountRows }}"
+        wx:key="item_id"
+        class="tree-row {{ item.needConfirm || item.orderViolation ? 'warn-row' : '' }}"
+        data-index="{{ index }}"
+        bindtap="onMountToggle"
+      >
+        <view class="tree-check">{{ item.checked ? '☑' : '☐' }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">{{ item.pathText }}</view>
+          <view wx:if="{{ item.orderViolation }}" class="row-warn">顺序可疑,请核对</view>
+          <view wx:elif="{{ item.needConfirm }}" class="row-warn">AI 不太确定,请核对</view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{ skipRows.length > 0 }}" class="card">
+      <view class="card-title">这次没法自动归位({{ skipRows.length }} 件)</view>
+      <view
+        wx:for="{{ skipRows }}"
+        wx:key="item_id"
+        class="item-row"
+      >
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">{{ item.reasonText }}</view>
+        </view>
+        <view class="syn-btn" catchtap="onItemOpen" data-item-id="{{ item.item_id }}">去详情页</view>
+      </view>
+    </view>
+
+    <view wx:if="{{ submitError }}" class="card">
+      <view class="error-text">{{ submitError }}</view>
+    </view>
+
+    <view class="card">
+      <button class="btn primary block" bindtap="onSubmitTap">
+        {{ pendingRetry ? '重试提交(接着完成剩余的)' : '确认入库' }}
+      </button>
+      <button class="btn block" bindtap="onDone">先不提交,返回</button>
+    </view>
+  </block>
+
+  <!-- 结果 -->
+  <block wx:elif="{{ phase === 'done' }}">
+    <view class="card">
+      <view class="card-title">入库结果</view>
+      <view class="hint">{{ resultBranchText }}</view>
+      <view wx:if="{{ resultRows.length === 0 }}" class="empty-text">没有物品需要挂载。</view>
+      <view
+        wx:for="{{ resultRows }}"
+        wx:key="item_id"
+        class="item-row"
+      >
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location {{ item.statusClass }}">{{ item.statusText }}</view>
+        </view>
+        <view wx:if="{{ item.canOpen }}" class="syn-btn" catchtap="onItemOpen" data-item-id="{{ item.item_id }}">详情</view>
+      </view>
+    </view>
+    <view class="card">
+      <button class="btn primary block" bindtap="onDone">完成</button>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,88 @@
+/* 我的家(空间树)页面:复用 app.wxss 的卡片/条目语言,颜色只用全局 CSS 变量 */
+
+.crumb {
+  margin: 24rpx 32rpx 0;
+  font-size: 24rpx;
+  color: var(--text-3);
+}
+
+/* 生成 / 更新空间树常驻入口(次级行,item-row 同款节奏) */
+.scan-entry {
+  display: flex;
+  align-items: center;
+}
+
+.warn-line {
+  margin-top: 12rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 12rpx;
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+  font-size: 24rpx;
+  color: var(--text);
+}
+
+.add-link {
+  font-size: 26rpx;
+  color: var(--text-2);
+  padding: 4rpx 0 4rpx 16rpx;
+}
+
+/* 节点类型小标签 */
+.node-type {
+  display: inline-block;
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  background: var(--card-inset);
+  color: var(--text-3);
+  font-size: 20rpx;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
+/* 「⋯」管理入口:足够大的点击热区 */
+.row-more {
+  margin-left: 12rpx;
+  padding: 12rpx 8rpx 12rpx 20rpx;
+  color: var(--text-3);
+  font-size: 36rpx;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* 选择模式:选中动作与禁用态 */
+.pick-check {
+  margin-left: 12rpx;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  background: var(--accent-dim);
+  color: var(--text-2);
+  font-size: 24rpx;
+  flex-shrink: 0;
+}
+
+.row-disabled .item-icon {
+  opacity: 0.35;
+}
+
+.row-disabled .item-name,
+.row-disabled .item-location {
+  color: var(--text-3);
+}
+
+.row-note {
+  margin-left: 12rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  flex-shrink: 0;
+  max-width: 220rpx;
+  text-align: right;
+}
+
+/* 选择模式行内动作组:「选这个」+ 下钻 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
