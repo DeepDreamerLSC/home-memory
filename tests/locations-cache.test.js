@@ -93,6 +93,7 @@ function makePageLike() {
   var seq = cache.createRequestSeq();
   function loadNode(force, fetch) {
     var mySeq = seq.next();
+    var myGen = cache.captureCacheGeneration(); // P1-1:跨页面失效代数
     var cached = cache.readLocationsLayer(state.nodeId);
     var plan = cache.planLocationsLoad({
       cached: cached,
@@ -113,7 +114,11 @@ function makePageLike() {
         if (!seq.isCurrent(mySeq)) {
           return; // 约束 4:迟到响应既不上屏也不写缓存
         }
-        cache.writeLocationsLayer(state.nodeId, res);
+        if (!cache.isCacheGenerationCurrent(myGen)) {
+          state.stale = true; // P1-1:在途期间发生过写失效 → 旧树作废,不缓存不上屏
+          return;
+        }
+        cache.writeLocationsLayer(state.nodeId, res, Date.now(), myGen);
         state.rendered = res;
         state.renderedOnce = true;
         state.stale = false;
@@ -446,4 +451,118 @@ test("失败也一样:旧请求的迟到失败不把新数据标记为 stale", a
 
   assert.equal(page.state.stale, false, "旧请求的迟到失败不得污染当前状态(新数据已成功上屏)");
   assert.deepEqual(page.state.rendered, respB);
+});
+
+/* ---------------- 5. P1-1:跨页面失效代数(在途旧响应不得复活缓存) ---------------- */
+
+test("GEN-1:list 在途时其他页面写成功并失效 → 迟到旧响应作废:不缓存、不冒充新树", async function () {
+  // 预置「已过性能 TTL」的旧树:保证 loadNode 会真的发请求(在途),而不是直用缓存
+  cache.writeLocationsLayer("", makeListResponse({ itemCount: 3 }), T0 - TTL_MS - 60000);
+  var page = makePageLike();
+  var d = defer();
+  var inflight = page.loadNode(false, function () {
+    return d.promise; // 页面 A 的 list(服务器读的还是旧树)
+  });
+  // 页面 B:物品移动/改名成功 → API 层全量失效(clearLocationsCache 收口同款)
+  cache.clearLocationsCache();
+  d.resolve(makeListResponse({ itemCount: 2 }));
+  await inflight;
+  assert.equal(cache.readLocationsLayer(""), null, "迟到旧树不得按新 savedAt 写回缓存");
+  assert.equal(page.state.stale, true, "页面呈现待同步状态而非冒充成功");
+
+  // 后续正常路径:失效后的新请求(新代数)照常落缓存
+  var page2 = makePageLike();
+  await page2.loadNode(false, function () {
+    return Promise.resolve(makeListResponse({ itemCount: 2 }));
+  });
+  var entry = cache.readLocationsLayer("");
+  assert.ok(entry, "新代数请求正常落缓存");
+  assert.equal(entry.response.node.item_count, 2);
+});
+
+test("GEN-2:失效代数单调递增;旧代数直接调 writeLocationsLayer 同样被拒", function () {
+  var g0 = cache.captureCacheGeneration();
+  cache.clearLocationsCache();
+  assert.equal(cache.isCacheGenerationCurrent(g0), false, "失效后旧代数必失效");
+  var g1 = cache.captureCacheGeneration();
+  assert.equal(cache.isCacheGenerationCurrent(g1), true);
+  assert.notEqual(g0, g1, "代数递增");
+
+  cache.writeLocationsLayer("x", makeListResponse({ nodeId: "x" }), T0, g0);
+  assert.equal(cache.readLocationsLayer("x"), null, "旧代数写入被拒");
+  cache.writeLocationsLayer("x", makeListResponse({ nodeId: "x" }), T0, g1);
+  assert.ok(cache.readLocationsLayer("x"), "当前代数写入正常");
+});
+
+/* ---------------- 6. P1-2:storage 故障 best-effort(不冒充业务/网络错误) ---------------- */
+
+test("STO-1:getStorageSync 抛异常 → 读缓存视为 miss,服务端结果照常渲染,不产生错误态", async function () {
+  var broken = makeFakeStorage();
+  broken.getStorageSync = function () {
+    throw new Error("storage boom");
+  };
+  cache.__setLocationsCacheStorageForTest(broken);
+  var page = makePageLike();
+  await page.loadNode(false, function () {
+    return Promise.resolve(makeListResponse({ itemCount: 5 }));
+  });
+  assert.equal(page.state.rendered.node.item_count, 5, "服务端结果照常上屏");
+  assert.equal(page.state.loadError, "", "storage 异常不得冒充业务/网络错误");
+  assert.equal(page.state.stale, false);
+});
+
+test("STO-2:setStorageSync 抛异常 → 写缓存静默失败;渲染不受影响,后续读降级为 miss", async function () {
+  var broken = makeFakeStorage();
+  broken.setStorageSync = function () {
+    throw new Error("disk full");
+  };
+  cache.__setLocationsCacheStorageForTest(broken);
+  var page = makePageLike();
+  await page.loadNode(false, function () {
+    return Promise.resolve(makeListResponse({ itemCount: 1 }));
+  });
+  assert.ok(page.state.rendered, "渲染不因写缓存失败而失败");
+  assert.equal(page.state.loadError, "");
+  assert.equal(cache.readLocationsLayer(""), null, "写失败不留半成品,读降级为 miss");
+});
+
+test("STO-3:removeStorageSync 抛异常 → API 写操作仍按服务端结果成败,失效不抛不改语义", async function () {
+  var broken = makeFakeStorage();
+  broken.removeStorageSync = function () {
+    throw new Error("rm boom");
+  };
+  cache.__setLocationsCacheStorageForTest(broken);
+  cache.writeLocationsLayer("", makeListResponse({ unmounted: 5 }), T0);
+  installCloudStub(function (opts) {
+    if (opts.data.action === "create") {
+      return {
+        ok: true,
+        item: { item_id: "it_9", name: "钥匙", location_text: "玄关抽屉", note: "", version: 1, updated_at: "2026-10-09T00:00:00.000Z" },
+        duplicated: false,
+      };
+    }
+    return { ok: true };
+  });
+  var res = await itemsApi.callItemsApi({ action: "create", draft: {}, operation_id: "op-sto3" });
+  assert.equal(res.ok, true, "服务端写成功就是成功:缓存清理异常不得改写 API 语义");
+});
+
+test("STO-4:app 启动清理遇 storage 异常不抛(prune best-effort);malformed 条目降级为 miss", function () {
+  var broken = makeFakeStorage();
+  broken.getStorageSync = function () {
+    throw new Error("boot boom");
+  };
+  cache.__setLocationsCacheStorageForTest(broken);
+  assert.doesNotThrow(function () {
+    cache.pruneLocationsCache(T0);
+  }, "启动清理不得打断应用启动");
+
+  cache.__resetLocationsCacheForTest();
+  var fake = makeFakeStorage();
+  cache.__setLocationsCacheStorageForTest(fake);
+  cache.writeLocationsLayer("", makeListResponse(), T0);
+  var dump = fake.__dump();
+  var key = Object.keys(dump)[0];
+  fake.setStorageSync(key, "不是一个合法的缓存对象"); // 模拟持久层损坏
+  assert.equal(cache.readLocationsLayer(""), null, "malformed 条目降级为 miss,不让页面拿到坏数据");
 });

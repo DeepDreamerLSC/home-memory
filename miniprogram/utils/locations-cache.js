@@ -5,6 +5,8 @@ exports.readLocationsLayer = readLocationsLayer;
 exports.isLocationsCacheFresh = isLocationsCacheFresh;
 exports.writeLocationsLayer = writeLocationsLayer;
 exports.clearLocationsCache = clearLocationsCache;
+exports.captureCacheGeneration = captureCacheGeneration;
+exports.isCacheGenerationCurrent = isCacheGenerationCurrent;
 exports.pruneLocationsCache = pruneLocationsCache;
 exports.planLocationsLoad = planLocationsLoad;
 exports.createRequestSeq = createRequestSeq;
@@ -20,10 +22,24 @@ let testStorage;
 /** 无 wx / 无注入时的模块内后备(仅同进程,进程回收即丢——如实降级,不伪装持久) */
 let memoryFallback = null;
 /**
+ * storage 故障熔断(P1-2):任一 storage 调用抛异常即置位,本会话内缓存整体
+ * 禁用(读=miss、写/清=no-op),直连服务端;不恢复,重启自然复位。
+ */
+let storageBroken = false;
+/**
+ * 全局失效代数(P1-1):任何成功写操作使代数递增。请求发出时捕获代数,响应
+ * 回来时代数已变 → 该响应是失效发生之前读取的旧树,不得上屏、不得写缓存。
+ * 页内并发由 requestSeq 管,跨页面/跨组件的迟到写入由本代数管。
+ */
+let invalidationGeneration = 0;
+/**
  * 解析当前可用存储。逐调用解析而非模块加载时绑定:测试里 globalThis.wx 可能被
  * 换成只含 cloud 的 stub,加载时机不同会拿到缺方法的假 wx。
  */
 function activeStorage() {
+    if (storageBroken) {
+        return null; // 熔断后本会话禁用缓存:读=miss、写/清=no-op,直连服务端
+    }
     if (testStorage !== undefined) {
         return testStorage;
     }
@@ -34,6 +50,16 @@ function activeStorage() {
         return wx;
     }
     return null;
+}
+/** storage 调用统一包裹(P1-2 best-effort):异常吃掉并熔断,绝不向上抛 */
+function safeStorage(op) {
+    try {
+        return op();
+    }
+    catch (e) {
+        storageBroken = true;
+        return null;
+    }
 }
 /** 层键:根层(parent_id 缺省)固定 "root",其余用 parent_id */
 function locationsLayerKey(parentId) {
@@ -47,7 +73,10 @@ function isPayload(v) {
 function readPayload() {
     const storage = activeStorage();
     if (storage !== null) {
-        const raw = storage.getStorageSync(STORAGE_KEY);
+        const raw = safeStorage(() => storage.getStorageSync(STORAGE_KEY));
+        if (raw === null) {
+            return { layers: {} }; // 读失败=miss(best-effort,不当错误冒泡)
+        }
         return isPayload(raw) ? raw : { layers: {} };
     }
     return memoryFallback !== null ? memoryFallback : { layers: {} };
@@ -55,15 +84,15 @@ function readPayload() {
 function writePayload(payload) {
     const storage = activeStorage();
     if (storage !== null) {
-        storage.setStorageSync(STORAGE_KEY, payload);
-        return;
+        safeStorage(() => storage.setStorageSync(STORAGE_KEY, payload));
+        return; // 写失败:本次不持久化,不影响当前渲染与 API 语义
     }
     memoryFallback = payload;
 }
 function clearPayload() {
     const storage = activeStorage();
     if (storage !== null) {
-        storage.removeStorageSync(STORAGE_KEY);
+        safeStorage(() => storage.removeStorageSync(STORAGE_KEY));
         return;
     }
     memoryFallback = null;
@@ -95,10 +124,14 @@ function isLocationsCacheFresh(entry, now = Date.now()) {
     return now - entry.savedAt <= LOCATIONS_CACHE_TTL_MS;
 }
 /**
- * 写入某一层的 list 响应。页面侧必须先过请求序号校验(见 createRequestSeq):
- * 迟到响应既不上屏也不写缓存。本模块只认「当前调用」,跨请求的先后由调用方把关。
+ * 写入某一层的 list 响应。generation 为请求发出时捕获的失效代数(P1-1):
+ * 在途期间发生过写失效(代数已变)则拒绝写入——旧树不得按新 savedAt 复活。
+ * 页面侧仍须先过请求序号校验(见 createRequestSeq):两者共同覆盖页内并发与跨页迟到。
  */
-function writeLocationsLayer(parentId, response, now = Date.now()) {
+function writeLocationsLayer(parentId, response, now = Date.now(), generation) {
+    if (generation !== undefined && generation !== invalidationGeneration) {
+        return; // 失效发生在此响应在途期间:丢弃,不污染缓存
+    }
     const payload = readPayload();
     // 顺手丢弃其他已绝对过期的层,控制条目体积
     for (const key of Object.keys(payload.layers)) {
@@ -109,9 +142,18 @@ function writeLocationsLayer(parentId, response, now = Date.now()) {
     payload.layers[locationsLayerKey(parentId)] = { savedAt: now, response };
     writePayload(payload);
 }
-/** 全量失效(整棵树):任何一次成功写操作后由 API 层调用;幂等 */
+/** 全量失效(整棵树):任何一次成功写操作后由 API 层调用;幂等;使失效代数 +1 */
 function clearLocationsCache() {
+    invalidationGeneration += 1;
     clearPayload();
+}
+/** 捕获当前失效代数(P1-1):请求发出前调用,响应回来用 isCacheGenerationCurrent 校验 */
+function captureCacheGeneration() {
+    return invalidationGeneration;
+}
+/** 响应回来时代数是否仍然有效(false = 在途期间发生过写失效,响应作废) */
+function isCacheGenerationCurrent(generation) {
+    return generation === invalidationGeneration;
 }
 /** 清理超过 24 小时的层,返回剩余层数(app 启动时调用;now 可注入) */
 function pruneLocationsCache(now = Date.now()) {
@@ -182,4 +224,6 @@ function __setLocationsCacheStorageForTest(storage) {
 function __resetLocationsCacheForTest() {
     testStorage = undefined;
     memoryFallback = null;
+    storageBroken = false;
+    invalidationGeneration = 0;
 }

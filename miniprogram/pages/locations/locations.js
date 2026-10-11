@@ -84,10 +84,12 @@ Page({
     /**
      * 拉取当前层:缓存先行 + 条件刷新(issue #23,感知层优化——冷启动客观时长不变)。
      * force=true(下拉/重试)绕过 TTL 直连服务端;选择模式(picker)一律直连,
-     * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存。
+     * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存;
+     * 失效代数变化(P1-1,在途期间其他页面写过数据)同样作废本次响应并补拉一次。
      */
-    async loadNode(force) {
+    async loadNode(force, retryOnStaleGen) {
         const seq = this.requestSeq.next();
+        const gen = (0, locations_cache_1.captureCacheGeneration)();
         const pickMode = this.data.mode === "pick";
         const cached = pickMode ? null : (0, locations_cache_1.readLocationsLayer)(this.nodeId);
         const plan = (0, locations_cache_1.planLocationsLoad)({
@@ -118,7 +120,18 @@ Page({
             if (!this.requestSeq.isCurrent(seq)) {
                 return; // 迟到响应:既不 setData 也不写缓存(约束 4)
             }
-            (0, locations_cache_1.writeLocationsLayer)(this.nodeId, res);
+            if (!(0, locations_cache_1.isCacheGenerationCurrent)(gen)) {
+                // P1-1:在途期间发生过写失效(其他页面移动/挂载/改名…),这是旧树——
+                // 不上屏不写缓存,补拉一次;连续写场景由 retryOnStaleGen 挡住不无限循环
+                if (retryOnStaleGen !== false) {
+                    void this.loadNode(force, false);
+                }
+                else {
+                    this.setData({ loading: false, refreshing: false, stale: true });
+                }
+                return;
+            }
+            (0, locations_cache_1.writeLocationsLayer)(this.nodeId, res, Date.now(), gen);
             this.renderList(res); // 刷新成功:原位 setData 更新,不闪屏
             this.setData({ loading: false, refreshing: false, stale: false, loadError: "" });
         }

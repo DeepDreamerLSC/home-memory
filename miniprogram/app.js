@@ -4,8 +4,15 @@ const config_1 = require("./config");
 const locations_cache_1 = require("./utils/locations-cache");
 App({
     onLaunch() {
-        // 清理超过 24 小时的空间树缓存层(issue #23:缓存带绝对过期,启动时收口)
-        (0, locations_cache_1.pruneLocationsCache)();
+        // 清理超过 24 小时的空间树缓存层(issue #23:缓存带绝对过期,启动时收口)。
+        // best-effort(P1-2):缓存模块内部已吃掉 storage 异常,这里再加一层保险,
+        // 本地缓存问题绝不允许打断应用启动与云环境初始化。
+        try {
+            (0, locations_cache_1.pruneLocationsCache)();
+        }
+        catch (e) {
+            // 缓存清理失败:静默跳过,不影响启动
+        }
         if (!wx.cloud) {
             console.error("当前基础库不支持云开发能力,请升级微信或基础库版本");
             wx.showModal({
