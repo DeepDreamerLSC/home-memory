@@ -83,15 +83,18 @@ async function main() {
   timings.extractAndNav = Date.now() - t0;
   console.log("✔ 已进入确认页(耗时 " + fmt(timings.extractAndNav) + ",含云函数执行 + DeepSeek 推理)");
 
-  // ---- 2. 确认页:核对 AI 草稿 ----
+  // ---- 2. 确认页:核对 AI 草稿(列表式,Issue #14) ----
   await page.waitFor(600);
   const banner = await page.$(".banner");
   const bannerText = await banner.text();
   assert(bannerText.includes("AI 草稿"), "确认页应显示「AI 草稿,请确认」,实际:" + bannerText);
-  const inputs = await page.$$(".input");
-  assert(inputs.length >= 2, "确认页应有名称/位置两个输入框");
-  const draftName = await inputs[0].value();
-  const draftLocation = await inputs[1].value();
+  const quoteCard = await page.$(".quote-text");
+  assert(quoteCard !== null, "确认页应展示原话(证据回看)");
+  const nameInput = await page.$(".row-name");
+  const locationInput = await page.$(".row-location");
+  assert(nameInput !== null && locationInput !== null, "列表行应有名称/位置输入框");
+  const draftName = await nameInput.value();
+  const draftLocation = await locationInput.value();
   console.log("✔ AI 草稿:名称=" + JSON.stringify(draftName) + " 位置=" + JSON.stringify(draftLocation));
   assert(String(draftName).includes(itemName.slice(0, 6)), "草稿名称应含物品名,实际 " + draftName);
   assert(String(draftLocation).includes("厨房"), "草稿位置应含「厨房」,实际 " + draftLocation);

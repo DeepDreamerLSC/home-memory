@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const voice_1 = require("../../utils/voice");
+const draft_session_1 = require("../../utils/draft-session");
 function toDisplayItems(items) {
     return items.map((item) => ({
         ...item,
@@ -22,6 +23,8 @@ Page({
         recentLoading: false,
         recentError: "",
         inputMode: "voice",
+        /** 未完成草稿会话恢复入口(非空时显示横幅) */
+        resumeSession: null,
         voiceState: "idle",
         transcribing: false,
         recordSeconds: 0,
@@ -39,6 +42,13 @@ Page({
     },
     onShow() {
         this.loadRecent();
+        // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
+        const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
+        this.setData({
+            resumeSession: unfinished === null
+                ? null
+                : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+        });
     },
     onHide() {
         this.clearRecordTimer();
@@ -223,7 +233,45 @@ Page({
         this.invalidateVoiceSession();
         this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
     },
-    /** 记一件:textarea → extractDraft,按契约分流 */
+    /**
+     * 未完成批次的新建门禁(第四轮评审阻断项):存在未完成会话时直接新建会覆盖
+     * 持久化恢复入口,旧批次已保存行的 operation_id 幂等键随之丢失——必须先由
+     * 用户明确裁决:继续核对旧的 / 放弃旧的记新的 / 中止(什么都不动)。
+     */
+    askDraftEntryIntent(count) {
+        return new Promise((resolve) => {
+            wx.showActionSheet({
+                itemList: ["继续核对上一批(共 " + count + " 件)", "放弃上一批,记新的"],
+                success: (r) => {
+                    resolve(r.tapIndex === 0 ? "resume" : "discard");
+                },
+                fail: () => {
+                    resolve("abort"); // 点遮罩/取消:保留旧批次,本次不提取
+                },
+            });
+        });
+    },
+    /**
+     * 放弃旧批次的二次确认(五轮评审):明确「放弃」只是丢掉恢复入口,
+     * 不是数据库撤销——已保存的物品不会回滚,结果未知的物品可能已入库。
+     */
+    confirmDiscardDraft() {
+        return new Promise((resolve) => {
+            wx.showModal({
+                title: "放弃上一批?",
+                content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
+                confirmText: "放弃,记新的",
+                cancelText: "返回",
+                success: (r) => {
+                    resolve(r.confirm);
+                },
+                fail: () => {
+                    resolve(false);
+                },
+            });
+        });
+    },
+    /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
     async onExtractTap() {
         const text = this.data.memoText.trim();
         if (!text) {
@@ -233,10 +281,33 @@ Page({
         if (this.data.extracting) {
             return;
         }
+        const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
+        if (unfinished !== null) {
+            const choice = await this.askDraftEntryIntent(unfinished.payload.drafts.length);
+            if (choice === "resume") {
+                this.goToConfirm("/pages/confirm/confirm?sid=" + unfinished.sid);
+                return;
+            }
+            if (choice === "abort") {
+                return;
+            }
+            // 放弃:二次确认讲清语义(非数据库撤销),显式清除恢复入口后才开始本次提取
+            if (!(await this.confirmDiscardDraft())) {
+                return;
+            }
+            (0, draft_session_1.clearDraftSession)(unfinished.sid);
+        }
         this.setData({ extracting: true });
         try {
-            const res = await (0, api_1.callExtractDraft)(text);
+            const res = await (0, api_1.callExtractDraft)(text, { protocol: 2 });
+            if ("drafts" in res) {
+                // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
+                const sid = (0, draft_session_1.createDraftSession)(res.original_text, res.drafts, res.truncated);
+                this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
+                return;
+            }
             if ("needs_split" in res) {
+                // 防御:服务端未升级窗口内仍可能返回旧形态
                 wx.showToast({
                     title: res.message || "一次只记一件物品,请分开说",
                     icon: "none",
@@ -244,8 +315,9 @@ Page({
                 });
                 return;
             }
-            const draft = res.draft;
-            this.goToConfirm("/pages/confirm/confirm?draft=" + encodeURIComponent(JSON.stringify(draft)));
+            // v1 单草稿兜底:同样入会话走列表页
+            const sid = (0, draft_session_1.createDraftSession)(text, [{ ...res.draft, source_quote: text }], false);
+            this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "AI_UNAVAILABLE") {
@@ -314,6 +386,14 @@ Page({
         if (item) {
             this.openItem(item);
         }
+    },
+    onResumeTap() {
+        const resume = this.data.resumeSession;
+        if (resume === null) {
+            return;
+        }
+        this.setData({ resumeSession: null });
+        this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
     },
     onRecentTap(e) {
         const index = Number(e.currentTarget.dataset.index);

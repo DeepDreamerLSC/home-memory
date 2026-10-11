@@ -17,7 +17,8 @@ import {
   type SessionGuard,
   type VoiceController,
 } from "../../utils/voice";
-import type { Draft, ItemSummary } from "../../types";
+import type { ItemSummary } from "../../types";
+import { createDraftSession, clearDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
@@ -52,6 +53,8 @@ Page<
     recordSeconds: number;
     /** 录音中/识别中的提示文本 */
     partialText: string;
+    /** 未完成草稿会话恢复入口(非空时显示横幅) */
+    resumeSession: { sid: string; count: number } | null;
   },
   {
     onMemoInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
@@ -73,10 +76,15 @@ Page<
     invalidateVoiceSession(): void;
     startRecording(session: number): Promise<void>;
     onExtractTap(): Promise<void>;
+    /** 未完成批次的新建门禁(第四轮评审):恢复 / 放弃 / 中止 三选 */
+    askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort">;
+    /** 放弃旧批次二次确认(五轮评审):讲清非数据库撤销语义 */
+    confirmDiscardDraft(): Promise<boolean>;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     onRecentTap(e: WechatMiniprogram.CustomEvent): void;
+    onResumeTap(): void;
     loadRecent(): Promise<void>;
     openItem(item: DisplayItem): void;
     goToConfirm(url: string): void;
@@ -100,6 +108,8 @@ Page<
     recentLoading: false,
     recentError: "",
     inputMode: "voice",
+    /** 未完成草稿会话恢复入口(非空时显示横幅) */
+    resumeSession: null as { sid: string; count: number } | null,
     voiceState: "idle",
     transcribing: false,
     recordSeconds: 0,
@@ -120,6 +130,14 @@ Page<
 
   onShow() {
     this.loadRecent();
+    // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
+    const unfinished = getUnfinishedDraftSession();
+    this.setData({
+      resumeSession:
+        unfinished === null
+          ? null
+          : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+    });
   },
 
   onHide() {
@@ -319,7 +337,47 @@ Page<
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
-  /** 记一件:textarea → extractDraft,按契约分流 */
+  /**
+   * 未完成批次的新建门禁(第四轮评审阻断项):存在未完成会话时直接新建会覆盖
+   * 持久化恢复入口,旧批次已保存行的 operation_id 幂等键随之丢失——必须先由
+   * 用户明确裁决:继续核对旧的 / 放弃旧的记新的 / 中止(什么都不动)。
+   */
+  askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort"> {
+    return new Promise((resolve) => {
+      wx.showActionSheet({
+        itemList: ["继续核对上一批(共 " + count + " 件)", "放弃上一批,记新的"],
+        success: (r) => {
+          resolve(r.tapIndex === 0 ? "resume" : "discard");
+        },
+        fail: () => {
+          resolve("abort"); // 点遮罩/取消:保留旧批次,本次不提取
+        },
+      });
+    });
+  },
+
+  /**
+   * 放弃旧批次的二次确认(五轮评审):明确「放弃」只是丢掉恢复入口,
+   * 不是数据库撤销——已保存的物品不会回滚,结果未知的物品可能已入库。
+   */
+  confirmDiscardDraft(): Promise<boolean> {
+    return new Promise((resolve) => {
+      wx.showModal({
+        title: "放弃上一批?",
+        content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
+        confirmText: "放弃,记新的",
+        cancelText: "返回",
+        success: (r) => {
+          resolve(r.confirm);
+        },
+        fail: () => {
+          resolve(false);
+        },
+      });
+    });
+  },
+
+  /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
   async onExtractTap() {
     const text = this.data.memoText.trim();
     if (!text) {
@@ -329,10 +387,33 @@ Page<
     if (this.data.extracting) {
       return;
     }
+    const unfinished = getUnfinishedDraftSession();
+    if (unfinished !== null) {
+      const choice = await this.askDraftEntryIntent(unfinished.payload.drafts.length);
+      if (choice === "resume") {
+        this.goToConfirm("/pages/confirm/confirm?sid=" + unfinished.sid);
+        return;
+      }
+      if (choice === "abort") {
+        return;
+      }
+      // 放弃:二次确认讲清语义(非数据库撤销),显式清除恢复入口后才开始本次提取
+      if (!(await this.confirmDiscardDraft())) {
+        return;
+      }
+      clearDraftSession(unfinished.sid);
+    }
     this.setData({ extracting: true });
     try {
-      const res = await callExtractDraft(text);
+      const res = await callExtractDraft(text, { protocol: 2 });
+      if ("drafts" in res) {
+        // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
+        const sid = createDraftSession(res.original_text, res.drafts, res.truncated);
+        this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
+        return;
+      }
       if ("needs_split" in res) {
+        // 防御:服务端未升级窗口内仍可能返回旧形态
         wx.showToast({
           title: res.message || "一次只记一件物品,请分开说",
           icon: "none",
@@ -340,10 +421,9 @@ Page<
         });
         return;
       }
-      const draft: Draft = res.draft;
-      this.goToConfirm(
-        "/pages/confirm/confirm?draft=" + encodeURIComponent(JSON.stringify(draft)),
-      );
+      // v1 单草稿兜底:同样入会话走列表页
+      const sid = createDraftSession(text, [{ ...res.draft, source_quote: text }], false);
+      this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
     } catch (e) {
       if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") {
         // 契约流程:AI 不可用时征得确认后进入手动录入
@@ -410,6 +490,15 @@ Page<
     if (item) {
       this.openItem(item);
     }
+  },
+
+  onResumeTap() {
+    const resume = this.data.resumeSession;
+    if (resume === null) {
+      return;
+    }
+    this.setData({ resumeSession: null });
+    this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
   },
 
   onRecentTap(e) {

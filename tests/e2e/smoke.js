@@ -42,7 +42,10 @@ async function main() {
     throw new Error("自动化会话未就绪:" + (lastErr ? lastErr.message : "未知"));
   }
 
-  // 确保停回首页(重试兼容首跳超时)
+  // 无条件 reLaunch 回首页:上次运行残留的页面实例在代码热更新后元素映射可能失效,
+  // 测试必须从已知的干净状态开始
+  await miniProgram.reLaunch("/pages/index/index");
+  await new Promise((r) => setTimeout(r, 1500));
   let page = null;
   for (let i = 1; i <= 3 && page === null; i++) {
     try {
@@ -50,11 +53,6 @@ async function main() {
     } catch (e) {
       await new Promise((r) => setTimeout(r, 2000));
     }
-  }
-  if (page === null) {
-    await miniProgram.reLaunch("/pages/index/index");
-    await page.waitFor(1500);
-    page = await miniProgram.currentPage();
   }
   console.log("✔ 当前页面:", page.path);
   assert(page.path === "pages/index/index", "启动后应停在首页 pages/index/index");

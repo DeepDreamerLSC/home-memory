@@ -39,6 +39,13 @@ export interface Draft {
   qualifiers: string[];
 }
 
+/** 协议 v2 草稿:附带原话证据片段(非子串时服务端置空,确认页标「来源不充分」) */
+export interface DraftWithQuote extends Draft {
+  source_quote: string;
+  /** 证据片段同时含其他物品名称(如整句原话):归属无法确定性排除交叉配对,须人工核对(默认不勾选) */
+  anchor_shared?: boolean;
+}
+
 /** query 的匹配层级 */
 export type MatchType = "exact" | "prefix" | "contains" | "none";
 
@@ -157,7 +164,21 @@ export interface ExtractDraftErrorResponse {
   manual_fallback: true;
 }
 
+/** 协议 v2 请求:显式 protocol:2(旧客户端不带,服务端维持 v1 行为) */
+export interface ExtractDraftMultiEvent extends ExtractDraftEvent {
+  protocol: 2;
+}
+
+/** 协议 v2 响应:一句话(1-5 件)拆分后的草稿数组,单件时长度也为 1;truncated=原话超 5 件被截取(须引导分批,绝不静默) */
+export interface ExtractDraftMultiResponse {
+  ok: true;
+  drafts: DraftWithQuote[];
+  original_text: string;
+  truncated: boolean;
+}
+
 export type ExtractDraftResponse =
   | ExtractDraftOkResponse
   | ExtractDraftNeedsSplitResponse
+  | ExtractDraftMultiResponse
   | ExtractDraftErrorResponse;
