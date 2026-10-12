@@ -171,3 +171,10 @@
   align-items: center;
   flex-shrink: 0;
 }
+
+/* 选择模式:当前层直选卡(「就选这里」) */
+.pick-current {
+  display: flex;
+  align-items: center;
+  border: 2rpx solid var(--accent-dim);
+}

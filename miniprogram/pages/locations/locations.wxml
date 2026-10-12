@@ -2,7 +2,7 @@
   <!-- 选择模式说明头 -->
   <view wx:if="{{ mode === 'pick' }}" class="card">
     <view class="card-title">{{ pickTitle }}</view>
-    <view class="hint">点一条即确认选择;点 › 可继续往里找。不能选的位置会标出原因。</view>
+    <view class="hint">想选哪一层就进到哪一层,顶部「就选这里」选定当前层;叶子位置点行即可。不能选的会标出原因。</view>
   </view>
 
   <!-- 无缓存首载:骨架屏(占位几何与真实列表一致,不再是一行干巴巴的「加载中」) -->
@@ -28,6 +28,19 @@
     <view class="crumb-row">
       <view class="crumb">{{ breadcrumbText }}</view>
       <view wx:if="{{ refreshing }}" class="refresh-flag">同步中…</view>
+    </view>
+
+    <!-- 选择模式非根层:当前层可直接选中(下钻过深不必退回找「选这个」) -->
+    <view
+      wx:if="{{ mode === 'pick' && !isRoot }}"
+      class="card pick-current"
+      bindtap="onPickCurrentTap"
+    >
+      <view class="item-main">
+        <view class="item-name">就选这里:「{{ currentNodeName }}」</view>
+        <view class="item-location">选当前这一层;往里找可继续点下面的位置</view>
+      </view>
+      <view class="pick-check">选</view>
     </view>
 
     <!-- 后台刷新失败:保留旧树,如实提示并可重试(点按=强制刷新) -->
