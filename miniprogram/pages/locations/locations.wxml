@@ -82,7 +82,7 @@
           <view class="pick-check" catchtap="onPickTap" data-index="{{ index }}">选这个</view>
           <view wx:if="{{ item.child_count > 0 }}" class="chevron" catchtap="onChildTap" data-index="{{ index }}">›</view>
         </view>
-        <view wx:if="{{ mode === 'browse' }}" class="row-more" catchtap="onChildMore">⋯</view>
+        <view wx:if="{{ mode === 'browse' }}" class="row-more" catchtap="onChildMore" data-index="{{ index }}">⋯</view>
         <view wx:if="{{ mode === 'browse' }}" class="chevron">›</view>
       </view>
     </view>
@@ -102,7 +102,7 @@
           <view class="item-name">{{ item.name }}</view>
           <view class="item-location">原始记录:{{ item.location_text }}</view>
         </view>
-        <view class="row-more" catchtap="onItemMore">⋯</view>
+        <view class="row-more" catchtap="onItemMore" data-index="{{ index }}">⋯</view>
       </view>
     </view>
   </block>
