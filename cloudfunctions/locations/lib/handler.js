@@ -734,14 +734,20 @@ async function mergeAction(event, deps) {
   if (source.type === "home" || target.type === "home") {
     return fail("INVALID_INPUT"); // home 根不可合并(§1.1)
   }
-  if (source.type !== target.type) {
-    return fail("INVALID_INPUT", "只能合并同类型的位置");
-  }
   var nodes = await fetchHouseholdNodes(deps);
   if (tree.isDescendant(nodes, source._id, target._id)) {
     return fail("NODE_CONFLICT"); // target 是 source 的后代
   }
   var sourceChildren = tree.directChildren(nodes, source._id);
+  if (source.type !== target.type && sourceChildren.length > 0) {
+    // 类型按深度推导,「同类型」=「同深度」:同一实物在不同深度的重复(根层「冰箱」vs
+    // 「书房/冰箱」)永远同不了型。叶子 source 放开跨类型合并——只重挂物品、删 source,
+    // 不产生子树类型漂移;source 带子树仍拒绝并引导先移动(issue #27)。
+    return fail(
+      "INVALID_INPUT",
+      "两者层级不同,不能直接合并;可先把「" + source.name + "」移动到与目标同级,或把它里面的位置移走后再合并"
+    );
+  }
   var targetChildren = tree.directChildren(nodes, target._id);
   var targetNorms = Object.create(null);
   for (var t = 0; t < targetChildren.length; t++) {

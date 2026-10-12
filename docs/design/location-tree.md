@@ -206,7 +206,7 @@ cloudfunctions/locations/
 ### 5.6 `merge` —— 合并重复节点(物品条件重挂载,不破坏版本链)
 
 - **请求**:`{ action:"merge", source_node_id, target_node_id }`。
-- **校验**:两节点存在且属本家庭;source ≠ target(`NODE_CONFLICT`);二者 type 相同(否则 INVALID_INPUT,message「只能合并同类型的位置」);target 不是 source 的后代(否则 NODE_CONFLICT);**source 的直接子节点与 target 的直接子节点无 name_norm 重名**(有则 `NODE_CONFLICT`,响应附 `detail:{ clashing_names:[..] }` 供客户端展示——名称出现在响应里合法,出现在日志里违规)。
+- **校验**:两节点存在且属本家庭;source ≠ target(`NODE_CONFLICT`);二者 type 相同——**例外(issue #27):source 无直接子节点(叶子)时允许跨类型/跨层级合并**,因为类型按深度推导,同一实物在不同深度的重复(根层「冰箱」vs「书房/冰箱」)永远不同型,而叶子合并只重挂物品、删 source,不产生子树类型漂移;source 带子树时跨类型仍拒绝(INVALID_INPUT,文案引导先移动到同级);target 不是 source 的后代(否则 NODE_CONFLICT);**source 的直接子节点与 target 的直接子节点无 name_norm 重名**(有则 `NODE_CONFLICT`,响应附 `detail:{ clashing_names:[..] }` 供客户端展示——名称出现在响应里合法,出现在日志里违规)。
 - **执行顺序(逐件条件更新 + 冲突即中止 + 可重试收敛)**:
   1. **物品阶段**:逐件处理直接挂在 source 上的未删物品。每件:读当前 version `v` → 条件更新 `where({ _id, household_id, deleted:false, version:v })` 置 `{ location_node_id: target._id, version: v+1, updated_at, last_update_id: "merge:"+digest(source_id+"→"+target_id+":"+item_id)(派生标识,规格见 §5.8), last_update_fingerprint }`。**0 命中**(并发修改,如 itemsApi.update 或另一 linkItem)→ 重读一次:若该件 `location_node_id` 已等于 target(本次或上次 merge 已完成)则视为已完成继续下一件;否则**中止整个 merge**,返回 `{ ok:false, error:"VERSION_CONFLICT", message:"部分物品刚被修改,请重试", detail:{ conflicted:[{item_id, current_version}] } }`——**绝不无条件改写 version**,绝不覆盖并发修改。中止时已成功重挂的件**保持已挂 target**(语义无损,version 已正确 +1),source 未动,重试安全(重放识别靠派生标识的确定性:同 source/target/item 输入恒得同标识,与 §5.10 收敛语义一致)。
   2. **后置校验(收窄 linkItem(source) 并发窗口)**:物品阶段完成后、删除 source 之前,再查一次 source 的直接挂载物品;若并发冒出新挂物品,对其执行同款条件重挂(0 命中且非已挂 → 同样中止);确认为空才继续。
