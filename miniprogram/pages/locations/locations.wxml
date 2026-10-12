@@ -83,7 +83,6 @@
           <view wx:if="{{ item.child_count > 0 }}" class="chevron" catchtap="onChildTap" data-index="{{ index }}">›</view>
         </view>
         <view wx:if="{{ mode === 'browse' }}" class="row-more" catchtap="onChildMore" data-index="{{ index }}">⋯</view>
-        <view wx:if="{{ mode === 'browse' }}" class="chevron">›</view>
       </view>
     </view>
 

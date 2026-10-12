@@ -506,19 +506,20 @@ Page<
     wx.showModal({
       title: "合并重复位置",
       content:
-        "把「" + node.name + "」并进另一个同类型位置:物品会一起挪过去,这个位置会消失。继续?",
+        "把「" + node.name + "」并进另一个位置:物品会一起挪过去,这个位置会消失。继续?",
       confirmText: "选目标",
       cancelText: "取消",
       success: (r) => {
         if (!r.confirm) {
           return;
         }
+        // 叶子位置放开跨层级合并(issue #27:同一实物在不同深度的重复,如根层「冰箱」
+        // 与「书房/冰箱」);带子位置仍限同类型(服务端同款约束),避免子树类型漂移。
         this.openPicker(
           "把「" + node.name + "」并进…",
-          {
-            type: node.type,
-            excludePath: node.path.join("/"),
-          },
+          node.child_count > 0
+            ? { type: node.type, excludePath: node.path.join("/") }
+            : { excludePath: node.path.join("/") },
           (picked) => {
             void this.doMerge(node, picked.location_id);
           },

@@ -1311,12 +1311,18 @@ test("TS-MG:merge 全部条件重挂载 + path 级联;source 后代 id 不变物
     t3.deps
   );
   assert.equal(self.error, "NODE_CONFLICT");
-  var crossType = await locHandler(
+  // 跨类型且 source 带子树 → 拒绝并引导先移动(issue #27:类型按深度推导,
+  // 子树嫁接到不同深度会整段类型漂移,故带子树的跨层级合并仍不允许)
+  await ensurePath(t3.deps, ["杂物间", "架子", "盒子"]);
+  var crossTypeSubtree = await locHandler(
     { action: "merge", source_node_id: g3.nodes[1].location_id, target_node_id: g3.nodes[0].location_id },
     t3.deps
   );
-  assert.equal(crossType.error, "INVALID_INPUT");
-  assert.equal(crossType.message, "只能合并同类型的位置");
+  assert.equal(crossTypeSubtree.error, "INVALID_INPUT");
+  assert.ok(
+    (crossTypeSubtree.message || "").indexOf("层级不同") !== -1,
+    "跨类型带子树应引导先移动,实际 " + crossTypeSubtree.message
+  );
   var nested = await ensurePath(t3.deps, ["书房", "桌子", "抽屉", "蓝色盒子"]);
   var toDescendant = await locHandler(
     { action: "merge", source_node_id: nested.nodes[2].location_id, target_node_id: nested.nodes[3].location_id },
@@ -1326,6 +1332,46 @@ test("TS-MG:merge 全部条件重挂载 + path 级联;source 后代 id 不变物
 });
 
 // ---------- TS-DL:delete 保护 ----------
+
+test("TS-MG2:跨层级叶子合并——根层「冰箱」(room)并入「书房/冰箱」(furniture),物品随迁(issue #27)", async function () {
+  var t = fresh();
+  // 类型按深度推导:根层冰箱=room,书房下冰箱=furniture——物理同一实物的两处重复
+  var rootF = await ensurePath(t.deps, ["冰箱"]);
+  var studyF = await ensurePath(t.deps, ["书房", "冰箱"]);
+  var rootId = rootF.nodes[0].location_id;
+  var targetId = studyF.nodes[1].location_id;
+  assert.notEqual(rootF.nodes[0].type, studyF.nodes[1].type, "前置:两节点类型确实不同");
+  var item = await createItem(t.deps, "op-mg2-a", "面条", "冰箱里");
+  await locHandler(
+    { action: "linkItem", item_id: item.item.item_id, node_id: rootId, expected_version: 1, update_id: "u-mg2-a" },
+    t.deps
+  );
+
+  var merged = await locHandler(
+    { action: "merge", source_node_id: rootId, target_node_id: targetId },
+    t.deps
+  );
+  assert.equal(merged.ok, true, JSON.stringify(merged));
+  assert.equal(merged.remounted, 1, "叶子跨层级合并:直挂物品应重挂到 target");
+  var items = await rawDocs(t.db, "items");
+  var raw = items.find(function (d) {
+    return d._id === item.item.item_id;
+  });
+  assert.equal(raw.location_node_id, targetId, "面条随迁到 书房/冰箱");
+  assert.equal(raw.location_text, "冰箱里", "merge 不改写历史话语");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(
+    nodes.some(function (d) {
+      return d._id === rootId;
+    }),
+    false,
+    "根层冰箱硬删除"
+  );
+  var targetNode = nodes.find(function (d) {
+    return d._id === targetId;
+  });
+  assert.equal(targetNode.type, "furniture", "target 自身类型不受影响");
+});
 
 test("TS-DL:delete 空节点保护;force 拦截有物品子树;空分支整支删;删后重建;home 根拒绝;补偿摘除", async function () {
   var t = fresh();
