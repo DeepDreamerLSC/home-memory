@@ -27,6 +27,7 @@
   <block wx:else>
     <view class="crumb-row">
       <view class="crumb">{{ breadcrumbText }}</view>
+      <view wx:if="{{ familyShared }}" class="family-flag">共享家庭·{{ familyName }}</view>
       <view wx:if="{{ refreshing }}" class="refresh-flag">同步中…</view>
     </view>
 

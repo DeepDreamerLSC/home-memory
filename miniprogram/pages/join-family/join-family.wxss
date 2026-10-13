@@ -68,6 +68,11 @@
   margin: 24rpx 0;
   padding: 20rpx 24rpx;
   border-radius: 16rpx;
-  background: var(--bg-2, #f5f3ee);
+  /* 显式双色:跟随主题的底与字,深浅色都可读(真机反馈:曾用静态浅底+继承白字) */
+  background: var(--card-inset, #f1ede0);
+  color: var(--text, #191919);
   font-size: 28rpx;
+}
+.token-input::placeholder {
+  color: var(--placeholder, #b8b2a4);
 }

@@ -831,10 +831,9 @@ async function dissolveAction(event, deps) {
  * owner 在前,其余按加入时间升序。
  */
 async function memberListAction(event, deps) {
-  var guard = requireOwnerContext(deps);
-  if (guard) {
-    return guard;
-  }
+  // 全体成员可读(真机反馈:加入后连家人有谁都看不到;家庭成员互见是基本感知;
+  // 管理动作 invite/remove/dissolve 仍 owner 独有)。resolver 已保证调用者是
+  // 本家庭的活跃成员,无需再验 owner。
   var householdId = deps.resolved.householdId;
   var rows = await fetchAll(deps, MEMBERS_COLLECTION, { household_id: householdId });
   var members = rows.map(function (r) {

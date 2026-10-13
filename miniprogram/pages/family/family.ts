@@ -4,7 +4,7 @@
  *   创建流程明示两条产品裁定文案(冻结合同决策 1/2):
  *   ①「新的共享家庭从空白开始,你现有的物品不会自动出现在里面」(需勾选确认);
  *   ②「创建后你就是这个家庭的创建者(Owner),负责邀请家人和管理成员」;
- * - 共享态:家庭名、成员列表(memberList,owner 独有——服务端 FORBIDDEN,
+ * - 共享态:家庭名、成员列表(全体成员可见,管理动作仍 owner;真机反馈修订),
  *   普通成员如实不展示)、邀请(owner:inviteCreate → 微信分享卡片
  *   onShareAppMessage,path 带 invite=<token>;inviteList 列未撤销邀请可
  *   inviteRevoke)、移除成员(owner,二次确认)、退出(普通成员;owner 在有
@@ -56,7 +56,7 @@ Page<
     role: string;
     isOwner: boolean;
     members: DisplayMember[];
-    /** owner 才能拉取 memberList(服务端 FORBIDDEN,普通成员如实不展示) */
+    /** 成员清单是否已拉取(全体成员可见;管理动作按 isOwner 区分) */
     memberListAvailable: boolean;
     invites: DisplayInvite[];
     inviteListError: string;
@@ -167,8 +167,8 @@ Page<
         memberListAvailable: false,
         loading: false,
       });
-      if (status.role === "owner") {
-        // owner 补充成员清单与邀请清单;失败如实提示,不阻塞页面主信息
+      {
+        // 成员清单全体可见(真机反馈:加入后应能看到家人有谁);邀请清单仍 owner
         this.setData({ memberListAvailable: true });
         try {
           const members = await fetchMemberList();
@@ -182,6 +182,7 @@ Page<
         } catch (e) {
           this.setData({ loadError: "成员列表加载失败:" + errorMessage(e) });
         }
+        if (status.role === "owner") {
         try {
           const invites = await fetchInviteList();
           this.setData({
@@ -198,6 +199,7 @@ Page<
           });
         } catch (e) {
           this.setData({ inviteListError: "邀请列表加载失败:" + errorMessage(e) });
+        }
         }
       }
     } catch (e) {
