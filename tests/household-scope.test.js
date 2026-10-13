@@ -137,8 +137,13 @@ test("HS-CAPTURE:捕获后 locations-cache 存储键与 draft-session 持久化�
       SCOPE_KEY,
       CACHE_BASE + ":hh-hh_abcdef0123456789"
     ]);
-    // 作用域本身也持久化(冷启动先还原作用域,缓存才能按正确键命中)
-    assert.equal(storage.__dump()[SCOPE_KEY], "hh_abcdef0123456789");
+    // 作用域本身也持久化(P1-B 起为 {id,shared,revision} 对象:冷启动先还原
+    // 作用域与共享标记/修订号,缓存才能按正确键命中、写请求才能绑定修订号)
+    assert.deepEqual(storage.__dump()[SCOPE_KEY], {
+      id: "hh_abcdef0123456789",
+      shared: false,
+      revision: null
+    });
     assert.ok(cache.readLocationsLayer("root", T0 + 1000) !== null);
   } finally {
     teardown();

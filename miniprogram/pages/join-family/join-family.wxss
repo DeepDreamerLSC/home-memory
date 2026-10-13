@@ -1,0 +1,64 @@
+/* 加入确认页(issue #34 P1-B):复用全局卡片体系,补居中确认布局 */
+
+.card {
+  text-align: center;
+}
+
+.join-icon {
+  width: 96rpx;
+  height: 96rpx;
+  margin: 16rpx auto 20rpx;
+  border-radius: 28rpx;
+  background: var(--accent-dim);
+  color: var(--text);
+  font-size: 44rpx;
+  line-height: 96rpx;
+  text-align: center;
+}
+
+.join-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+
+.card .hint {
+  text-align: center;
+  margin: 12rpx 0 24rpx;
+}
+
+/* 隐私明示(冻结合同 D2/决策 1) */
+.notice-block {
+  text-align: left;
+  background: var(--banner-bg);
+  border: 1rpx solid var(--banner-line);
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 28rpx;
+}
+
+.notice-line {
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 1.7;
+}
+
+.notice-line + .notice-line {
+  margin-top: 8rpx;
+}
+
+.trial-note {
+  margin: 8rpx 0 24rpx;
+  color: var(--text-3);
+  font-size: 24rpx;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.mode-link {
+  margin-top: 20rpx;
+  font-size: 26rpx;
+  color: var(--text-2);
+  text-align: center;
+}

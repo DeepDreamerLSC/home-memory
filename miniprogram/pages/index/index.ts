@@ -19,6 +19,8 @@ import {
 } from "../../utils/voice";
 import type { ItemSummary } from "../../types";
 import { createDraftSession, clearDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
+import { ensureScopeVerified } from "../../utils/households-api";
+import { captureScopeGeneration, isScopeGenerationCurrent } from "../../utils/household-scope";
 
 /** 用于渲染的条目(附带格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
@@ -58,7 +60,7 @@ Page<
   },
   {
     onMemoInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
-    onLoad(): void;
+    onLoad(options: Record<string, string | undefined>): void;
     onModeText(): void;
     onModeVoice(): void;
     ensureVoiceCtrl(): void;
@@ -85,11 +87,15 @@ Page<
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     onRecentTap(e: WechatMiniprogram.CustomEvent): void;
     onResumeTap(): void;
+    /** 未完成草稿恢复入口数据(作用域键隔离;null = 当前家庭无未完成批次) */
+    currentResumeSession(): { sid: string; count: number } | null;
     loadRecent(): Promise<void>;
     openItem(item: DisplayItem): void;
     goToConfirm(url: string): void;
     /** 「我的家」次级入口:进空间树浏览页(不抢语音主入口) */
     onHomeTreeTap(): void;
+    /** 「家庭」次级入口:进家庭管理页(创建/邀请/退出,issue #34 P1-B) */
+    onFamilyTap(): void;
     onTalkTouchStart(e: WechatMiniprogram.TouchEvent): void;
     onTalkTouchMove(e: WechatMiniprogram.TouchEvent): void;
     onTalkTouchEnd(): void;
@@ -125,20 +131,30 @@ Page<
   sessionGuard: null as SessionGuard | null,
   activeVoiceSession: null as VoiceSession | null,
 
-  onLoad() {
+  onLoad(options) {
     this.sessionGuard = createSessionGuard();
     this.ensureVoiceCtrl();
+    // 邀请卡片落地兜底(issue #34 P1-B):分享卡片 path 指向加入确认页,
+    // 冷启动直达;若有其他入口把 invite 带到首页,转送加入确认页(一步确认)
+    const invite = options && options.invite ? String(options.invite).trim() : "";
+    if (invite) {
+      wx.navigateTo({
+        url: "/pages/join-family/join-family?invite=" + encodeURIComponent(invite),
+        fail: () => {
+          wx.showToast({ title: "邀请打开失败,请重试", icon: "none" });
+        },
+      });
+    }
   },
 
   onShow() {
-    this.loadRecent();
-    // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
-    const unfinished = getUnfinishedDraftSession();
-    this.setData({
-      resumeSession:
-        unfinished === null
-          ? null
-          : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+    void this.loadRecent();
+    // 未完成草稿会话恢复入口(中途退出/进程回收;原幂等键续存,不重复建档)。
+    // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
+    // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
+    // (loadRecent 的 list 响应也会捕获作用域并标记已验证)
+    void ensureScopeVerified().then(() => {
+      this.setData({ resumeSession: this.currentResumeSession() });
     });
   },
 
@@ -503,6 +519,15 @@ Page<
     this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
   },
 
+  /** 未完成批次数据按当前家庭作用域读取(键隔离,P0;验证后才读,硬门 C) */
+  currentResumeSession() {
+    const unfinished = getUnfinishedDraftSession();
+    if (unfinished === null) {
+      return null;
+    }
+    return { sid: unfinished.sid, count: unfinished.payload.drafts.length };
+  },
+
   onRecentTap(e) {
     const index = Number(e.currentTarget.dataset.index);
     const item = this.data.recentItems[index];
@@ -511,16 +536,25 @@ Page<
     }
   },
 
-  /** 最近记录:itemsApi list */
+  /** 最近记录:itemsApi list;家庭切换(作用域代数变化)后的迟到响应不上屏 */
   async loadRecent() {
+    const scopeGen = captureScopeGeneration();
     this.setData({ recentLoading: true, recentError: "" });
     try {
       const res = await callItemsApi({ action: "list" });
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return; // 家庭刚切换(创建/加入/退出/被移除):旧家庭响应不上屏
+      }
       this.setData({ recentItems: toDisplayItems(res.items) });
     } catch (e) {
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return;
+      }
       this.setData({ recentError: errorMessage(e) });
     } finally {
-      this.setData({ recentLoading: false });
+      if (isScopeGenerationCurrent(scopeGen)) {
+        this.setData({ recentLoading: false });
+      }
     }
   },
 
@@ -545,6 +579,16 @@ Page<
   onHomeTreeTap() {
     wx.navigateTo({
       url: "/pages/locations/locations",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** 家庭管理页入口(issue #34 P1-B:创建/邀请/成员/退出/解散) */
+  onFamilyTap() {
+    wx.navigateTo({
+      url: "/pages/family/family",
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },

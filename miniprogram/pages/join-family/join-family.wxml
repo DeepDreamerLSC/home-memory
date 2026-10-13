@@ -1,0 +1,36 @@
+<view class="page">
+  <!-- 令牌预检中 -->
+  <view wx:if="{{ phase === 'loading' }}" class="card">
+    <view class="empty-text">正在确认邀请…</view>
+  </view>
+
+  <!-- 确认加入:家庭名 + 隐私明示,一步确认 -->
+  <block wx:elif="{{ phase === 'confirm' }}">
+    <view class="card">
+      <view class="join-icon">家</view>
+      <view class="join-title">加入「{{ familyName }}」?</view>
+      <view class="hint">家人邀请你共用一个家庭,一起记东西放哪儿了。</view>
+
+      <view class="notice-block">
+        <view class="notice-line">· {{ privacyNotice }}</view>
+        <view class="notice-line">· {{ blankNotice }},随时可以退出</view>
+      </view>
+
+      <button class="btn primary block" loading="{{ joining }}" bindtap="onJoinTap">
+        确认加入
+      </button>
+      <view class="mode-link" bindtap="onCloseTap">暂不加入</view>
+    </view>
+  </block>
+
+  <!-- 失败/已失效:如实文案 + 可关闭 -->
+  <view wx:elif="{{ phase === 'error' }}" class="card">
+    <view class="join-icon">!</view>
+    <view class="join-title">无法加入</view>
+    <view class="hint">{{ errorText }}</view>
+    <view class="trial-note">
+      提示:邀请可能已过期、被撤销或家庭已解散;体验版阶段,需先被添加为体验成员才能打开邀请卡片。
+    </view>
+    <button class="btn block" bindtap="onCloseTap">关闭</button>
+  </view>
+</view>

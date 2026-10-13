@@ -1,0 +1,108 @@
+/* 家庭管理页(issue #34 P1-B):复用全局卡片/条目体系,仅补本页特有样式 */
+
+.notice-block {
+  background: var(--banner-bg);
+  border: 1rpx solid var(--banner-line);
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 24rpx;
+}
+
+.notice-line {
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 1.7;
+}
+
+.notice-line + .notice-line {
+  margin-top: 8rpx;
+}
+
+/* 勾选确认(创建「从空白开始」明示的硬前置) */
+.ack-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 24rpx;
+}
+
+.ack-box {
+  flex: none;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 10rpx;
+  border: 2rpx solid var(--text-3);
+  margin: 4rpx 16rpx 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ack-box.checked {
+  background: var(--accent);
+  border-color: var(--accent-shadow);
+}
+
+.ack-tick {
+  color: var(--text);
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ack-text {
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 1.6;
+}
+
+/* 成员行右侧操作 */
+.row-action {
+  flex: none;
+  align-self: center;
+  color: var(--text-2);
+  font-size: 26rpx;
+  padding: 8rpx 20rpx;
+  border: 1rpx solid var(--line);
+  border-radius: 999rpx;
+}
+
+.row-action.danger {
+  color: var(--danger);
+  border-color: var(--danger-shadow);
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 12rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: var(--accent-dim);
+  color: var(--text-2);
+  font-size: 22rpx;
+  vertical-align: middle;
+}
+
+.share-btn {
+  margin-top: 16rpx;
+}
+
+.trial-note {
+  margin-top: 16rpx;
+  color: var(--text-3);
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
+.invite-title {
+  margin: 24rpx 0 8rpx;
+  color: var(--text-3);
+  font-size: 24rpx;
+}
+
+/* 取消链接(照首页 mode-link 口径,该类定义在首页 wxss,此处页面级补齐) */
+.mode-link {
+  margin-top: 20rpx;
+  font-size: 26rpx;
+  color: var(--text-2);
+  text-align: center;
+}

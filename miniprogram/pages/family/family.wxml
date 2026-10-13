@@ -1,0 +1,183 @@
+<view class="page">
+  <!-- 加载 / 错误 -->
+  <view wx:if="{{ loading }}" class="card">
+    <view class="empty-text">加载中…</view>
+  </view>
+  <view wx:elif="{{ loadError && !shared }}" class="card">
+    <view class="error-text">{{ loadError }}</view>
+    <button class="btn block" bindtap="refresh">重试</button>
+  </view>
+
+  <!-- 单人态:个人家庭 + 创建共享家庭入口 -->
+  <block wx:elif="{{ !shared }}">
+    <view class="card">
+      <view class="card-title">当前家庭</view>
+      <view class="item-row">
+        <view class="item-icon">家</view>
+        <view class="item-main">
+          <view class="item-name">个人家庭</view>
+          <view class="item-location">仅自己可见,你的物品都记在这里</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 创建共享家庭:内联表单(两条产品裁定文案明示,勾选确认为硬前置) -->
+    <view class="card" wx:if="{{ !creating }}">
+      <view class="card-title">共享家庭</view>
+      <view class="hint">
+        和家人共用一个家庭:大家都能看到彼此记住的物品与位置,谁放哪儿了一目了然。
+      </view>
+      <button class="btn primary block" bindtap="onStartCreateTap">创建共享家庭</button>
+    </view>
+    <view class="card" wx:else>
+      <view class="card-title">创建共享家庭</view>
+
+      <view class="notice-block">
+        <view class="notice-line">1. 新的共享家庭从空白开始,你现有的物品不会自动出现在里面。</view>
+        <view class="notice-line">2. 创建后你就是这个家庭的创建者(Owner),负责邀请家人和管理成员。</view>
+      </view>
+
+      <view class="ack-row" bindtap="onCreateAckToggle">
+        <view class="ack-box {{ createAck ? 'checked' : '' }}">
+          <view wx:if="{{ createAck }}" class="ack-tick">✓</view>
+        </view>
+        <view class="ack-text">我明白了:新的共享家庭从空白开始,不会自动带入我现有的物品</view>
+      </view>
+
+      <view class="field">
+        <view class="label">家庭名(可选,默认「我的家」)</view>
+        <input
+          class="input"
+          placeholder="如:我们家"
+          placeholder-class="placeholder"
+          value="{{ createName }}"
+          maxlength="30"
+          bindinput="onCreateNameInput"
+        />
+      </view>
+
+      <button
+        class="btn primary block"
+        loading="{{ createBusy }}"
+        disabled="{{ !createAck }}"
+        bindtap="onCreateTap"
+      >
+        创建并成为创建者(Owner)
+      </button>
+      <view class="mode-link" bindtap="onCancelCreateTap">取消</view>
+    </view>
+  </block>
+
+  <!-- 共享态:家庭信息 / 成员 / 邀请 / 退出·解散 -->
+  <block wx:else>
+    <view class="card">
+      <view class="card-title">当前家庭</view>
+      <view class="item-row">
+        <view class="item-icon">{{ displayName[0] || '家' }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ displayName || '我的家' }}</view>
+          <view class="item-location">你是{{ role }} · 全员都能看到这个家庭的物品与位置</view>
+        </view>
+      </view>
+      <view wx:if="{{ loadError }}" class="error-text">{{ loadError }}</view>
+    </view>
+
+    <!-- 成员(owner:memberList;普通成员不展示,如实说明) -->
+    <view class="card" wx:if="{{ isOwner }}">
+      <view class="card-head">
+        <view class="card-title">成员</view>
+        <view class="meta">共 {{ members.length }} 人</view>
+      </view>
+      <view
+        wx:for="{{ members }}"
+        wx:key="member_key"
+        class="item-row"
+      >
+        <view class="item-icon">{{ item.is_self ? '我' : (item.role === 'owner' ? '主' : '员') }}</view>
+        <view class="item-main">
+          <view class="item-name">
+            {{ item.is_self ? '我' : '成员' }}
+            <text wx:if="{{ item.role === 'owner' }}" class="tag">创建者</text>
+          </view>
+          <view class="item-location">{{ item.joined_text }} 加入</view>
+        </view>
+        <view
+          wx:if="{{ !item.is_self }}"
+          class="row-action danger"
+          data-index="{{ index }}"
+          catchtap="onRemoveMemberTap"
+        >
+          移除
+        </view>
+      </view>
+      <view wx:if="{{ members.length === 0 }}" class="empty-text">成员列表加载中…</view>
+    </view>
+    <view class="card" wx:else>
+      <view class="card-title">成员</view>
+      <view class="empty-text">成员列表仅家庭创建者可见。你可以在家庭成员的共同记录里一起记东西。</view>
+    </view>
+
+    <!-- 邀请(owner) -->
+    <view class="card" wx:if="{{ isOwner }}">
+      <view class="card-title">邀请家人</view>
+      <view class="hint">生成邀请后,把卡片发给家人;对方打开并确认后即加入。邀请 7 天内有效,可随时撤销。</view>
+      <button class="btn primary block" loading="{{ acting }}" bindtap="onInviteTap">
+        {{ shareToken ? '重新生成邀请' : '生成邀请' }}
+      </button>
+      <button wx:if="{{ shareToken }}" class="btn block share-btn" open-type="share" bindtap="onShareTap">
+        分享给家人
+      </button>
+      <view class="trial-note">体验版阶段:家人需要先被添加为体验成员,才能打开邀请卡片</view>
+
+      <block wx:if="{{ invites.length > 0 }}">
+        <view class="invite-title">未过期的邀请</view>
+        <view
+          wx:for="{{ invites }}"
+          wx:key="invite_id"
+          class="item-row"
+        >
+          <view class="item-icon">邀</view>
+          <view class="item-main">
+            <view class="item-name">邀请</view>
+            <view class="item-location">{{ item.created_text }} 生成 · {{ item.expires_text }} 前有效</view>
+          </view>
+          <view
+            class="row-action"
+            data-index="{{ index }}"
+            catchtap="onRevokeTap"
+          >
+            撤销
+          </view>
+        </view>
+      </block>
+      <view wx:if="{{ inviteListError }}" class="error-text">{{ inviteListError }}</view>
+    </view>
+
+    <!-- 退出 / 解散 -->
+    <view class="card">
+      <view class="card-title">退出与解散</view>
+      <view wx:if="{{ isOwner && members.length === 1 }}" class="hint">
+        家庭里只剩你一个人:不能退出,只能解散(数据将保留但无人可访问)。
+      </view>
+      <button
+        wx:if="{{ isOwner && members.length === 1 }}"
+        class="btn danger block"
+        loading="{{ acting }}"
+        bindtap="onDissolveTap"
+      >
+        解散家庭
+      </button>
+      <button
+        wx:else
+        class="btn danger block"
+        loading="{{ acting }}"
+        bindtap="onLeaveTap"
+      >
+        退出家庭
+      </button>
+      <view wx:if="{{ isOwner && members.length > 1 }}" class="hint">
+        还有其他成员在家庭里时,创建者不能退出(可先移除成员或等他们退出)。
+      </view>
+    </view>
+  </block>
+</view>

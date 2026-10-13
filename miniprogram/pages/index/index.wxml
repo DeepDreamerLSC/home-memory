@@ -124,6 +124,14 @@
       </view>
       <view class="chevron">›</view>
     </view>
+    <view class="item-row" bindtap="onFamilyTap">
+      <view class="item-icon">庭</view>
+      <view class="item-main">
+        <view class="item-name">家庭</view>
+        <view class="item-location">创建共享家庭、邀请家人、退出或解散</view>
+      </view>
+      <view class="chevron">›</view>
+    </view>
   </view>
 
   <!-- 最近记住的:紧凑,可点击 -->

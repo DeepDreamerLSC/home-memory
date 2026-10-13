@@ -4,7 +4,9 @@
     "pages/confirm/confirm",
     "pages/item/item",
     "pages/locations/locations",
-    "pages/locationScan/locationScan"
+    "pages/locationScan/locationScan",
+    "pages/family/family",
+    "pages/join-family/join-family"
   ],
   "window": {
     "navigationBarTitleText": "我靠东西呢",
