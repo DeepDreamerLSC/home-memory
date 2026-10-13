@@ -110,9 +110,9 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 作用:同一层下并发创建同名位置(如两次同时从扫描向导确认「书房」)时,数据库拒绝第二笔插入,服务端捕获后回查复用已有节点,绝不双建;home 根节点的每家庭唯一性也由该索引自然覆盖。
 
-**③ 权限设置(安全必做,三个集合都要)**:
+**③ 权限设置(安全必做,所有集合都要)**:
 
-> 三个集合 → 权限设置 → 均选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
+> 全部集合 → 权限设置 → 均选「**所有用户不可读不可写**」(或自定义安全规则 `{"read": false, "write": false}`)。
 
 **为什么必须改**:所有业务访问都经云函数(管理端身份,不受权限规则约束),客户端不需要任何直连权限。默认权限曾实测允许任意客户端直读全集合(见 `docs/security-evidence.md` 证据 1)——不改等于向所有用户开放全部家庭数据。
 
@@ -121,6 +121,15 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 > 按上文创建集合并把权限并入 ③(「所有用户不可读不可写」)即可;**无需建任何索引**。
 
 该集合是 append-only 的预留审计层:locations 云函数在每次真实挂载变更(挂上/摘除/合并重挂/向导入库/补偿摘除)后追加一行,只插不改不删,V1 没有读取入口。除「创建集合 + 设权限」外无需任何人工维护。
+
+**⑤ household_members 与 active_household(家庭共享 v0,issue #34 P0;先建集合再部署 itemsApi/locations,缺集合时两函数对家庭解析失败关闭并返回 HOUSEHOLD_UNAVAILABLE)**:
+
+> 创建集合 `household_members` 与 `active_household`,权限并入 ③(「所有用户不可读不可写」),然后各建唯一索引:
+>
+> - `household_members` → 索引管理 → 添加索引:字段一 `household_id`(升序)+ 字段二 `member_key`(升序),勾选「**唯一**」。
+> - `active_household` → 索引管理 → 添加索引:字段 `member_key`(升序),勾选「**唯一**」。
+
+作用(issue #34 P0):itemsApi 与 locations 每次请求先按 `member_key = sha256(OPENID)` 查 `active_household`——无记录则回退原有个人家庭(单人用户零感知);有记录则校验 `household_members` 里的会员行,孤儿指针或任何查询异常一律失败关闭(HOUSEHOLD_UNAVAILABLE),绝不把任一家庭的数据错写进另一个家庭。P0 没有任何写入这两个集合的路径(创建共享家庭/邀请/退出在 P1),建集合与索引只是让解析可查。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
@@ -166,7 +175,7 @@ npm run samples:live                                # 逐条真实调用 DeepSee
 ## 隐私与安全
 
 - **日志只记元数据,不记内容**:itemsApi 的日志只含 `action`、错误码、耗时、计数(`lib/handler.js` 的 `logResult`);extractDraft 的日志只含文本长度、耗时、错误码(`lib/handler.js`)。两套测试各有专门用例断言日志不出现物品名、位置、原文、身份与 operation_id 原文。
-- **身份不下库、不上传**:云函数用 `getWXContext().OPENID` 取身份,落库的是 `household_id = "hh_" + sha256(openid) 前 32 位`,不存裸 openid;客户端不信任、不上传任何身份字段,服务端对 event 里的身份字段一律忽略。
+- **身份不下库、不上传**:云函数用 `getWXContext().OPENID` 取身份,落库的是 `household_id = "hh_" + sha256(openid) 前 32 位`,不存裸 openid;家庭共享 v0(issue #34 P0)的会员表/活跃指针同样只存服务端派生的 `member_key = sha256(openid)` 全文摘要;客户端不信任、不上传任何身份字段,服务端对 event 里的身份字段一律忽略。
 - **软删除抹内容**:删除不是打标记了事,而是同时把 `name`、`name_norm`、`location_text`、`note` 全部抹成空字符串,文档里不再残留隐私内容;查询与列表永远过滤已删除文档。
 - **密钥只走环境变量**:DeepSeek API key 只存在于云函数环境变量中,代码、样例、测试、小程序端与日志里都没有;`lib/deepseek.js` 只接受调用方传参,不读环境变量、不打印请求内容。
 

@@ -17,7 +17,20 @@
 - 根 package.json:scripts 为 test 等于 "node --test tests/"、typecheck 等于 "tsc -p miniprogram --noEmit"、samples:live 等于 "node tests/samples-live.js";devDependencies 仅 typescript 与 miniprogram-api-typings
 
 ## 身份与隔离
-云函数用 cloud.getWXContext().OPENID 取身份;household_id 等于 "hh_" 拼接 sha256(openid) 十六进制的前 32 位(避免裸 openid 落库)。客户端传来的 household_id/openid 一律忽略;itemsApi 与 locations 的 handler 不得从 event 读取任何身份字段,身份只来自 deps.householdId(由 index.js 从 OPENID 派生),缺失时返回 UNAUTHORIZED。locations 的 household_id 派生与 itemsApi 完全同款,保证两个函数落到同一家庭。所有读写都必须带服务端派生的 household_id 条件;跨家庭访问统一表现为 NOT_FOUND。一个微信用户等于一个私人家庭空间。README 需说明建议为 items 建 (household_id, operation_id) 唯一索引、为 locations 建 (household_id, parent_id, name_norm) 唯一索引;代码中先查后插 + E11000 回查实现幂等。items 增可空字段 location_node_id 且唯一写入方为 locations 函数,一切写入均为版本条件更新(见下)。
+云函数用 cloud.getWXContext().OPENID 取身份;客户端传来的 household_id/openid 一律忽略;itemsApi 与 locations 的 handler 不得从 event 读取任何身份字段,身份只来自 deps.householdId(由 index.js 解析,见下),缺失时返回 UNAUTHORIZED。所有读写都必须带服务端派生的 household_id 条件;跨家庭访问统一表现为 NOT_FOUND。README 需说明建议为 items 建 (household_id, operation_id) 唯一索引、为 locations 建 (household_id, parent_id, name_norm) 唯一索引;代码中先查后插 + E11000 回查实现幂等。items 增可空字段 location_node_id 且唯一写入方为 locations 函数,一切写入均为版本条件更新(见下)。
+
+### 可信家庭解析与失败关闭(issue #34 P0)
+个人家庭 household_id = "hh_" + sha256(openid) 十六进制前 32 位(避免裸 openid 落库;存量算法不变)。家庭共享 v0 起,itemsApi 与 locations 两个函数族的 index.js 在进入 handler 前先经 `lib/household.js`(两份逐字节同源副本,漂移由 tests/household.test.js HH-SRC 拦截)解析当前可信家庭,extractDraft/transcribe 为无状态服务,不引入本解析:
+
+- 会员身份摘要 member_key = sha256(openid) 十六进制全文(服务端从可信 OPENID 派生,不持久化裸 openid);
+- 查 active_household(member_key 唯一):明确无记录 → 确定性回退个人家庭(单人用户零感知);命中 → 必须在 household_members 存在 (household_id, member_key) 会员行,孤儿指针(指针在、会员行不在)→ 失败关闭;
+- 任何查询异常(含集合未创建)、指针不唯一、指针字段非法 → 返回 HOUSEHOLD_UNAVAILABLE(中文 message 可直展示)并终止本次操作,绝不回退个人家庭继续读写(宁拒一次操作,不把任一家庭的数据错写进另一个家庭)。
+
+新集合(控制台人工创建,权限「所有用户不可读不可写」;P0 无任何写入路径,创建/邀请/退出/移除在 P1):household_members { household_id, member_key, role("owner"|"member"), joined_at, invited_by },组合唯一索引 (household_id, member_key);active_household { member_key, household_id, updated_at },唯一索引 (member_key)。
+
+### F2 跨家庭写入绑定与 list 作用域字段(issue #34 P0)
+- itemsApi 的 create/update/delete 与 locations 的 ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan(写类 action)接受可选 `expected_household_id`(客户端从 list 响应捕获的家庭作用域):与解析结果不一致 → 返回 FAMILY_SWITCHED,零业务写入;非字符串 → INVALID_INPUT;缺省 → 维持单人现状。该参数仅做一致性校验,不具任何授权效力。P0 客户端不发此参数,机制与测试本期落地,启用在 P1;
+- itemsApi.list 与 locations.list(仅这两个只读 action)响应携带 `household_id`(sha256 派生或共享家庭 id,非 PII;集合权限不变),作为客户端家庭作用域捕获依据(缓存/草稿键隔离,见 miniprogram/utils/household-scope.ts)。
 
 ## items 集合文档
 字段:_id(等于 "it_" 加服务端随机串)、household_id、name(去空白后 1-50 字)、name_norm、location_text(去空白后 1-200 字)、note(≤200,可空字符串)、version(从 1 起)、deleted(false)、operation_id(创建幂等键,非空 ≤64)、last_update_id(可选,最近一次带 update_id 的成功更新回写的标识,≤64)、last_update_fingerprint(可选,该次更新内容字段的稳定指纹:键排序 JSON 字符串,重放识别用)、created_at(ISO 字符串)、updated_at(ISO 字符串)、location_node_id(可空,issue #18 新增:挂载的 locations 节点 _id;缺失/null = 未挂载;指向不存在节点 = 悬挂,读侧按未挂载容忍。itemsApi 对该字段一律忽略、投影不含;唯一写入方是 locations 云函数,且一切写入均为「以读到的当前 version 为条件」的条件更新并 +1——与 itemsApi.update 完全同构的单一版本链,系统内不存在对 version 的无条件改写)。所有面向客户端的响应只给投影字段 { item_id, name, location_text, note, version, updated_at },绝不包含内部字段。
@@ -26,13 +39,14 @@
 NFC 归一 → 全角转半角 → 小写 → 去所有空白字符 → 去中英文标点。name_norm 与查询词都经过它。
 
 ## itemsApi 协议
-event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文,可直接给用户看) }。错误码:INVALID_INPUT、NOT_FOUND、VERSION_CONFLICT、UNAUTHORIZED、OPERATION_CONFLICT。
+event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文,可直接给用户看) }。错误码:INVALID_INPUT、NOT_FOUND、VERSION_CONFLICT、UNAUTHORIZED、OPERATION_CONFLICT、FAMILY_SWITCHED(写类 action 携带的 expected_household_id 与服务端解析不一致,issue #34 P0 F2)。index.js 解析家庭失败时返回 HOUSEHOLD_UNAVAILABLE(见「可信家庭解析与失败关闭」)。
 - create:入参 { action:"create", operation_id, name, location_text, note? }。校验:operation_id 非空 ≤64;name 去空白后 1-50;location_text 去空白后 1-200;note ≤200。校验失败返回 INVALID_INPUT 且绝不写入。**幂等只对「同键同内容」成立**:查 (household_id, operation_id, deleted:false) 已有——name/location_text/note 与本次一致则返回 { ok:true, item(投影), duplicated:true };内容不同则返回 { ok:false, error:"OPERATION_CONFLICT", message:"这条已保存过且内容与当前填写不同,请到详情页修改", existing(投影,已删时不下发) },绝不静默返回旧数据。并发下唯一索引拒绝第二笔插入时:捕获重复键错误后回查,按上述同款规则返回稳定结果(同内容 duplicated;异内容或命中已删文档 OPERATION_CONFLICT,已删变体 message 说明已删除)。新插入 version=1、deleted=false,返回 { ok:true, item(投影), duplicated:false }。
 - update:入参 { action:"update", item_id, expected_version, update_id?, location_text?, name?, note? }。update_id 可选(非空 ≤64),标识同一次逻辑修改,用于响应丢失后的重试重放。至少一个可变字段,字段校验同上。条件更新:where(_id 等于 item_id 且 household_id 匹配且 deleted 为 false 且 version 等于 expected_version)更新字段、version 加一、updated_at 刷新(name 变则 name_norm 重算;带 update_id 时回写 last_update_id 与 last_update_fingerprint——指纹只覆盖内容字段,不含版本元数据)。命中 1 条返回 { ok:true, item(投影) };命中 0 条再查该 _id 与 household_id 且未删:存在且**三重条件同时成立**(version 恰为 expected_version+1、last_update_id 等于本次 update_id、last_update_fingerprint 等于本次内容指纹)判定为「自己刚写入但响应丢失」的重放,返回 { ok:true, item(投影), replayed:true };相同 update_id 但内容不同一律 VERSION_CONFLICT,绝不把新内容当重放吞掉;其余存在即 VERSION_CONFLICT,不存在即 NOT_FOUND。
 - delete:入参 { action:"delete", item_id }。条件更新 where(_id 且 household_id 且 deleted 为 false)置 deleted 为 true 并把 name、name_norm、location_text、note 全部抹成空字符串。返回 { ok:true };查无则 NOT_FOUND。查询与列表永远过滤 deleted 为 false。
 - get:入参 { action:"get", item_id }。按 id 单查(where _id 且 household_id 且 deleted 为 false),返回 { ok:true, item(投影) };查无或越权均 NOT_FOUND。用于详情页冲突刷新等场景,不受 list 分页截断影响。
 - query:入参 { action:"query", q }。q 去空白后非空否则 INVALID_INPUT。nq 为 normalizeName(q);按 name_norm 精确匹配优先、其次前缀匹配、最后包含匹配,各自按 updated_at 降序,合并去重,最多 20 条,返回 { ok:true, items:[{item_id,name,location_text,note,version,updated_at}], match_type:"exact" 或 "prefix" 或 "contains" 或 "none" }。无结果是正常结果(items 为空数组)。
-- list:入参 { action:"list", limit? }。deleted 为 false,updated_at 降序,limit 默认 50、最大 50,返回 { ok:true, items:[同上] }。
+- list:入参 { action:"list", limit? }。deleted 为 false,updated_at 降序,limit 默认 50、最大 50,返回 { ok:true, household_id(服务端解析的当前家庭,issue #34 P0), items:[同上] }。
+- create/update/delete 可携带可选 expected_household_id(issue #34 P0 F2):一致放行;不一致 FAMILY_SWITCHED 且零写入;缺省维持单人现状。
 - 未知 action、缺必填字段一律 INVALID_INPUT。
 - handler 是纯函数:handler(event, deps),deps = { db, now(), genId(), householdId, logger },依赖注入以便离线测试;index.js 只做 wx-server-sdk 胶水。logger 只输出 action、错误码、耗时、计数,绝不输出原文、身份、物品名、位置。
 
@@ -55,8 +69,9 @@ system prompt 要点:家庭物品位置提取器;从一句话提取一件物品�
 - **权限(人工步骤)**:「所有用户不可读不可写」(全部访问走云函数)。
 
 ## locations 协议(issue #18)
-event = { action, ... };节点 id 参数均为 location_id(文档 _id),物品 id 为 items 文档 _id。统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文) };业务错误可附 detail(结构化补充,如冲突清单、计数——用户自己的数据回给本人,绝不进日志)。错误码固定 7 个:INVALID_INPUT(未知 action/字段非法/对 home 根非法编辑/路径超 6 层)、NOT_FOUND(节点或物品不存在/跨家庭/已删)、UNAUTHORIZED、VERSION_CONFLICT(挂载的乐观并发冲突,含 merge 物品阶段中止)、NODE_NOT_EMPTY(删除保护,附 detail:{ item_count, descendant_count })、NODE_CONFLICT(同级同名/移动到自身后代/合并冲突,附 detail:{ clashing_names })、AI_UNAVAILABLE(附 manual_fallback:true)。日志只记 action/error/ms/count(LLM 类另记 text_length/items_scanned/chunks/elapsed_ms),绝不记录位置名/物品名/原文/身份/模型输出。
-- **list**:入参 { action:"list", parent_id? }(缺省 = home 根层,惰性建根,幂等)。返回 { ok:true, node, children, items, unmounted_count, dangling_mounts }:node/children 为节点摘要 { location_id, name, type, path, item_count(整棵子树未删物品数), child_count, created_from, updated_at };items 为直接挂载该节点的未删物品投影;unmounted_count = 未删且未挂载(缺失/null/悬挂)物品数,dangling_mounts 为其中悬挂件数;children 按 item_count 降序、同数按 name 升序,items 按 updated_at 降序。parent 不存在/跨家庭 → NOT_FOUND。
+event = { action, ... };节点 id 参数均为 location_id(文档 _id),物品 id 为 items 文档 _id。统一响应 { ok:true, ... } 或 { ok:false, error:CODE, message(中文) };业务错误可附 detail(结构化补充,如冲突清单、计数——用户自己的数据回给本人,绝不进日志)。错误码固定 8 个:INVALID_INPUT(未知 action/字段非法/对 home 根非法编辑/路径超 6 层)、NOT_FOUND(节点或物品不存在/跨家庭/已删)、UNAUTHORIZED、VERSION_CONFLICT(挂载的乐观并发冲突,含 merge 物品阶段中止)、NODE_NOT_EMPTY(删除保护,附 detail:{ item_count, descendant_count })、NODE_CONFLICT(同级同名/移动到自身后代/合并冲突,附 detail:{ clashing_names })、AI_UNAVAILABLE(附 manual_fallback:true)、FAMILY_SWITCHED(写类 action 携带的 expected_household_id 与服务端解析不一致,issue #34 P0 F2)。index.js 解析家庭失败时返回 HOUSEHOLD_UNAVAILABLE(见「可信家庭解析与失败关闭」)。日志只记 action/error/ms/count(LLM 类另记 text_length/items_scanned/chunks/elapsed_ms),绝不记录位置名/物品名/原文/身份/模型输出。
+- **list**:入参 { action:"list", parent_id? }(缺省 = home 根层,惰性建根,幂等)。返回 { ok:true, household_id(服务端解析的当前家庭,issue #34 P0), node, children, items, unmounted_count, dangling_mounts }:node/children 为节点摘要 { location_id, name, type, path, item_count(整棵子树未删物品数), child_count, created_from, updated_at };items 为直接挂载该节点的未删物品投影;unmounted_count = 未删且未挂载(缺失/null/悬挂)物品数,dangling_mounts 为其中悬挂件数;children 按 item_count 降序、同数按 name 升序,items 按 updated_at 降序。parent 不存在/跨家庭 → NOT_FOUND。
+- 写类 action(ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan)可携带可选 expected_household_id(issue #34 P0 F2):一致放行;不一致 FAMILY_SWITCHED 且零写入;缺省维持单人现状。list 与 LLM 类 action 只读,不参与校验。
 - **ensurePath**(全系统唯一建节点入口):入参 { action:"ensurePath", path:[1-6 段,每段去空白 1-30 码点], created_from?("scan"|"parse"|"manual",缺省 manual) }。自 home 根逐段 find-or-create(type 按深度派生写入——历史兼容字段;path 按层级),只创建不改已存在节点、不碰 items;按路径幂等(同 path 重复调用返回相同节点序列);并发 E11000 回查复用。返回 { ok:true, nodes(与 path 等长的摘要), created(布尔数组) }。
 - **rename**:入参 { node_id, name }。校验存在、非 home 根(parent_id==="" 判根)、新名 1-30 码点、同级 name_norm 不重名(NODE_CONFLICT)。更新自身并把全部后代 path 级联重写;绝不碰 items(location_text 原始话语不变,挂载引用节点 id 不受影响)。返回 { ok:true, node }。
 - **move**:入参 { node_id, new_parent_id }。校验两节点存在、双方非 home 根(判根同上)、new_parent 非自身及其后代(NODE_CONFLICT「不能移动到自己下面」)、新家同级不重名(NODE_CONFLICT)、移动后子树深度 ≤6(否则 INVALID_INPUT「层级太深了」)。parent_id 更新 + 子树 path 前缀整体重写,不碰 items。返回 { ok:true, node }。

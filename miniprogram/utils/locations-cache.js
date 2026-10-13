@@ -12,11 +12,17 @@ exports.planLocationsLoad = planLocationsLoad;
 exports.createRequestSeq = createRequestSeq;
 exports.__setLocationsCacheStorageForTest = __setLocationsCacheStorageForTest;
 exports.__resetLocationsCacheForTest = __resetLocationsCacheForTest;
+const household_scope_1 = require("./household-scope");
 /** 性能 TTL:2 分钟内可直接上屏、不触发云函数;过期仅意味着「该刷新了」,数据仍可先上屏 */
 const LOCATIONS_CACHE_TTL_MS = 2 * 60 * 1000;
 /** 绝对过期:单层缓存最多保留 24 小时,超时如实视为不存在(app 启动时清理) */
 const LOCATIONS_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const STORAGE_KEY = "home-memory:locations-cache";
+/** 存储键基础段;实际键 = 基础段 + 家庭作用域后缀(issue #34 P0,逐读写动态解析) */
+const STORAGE_KEY_BASE = "home-memory:locations-cache";
+/** 当前作用域的实际存储键:切换家庭后键天然不同,旧家庭缓存不可达(F3) */
+function storageKey() {
+    return STORAGE_KEY_BASE + (0, household_scope_1.householdScopeSuffix)();
+}
 /** 测试注入的存储(undefined = 未注入);优先级最高 */
 let testStorage;
 /** 无 wx / 无注入时的模块内后备(仅同进程,进程回收即丢——如实降级,不伪装持久) */
@@ -109,7 +115,7 @@ function isUsableEntry(v) {
 function readPayload() {
     const storage = activeStorage();
     if (storage !== null) {
-        const raw = safeStorage(() => storage.getStorageSync(STORAGE_KEY));
+        const raw = safeStorage(() => storage.getStorageSync(storageKey()));
         if (raw === null) {
             return { layers: {} }; // 读失败=miss(best-effort,不当错误冒泡)
         }
@@ -120,7 +126,7 @@ function readPayload() {
 function writePayload(payload) {
     const storage = activeStorage();
     if (storage !== null) {
-        safeStorage(() => storage.setStorageSync(STORAGE_KEY, payload));
+        safeStorage(() => storage.setStorageSync(storageKey(), payload));
         return; // 写失败:本次不持久化,不影响当前渲染与 API 语义
     }
     memoryFallback = payload;
@@ -128,7 +134,7 @@ function writePayload(payload) {
 function clearPayload() {
     const storage = activeStorage();
     if (storage !== null) {
-        safeStorage(() => storage.removeStorageSync(STORAGE_KEY));
+        safeStorage(() => storage.removeStorageSync(storageKey()));
         return;
     }
     memoryFallback = null;

@@ -15,6 +15,7 @@ import {
   CLIENT_TIMEOUT,
 } from "./api";
 import { clearLocationsCache } from "./locations-cache";
+import { captureHouseholdId } from "./household-scope";
 import type {
   ApplyScanResponse,
   DeleteLocationResponse,
@@ -69,6 +70,8 @@ const LOCATIONS_API_MESSAGES: Record<string, string> = {
   NODE_NOT_EMPTY: "这里还有东西,先移走物品和子位置才能删除",
   NODE_CONFLICT: "目标位置已有同名节点,或不能移动到自己下面",
   AI_UNAVAILABLE: "AI 暂时不可用,可稍后重试或手动选择位置",
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+  HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
 };
 
 const BAD_RESPONSE_MESSAGE = "服务返回异常,请稍后重试";
@@ -301,6 +304,11 @@ export async function callLocationsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   validateLocationsOkResponse(event.action, result);
+  if (event.action === "list") {
+    // issue #34 P0:从 list 响应捕获服务端解析的家庭 id(非法/缺省静默忽略,
+    // 保持回退值;旧云函数窗口与单人阶段行为不变)
+    captureHouseholdId(result.household_id);
+  }
   if (LOCATIONS_MUTATING_ACTIONS.has(event.action)) {
     // 失效收口在 API 层:变更成功即整树失效,页面不自己记「该清哪层」
     clearLocationsCache();

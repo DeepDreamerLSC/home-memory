@@ -124,6 +124,8 @@ export interface QueryItemsResponse {
 
 export interface ListItemsResponse {
   ok: true;
+  /** 服务端解析的当前家庭 id(issue #34 P0;sha256 派生/共享家庭 id,非 PII;旧云函数窗口可能缺省) */
+  household_id?: string;
   items: ItemSummary[];
 }
 
@@ -379,6 +381,8 @@ export type LocationsApiEvent =
 
 export interface ListLocationsResponse {
   ok: true;
+  /** 服务端解析的当前家庭 id(issue #34 P0;sha256 派生/共享家庭 id,非 PII;旧云函数窗口可能缺省) */
+  household_id?: string;
   node: LocationNodeSummary;
   children: LocationNodeSummary[];
   /** 直接挂载于该节点的未删物品 */
