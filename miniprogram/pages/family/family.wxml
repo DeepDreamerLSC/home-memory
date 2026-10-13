@@ -28,6 +28,7 @@
         和家人共用一个家庭:大家都能看到彼此记住的物品与位置,谁放哪儿了一目了然。
       </view>
       <button class="btn primary block" bindtap="onStartCreateTap">创建共享家庭</button>
+      <view class="mode-link" bindtap="onJoinByCodeTap">收到邀请码?输入加入</view>
     </view>
     <view class="card" wx:else>
       <view class="card-title">创建共享家庭</view>
@@ -126,6 +127,9 @@
       </button>
       <button wx:if="{{ shareToken }}" class="btn block share-btn" open-type="share" bindtap="onShareTap">
         分享给家人
+      </button>
+      <button wx:if="{{ shareToken }}" class="btn block" bindtap="onCopyInviteTap">
+        复制邀请码(分享受限时用)
       </button>
       <view class="trial-note">体验版阶段:家人需要先被添加为体验成员,才能打开邀请卡片</view>
 

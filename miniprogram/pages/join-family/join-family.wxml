@@ -4,6 +4,26 @@
     <view class="empty-text">正在确认邀请…</view>
   </view>
 
+  <!-- 手输邀请码(体验版兜底:分享卡片受限时,家人复制邀请码手动加入) -->
+  <block wx:elif="{{ phase === 'manual' }}">
+    <view class="card">
+      <view class="join-icon">家</view>
+      <view class="join-title">输入邀请码</view>
+      <view class="hint">家人在「家庭 → 邀请家人」生成邀请后可复制邀请码发给你,粘贴到下面。</view>
+      <input
+        class="token-input"
+        value="{{ manualToken }}"
+        placeholder="粘贴邀请码"
+        maxlength="64"
+        bindinput="onManualTokenInput"
+      />
+      <button class="btn primary block" loading="{{ joining }}" bindtap="onManualSubmitTap">
+        下一步
+      </button>
+      <view class="mode-link" bindtap="onCloseTap">返回</view>
+    </view>
+  </block>
+
   <!-- 确认加入:家庭名 + 隐私明示,一步确认 -->
   <block wx:elif="{{ phase === 'confirm' }}">
     <view class="card">
@@ -23,14 +43,15 @@
     </view>
   </block>
 
-  <!-- 失败/已失效:如实文案 + 可关闭 -->
+  <!-- 失败/已失效:如实文案 + 可重新输入或关闭 -->
   <view wx:elif="{{ phase === 'error' }}" class="card">
     <view class="join-icon">!</view>
     <view class="join-title">无法加入</view>
     <view class="hint">{{ errorText }}</view>
     <view class="trial-note">
-      提示:邀请可能已过期、被撤销或家庭已解散;体验版阶段,需先被添加为体验成员才能打开邀请卡片。
+      提示:邀请可能已过期、被撤销或家庭已解散;体验版阶段,需先被添加为体验成员。
     </view>
-    <button class="btn block" bindtap="onCloseTap">关闭</button>
+    <button class="btn block" bindtap="onManualRetryTap">重新输入邀请码</button>
+    <view class="mode-link" bindtap="onCloseTap">关闭</view>
   </view>
 </view>
