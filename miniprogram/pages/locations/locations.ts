@@ -58,6 +58,20 @@ function safeDecode(s: string | undefined): string {
   }
 }
 
+/**
+ * 选择完成后统一退栈:选择器页只叠在发起页正上方,按发起页在栈中的位置
+ * 一次性退掉其上全部页面。多页各自 navigateBack 在导航风暴中会被吞掉,
+ * 曾导致选择器残留在栈顶(#29 后续真机反馈)。
+ */
+function unwindPickerAbove(origin: ReturnType<typeof getCurrentPages>[number]): void {
+  const pages = getCurrentPages();
+  const idx = pages.indexOf(origin);
+  const delta = pages.length - 1 - idx;
+  if (idx !== -1 && delta > 0) {
+    wx.navigateBack({ delta, fail: () => {} });
+  }
+}
+
 Page<
   {
     /** browse = 空间浏览;pick = 选择模式(移动/合并/物品移动的目标选择) */
@@ -136,6 +150,7 @@ Page<
       onPick: (picked: PickedLocation) => void,
     ): void;
     finishPick(node: DisplayNode): void;
+    showTargetLayer(nodeId: string): void;
     childAt(index: number): DisplayNode | undefined;
     itemAt(index: number): DisplayItem | undefined;
     goScan(): void;
@@ -389,7 +404,8 @@ Page<
     };
     // 选择模式下钻时把 pickNode 逐层转发回发起页:EventChannel 只连相邻两层,
     // 而发起页(openPicker/物品详情)只在第一层注册了监听——不转发则深层选中
-    // 只会退栈一格、事件静默丢失(issue #27 真机「点击不生效」的断点)。
+    // 事件会静默丢失(issue #27 真机「点击不生效」的断点)。退栈一律由发起页
+    // 统一计算(unwindPickerAbove),本层不单独 navigateBack。
     if (this.data.mode === "pick") {
       wx.navigateTo({
         url,
@@ -399,7 +415,6 @@ Page<
             if (channel && typeof channel.emit === "function") {
               channel.emit("pickNode", d);
             }
-            wx.navigateBack({ fail: () => {} });
           },
         },
         fail: navFail,
@@ -542,6 +557,7 @@ Page<
       });
       wx.showToast({ title: "已移动", icon: "success" });
       await this.loadNode();
+      this.showTargetLayer(newParentId);
     } catch (e) {
       wx.showModal({ title: "移动失败", content: errorMessage(e), showCancel: false });
     } finally {
@@ -595,6 +611,7 @@ Page<
         duration: comp > 0 ? 3000 : 1500,
       });
       await this.loadNode();
+      this.showTargetLayer(targetId);
     } catch (e) {
       // merge 冲突中止是「可重试」的收敛语义:如实提示后由用户重走一次合并
       wx.showModal({ title: "合并失败", content: errorMessage(e), showCancel: false });
@@ -802,6 +819,7 @@ Page<
       });
       wx.showToast({ title: "已挂到新位置", icon: "success" });
       await this.loadNode();
+      this.showTargetLayer(nodeId);
     } catch (e) {
       // 版本冲突:刷新本层拿到新版本,由用户重试;绝不静默覆盖
       wx.showModal({
@@ -892,6 +910,7 @@ Page<
           if (cb) {
             cb(d);
           }
+          unwindPickerAbove(this);
         },
       },
       fail: () => {
@@ -911,6 +930,22 @@ Page<
         path: node.path,
       });
     }
-    wx.navigateBack({ fail: () => {} });
+    // 退栈由发起页统一计算(见 unwindPickerAbove):多页各自 navigateBack
+    // 在导航风暴中会被吞掉,曾导致选择器残留在栈顶(#29 后续真机反馈)。
+  },
+
+  /**
+   * 选目标的操作(物品挂载/位置移动/合并)成功后,进入目标层展示结果——
+   * 用户能立刻看到"东西确实在里面"(真机反馈:挂完退回原层,东西已不在,
+   * 还得再点两层确认)。目标即当前层(如把物品挂回本层)时只刷新不跳转。
+   */
+  showTargetLayer(nodeId) {
+    if (!nodeId || nodeId === this.nodeId) {
+      return;
+    }
+    wx.navigateTo({
+      url: "/pages/locations/locations?node_id=" + encodeURIComponent(nodeId),
+      fail: () => {},
+    });
   },
 });
