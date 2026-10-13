@@ -1,16 +1,22 @@
-import { uuid } from "./api";
-import type { DraftWithQuote } from "../types";
-
 /*
  * 临时草稿会话(确认页不得 URL 传整段草稿;Issue #14 三轮评审:退出后保幂等恢复能力):
- * - 内存 Map 供同进程快速取用;持久层(小程序 wx storage,node/测试用模块后备)
+ * - 内存 Map 供同进程快速取用;持久层(小程序 wx storage,node/测试用注入/后备)
  *   只保留最新一个会话,供进程被回收后恢复;
  * - 确认页逐行保存时把行状态(含固定 operation_id 与已保存状态)回写会话,
  *   中途退出(部分写入结果未知)不清持久层,首页检测到未完成会话给「继续核对」入口,
  *   恢复后沿用原幂等键——已保存行不再提交,不会重复建档;
  * - 全部保存完成或用户放弃(无勾选)离开时,确认页清除会话;
- * - 过期(24 小时)如实视为不存在:提示重新提取,绝不编造空草稿。
+ * - 过期(24 小时)如实视为不存在:提示重新提取,绝不编造空草稿;
+ * - 家庭作用域(issue #34 P0,F3):持久层存储键与内存会话键统一拼接
+ *   householdScopeSuffix()(捕获到服务端 household_id 后为 ":hh-<id>")。
+ *   草稿归属产生它的家庭:切换家庭后旧草稿原地保留(键不同=互不可达),
+ *   回切即恢复;新家庭从干净状态开始,绝不自动迁移(F3/产品决策 3)。
+ *   P0 无切换入口,单人阶段后缀为空串,键与现状逐字节一致。
  */
+
+import { uuid } from "./api";
+import { householdScopeSuffix } from "./household-scope";
+import type { DraftWithQuote } from "../types";
 
 export interface DraftSessionRowState {
   key: string;
@@ -32,16 +38,49 @@ export interface DraftSessionPayload {
 }
 
 const TTL_MS = 24 * 60 * 60 * 1000;
-const STORAGE_KEY = "home-memory:draft-session";
+/** 存储键基础段;实际键 = 基础段 + 家庭作用域后缀(issue #34 P0,逐读写动态解析) */
+const STORAGE_KEY_BASE = "home-memory:draft-session";
 
-/** 小程序 storage;node/测试环境无 wx 时用模块后备(仅同进程) */
-const storage: Pick<
+type DraftStorage = Pick<
   WechatMiniprogram.Wx,
   "getStorageSync" | "setStorageSync" | "removeStorageSync"
-> | null = typeof wx !== "undefined" ? wx : null;
+>;
+
+/** 测试注入的存储(undefined = 未注入);优先级最高 */
+let testStorage: DraftStorage | null | undefined;
+/** 无 wx / 无注入时的模块内后备(仅同进程) */
+let memoryFallback: { sid: string; payload: DraftSessionPayload } | null = null;
+
+/**
+ * 解析当前可用存储(逐调用解析而非模块加载时绑定:测试里 globalThis.wx 可能是
+ * 只含 cloud 的部分 stub,加载时机不同会拿到假 wx;口径与 locations-cache 一致)。
+ */
+function activeStorage(): DraftStorage | null {
+  if (testStorage !== undefined) {
+    return testStorage;
+  }
+  if (
+    typeof wx !== "undefined" &&
+    typeof wx.getStorageSync === "function" &&
+    typeof wx.setStorageSync === "function" &&
+    typeof wx.removeStorageSync === "function"
+  ) {
+    return wx;
+  }
+  return null;
+}
+
+/** 当前作用域的实际存储键:切换家庭后键天然不同,旧家庭草稿不可达(F3) */
+function storageKey(): string {
+  return STORAGE_KEY_BASE + householdScopeSuffix();
+}
+
+/** 内存会话键:sid + 作用域后缀(作用域不同则同一 sid 互不可见) */
+function scopedSid(sid: string): string {
+  return sid + householdScopeSuffix();
+}
 
 const sessions = new Map<string, DraftSessionPayload>();
-let memoryFallback: { sid: string; payload: DraftSessionPayload } | null = null;
 
 interface PersistedEntry {
   sid: string;
@@ -49,8 +88,9 @@ interface PersistedEntry {
 }
 
 function readPersisted(): PersistedEntry | null {
+  const storage = activeStorage();
   if (storage !== null) {
-    const raw = storage.getStorageSync(STORAGE_KEY) as PersistedEntry | "" | undefined;
+    const raw = storage.getStorageSync(storageKey()) as PersistedEntry | "" | undefined;
     return raw && typeof raw === "object" && typeof raw.sid === "string" && raw.payload
       ? raw
       : null;
@@ -59,16 +99,18 @@ function readPersisted(): PersistedEntry | null {
 }
 
 function writePersisted(entry: PersistedEntry): void {
+  const storage = activeStorage();
   if (storage !== null) {
-    storage.setStorageSync(STORAGE_KEY, entry);
+    storage.setStorageSync(storageKey(), entry);
     return;
   }
   memoryFallback = entry;
 }
 
 function clearPersisted(): void {
+  const storage = activeStorage();
   if (storage !== null) {
-    storage.removeStorageSync(STORAGE_KEY);
+    storage.removeStorageSync(storageKey());
     return;
   }
   memoryFallback = null;
@@ -86,26 +128,26 @@ export function createDraftSession(
 ): string {
   const sid = uuid();
   const payload: DraftSessionPayload = { originalText, drafts, truncated, createdAt: Date.now() };
-  sessions.set(sid, payload);
+  sessions.set(scopedSid(sid), payload);
   writePersisted({ sid, payload });
   return sid;
 }
 
 /** 按 sid 取会话;内存未命中时从持久层恢复(进程回收场景);过期返回 null(如实提示,不编造) */
 export function getDraftSession(sid: string, now: number = Date.now()): DraftSessionPayload | null {
-  let payload = sessions.get(sid) ?? undefined;
+  let payload = sessions.get(scopedSid(sid)) ?? undefined;
   if (payload === undefined) {
     const persisted = readPersisted();
     if (persisted !== null && persisted.sid === sid) {
       payload = persisted.payload;
-      sessions.set(sid, payload);
+      sessions.set(scopedSid(sid), payload);
     }
   }
   if (payload === undefined) {
     return null;
   }
   if (isExpired(payload, now)) {
-    sessions.delete(sid);
+    sessions.delete(scopedSid(sid));
     const persisted = readPersisted();
     if (persisted !== null && persisted.sid === sid) {
       clearPersisted();
@@ -122,7 +164,7 @@ export function getDraftSession(sid: string, now: number = Date.now()): DraftSes
  * 否则会顶掉新批次的恢复入口与其幂等键。内存行状态照常更新(不影响新批次)。
  */
 export function updateDraftSessionRows(sid: string, rows: DraftSessionRowState[]): void {
-  const payload = sessions.get(sid);
+  const payload = sessions.get(scopedSid(sid));
   if (payload === undefined) {
     return;
   }
@@ -136,7 +178,7 @@ export function updateDraftSessionRows(sid: string, rows: DraftSessionRowState[]
 
 /** 清除会话(保存完成/放弃离开;幂等) */
 export function clearDraftSession(sid: string): void {
-  sessions.delete(sid);
+  sessions.delete(scopedSid(sid));
   const persisted = readPersisted();
   if (persisted !== null && persisted.sid === sid) {
     clearPersisted();
@@ -171,4 +213,15 @@ export function pruneDraftSessions(now: number = Date.now()): number {
 /** 测试钩子:模拟进程回收(清内存会话,保留持久层),验证恢复路径 */
 export function simulateProcessRestartForTest(): void {
   sessions.clear();
+}
+
+/** 测试钩子:注入存储(null = 强制用模块内后备);只在测试里用 */
+export function __setDraftSessionStorageForTest(storage: DraftStorage | null): void {
+  testStorage = storage;
+}
+
+/** 还原测试注入与内存后备 */
+export function __resetDraftSessionForTest(): void {
+  testStorage = undefined;
+  memoryFallback = null;
 }

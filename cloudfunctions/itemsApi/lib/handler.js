@@ -27,7 +27,8 @@ var ERROR_MESSAGES = {
   NOT_FOUND: "没有找到这条记录",
   VERSION_CONFLICT: "内容已被修改,已为你刷新,请重试",
   UNAUTHORIZED: "请先登录",
-  OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改"
+  OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试"
 };
 
 function fail(error) {
@@ -412,6 +413,9 @@ async function queryItems(event, deps) {
 /**
  * list:入参 { action, limit? }
  * deleted 为 false,updated_at 降序,limit 默认 50、最大 50。
+ * 响应带 household_id(issue #34 P0):服务端解析的当前家庭(sha256 派生或共享
+ * 家庭 id,非 PII),供客户端捕获家庭作用域(缓存/草稿键隔离的依据)。
+ * 集合权限不变;仅此只读 action 与 locations.list 携带该字段。
  */
 async function listItems(event, deps) {
   var limit = LIST_DEFAULT;
@@ -423,7 +427,7 @@ async function listItems(event, deps) {
   }
   var docs = await fetchActiveItems(deps);
   docs.sort(byUpdatedDesc); // fetchActiveItems 返回新建数组,可原地排序
-  return { ok: true, items: docs.slice(0, limit).map(project) };
+  return { ok: true, household_id: deps.householdId, items: docs.slice(0, limit).map(project) };
 }
 
 /**
@@ -452,6 +456,15 @@ var ACTIONS = {
   query: queryItems,
   list: listItems
 };
+
+/**
+ * 写类 action(issue #34 P0,F2 跨家庭写入绑定:机制本期落地,启用在 P1):
+ * create/update/delete 可携带可选 expected_household_id(客户端从 list 响应捕获的
+ * 家庭作用域)。与服务端解析结果不一致 → FAMILY_SWITCHED,零业务写入,绝不静默
+ * 改投当前家庭;未携带 → 维持现状(P0 客户端不发此参数)。该参数仅做一致性
+ * 校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
+ */
+var WRITE_ACTIONS = { create: true, update: true, delete: true };
 
 /**
  * 日志只输出 action、错误码、耗时、计数;绝不输出原文、身份、物品名、位置。
@@ -492,6 +505,15 @@ async function handler(event, deps) {
     } else if (!isString(action) || !ACTIONS[action]) {
       // 未知 action、缺必填 action 一律 INVALID_INPUT
       result = fail("INVALID_INPUT");
+    } else if (WRITE_ACTIONS[action] && event.expected_household_id !== undefined) {
+      // F2 写入绑定(issue #34 P0):一致放行,不一致 FAMILY_SWITCHED(零写入)
+      if (!isString(event.expected_household_id)) {
+        result = fail("INVALID_INPUT");
+      } else if (event.expected_household_id !== deps.householdId) {
+        result = fail("FAMILY_SWITCHED");
+      } else {
+        result = await ACTIONS[action](event, deps);
+      }
     } else {
       result = await ACTIONS[action](event, deps);
     }

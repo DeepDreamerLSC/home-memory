@@ -24,6 +24,7 @@ import type {
   UpdateItemResponse,
 } from "../types";
 import { clearLocationsCache } from "./locations-cache";
+import { captureHouseholdId } from "./household-scope";
 
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
@@ -63,6 +64,8 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   VERSION_CONFLICT: "内容已被修改,已为你刷新,请重试",
   UNAUTHORIZED: "登录状态异常,请退出小程序后重试",
   OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+  HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -220,6 +223,11 @@ export async function callItemsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   validateItemsOkResponse(event.action, result);
+  if (event.action === "list") {
+    // issue #34 P0:从 list 响应捕获服务端解析的家庭 id(非法/缺省静默忽略,
+    // 保持回退值;旧云函数窗口与单人阶段行为不变)
+    captureHouseholdId((result as { household_id?: unknown }).household_id);
+  }
   if (
     event.action === "create" ||
     event.action === "update" ||

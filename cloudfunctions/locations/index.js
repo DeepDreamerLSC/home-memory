@@ -4,8 +4,11 @@
  * locations 云函数入口:wx-server-sdk 胶水层(itemsApi/index.js 同款纪律)。
  * - cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });身份只取 cloud.getWXContext().OPENID,
  *   缺失返回 UNAUTHORIZED;event 里的身份字段(household_id/openid)一律忽略不读;
- * - household_id = "hh_" + sha256(openid) 十六进制前 32 位(itemsApi 完全同款,
- *   保证 itemsApi 与 locations 两个函数落到同一家庭);
+ * - 可信家庭解析(issue #34 P0,lib/household.js,与 itemsApi 逐字节同源副本):
+ *   活跃共享家庭且会员行有效 → 该 household_id;无活跃记录 → 回退
+ *   "hh_" + sha256(openid) 前 32 位(itemsApi 同款,保证两个函数落到同一家庭);
+ *   任何查询异常/孤儿指针 → HOUSEHOLD_UNAVAILABLE 失败关闭,绝不回退个人家庭
+ *   继续读写(P0-4),避免 items 写共享域、locations 写私人域的 split-brain;
  * - deps.digest(s):sha256 十六进制前 16 位,供 merge/compensate/applyScan 的
  *   内部派生标识使用(§5.8 规格恒 ≤27 字符);
  * - DEEPSEEK_API_KEY 只从云函数环境变量读取(仅 LLM action parseLocation/scanHousehold
@@ -22,16 +25,12 @@ var handlerModule = require("./lib/handler");
 var handler = handlerModule.handler;
 var ERROR_MESSAGES = handlerModule.ERROR_MESSAGES;
 var callDeepSeek = require("./lib/deepseek").callDeepSeek;
+var resolveActiveHousehold = require("./lib/household").resolveActiveHousehold;
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 var LLM_ACTIONS = { parseLocation: true, scanHousehold: true };
 var LLM_TIMEOUT_DEFAULT_MS = 15000; // 单块调用超时(近义比对由 parse.js 显式传 10s)
-
-function deriveHouseholdId(openid) {
-  var hex = crypto.createHash("sha256").update(openid, "utf8").digest("hex");
-  return "hh_" + hex.slice(0, 32);
-}
 
 function digest16(s) {
   return crypto.createHash("sha256").update(s, "utf8").digest("hex").slice(0, 16);
@@ -66,6 +65,16 @@ exports.main = async function (event) {
   }
 
   var action = event && event.action;
+
+  // 可信家庭解析收口(issue #34 P0):household_id 只由服务端从可信 OPENID 解析得出,
+  // 与 itemsApi 走同一份(逐字节同源)解析,杜绝两侧落到不同家庭
+  var resolved = await resolveActiveHousehold(db, openid);
+  if (resolved.ok !== true) {
+    // 失败关闭:只记错误码与简短 reason(不含身份/家庭数据),绝不回退个人家庭
+    console.log(JSON.stringify({ action: action, error: resolved.error, reason: resolved.reason }));
+    return { ok: false, error: resolved.error, message: resolved.message };
+  }
+
   var deps = {
     db: db,
     now: function () {
@@ -75,7 +84,7 @@ exports.main = async function (event) {
       return crypto.randomBytes(12).toString("hex");
     },
     digest: digest16,
-    householdId: deriveHouseholdId(openid),
+    householdId: resolved.householdId,
     logger: makeLogger()
   };
 

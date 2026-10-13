@@ -11,8 +11,10 @@
  * - 隐私与账号维度:缓存的是完整 list 响应,含 items[*].location_text 家庭位置
  *   原始文字——按「敏感的应用本地缓存」口径管理(与 draft-session 同级敏感面),
  *   本地保留不超过 24 小时。不宣称小程序 storage 天然按用户/家庭隔离(未验证,
- *   也不能由此推出换号无需处理);当前单身份自用阶段用单键,未来支持家庭切换
- *   时必须显式清理或按家庭作用域隔离;
+ *   也不能由此推出换号无需处理);存储键已按家庭作用域隔离(issue #34 P0):
+ *   键 = 基础键 + householdScopeSuffix()(捕获到服务端 household_id 后为
+ *   ":hh-<id>"),切换家庭后键天然不同,旧家庭缓存不可达(F3;单人阶段后缀
+ *   为空串,键与现状逐字节一致);
  * - 本模块对 storage 一律 best-effort(P1-2):读写清理失败不抛出、不改变 API
  *   成败语义;连续故障时本会话禁用缓存直接降级为始终请求服务端;
  * - TTL(2 分钟)只是性能策略不是正确性保证:下拉刷新 / 选择位置模式(picker=1,
@@ -22,13 +24,20 @@
  * 测试可注入:存储(显式注入,无 wx 时模块内后备)与时钟(now 参数)。
  */
 import type { ListLocationsResponse } from "../types";
+import { householdScopeSuffix } from "./household-scope";
 
 /** 性能 TTL:2 分钟内可直接上屏、不触发云函数;过期仅意味着「该刷新了」,数据仍可先上屏 */
 const LOCATIONS_CACHE_TTL_MS = 2 * 60 * 1000;
 /** 绝对过期:单层缓存最多保留 24 小时,超时如实视为不存在(app 启动时清理) */
 const LOCATIONS_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-const STORAGE_KEY = "home-memory:locations-cache";
+/** 存储键基础段;实际键 = 基础段 + 家庭作用域后缀(issue #34 P0,逐读写动态解析) */
+const STORAGE_KEY_BASE = "home-memory:locations-cache";
+
+/** 当前作用域的实际存储键:切换家庭后键天然不同,旧家庭缓存不可达(F3) */
+function storageKey(): string {
+  return STORAGE_KEY_BASE + householdScopeSuffix();
+}
 
 /** 缓存的某一层 list 响应(savedAt 为写入时钟,毫秒) */
 export interface LocationsCacheEntry {
@@ -145,7 +154,7 @@ function isUsableEntry(v: unknown): v is LocationsCacheEntry {
 function readPayload(): LocationsCachePayload {
   const storage = activeStorage();
   if (storage !== null) {
-    const raw = safeStorage(() => storage.getStorageSync(STORAGE_KEY));
+    const raw = safeStorage(() => storage.getStorageSync(storageKey()));
     if (raw === null) {
       return { layers: {} }; // 读失败=miss(best-effort,不当错误冒泡)
     }
@@ -157,7 +166,7 @@ function readPayload(): LocationsCachePayload {
 function writePayload(payload: LocationsCachePayload): void {
   const storage = activeStorage();
   if (storage !== null) {
-    safeStorage(() => storage.setStorageSync(STORAGE_KEY, payload));
+    safeStorage(() => storage.setStorageSync(storageKey(), payload));
     return; // 写失败:本次不持久化,不影响当前渲染与 API 语义
   }
   memoryFallback = payload;
@@ -166,7 +175,7 @@ function writePayload(payload: LocationsCachePayload): void {
 function clearPayload(): void {
   const storage = activeStorage();
   if (storage !== null) {
-    safeStorage(() => storage.removeStorageSync(STORAGE_KEY));
+    safeStorage(() => storage.removeStorageSync(storageKey()));
     return;
   }
   memoryFallback = null;

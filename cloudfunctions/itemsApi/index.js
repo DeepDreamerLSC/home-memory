@@ -4,7 +4,10 @@
  * itemsApi 薄适配层:仅做 wx-server-sdk 胶水。
  * - cloud.init 用 { env: cloud.DYNAMIC_CURRENT_ENV }
  * - 身份只取 cloud.getWXContext().OPENID;openid 缺失返回 UNAUTHORIZED
- * - household_id = "hh_" + sha256(openid) 十六进制前 32 位(避免裸 openid 落库)
+ * - 可信家庭解析(issue #34 P0,lib/household.js,与 locations 逐字节同源):
+ *   活跃共享家庭且会员行有效 → 该 household_id;无活跃记录 → 回退
+ *   "hh_" + sha256(openid) 前 32 位(存量用户零感知);任何查询异常/孤儿指针 →
+ *   HOUSEHOLD_UNAVAILABLE 失败关闭,绝不回退个人家庭继续读写(P0-4)
  * - 组装 deps(db、now、genId、householdId、logger)后交给 lib/handler.js,返回其结果
  * 客户端传来的 household_id/openid 一律忽略(不透传、不读取)。
  */
@@ -15,13 +18,9 @@ var crypto = require("crypto");
 var handlerModule = require("./lib/handler");
 var handler = handlerModule.handler;
 var ERROR_MESSAGES = handlerModule.ERROR_MESSAGES;
+var resolveActiveHousehold = require("./lib/household").resolveActiveHousehold;
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
-
-function deriveHouseholdId(openid) {
-  var hex = crypto.createHash("sha256").update(openid, "utf8").digest("hex");
-  return "hh_" + hex.slice(0, 32);
-}
 
 function makeLogger() {
   return {
@@ -44,15 +43,24 @@ exports.main = async function (event) {
     };
   }
 
+  var db = cloud.database();
+  // 可信家庭解析收口(issue #34 P0):household_id 只由服务端从可信 OPENID 解析得出
+  var resolved = await resolveActiveHousehold(db, openid);
+  if (resolved.ok !== true) {
+    // 失败关闭:只记错误码与简短 reason(不含身份/家庭数据),绝不回退个人家庭
+    console.log(JSON.stringify({ error: resolved.error, reason: resolved.reason }));
+    return { ok: false, error: resolved.error, message: resolved.message };
+  }
+
   var deps = {
-    db: cloud.database(),
+    db: db,
     now: function () {
       return new Date().toISOString();
     },
     genId: function () {
       return crypto.randomBytes(12).toString("hex");
     },
-    householdId: deriveHouseholdId(openid),
+    householdId: resolved.householdId,
     logger: makeLogger()
   };
   return handler(event, deps);

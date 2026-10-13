@@ -37,7 +37,8 @@ var ERROR_MESSAGES = {
   VERSION_CONFLICT: "物品内容已被修改,已为你刷新,请重试",
   NODE_NOT_EMPTY: "这里还有东西,先移走物品和子位置才能删除",
   NODE_CONFLICT: "目标位置已有同名节点,或不能移动到自己下面",
-  AI_UNAVAILABLE: "AI 暂时不可用,可稍后重试或手动选择位置"
+  AI_UNAVAILABLE: "AI 暂时不可用,可稍后重试或手动选择位置",
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试"
 };
 
 function fail(error, message) {
@@ -489,8 +490,11 @@ async function listAction(event, deps) {
   }
   mountedHere.sort(byUpdatedDesc);
 
+  // household_id(issue #34 P0):服务端解析的当前家庭(sha256 派生或共享家庭 id,
+  // 非 PII),供客户端捕获家庭作用域;仅此只读 action 与 itemsApi.list 携带
   return {
     ok: true,
+    household_id: deps.householdId,
     node: summarize(parent, stats.counts, childCounts),
     children: children,
     items: mountedHere,
@@ -1097,6 +1101,24 @@ var DB_ACTIONS = {
   applyScan: applyScanAction
 };
 
+/**
+ * 写类 action(issue #34 P0,F2 跨家庭写入绑定:机制本期落地,启用在 P1):
+ * ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan 可携带可选
+ * expected_household_id(客户端从 list 响应捕获的家庭作用域)。与服务端解析结果
+ * 不一致 → FAMILY_SWITCHED,零业务写入,绝不静默改投当前家庭;未携带 → 维持现状。
+ * 该参数仅做一致性校验,不具任何授权效力;list 与 LLM 类 action 只读,不参与校验。
+ */
+var WRITE_DB_ACTIONS = {
+  ensurePath: true,
+  rename: true,
+  move: true,
+  merge: true,
+  delete: true,
+  linkItem: true,
+  unlinkItem: true,
+  applyScan: true
+};
+
 var LLM_ACTIONS = { parseLocation: true, scanHousehold: true };
 
 /**
@@ -1136,6 +1158,16 @@ async function handler(event, deps) {
       result = fail("UNAUTHORIZED");
     } else if (!isString(action) || (!DB_ACTIONS[action] && !LLM_ACTIONS[action])) {
       result = fail("INVALID_INPUT");
+    } else if (WRITE_DB_ACTIONS[action] && event.expected_household_id !== undefined) {
+      // F2 写入绑定(issue #34 P0):一致放行,不一致 FAMILY_SWITCHED(零写入)。
+      // WRITE_DB_ACTIONS 与 LLM_ACTIONS 不相交,此处只可能是 db 类写 action
+      if (!isString(event.expected_household_id)) {
+        result = fail("INVALID_INPUT");
+      } else if (event.expected_household_id !== deps.householdId) {
+        result = fail("FAMILY_SWITCHED");
+      } else {
+        result = await DB_ACTIONS[action](event, deps);
+      }
     } else if (LLM_ACTIONS[action]) {
       // LLM 编排与 db 胶水分离(§4.1);此处 lazy require 避免循环依赖
       var parseMod = require("./parse");
