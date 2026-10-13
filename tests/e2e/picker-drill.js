@@ -19,6 +19,10 @@ const automator = require("miniprogram-automator");
 
 const WS_ENDPOINT = process.env.AUTO_WS || "ws://127.0.0.1:9420";
 
+async function withTimeout(p, ms, label) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("TO:" + label)), ms))]);
+}
+
 function assert(cond, msg) {
   if (!cond) {
     throw new Error(msg);
@@ -31,26 +35,33 @@ async function main() {
     await mp.reLaunch("/pages/index/index");
     await new Promise((r) => setTimeout(r, 3000));
 
-    // 1) 只读:source=根层叶子节点(排除逻辑不禁其它行),drill=另一个带子位置的根层节点
-    //    (不能下钻 source 自己——排除逻辑会正确禁选;镜像 issue #27 真机场景:
-    //    source=根层冰箱,drill=书房,在书房层「就选这里」)
+    // 1) 只读选角:drill=带子位置的节点(下钻目标);source=与 drill 不同分支的任意节点
+    //    (排除逻辑会禁选 source 自身子树,故不能拿 drill 当 source)。优先根层找 pair;
+    //    根层只有一个节点时退化为 source=drill 的孩子(发起页进 drill 层)。
+    //    merge 调用被拦截不落库,source 取谁不影响服务端规则,只驱动 UI 链路。
     const probe = await mp.evaluate(
       () =>
         new Promise((resolve) => {
-          wx.cloud.callFunction({
-            name: "locations",
-            data: { action: "list" },
-            success: (a) => {
-              const r = a.result;
-              const kids = (r.children || []).filter((c) => (c.child_count || 0) > 0);
-              const leaf = (r.children || []).find((c) => (c.child_count || 0) === 0);
-              resolve({ ok: !!(kids.length > 0 && leaf), source: leaf, drill: kids[0] });
-            },
-            fail: () => resolve({ ok: false }),
-          });
+          wx.cloud.callFunction({ name: "locations", data: { action: "list" }, success: (a) => {
+            const r = a.result;
+            const rootKids = r.children || [];
+            const drill = rootKids.find((c) => (c.child_count || 0) > 0);
+            if (!drill) { resolve({ ok: false }); return; }
+            const sibling = rootKids.find((c) => c.location_id !== drill.location_id);
+            if (sibling) {
+              resolve({ ok: true, source: sibling, drill, startUrl: "/pages/locations/locations" });
+              return;
+            }
+            wx.cloud.callFunction({ name: "locations", data: { action: "list", parent_id: drill.location_id }, success: (b) => {
+              const child = ((b.result && b.result.children) || [])[0];
+              resolve(child
+                ? { ok: true, source: child, drill, startUrl: "/pages/locations/locations?node_id=" + encodeURIComponent(drill.location_id) }
+                : { ok: false });
+            }, fail: () => resolve({ ok: false }) });
+          }, fail: () => resolve({ ok: false }) });
         }),
     );
-    assert(probe && probe.ok, "前置不满足:根层需要至少一个叶子节点和一个带子位置的节点");
+    assert(probe && probe.ok, "前置不满足:需要至少一个带子位置的节点(真实家庭数据)");
 
     // 2) 拦截:ActionSheet 选「合并到…」(index 2),Modal 确认,merge 只记不发
     await mp.evaluate(() => {
@@ -74,8 +85,8 @@ async function main() {
       return 1;
     });
 
-    // 3) 发起合并:source 行的 ⋯
-    await mp.navigateTo("/pages/locations/locations");
+    // 3) 发起合并:进入 source 所在浏览层,点 source 行的 ⋯
+    await mp.navigateTo(probe.startUrl);
     await new Promise((r) => setTimeout(r, 3500));
     let page = await mp.currentPage();
     const rows = await page.$$(".item-row");
@@ -123,6 +134,34 @@ async function main() {
     assert(calls[0].s === probe.source.location_id, "source 应为根层叶子,实际 " + JSON.stringify(calls[0]));
     assert(calls[0].t === probe.drill.location_id, "target 应为 drill 层,实际 " + JSON.stringify(calls[0]));
     console.log("✔ 深层「就选这里」→ 转发链 → merge 调用抵达发起页(source=" + calls[0].s + ")");
+
+    // 7) 操作成功后应落到目标层展示(真机反馈:挂完要看到东西在目标里)。
+    //    退栈后 automator 的页面对象接口偶发无响应,改从应用侧读页面栈(更稳)。
+    let top = null;
+    for (let i = 0; i < 6 && !top; i++) {
+      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        const st = await withTimeout(
+          mp.evaluate(() => getCurrentPages().map((p) => p.route + "|" + (p.data ? p.data.mode : "") + "|" + (p.data ? p.data.breadcrumbText : ""))),
+          8000,
+          "stack",
+        );
+        top = st[st.length - 1] || "";
+      } catch (e) {
+        top = null;
+      }
+    }
+    assert(top, "落地页状态读取失败(evaluate 超时)");
+    assert(
+      top.indexOf("pages/locations/locations|browse|") === 0,
+      "栈顶应为浏览模式位置页,实际 " + top,
+    );
+    const wantCrumb = "我的家 / " + probe.drill.name;
+    assert(
+      top.indexOf("|" + wantCrumb) !== -1,
+      "应落在目标层(" + wantCrumb + ")展示结果,实际 " + top,
+    );
+    console.log("✔ 操作完成落在目标层展示:" + wantCrumb);
     console.log("✔ 回归通过:选择器逐层下钻事件链未断(issue #27 修复未复发)");
   } finally {
     await mp.disconnect();

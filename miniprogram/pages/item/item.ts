@@ -473,6 +473,14 @@ Page<
       events: {
         pickNode: (d: { location_id: string }) => {
           void this.doLinkToNode(d.location_id);
+          // 退栈统一由发起页计算(选择器页自身不再逐层退,#29 后续):
+          // 选择器页只叠在本页正上方,一次退掉全部。
+          const pages = getCurrentPages();
+          const idx = pages.indexOf(this);
+          const delta = pages.length - 1 - idx;
+          if (idx !== -1 && delta > 0) {
+            wx.navigateBack({ delta, fail: () => {} });
+          }
         },
       },
       fail: () => {
