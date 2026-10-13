@@ -1,0 +1,10 @@
+{
+  "name": "households",
+  "version": "1.0.0",
+  "description": "家庭物品记忆助手 issue #34 P1-A:共享家庭生命周期(创建/邀请/加入/退出/移除/解散)与状态云函数",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

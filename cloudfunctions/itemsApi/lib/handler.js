@@ -7,6 +7,7 @@
  */
 
 var normalizeName = require("./normalize").normalizeName;
+var checkWriteScopeBinding = require("./household").checkWriteScopeBinding;
 
 var COLLECTION = "items";
 var NAME_MAX = 50;
@@ -28,7 +29,8 @@ var ERROR_MESSAGES = {
   VERSION_CONFLICT: "内容已被修改,已为你刷新,请重试",
   UNAUTHORIZED: "请先登录",
   OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
-  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试"
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试"
 };
 
 function fail(error) {
@@ -415,7 +417,8 @@ async function queryItems(event, deps) {
  * deleted 为 false,updated_at 降序,limit 默认 50、最大 50。
  * 响应带 household_id(issue #34 P0):服务端解析的当前家庭(sha256 派生或共享
  * 家庭 id,非 PII),供客户端捕获家庭作用域(缓存/草稿键隔离的依据)。
- * 集合权限不变;仅此只读 action 与 locations.list 携带该字段。
+ * 共享家庭另带 scope_revision(issue #34 P1-A):写请求前的 expected_scope_revision
+ * 捕获来源。集合权限不变;仅此只读 action 与 locations.list 携带这些字段。
  */
 async function listItems(event, deps) {
   var limit = LIST_DEFAULT;
@@ -427,7 +430,13 @@ async function listItems(event, deps) {
   }
   var docs = await fetchActiveItems(deps);
   docs.sort(byUpdatedDesc); // fetchActiveItems 返回新建数组,可原地排序
-  return { ok: true, household_id: deps.householdId, items: docs.slice(0, limit).map(project) };
+  var res = { ok: true, household_id: deps.householdId, items: docs.slice(0, limit).map(project) };
+  if (deps.householdShared === true) {
+    // 共享家庭附带 scope_revision(issue #34 P1-A):客户端写请求前捕获作用域+修订,
+    // 作为 expected_scope_revision 的来源(仅一致性前置条件,不授权)
+    res.scope_revision = deps.scopeRevision;
+  }
+  return res;
 }
 
 /**
@@ -458,11 +467,17 @@ var ACTIONS = {
 };
 
 /**
- * 写类 action(issue #34 P0,F2 跨家庭写入绑定:机制本期落地,启用在 P1):
- * create/update/delete 可携带可选 expected_household_id(客户端从 list 响应捕获的
- * 家庭作用域)。与服务端解析结果不一致 → FAMILY_SWITCHED,零业务写入,绝不静默
- * 改投当前家庭;未携带 → 维持现状(P0 客户端不发此参数)。该参数仅做一致性
- * 校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
+ * 写类 action(issue #34 P0 F2 + P1-A 写入硬门,lib/household.js 的
+ * checkWriteScopeBinding 统一裁定):
+ * - 共享家庭(解析为 shared):必须携带与解析一致的 expected_household_id 与
+ *   expected_scope_revision(客户端从 list 响应捕获)。缺失/不一致 →
+ *   FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零业务写入,绝不静默改投当前家庭;
+ *   单调 scope_revision 挡成员变更后的旧请求误写与 A→B→A 的 ABA 重放
+ *   (P1 硬门 B 第 1、2 条);
+ * - 个人(单人)家庭:维持 P0 宽松口径——expected_household_id 可选(携带则
+ *   校验,不一致 FAMILY_SWITCHED)、expected_scope_revision 忽略,0.4.7 及
+ *   以前客户端单人零回归。
+ * 两参数仅做一致性校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
  */
 var WRITE_ACTIONS = { create: true, update: true, delete: true };
 
@@ -492,7 +507,8 @@ function logResult(deps, action, result, startedAt) {
 
 /**
  * 纯函数入口:handler(event, deps)
- * deps = { db, now(), genId(), householdId, logger }
+ * deps = { db, now(), genId(), householdId, householdShared?, scopeRevision?, logger }
+ * (householdShared/scopeRevision 由 index.js 从解析结果注入:共享家庭写硬门依据)
  * 返回 { ok:true, ... } 或 { ok:false, error, message(中文) }。
  */
 async function handler(event, deps) {
@@ -505,15 +521,17 @@ async function handler(event, deps) {
     } else if (!isString(action) || !ACTIONS[action]) {
       // 未知 action、缺必填 action 一律 INVALID_INPUT
       result = fail("INVALID_INPUT");
-    } else if (WRITE_ACTIONS[action] && event.expected_household_id !== undefined) {
-      // F2 写入绑定(issue #34 P0):一致放行,不一致 FAMILY_SWITCHED(零写入)
-      if (!isString(event.expected_household_id)) {
-        result = fail("INVALID_INPUT");
-      } else if (event.expected_household_id !== deps.householdId) {
-        result = fail("FAMILY_SWITCHED");
-      } else {
-        result = await ACTIONS[action](event, deps);
-      }
+    } else if (WRITE_ACTIONS[action]) {
+      // F2 写入硬门(issue #34 P0+P1-A):共享家庭强制作用域绑定(缺 marker /
+      // 旧修订 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持
+      // P0 宽松口径(可选 marker)。gate 返回 null = 放行
+      var gate = checkWriteScopeBinding(
+        deps.householdId,
+        deps.householdShared === true,
+        deps.scopeRevision,
+        event
+      );
+      result = gate === null ? await ACTIONS[action](event, deps) : gate;
     } else {
       result = await ACTIONS[action](event, deps);
     }

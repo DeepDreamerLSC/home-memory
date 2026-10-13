@@ -4,11 +4,13 @@
  * locations 云函数入口:wx-server-sdk 胶水层(itemsApi/index.js 同款纪律)。
  * - cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });身份只取 cloud.getWXContext().OPENID,
  *   缺失返回 UNAUTHORIZED;event 里的身份字段(household_id/openid)一律忽略不读;
- * - 可信家庭解析(issue #34 P0,lib/household.js,与 itemsApi 逐字节同源副本):
- *   活跃共享家庭且会员行有效 → 该 household_id;无活跃记录 → 回退
- *   "hh_" + sha256(openid) 前 32 位(itemsApi 同款,保证两个函数落到同一家庭);
- *   任何查询异常/孤儿指针 → HOUSEHOLD_UNAVAILABLE 失败关闭,绝不回退个人家庭
- *   继续读写(P0-4),避免 items 写共享域、locations 写私人域的 split-brain;
+ * - 可信家庭解析(issue #34 P0+P1-A,lib/household.js,与 itemsApi/households
+ *   逐字节同源副本,三向验证:活跃指针 → 有效会员 → 家庭未解散):
+ *   活跃共享家庭且三向验证通过 → 该 household_id(含 role/scope_revision);
+ *   无活跃记录 → 回退 "hh_" + sha256(openid) 前 32 位(itemsApi 同款,保证两个
+ *   函数落到同一家庭);任何查询异常/孤儿指针/已解散 → HOUSEHOLD_UNAVAILABLE
+ *   失败关闭,绝不回退个人家庭继续读写(P0-4),避免 items 写共享域、
+ *   locations 写私人域的 split-brain;
  * - deps.digest(s):sha256 十六进制前 16 位,供 merge/compensate/applyScan 的
  *   内部派生标识使用(§5.8 规格恒 ≤27 字符);
  * - DEEPSEEK_API_KEY 只从云函数环境变量读取(仅 LLM action parseLocation/scanHousehold
@@ -85,6 +87,10 @@ exports.main = async function (event) {
     },
     digest: digest16,
     householdId: resolved.householdId,
+    // 写入硬门上下文(issue #34 P1-A):共享家庭(三向验证通过)强制
+    // expected_household_id + expected_scope_revision;个人家庭维持宽松口径
+    householdShared: resolved.shared === true,
+    scopeRevision: resolved.shared === true ? resolved.scopeRevision : null,
     logger: makeLogger()
   };
 

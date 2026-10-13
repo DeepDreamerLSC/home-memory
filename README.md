@@ -31,16 +31,17 @@ miniprogram/             小程序端(TypeScript,strict)
   pages/locationScan     生成空间树向导:候选树确认 → 一次 applyScan 入库
 cloudfunctions/
   itemsApi/              items 集合的 create/update/delete/query/list
-    index.js             薄适配层(wx-server-sdk 胶水,OPENID 派生 household_id)
+    index.js             薄适配层(wx-server-sdk 胶水,可信家庭解析,注入写硬门上下文)
     lib/handler.js       纯函数业务逻辑(依赖注入,可离线测试)
     lib/normalize.js     名称归一化(NFC/全角转半角/小写/去空白/去标点)
+    lib/household.js     可信家庭三向解析 + 写入硬门(三副本同源,测试强制不漂移)
   extractDraft/          一句话 → 物品位置草稿
     index.js             胶水层(读环境变量 DEEPSEEK_API_KEY)
     lib/handler.js       纯函数:prompt 构造、坏 JSON 重试一次、结果分流
     lib/deepseek.js      DeepSeek HTTP 客户端(Node 内置 https,20 秒超时)
     lib/validate.js      服务端草稿校验(幻觉防护、needs_split、长度规则)
   locations/             空间树(issue #18):浏览/建节点/编辑/挂载/整户扫描
-    index.js             胶水层(OPENID 派生 household_id 与 itemsApi 同款;LLM action 检查 DEEPSEEK_API_KEY)
+    index.js             胶水层(可信家庭解析与 itemsApi 同款;LLM action 检查 DEEPSEEK_API_KEY)
     config.json          超时 60 秒(整户扫描最坏 ~50 秒)
     lib/handler.js       db 类 action:list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan
     lib/parse.js         LLM 类 action:parseLocation/scanHousehold(并行分块 + 近义比对)
@@ -48,6 +49,12 @@ cloudfunctions/
     lib/tree.js          纯函数:子树收集 / path 级联重写 / 深度计算
     lib/normalize.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
     lib/deepseek.js      与 extractDraft 逐字节同源的副本(测试强制不漂移)
+    lib/household.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
+  households/            共享家庭生命周期(issue #34 P1-A):创建/邀请/加入/退出/移除/解散/状态
+    index.js             胶水层(OPENID→member_key、三向解析、令牌生成与哈希注入)
+    config.json          超时 10 秒
+    lib/handler.js       纯函数 action 路由(依赖注入,可离线测试)
+    lib/household.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
 tests/                   离线测试(node:test + node:assert,零外部依赖)
   helpers/memoryDb.js    内存版 CloudBase 语义(含云函数端 get() 单次 100 条上限、唯一索引 E11000 模拟)
   itemsApi.test.js       itemsApi 契约测试
@@ -56,6 +63,8 @@ tests/                   离线测试(node:test + node:assert,零外部依赖)
   transcribe.test.js     语音识别云函数契约测试
   glue.test.js           云函数入口胶水层测试(stub wx-server-sdk 真实加载)
   voice.test.js          语音控制器与会话守卫测试
+  household.test.js      可信家庭三向解析 + 写入硬门 + 三副本同源(issue #34)
+  households.test.js     共享家庭生命周期/邀请/修订号/失败关闭/日志脱敏(issue #34 P1-A)
   samples-live.js        真实调用 DeepSeek 的样例集验证脚本
   fixtures/samples/      16 条中文样例(s01–s16,覆盖八类情形)
 docs/
@@ -70,7 +79,7 @@ docs/
 
 ```bash
 npm install          # 仅安装 typescript 与 miniprogram-api-typings 两个 devDependencies
-npm test             # 离线全量测试:86 项(itemsApi 26 + extractDraft 20 + locations 21 + locations-api 2 + voice 10 + transcribe 4 + 胶水层 3),全部通过
+npm test             # 离线全量测试:202 项全部通过(itemsApi/extractDraft/locations/voice/transcribe/胶水层 + household 22 + households 19,issue #34)
 npm run typecheck    # miniprogram 的 tsc --noEmit,严格模式类型检查
 npm run samples:live # 真实样例试运行,见下文「真实样例试运行」
 ```
@@ -122,14 +131,16 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 该集合是 append-only 的预留审计层:locations 云函数在每次真实挂载变更(挂上/摘除/合并重挂/向导入库/补偿摘除)后追加一行,只插不改不删,V1 没有读取入口。除「创建集合 + 设权限」外无需任何人工维护。
 
-**⑤ household_members 与 active_household(家庭共享 v0,issue #34 P0;先建集合再部署 itemsApi/locations,缺集合时两函数对家庭解析失败关闭并返回 HOUSEHOLD_UNAVAILABLE)**:
+**⑤ 家庭共享元数据集合(issue #34 P0+P1-A:household_members、active_household、households、household_invites;先建集合再部署 itemsApi/locations/households,缺集合时对家庭解析失败关闭并返回 HOUSEHOLD_UNAVAILABLE)**:
 
-> 创建集合 `household_members` 与 `active_household`,权限并入 ③(「所有用户不可读不可写」),然后各建唯一索引:
+> 创建集合 `household_members`、`active_household`、`households` 与 `household_invites`,权限全部并入 ③(「所有用户不可读不可写」),然后建索引:
 >
 > - `household_members` → 索引管理 → 添加索引:字段一 `household_id`(升序)+ 字段二 `member_key`(升序),勾选「**唯一**」。
 > - `active_household` → 索引管理 → 添加索引:字段 `member_key`(升序),勾选「**唯一**」。
+> - `households` → 无需额外索引(`_id` 天然唯一,household_id 即 `_id`)。
+> - `household_invites` → 索引管理 → 添加索引:字段 `token_hash`(升序),勾选「**唯一**」;另建议加 `household_id`(升序)普通索引(邀请列表查询性能,非唯一)。
 
-作用(issue #34 P0):itemsApi 与 locations 每次请求先按 `member_key = sha256(OPENID)` 查 `active_household`——无记录则回退原有个人家庭(单人用户零感知);有记录则校验 `household_members` 里的会员行,孤儿指针或任何查询异常一律失败关闭(HOUSEHOLD_UNAVAILABLE),绝不把任一家庭的数据错写进另一个家庭。P0 没有任何写入这两个集合的路径(创建共享家庭/邀请/退出在 P1),建集合与索引只是让解析可查。
+作用(issue #34):itemsApi 与 locations 每次请求先按 `member_key = sha256(OPENID)` 查 `active_household`——无记录则回退原有个人家庭(单人用户零感知);有记录则做三向验证(active 指针 → `household_members` 会员行 → `households` 未解散),孤儿指针、已解散家庭或任何查询异常一律失败关闭(HOUSEHOLD_UNAVAILABLE),绝不把任一家庭的数据错写进另一个家庭。P1-A 起新增 `households` 云函数写入这四个集合(创建共享家庭/邀请/加入/退出/移除/解散);邀请库中只存 `sha256(令牌)`,裸令牌绝不落库。单人用户不触发共享家庭路径,`households` 集合只在有活跃共享指针时才被查询,晚建不影响单人使用,但启用家庭共享前必须建齐。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
@@ -139,11 +150,13 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 - 未配置时 extractDraft 一律返回 `AI_UNAVAILABLE` 并提示「可手动录入」,locations 的解析/整户扫描同样返回 `AI_UNAVAILABLE` 并提示「可手动选择位置」——这是设计内行为,不是故障。
 - itemsApi 不需要任何环境变量。
 
-### 6. 部署三个云函数
+### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft` 与 `cloudfunctions/locations` →「**上传并部署:云端安装依赖**」。三个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations` 与 `cloudfunctions/households` →「**上传并部署:云端安装依赖**」。四个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+
+issue #34 P1-A 起,`itemsApi`、`locations` 与 `households` 三个函数持有逐字节同源的家庭解析副本,**升级时三者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
 
 ### 7. 小程序里验证
 
@@ -174,8 +187,8 @@ npm run samples:live                                # 逐条真实调用 DeepSee
 
 ## 隐私与安全
 
-- **日志只记元数据,不记内容**:itemsApi 的日志只含 `action`、错误码、耗时、计数(`lib/handler.js` 的 `logResult`);extractDraft 的日志只含文本长度、耗时、错误码(`lib/handler.js`)。两套测试各有专门用例断言日志不出现物品名、位置、原文、身份与 operation_id 原文。
-- **身份不下库、不上传**:云函数用 `getWXContext().OPENID` 取身份,落库的是 `household_id = "hh_" + sha256(openid) 前 32 位`,不存裸 openid;家庭共享 v0(issue #34 P0)的会员表/活跃指针同样只存服务端派生的 `member_key = sha256(openid)` 全文摘要;客户端不信任、不上传任何身份字段,服务端对 event 里的身份字段一律忽略。
+- **日志只记元数据,不记内容**:itemsApi 的日志只含 `action`、错误码、耗时、计数(`lib/handler.js` 的 `logResult`);extractDraft 的日志只含文本长度、耗时、错误码(`lib/handler.js`);households 的日志只含 `action`、错误码、耗时、计数(`lib/handler.js`,邀请令牌绝不进日志)。各套测试有专门用例断言日志不出现物品名、位置、原文、身份、openid/member_key、裸令牌/令牌哈希、家庭名与 operation_id 原文。
+- **身份不下库、不上传**:云函数用 `getWXContext().OPENID` 取身份,落库的是 `household_id = "hh_" + sha256(openid) 前 32 位`,不存裸 openid;家庭共享(issue #34)的会员表/活跃指针/邀请表同样只存服务端派生的 `member_key = sha256(openid)` 全文摘要与 `sha256(邀请令牌)`;邀请裸令牌只在 inviteCreate 响应出现一次;客户端不信任、不上传任何身份字段,服务端对 event 里的身份字段一律忽略。
 - **软删除抹内容**:删除不是打标记了事,而是同时把 `name`、`name_norm`、`location_text`、`note` 全部抹成空字符串,文档里不再残留隐私内容;查询与列表永远过滤已删除文档。
 - **密钥只走环境变量**:DeepSeek API key 只存在于云函数环境变量中,代码、样例、测试、小程序端与日志里都没有;`lib/deepseek.js` 只接受调用方传参,不读环境变量、不打印请求内容。
 
