@@ -14,6 +14,7 @@
 
 var normalizeName = require("./normalize").normalizeName;
 var tree = require("./tree");
+var checkWriteScopeBinding = require("./household").checkWriteScopeBinding;
 
 var LOC_COLLECTION = "locations";
 var ITEMS_COLLECTION = "items";
@@ -38,7 +39,8 @@ var ERROR_MESSAGES = {
   NODE_NOT_EMPTY: "这里还有东西,先移走物品和子位置才能删除",
   NODE_CONFLICT: "目标位置已有同名节点,或不能移动到自己下面",
   AI_UNAVAILABLE: "AI 暂时不可用,可稍后重试或手动选择位置",
-  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试"
+  FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试"
 };
 
 function fail(error, message) {
@@ -491,8 +493,9 @@ async function listAction(event, deps) {
   mountedHere.sort(byUpdatedDesc);
 
   // household_id(issue #34 P0):服务端解析的当前家庭(sha256 派生或共享家庭 id,
-  // 非 PII),供客户端捕获家庭作用域;仅此只读 action 与 itemsApi.list 携带
-  return {
+  // 非 PII),供客户端捕获家庭作用域;共享家庭另带 scope_revision(issue #34 P1-A,
+  // 写请求前捕获作用域+修订的来源);仅此只读 action 与 itemsApi.list 携带这些字段
+  var res = {
     ok: true,
     household_id: deps.householdId,
     node: summarize(parent, stats.counts, childCounts),
@@ -501,6 +504,10 @@ async function listAction(event, deps) {
     unmounted_count: unmounted,
     dangling_mounts: stats.dangling
   };
+  if (deps.householdShared === true) {
+    res.scope_revision = deps.scopeRevision;
+  }
+  return res;
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,11 +1109,17 @@ var DB_ACTIONS = {
 };
 
 /**
- * 写类 action(issue #34 P0,F2 跨家庭写入绑定:机制本期落地,启用在 P1):
- * ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan 可携带可选
- * expected_household_id(客户端从 list 响应捕获的家庭作用域)。与服务端解析结果
- * 不一致 → FAMILY_SWITCHED,零业务写入,绝不静默改投当前家庭;未携带 → 维持现状。
- * 该参数仅做一致性校验,不具任何授权效力;list 与 LLM 类 action 只读,不参与校验。
+ * 写类 action(issue #34 P0 F2 + P1-A 写入硬门,lib/household.js 的
+ * checkWriteScopeBinding 统一裁定):
+ * - 共享家庭(解析为 shared):必须携带与解析一致的 expected_household_id 与
+ *   expected_scope_revision(客户端从 list 响应捕获)。缺失/不一致 →
+ *   FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零业务写入,绝不静默改投当前家庭;
+ *   单调 scope_revision 挡成员变更后的旧请求误写与 A→B→A 的 ABA 重放
+ *   (P1 硬门 B 第 1、2 条);
+ * - 个人(单人)家庭:维持 P0 宽松口径——expected_household_id 可选(携带则
+ *   校验,不一致 FAMILY_SWITCHED)、expected_scope_revision 忽略,0.4.7 及
+ *   以前客户端单人零回归。
+ * 两参数仅做一致性校验,不具任何授权效力;list 与 LLM 类 action 只读,不参与校验。
  */
 var WRITE_DB_ACTIONS = {
   ensurePath: true,
@@ -1147,6 +1160,9 @@ function logResult(deps, action, result, startedAt) {
 
 /**
  * 纯函数入口:handler(event, deps)。
+ * deps = { db, now(), genId(), digest(s), householdId, householdShared?,
+ * scopeRevision?, logger, callLLM?(仅 LLM action 需要) }
+ * (householdShared/scopeRevision 由 index.js 从解析结果注入:共享家庭写硬门依据)
  * 返回 { ok:true, ... } 或 { ok:false, error, message(中文) };基础设施异常记日志后原样上抛。
  */
 async function handler(event, deps) {
@@ -1158,16 +1174,18 @@ async function handler(event, deps) {
       result = fail("UNAUTHORIZED");
     } else if (!isString(action) || (!DB_ACTIONS[action] && !LLM_ACTIONS[action])) {
       result = fail("INVALID_INPUT");
-    } else if (WRITE_DB_ACTIONS[action] && event.expected_household_id !== undefined) {
-      // F2 写入绑定(issue #34 P0):一致放行,不一致 FAMILY_SWITCHED(零写入)。
+    } else if (WRITE_DB_ACTIONS[action]) {
+      // F2 写入硬门(issue #34 P0+P1-A):共享家庭强制作用域绑定(缺 marker /
+      // 旧修订 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持
+      // P0 宽松口径(可选 marker)。gate 返回 null = 放行。
       // WRITE_DB_ACTIONS 与 LLM_ACTIONS 不相交,此处只可能是 db 类写 action
-      if (!isString(event.expected_household_id)) {
-        result = fail("INVALID_INPUT");
-      } else if (event.expected_household_id !== deps.householdId) {
-        result = fail("FAMILY_SWITCHED");
-      } else {
-        result = await DB_ACTIONS[action](event, deps);
-      }
+      var gate = checkWriteScopeBinding(
+        deps.householdId,
+        deps.householdShared === true,
+        deps.scopeRevision,
+        event
+      );
+      result = gate === null ? await DB_ACTIONS[action](event, deps) : gate;
     } else if (LLM_ACTIONS[action]) {
       // LLM 编排与 db 胶水分离(§4.1);此处 lazy require 避免循环依赖
       var parseMod = require("./parse");
