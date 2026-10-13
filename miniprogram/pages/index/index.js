@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const voice_1 = require("../../utils/voice");
 const draft_session_1 = require("../../utils/draft-session");
+const households_api_1 = require("../../utils/households-api");
+const household_scope_1 = require("../../utils/household-scope");
 function toDisplayItems(items) {
     return items.map((item) => ({
         ...item,
@@ -36,18 +38,29 @@ Page({
     /** 按压会话守卫:授权异步回调、录音、取消、识别结果都必须属于同一次有效按压 */
     sessionGuard: null,
     activeVoiceSession: null,
-    onLoad() {
+    onLoad(options) {
         this.sessionGuard = (0, voice_1.createSessionGuard)();
         this.ensureVoiceCtrl();
+        // 邀请卡片落地兜底(issue #34 P1-B):分享卡片 path 指向加入确认页,
+        // 冷启动直达;若有其他入口把 invite 带到首页,转送加入确认页(一步确认)
+        const invite = options && options.invite ? String(options.invite).trim() : "";
+        if (invite) {
+            wx.navigateTo({
+                url: "/pages/join-family/join-family?invite=" + encodeURIComponent(invite),
+                fail: () => {
+                    wx.showToast({ title: "邀请打开失败,请重试", icon: "none" });
+                },
+            });
+        }
     },
     onShow() {
-        this.loadRecent();
-        // 未完成草稿会话恢复入口(中途退出/进程回收):原幂等键续存,不重复建档
-        const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
-        this.setData({
-            resumeSession: unfinished === null
-                ? null
-                : { sid: unfinished.sid, count: unfinished.payload.drafts.length },
+        void this.loadRecent();
+        // 未完成草稿会话恢复入口(中途退出/进程回收;原幂等键续存,不重复建档)。
+        // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
+        // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
+        // (loadRecent 的 list 响应也会捕获作用域并标记已验证)
+        void (0, households_api_1.ensureScopeVerified)().then(() => {
+            this.setData({ resumeSession: this.currentResumeSession() });
         });
     },
     onHide() {
@@ -395,6 +408,14 @@ Page({
         this.setData({ resumeSession: null });
         this.goToConfirm("/pages/confirm/confirm?sid=" + resume.sid);
     },
+    /** 未完成批次数据按当前家庭作用域读取(键隔离,P0;验证后才读,硬门 C) */
+    currentResumeSession() {
+        const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
+        if (unfinished === null) {
+            return null;
+        }
+        return { sid: unfinished.sid, count: unfinished.payload.drafts.length };
+    },
     onRecentTap(e) {
         const index = Number(e.currentTarget.dataset.index);
         const item = this.data.recentItems[index];
@@ -402,18 +423,27 @@ Page({
             this.openItem(item);
         }
     },
-    /** 最近记录:itemsApi list */
+    /** 最近记录:itemsApi list;家庭切换(作用域代数变化)后的迟到响应不上屏 */
     async loadRecent() {
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
         this.setData({ recentLoading: true, recentError: "" });
         try {
             const res = await (0, api_1.callItemsApi)({ action: "list" });
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return; // 家庭刚切换(创建/加入/退出/被移除):旧家庭响应不上屏
+            }
             this.setData({ recentItems: toDisplayItems(res.items) });
         }
         catch (e) {
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return;
+            }
             this.setData({ recentError: (0, api_1.errorMessage)(e) });
         }
         finally {
-            this.setData({ recentLoading: false });
+            if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                this.setData({ recentLoading: false });
+            }
         }
     },
     openItem(item) {
@@ -435,6 +465,15 @@ Page({
     onHomeTreeTap() {
         wx.navigateTo({
             url: "/pages/locations/locations",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    /** 家庭管理页入口(issue #34 P1-B:创建/邀请/成员/退出/解散) */
+    onFamilyTap() {
+        wx.navigateTo({
+            url: "/pages/family/family",
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },

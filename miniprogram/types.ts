@@ -68,16 +68,28 @@ export type ExtractDraftErrorCode = "AI_UNAVAILABLE";
 
 /* ---------------- itemsApi 请求 ---------------- */
 
+/**
+ * 写类 action 的作用域一致性绑定(issue #34 P1-B,F2 客户端半边):
+ * 由 API 封装层自动从 household-scope 拼装,页面不手工传;仅是一致性前置
+ * 条件,绝不构成授权(服务端独立解析身份与家庭)。
+ * - expected_household_id:捕获到的服务端解析家庭 id(个人/共享都带,携带则校验);
+ * - expected_scope_revision:共享家庭的修订号(服务端共享硬门必需;个人态无语义)。
+ */
+export interface ScopeWriteBinding {
+  expected_household_id?: string;
+  expected_scope_revision?: number;
+}
+
 export type ItemsApiEvent =
-  | {
+  | ({
       action: "create";
       /** 创建幂等键,客户端生成(uuid),非空 ≤64 */
       operation_id: string;
       name: string;
       location_text: string;
       note?: string;
-    }
-  | {
+    } & ScopeWriteBinding)
+  | ({
       action: "update";
       item_id: string;
       expected_version: number;
@@ -86,8 +98,8 @@ export type ItemsApiEvent =
       name?: string;
       location_text?: string;
       note?: string;
-    }
-  | { action: "delete"; item_id: string }
+    } & ScopeWriteBinding)
+  | ({ action: "delete"; item_id: string } & ScopeWriteBinding)
   | { action: "get"; item_id: string }
   | { action: "query"; q: string }
   | { action: "list"; limit?: number };
@@ -126,6 +138,8 @@ export interface ListItemsResponse {
   ok: true;
   /** 服务端解析的当前家庭 id(issue #34 P0;sha256 派生/共享家庭 id,非 PII;旧云函数窗口可能缺省) */
   household_id?: string;
+  /** 共享家庭附带的作用域修订号(issue #34 P1-A):写请求 expected_scope_revision 的捕获来源;个人家庭缺省 */
+  scope_revision?: number;
   items: ItemSummary[];
 }
 
@@ -337,33 +351,41 @@ export interface LocationsApiErrorResponse {
 
 export type LocationsApiEvent =
   | { action: "list"; parent_id?: string }
-  | {
+  | ({
       action: "ensurePath";
       /** 从根起的完整段序列,1-6 段,每段去空白 1-30 字 */
       path: string[];
       created_from?: "scan" | "parse" | "manual";
-    }
-  | { action: "rename"; node_id: string; name: string }
-  | { action: "move"; node_id: string; new_parent_id: string }
-  | { action: "merge"; source_node_id: string; target_node_id: string }
-  | { action: "delete"; node_id: string; force?: boolean }
-  | {
+    } & ScopeWriteBinding)
+  | ({ action: "rename"; node_id: string; name: string } & ScopeWriteBinding)
+  | ({
+      action: "move";
+      node_id: string;
+      new_parent_id: string;
+    } & ScopeWriteBinding)
+  | ({
+      action: "merge";
+      source_node_id: string;
+      target_node_id: string;
+    } & ScopeWriteBinding)
+  | ({ action: "delete"; node_id: string; force?: boolean } & ScopeWriteBinding)
+  | ({
       action: "linkItem";
       item_id: string;
       node_id: string;
       expected_version: number;
       /** 同一次逻辑挂载的标识(uuid):失败重试同内容复用,服务端据此识别重放 */
       update_id: string;
-    }
-  | {
+    } & ScopeWriteBinding)
+  | ({
       action: "unlinkItem";
       item_id: string;
       expected_version: number;
       update_id: string;
-    }
+    } & ScopeWriteBinding)
   | { action: "parseLocation"; text: string }
   | { action: "scanHousehold" }
-  | {
+  | ({
       action: "applyScan";
       /** 本次向导提交的幂等键(uuid),失败重试/恢复时原样复用 */
       operation_id: string;
@@ -375,7 +397,7 @@ export type LocationsApiEvent =
         expected_version: number;
         path: string[];
       }>;
-    };
+    } & ScopeWriteBinding);
 
 /* ---------------- locations 响应 ---------------- */
 
@@ -383,6 +405,8 @@ export interface ListLocationsResponse {
   ok: true;
   /** 服务端解析的当前家庭 id(issue #34 P0;sha256 派生/共享家庭 id,非 PII;旧云函数窗口可能缺省) */
   household_id?: string;
+  /** 共享家庭附带的作用域修订号(issue #34 P1-A):写请求 expected_scope_revision 的捕获来源;个人家庭缺省 */
+  scope_revision?: number;
   node: LocationNodeSummary;
   children: LocationNodeSummary[];
   /** 直接挂载于该节点的未删物品 */
@@ -459,3 +483,90 @@ export type LocationsApiOkResponse =
   | ApplyScanResponse;
 
 export type LocationsApiResponse = LocationsApiOkResponse | LocationsApiErrorResponse;
+
+/* ---------------- households 协议(issue #34 P1-A/P1-B:共享家庭生命周期) ---------------- */
+
+/** 家庭内角色(owner = 创建者,独管邀请/移除/解散) */
+export type HouseholdRole = "owner" | "member";
+
+/** memberList 成员行(member_key 为服务端派生摘要句柄,不可逆、不构成 PII) */
+export interface HouseholdMember {
+  member_key: string;
+  role: HouseholdRole;
+  joined_at: string;
+  invited_by: string | null;
+  is_self: boolean;
+}
+
+/** inviteList 邀请元数据行(不含令牌与令牌哈希) */
+export interface HouseholdInviteMeta {
+  invite_id: string;
+  created_at: string;
+  expires_at: string;
+  revoked: boolean;
+  expired: boolean;
+}
+
+/** inviteCreate 响应:裸令牌只在本次响应出现一次(服务端只存哈希) */
+export interface HouseholdInviteCreated {
+  invite_id: string;
+  token: string;
+  expires_at: string;
+}
+
+/** status 响应(资格复核依据):个人态 role/scope_revision/display_name 为 null */
+export interface HouseholdStatusResponse {
+  ok: true;
+  household_id: string;
+  shared: boolean;
+  role: HouseholdRole | null;
+  scope_revision: number | null;
+  display_name: string | null;
+}
+
+export interface HouseholdCreateResponse {
+  ok: true;
+  household_id: string;
+  display_name: string;
+  role: "owner";
+  scope_revision: number;
+  shared: true;
+}
+
+export interface HouseholdJoinResponse {
+  ok: true;
+  joined: boolean;
+  already_member?: boolean;
+  household_id: string;
+  display_name: string;
+  role: HouseholdRole;
+  scope_revision: number;
+}
+
+export interface HouseholdInviteInfoResponse {
+  ok: true;
+  display_name: string;
+}
+
+export interface HouseholdMemberListResponse {
+  ok: true;
+  members: HouseholdMember[];
+}
+
+export interface HouseholdInviteListResponse {
+  ok: true;
+  invites: HouseholdInviteMeta[];
+}
+
+export type HouseholdsApiEvent =
+  | { action: "status" }
+  | { action: "create"; display_name?: string }
+  | { action: "inviteCreate" }
+  | { action: "inviteRevoke"; invite_id: string }
+  | { action: "inviteList" }
+  | { action: "inviteInfo"; token: string }
+  | { action: "join"; token: string }
+  | { action: "leave" }
+  | { action: "removeMember"; member_key: string }
+  | { action: "dissolve" }
+  | { action: "memberList" };

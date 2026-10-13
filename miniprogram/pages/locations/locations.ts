@@ -13,6 +13,7 @@ import {
 } from "../../utils/locations-cache";
 import type { LocationsRequestSeq } from "../../utils/locations-cache";
 import { errorMessage, formatDateTime, uuid } from "../../utils/api";
+import { isScopeVerified } from "../../utils/household-scope";
 import type {
   ItemSummary,
   ListLocationsResponse,
@@ -212,12 +213,16 @@ Page<
    * force=true(下拉/重试)绕过 TTL 直连服务端;选择模式(picker)一律直连,
    * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存;
    * 失效代数变化(P1-1,在途期间其他页面写过数据)同样作废本次响应并补拉一次。
+   * 展示前资格复核(issue #34 P1-B,硬门 C1):作用域未经服务端验证(冷启动/
+   * 前台切回)时不读持久化缓存,直连服务端——旧家庭的缓存不得当作当前可访问
+   * 内容展示;list 响应捕获作用域后即恢复缓存可用。
    */
   async loadNode(force?: boolean, retryOnStaleGen?: boolean): Promise<void> {
     const seq = this.requestSeq.next();
     const gen = captureCacheGeneration();
     const pickMode = this.data.mode === "pick";
-    const cached = pickMode ? null : readLocationsLayer(this.nodeId);
+    const cached =
+      pickMode || !isScopeVerified() ? null : readLocationsLayer(this.nodeId);
     const plan = planLocationsLoad({
       cached,
       fresh: cached !== null && isLocationsCacheFresh(cached),

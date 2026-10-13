@@ -4,9 +4,13 @@
  *   优先让服务端错误先于客户端到点返回,照 utils/api.ts 的放宽原则);
  * - 服务端错误码映射为可直接展示的中文文案(服务端 message 缺失时兜底),
  *   NODE_NOT_EMPTY/NODE_CONFLICT/merge 冲突等业务错误附带的 detail 结构化保留;
- * - 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示)。
+ * - 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示);
+ * - 写类 action 自动拼装作用域一致性绑定(issue #34 P1-B,F2 客户端半边):
+ *   expected_household_id / expected_scope_revision 取自服务端 list/status
+ *   响应捕获的权威作用域,仅作一致性前置条件、绝不授权;未捕获时不编造。
  *
- * 本模块不读取、不传输任何身份字段;household_id/openid 一律由服务端派生。
+ * 本模块不读取、不传输任何身份字段;openid 一律由服务端派生,
+ * household_id 相关字段只是服务端解析结果的回显(一致性校验用,不具授权效力)。
  */
 import {
   ApiError,
@@ -15,7 +19,11 @@ import {
   CLIENT_TIMEOUT,
 } from "./api";
 import { clearLocationsCache } from "./locations-cache";
-import { captureHouseholdId } from "./household-scope";
+import {
+  captureHouseholdId,
+  scopeWriteMarkers,
+} from "./household-scope";
+import { notifyFamilyScopeDrift } from "./households-api";
 import type {
   ApplyScanResponse,
   DeleteLocationResponse,
@@ -71,6 +79,7 @@ const LOCATIONS_API_MESSAGES: Record<string, string> = {
   NODE_CONFLICT: "目标位置已有同名节点,或不能移动到自己下面",
   AI_UNAVAILABLE: "AI 暂时不可用,可稍后重试或手动选择位置",
   FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
   HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
 };
 
@@ -289,25 +298,44 @@ export function callLocationsApi(
 export async function callLocationsApi(
   event: LocationsApiEvent,
 ): Promise<LocationsApiOkResponse> {
-  const result = await callCloudFunction(
-    LOCATIONS_API_FUNCTION,
-    event,
-    timeoutForAction(event.action),
-  );
+  // F2 客户端半边(issue #34 P1-B):写类 action 自动附
+  // expected_household_id / expected_scope_revision(来自 household-scope 捕获的
+  // 服务端权威作用域;未捕获时不编造,旧云函数窗口与 0.4.7 单人行为逐字节一致)
+  const payload: unknown = LOCATIONS_MUTATING_ACTIONS.has(event.action)
+    ? { ...event, ...scopeWriteMarkers() }
+    : event;
+  let result: unknown;
+  try {
+    result = await callCloudFunction(
+      LOCATIONS_API_FUNCTION,
+      payload,
+      timeoutForAction(event.action),
+    );
+  } catch (e) {
+    // FAMILY_SWITCHED / FAMILY_STALE_SCOPE:家庭状态刚变化——触发 status 刷新
+    // 作用域,绝不静默重试,由用户按服务端文案重试
+    notifyFamilyScopeDrift(e);
+    throw e;
+  }
   if (!isRecord(result)) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   if (result.ok === false) {
-    throw toLocationsServerError(result.error, result.message, result.detail);
+    const err = toLocationsServerError(result.error, result.message, result.detail);
+    notifyFamilyScopeDrift(err);
+    throw err;
   }
   if (result.ok !== true) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   validateLocationsOkResponse(event.action, result);
   if (event.action === "list") {
-    // issue #34 P0:从 list 响应捕获服务端解析的家庭 id(非法/缺省静默忽略,
-    // 保持回退值;旧云函数窗口与单人阶段行为不变)
-    captureHouseholdId(result.household_id);
+    // issue #34 P0/P1-B:从 list 响应捕获服务端解析的家庭作用域(household_id
+    // 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
+    // 把家庭切换显式接入既有失效代数(F2);非法/缺省静默忽略,保持回退值
+    if (captureHouseholdId(result.household_id, result.scope_revision)) {
+      clearLocationsCache();
+    }
   }
   if (LOCATIONS_MUTATING_ACTIONS.has(event.action)) {
     // 失效收口在 API 层:变更成功即整树失效,页面不自己记「该清哪层」

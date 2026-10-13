@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const locations_api_1 = require("../../utils/locations-api");
 const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
+const household_scope_1 = require("../../utils/household-scope");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     if (!s) {
@@ -93,12 +94,15 @@ Page({
      * force=true(下拉/重试)绕过 TTL 直连服务端;选择模式(picker)一律直连,
      * 它是影响真实数据操作前的重新校验。迟到响应(序号不匹配)不上屏、不写缓存;
      * 失效代数变化(P1-1,在途期间其他页面写过数据)同样作废本次响应并补拉一次。
+     * 展示前资格复核(issue #34 P1-B,硬门 C1):作用域未经服务端验证(冷启动/
+     * 前台切回)时不读持久化缓存,直连服务端——旧家庭的缓存不得当作当前可访问
+     * 内容展示;list 响应捕获作用域后即恢复缓存可用。
      */
     async loadNode(force, retryOnStaleGen) {
         const seq = this.requestSeq.next();
         const gen = (0, locations_cache_1.captureCacheGeneration)();
         const pickMode = this.data.mode === "pick";
-        const cached = pickMode ? null : (0, locations_cache_1.readLocationsLayer)(this.nodeId);
+        const cached = pickMode || !(0, household_scope_1.isScopeVerified)() ? null : (0, locations_cache_1.readLocationsLayer)(this.nodeId);
         const plan = (0, locations_cache_1.planLocationsLoad)({
             cached,
             fresh: cached !== null && (0, locations_cache_1.isLocationsCacheFresh)(cached),

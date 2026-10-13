@@ -9,6 +9,7 @@ exports.formatDateTime = formatDateTime;
 exports.errorMessage = errorMessage;
 const locations_cache_1 = require("./locations-cache");
 const household_scope_1 = require("./household-scope");
+const households_api_1 = require("./households-api");
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 /** itemsApi 为薄适配层,正常应在数秒内返回 */
@@ -40,6 +41,7 @@ const ITEMS_API_MESSAGES = {
     UNAUTHORIZED: "登录状态异常,请退出小程序后重试",
     OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
     FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
+    FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
     HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
 };
 const EXTRACT_DRAFT_MESSAGES = {
@@ -132,22 +134,49 @@ function validateItemsOkResponse(action, r) {
             break;
     }
 }
+/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定) */
+const ITEMS_MUTATING_ACTIONS = new Set([
+    "create",
+    "update",
+    "delete",
+]);
 async function callItemsApi(event) {
-    const result = await callCloudFunction(ITEMS_API_FUNCTION, event, ITEMS_API_TIMEOUT_MS);
+    // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision
+    // (来自 household-scope 捕获的服务端权威作用域;未捕获时不编造,旧云函数窗口
+    // 与 0.4.7 单人行为逐字节一致)
+    const payload = ITEMS_MUTATING_ACTIONS.has(event.action)
+        ? { ...event, ...(0, household_scope_1.scopeWriteMarkers)() }
+        : event;
+    let result;
+    try {
+        result = await callCloudFunction(ITEMS_API_FUNCTION, payload, ITEMS_API_TIMEOUT_MS);
+    }
+    catch (e) {
+        // FAMILY_SWITCHED / FAMILY_STALE_SCOPE:家庭状态刚变化——触发 status 刷新
+        // 作用域(捕获新 id/修订号),绝不静默重试,由用户按服务端文案重试
+        (0, households_api_1.notifyFamilyScopeDrift)(e);
+        throw e;
+    }
     if (!isRecord(result)) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     if (result.ok === false) {
-        throw toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing);
+        const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing);
+        (0, households_api_1.notifyFamilyScopeDrift)(err);
+        throw err;
     }
     if (result.ok !== true) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     validateItemsOkResponse(event.action, result);
     if (event.action === "list") {
-        // issue #34 P0:从 list 响应捕获服务端解析的家庭 id(非法/缺省静默忽略,
-        // 保持回退值;旧云函数窗口与单人阶段行为不变)
-        (0, household_scope_1.captureHouseholdId)(result.household_id);
+        // issue #34 P0/P1-B:从 list 响应捕获服务端解析的家庭作用域(household_id
+        // 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
+        // 把家庭切换显式接入 locations-cache 既有失效代数(F2);
+        // 非法/缺省静默忽略,保持回退值(旧云函数窗口与单人阶段行为不变)
+        if ((0, household_scope_1.captureHouseholdId)(result.household_id, result.scope_revision)) {
+            (0, locations_cache_1.clearLocationsCache)();
+        }
     }
     if (event.action === "create" ||
         event.action === "update" ||
