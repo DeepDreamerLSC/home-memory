@@ -165,3 +165,13 @@
   align-items: center;
   border: 2rpx solid var(--accent-dim);
 }
+
+/* 共享家庭标识(面包屑行内,真机反馈:加入后需表明当前家庭) */
+.family-flag {
+  padding: 4rpx 16rpx;
+  border-radius: 999rpx;
+  background: var(--accent-dim, #f3edd9);
+  color: var(--text-2, #4c483e);
+  font-size: 22rpx;
+  flex-shrink: 0;
+}

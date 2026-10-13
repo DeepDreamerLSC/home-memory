@@ -45,6 +45,8 @@ Page({
         items: [],
         unmountedCount: 0,
         danglingMounts: 0,
+        familyShared: false,
+        familyName: "",
         hasRooms: false,
         canScan: false,
         acting: false,
@@ -179,6 +181,8 @@ Page({
             items,
             unmountedCount: res.unmounted_count,
             danglingMounts: res.dangling_mounts,
+            familyShared: (0, household_scope_1.isHouseholdScopeShared)(),
+            familyName: (0, household_scope_1.householdScopeName)() || "",
             hasRooms: res.children.length > 0,
             canScan: res.unmounted_count > 0,
         });

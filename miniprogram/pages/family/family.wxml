@@ -103,7 +103,7 @@
           <view class="item-location">{{ item.joined_text }} 加入</view>
         </view>
         <view
-          wx:if="{{ !item.is_self }}"
+          wx:if="{{ isOwner && !item.is_self }}"
           class="row-action danger"
           data-index="{{ index }}"
           catchtap="onRemoveMemberTap"
@@ -112,10 +112,6 @@
         </view>
       </view>
       <view wx:if="{{ members.length === 0 }}" class="empty-text">成员列表加载中…</view>
-    </view>
-    <view class="card" wx:else>
-      <view class="card-title">成员</view>
-      <view class="empty-text">成员列表仅家庭创建者可见。你可以在家庭成员的共同记录里一起记东西。</view>
     </view>
 
     <!-- 邀请(owner) -->

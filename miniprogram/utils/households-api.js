@@ -104,9 +104,16 @@ function callCloudFunction(name, data, timeoutMs) {
     });
 }
 /** 捕获服务端权威作用域;id 变化(切换/漂移)时显式清空位置树缓存(接入失效代数) */
-function captureAndInvalidate(householdId, shared, scopeRevision) {
-    if ((0, household_scope_1.captureHouseholdScope)(householdId, shared, scopeRevision)) {
+function captureAndInvalidate(householdId, shared, scopeRevision, displayName) {
+    const changed = (0, household_scope_1.captureHouseholdScope)(householdId, shared, scopeRevision);
+    if (changed) {
         (0, locations_cache_1.clearLocationsCache)();
+        if (displayName === undefined) {
+            (0, household_scope_1.captureHouseholdScopeName)(null); // 换家未携带新名:清空,不跟旧名
+        }
+    }
+    if (displayName !== undefined) {
+        (0, household_scope_1.captureHouseholdScopeName)(displayName);
     }
 }
 /**
@@ -167,7 +174,7 @@ function parseStatus(r) {
 async function fetchHouseholdStatus() {
     const r = await callHouseholds({ action: "status" });
     const status = parseStatus(r);
-    captureAndInvalidate(status.household_id, status.shared, status.scope_revision);
+    captureAndInvalidate(status.household_id, status.shared, status.scope_revision, status.display_name === undefined ? null : status.display_name);
     return status;
 }
 /** 前台切回时重置验证状态后再复核(app.onShow 用;复用 household-scope 同名函数) */
@@ -251,7 +258,7 @@ async function createFamily(displayName) {
         typeof r.display_name !== "string") {
         throw new api_1.ApiError(api_1.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
-    captureAndInvalidate(r.household_id, true, r.scope_revision);
+    captureAndInvalidate(r.household_id, true, r.scope_revision, r.display_name === undefined ? null : r.display_name);
     return {
         ok: true,
         household_id: r.household_id,
@@ -270,7 +277,7 @@ async function joinFamily(token) {
         typeof r.scope_revision !== "number") {
         throw new api_1.ApiError(api_1.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
-    captureAndInvalidate(r.household_id, true, r.scope_revision);
+    captureAndInvalidate(r.household_id, true, r.scope_revision, r.display_name === undefined ? null : r.display_name);
     return {
         ok: true,
         joined: r.joined === true,

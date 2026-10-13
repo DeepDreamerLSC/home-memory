@@ -66,7 +66,7 @@ export interface ScopeWriteMarkers {
 
 type ScopeStorage = Pick<
   WechatMiniprogram.Wx,
-  "getStorageSync" | "setStorageSync"
+  "getStorageSync" | "setStorageSync" | "removeStorageSync"
 >;
 
 /** 测试注入的存储(undefined = 未注入);优先级最高 */
@@ -93,7 +93,8 @@ function activeStorage(): ScopeStorage | null {
   if (
     typeof wx !== "undefined" &&
     typeof wx.getStorageSync === "function" &&
-    typeof wx.setStorageSync === "function"
+    typeof wx.setStorageSync === "function" &&
+    typeof wx.removeStorageSync === "function"
   ) {
     return wx;
   }
@@ -259,6 +260,63 @@ export function captureHouseholdScope(
 }
 
 /** 当前作用域 id:已捕获的家庭 id,或稳定回退 "default"(单人阶段) */
+/**
+ * 当前家庭显示名记忆(独立存储键,不进 scope 载荷,避免动已验证的格式):
+ * households.status/create/join 的 display_name 捕获于此;个人家庭为 null。
+ * 切换家庭未携带新名时清空,绝不让上一家的名字跟着走。
+ */
+const NAME_STORAGE_KEY = "home-memory:household-name";
+let rememberedName: string | null = undefined as unknown as string | null;
+
+function persistName(name: string | null): void {
+  const storage = activeStorage();
+  if (storage === null) {
+    return;
+  }
+  try {
+    if (name === null) {
+      storage.removeStorageSync(NAME_STORAGE_KEY);
+    } else {
+      storage.setStorageSync(NAME_STORAGE_KEY, name);
+    }
+  } catch (e) {
+    // best-effort:名字仅用于展示,失败不影响任何行为
+  }
+}
+
+/** 捕获家庭显示名(仅 string 非空写入;null 显式清空;undefined 不动) */
+export function captureHouseholdScopeName(name: unknown): void {
+  if (name === undefined) {
+    return;
+  }
+  if (typeof name === "string" && name.length > 0 && name.length <= 60) {
+    rememberedName = name;
+    persistName(name);
+    return;
+  }
+  rememberedName = null;
+  persistName(null);
+}
+
+/** 当前家庭显示名(未捕获/个人家庭为 null;读失败按未捕获处理) */
+export function householdScopeName(): string | null {
+  if (rememberedName === undefined) {
+    const storage = activeStorage();
+    rememberedName = null;
+    if (storage !== null) {
+      try {
+        const raw = storage.getStorageSync(NAME_STORAGE_KEY);
+        if (typeof raw === "string" && raw.length > 0 && raw.length <= 60) {
+          rememberedName = raw;
+        }
+      } catch (e) {
+        // best-effort
+      }
+    }
+  }
+  return rememberedName;
+}
+
 export function householdScopeId(): string {
   ensureLoaded();
   return captured !== null ? captured.id : DEFAULT_HOUSEHOLD_SCOPE_ID;

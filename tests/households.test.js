@@ -339,10 +339,11 @@ test("HHH-LC-3:memberList(owner)——owner 在前、is_self 标记、含摘要�
   var allowed = ["member_key", "role", "joined_at", "invited_by", "is_self"].sort();
   assert.deepEqual(Object.keys(list.members[1]).sort(), allowed, "成员投影只含摘要句柄与角色,无昵称等 PII");
 
-  // 普通成员无权
+  // 普通成员可读(真机反馈:家庭成员互见是基本感知;管理动作仍 owner)
   await refreshResolved(b, "o-member-3");
-  var denied = await hhHandler({ action: "memberList" }, b);
-  assert.equal(denied.error, "FORBIDDEN");
+  var memberView = await hhHandler({ action: "memberList" }, b);
+  assert.equal(memberView.ok, true, "普通成员应能看到成员列表");
+  assert.equal(memberView.members.length, list.members.length);
 });
 
 test("HHH-LC-4:幂等 join(已是本家庭成员 → 直接成功)+ V1 一家庭边界(别家成员拒绝 join/create)", async function () {

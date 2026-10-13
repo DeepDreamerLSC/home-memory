@@ -28,6 +28,7 @@ import {
 import { clearLocationsCache } from "./locations-cache";
 import {
   captureHouseholdScope,
+  captureHouseholdScopeName,
   householdScopeId,
   isHouseholdScopeShared,
   isScopeVerified,
@@ -132,9 +133,17 @@ function captureAndInvalidate(
   householdId: unknown,
   shared: unknown,
   scopeRevision: unknown,
+  displayName?: unknown,
 ): void {
-  if (captureHouseholdScope(householdId, shared, scopeRevision)) {
+  const changed = captureHouseholdScope(householdId, shared, scopeRevision);
+  if (changed) {
     clearLocationsCache();
+    if (displayName === undefined) {
+      captureHouseholdScopeName(null); // 换家未携带新名:清空,不跟旧名
+    }
+  }
+  if (displayName !== undefined) {
+    captureHouseholdScopeName(displayName);
   }
 }
 
@@ -206,7 +215,12 @@ function parseStatus(r: Record<string, unknown>): HouseholdStatusResponse {
 export async function fetchHouseholdStatus(): Promise<HouseholdStatusResponse> {
   const r = await callHouseholds({ action: "status" });
   const status = parseStatus(r);
-  captureAndInvalidate(status.household_id, status.shared, status.scope_revision);
+  captureAndInvalidate(
+    status.household_id,
+    status.shared,
+    status.scope_revision,
+    status.display_name === undefined ? null : status.display_name,
+  );
   return status;
 }
 
@@ -316,7 +330,7 @@ export async function createFamily(
   ) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
-  captureAndInvalidate(r.household_id, true, r.scope_revision);
+  captureAndInvalidate(r.household_id, true, r.scope_revision, r.display_name === undefined ? null : r.display_name);
   return {
     ok: true,
     household_id: r.household_id,
@@ -338,7 +352,7 @@ export async function joinFamily(token: string): Promise<HouseholdJoinResponse> 
   ) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
-  captureAndInvalidate(r.household_id, true, r.scope_revision);
+  captureAndInvalidate(r.household_id, true, r.scope_revision, r.display_name === undefined ? null : r.display_name);
   return {
     ok: true,
     joined: r.joined === true,

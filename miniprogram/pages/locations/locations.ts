@@ -13,7 +13,7 @@ import {
 } from "../../utils/locations-cache";
 import type { LocationsRequestSeq } from "../../utils/locations-cache";
 import { errorMessage, formatDateTime, uuid } from "../../utils/api";
-import { isScopeVerified } from "../../utils/household-scope";
+import { householdScopeName, isHouseholdScopeShared, isScopeVerified } from "../../utils/household-scope";
 import type {
   ItemSummary,
   ListLocationsResponse,
@@ -84,6 +84,9 @@ Page<
     items: DisplayItem[];
     unmountedCount: number;
     danglingMounts: number;
+    /** 共享家庭标识(真机反馈:加入后我的家应表明当前身处哪个家庭) */
+    familyShared: boolean;
+    familyName: string;
     hasRooms: boolean;
     canScan: boolean;
     /** 结构操作进行中(rename/move/merge/delete/add),防止并发重复提交 */
@@ -159,6 +162,8 @@ Page<
     items: [],
     unmountedCount: 0,
     danglingMounts: 0,
+    familyShared: false,
+    familyName: "",
     hasRooms: false,
     canScan: false,
     acting: false,
@@ -299,6 +304,8 @@ Page<
       items,
       unmountedCount: res.unmounted_count,
       danglingMounts: res.dangling_mounts,
+      familyShared: isHouseholdScopeShared(),
+      familyName: householdScopeName() || "",
       hasRooms: res.children.length > 0,
       canScan: res.unmounted_count > 0,
     });
