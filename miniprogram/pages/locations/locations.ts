@@ -17,20 +17,17 @@ import type {
   ItemSummary,
   ListLocationsResponse,
   LocationNodeSummary,
-  LocationType,
 } from "../../types";
 
-/** 选择模式回传给发起页的节点 */
+/** 选择模式回传给发起页的节点(仓库内全部监听方只消费 location_id) */
 interface PickedLocation {
   location_id: string;
   name: string;
-  type: LocationType;
   path: string[];
 }
 
 /** 用于渲染的子节点(附展示文案与选择模式的禁用原因) */
 type DisplayNode = LocationNodeSummary & {
-  typeText: string;
   countText: string;
   disabled: boolean;
   disabledReason: string;
@@ -38,13 +35,6 @@ type DisplayNode = LocationNodeSummary & {
 
 /** 用于渲染的物品条目(附格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
-
-const TYPE_TEXT: Record<LocationType, string> = {
-  home: "",
-  room: "房间",
-  furniture: "家具",
-  container: "容器",
-};
 
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s: string | undefined): string {
@@ -89,7 +79,6 @@ Page<
     /** 当前层自身节点(「就选这里」用;根层为空) */
     currentNodeId: string;
     currentNodeName: string;
-    currentNodeType: string;
     children: DisplayNode[];
     items: DisplayItem[];
     unmountedCount: number;
@@ -103,8 +92,6 @@ Page<
     nodeId: string;
     /** 当前节点的完整 path(根层为空数组);手动添加子位置时作前缀 */
     nodePath: string[];
-    /** 选择模式的类型参数(仅保留 URL 透传结构;已不据此过滤,issue #30 PR A) */
-    pickType: string;
     /** 选择模式排除的子树(exclude 节点 path + 自身名 join "/"),空串 = 无排除 */
     pickExcludePath: string;
     /** 发起页注册的选择回调(picker 选中回传后执行 move/merge/linkItem) */
@@ -146,10 +133,10 @@ Page<
     openItem(item: DisplayItem): void;
     openPicker(
       title: string,
-      opts: { type?: string; excludePath?: string },
+      opts: { excludePath?: string },
       onPick: (picked: PickedLocation) => void,
     ): void;
-    finishPick(node: DisplayNode): void;
+    finishPick(node: { location_id: string; name: string; path: string[] }): void;
     showTargetLayer(nodeId: string): void;
     childAt(index: number): DisplayNode | undefined;
     itemAt(index: number): DisplayItem | undefined;
@@ -167,7 +154,6 @@ Page<
     isRoot: true,
     currentNodeId: "",
     currentNodeName: "",
-    currentNodeType: "home",
     children: [],
     items: [],
     unmountedCount: 0,
@@ -179,7 +165,6 @@ Page<
 
   nodeId: "",
   nodePath: [] as string[],
-  pickType: "",
   pickExcludePath: "",
   pendingPick: null as ((picked: PickedLocation) => void) | null,
   requestSeq: createRequestSeq(),
@@ -191,7 +176,6 @@ Page<
     this.renderedOnce = false;
     const isPicker = options.picker === "1";
     this.nodeId = safeDecode(options.node_id);
-    this.pickType = isPicker ? safeDecode(options.type) : "";
     this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
     this.setData({
       mode: isPicker ? "pick" : "browse",
@@ -306,7 +290,6 @@ Page<
       isRoot,
       currentNodeId: res.node.location_id,
       currentNodeName: res.node.name,
-      currentNodeType: res.node.type,
       children: this.decorate(res.children),
       items,
       unmountedCount: res.unmounted_count,
@@ -316,7 +299,7 @@ Page<
     });
   },
 
-  /** 子节点渲染装饰:类型/计数文案;选择模式下计算禁用与原因 */
+  /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因 */
   decorate(children) {
     const pickMode = this.data.mode === "pick";
     return children.map((c) => {
@@ -345,7 +328,6 @@ Page<
       }
       return {
         ...c,
-        typeText: TYPE_TEXT[c.type] || "",
         countText: parts.length > 0 ? parts.join(" · ") : "空",
         disabled,
         disabledReason,
@@ -363,7 +345,7 @@ Page<
     return item ? item : undefined;
   },
 
-  /** 点子节点:下钻一层(选择模式也保留逐层下钻,过滤参数随行) */
+  /** 点子节点:下钻一层(选择模式也保留逐层下钻,排除参数随行) */
   onChildTap(e) {
     const index = Number(e.currentTarget.dataset.index);
     const node = this.childAt(index);
@@ -385,9 +367,6 @@ Page<
     if (this.data.mode === "pick") {
       params.push("picker=1");
       params.push("title=" + encodeURIComponent(this.data.pickTitle));
-      if (this.pickType) {
-        params.push("type=" + encodeURIComponent(this.pickType));
-      }
       if (this.pickExcludePath) {
         params.push("exclude_path=" + encodeURIComponent(this.pickExcludePath));
       }
@@ -458,9 +437,8 @@ Page<
     this.finishPick({
       location_id: this.data.currentNodeId,
       name: this.data.currentNodeName,
-      type: this.data.currentNodeType,
       path,
-    } as DisplayNode);
+    });
   },
 
   /** 子节点「⋯」:改名 / 移动 / 合并 / 删除(home 根不在列表,天然无此入口) */
@@ -895,9 +873,6 @@ Page<
   openPicker(title, opts, onPick) {
     this.pendingPick = onPick;
     const params = ["picker=1", "title=" + encodeURIComponent(title)];
-    if (opts.type) {
-      params.push("type=" + encodeURIComponent(opts.type));
-    }
     if (opts.excludePath) {
       params.push("exclude_path=" + encodeURIComponent(opts.excludePath));
     }
@@ -923,10 +898,11 @@ Page<
   finishPick(node) {
     const channel = this.getOpenerEventChannel();
     if (channel && typeof channel.emit === "function") {
+      // 载荷只回传标识与展示必需字段(issue #30 PR B:type 不再随载荷下发,
+      // 仓库内监听方——本页 openPicker 回调与 item 页手动兜底——均只读 location_id)
       channel.emit("pickNode", {
         location_id: node.location_id,
         name: node.name,
-        type: node.type,
         path: node.path,
       });
     }

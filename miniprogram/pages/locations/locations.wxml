@@ -85,9 +85,7 @@
       >
         <view class="item-icon">{{ item.name[0] }}</view>
         <view class="item-main">
-          <view class="item-name">
-            {{ item.name }}<text wx:if="{{ item.typeText }}" class="node-type">{{ item.typeText }}</text>
-          </view>
+          <view class="item-name">{{ item.name }}</view>
           <view class="item-location">{{ item.countText }}</view>
         </view>
         <view wx:if="{{ mode === 'pick' && item.disabled }}" class="row-note">{{ item.disabledReason }}</view>

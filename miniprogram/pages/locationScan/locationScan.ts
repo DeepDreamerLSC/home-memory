@@ -4,7 +4,6 @@ import type {
   ApplyScanBranchResult,
   ApplyScanResult,
   CandidateNode,
-  LocationType,
   ScanResult,
 } from "../../types";
 
@@ -23,7 +22,6 @@ interface PendingScanRequest {
 interface DraftNode {
   uid: string;
   name: string;
-  type: LocationType;
   confidence: number;
   needConfirm: boolean;
   hintName: string;
@@ -44,13 +42,6 @@ interface DraftMount {
   checked: boolean;
 }
 
-const TYPE_TEXT: Record<LocationType, string> = {
-  home: "",
-  room: "房间",
-  furniture: "家具",
-  container: "容器",
-};
-
 Page<
   {
     /** loading 扫描中 / error 扫描失败 / empty 无未归位 / confirm 确认草案 / submitting 提交中 / done 结果 */
@@ -62,7 +53,6 @@ Page<
       uid: string;
       depth: number;
       name: string;
-      typeText: string;
       confidenceText: string;
       needConfirm: boolean;
       hintName: string;
@@ -111,7 +101,7 @@ Page<
     startScan(): Promise<void>;
     buildDrafts(scan: ScanResult): void;
     refreshConfirmView(): void;
-    flattenTree(): Array<{ uid: string; depth: number; name: string; typeText: string; confidenceText: string; needConfirm: boolean; hintName: string; checked: boolean }>;
+    flattenTree(): Array<{ uid: string; depth: number; name: string; confidenceText: string; needConfirm: boolean; hintName: string; checked: boolean }>;
     flattenMounts(): Array<{ item_id: string; name: string; pathText: string; needConfirm: boolean; orderViolation: boolean; checked: boolean }>;
     pathNamesOf(mount: DraftMount): string[];
     findNode(uid: string, nodes?: DraftNode[]): DraftNode | undefined;
@@ -257,7 +247,6 @@ Page<
         const d: DraftNode = {
           uid: "n" + this.uidSeq++,
           name: c.name,
-          type: c.type,
           confidence: c.confidence,
           needConfirm: c.need_confirm,
           hintName:
@@ -336,7 +325,6 @@ Page<
       uid: string;
       depth: number;
       name: string;
-      typeText: string;
       confidenceText: string;
       needConfirm: boolean;
       hintName: string;
@@ -348,7 +336,6 @@ Page<
           uid: n.uid,
           depth,
           name: n.name,
-          typeText: TYPE_TEXT[n.type] || "",
           confidenceText: Math.round(n.confidence * 100) + "%",
           needConfirm: n.needConfirm,
           hintName: n.hintName,

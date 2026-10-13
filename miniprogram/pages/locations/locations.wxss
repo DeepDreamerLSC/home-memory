@@ -113,19 +113,6 @@
   padding: 4rpx 0 4rpx 16rpx;
 }
 
-/* 节点类型小标签 */
-.node-type {
-  display: inline-block;
-  margin-left: 12rpx;
-  padding: 2rpx 12rpx;
-  border-radius: 8rpx;
-  background: var(--card-inset);
-  color: var(--text-3);
-  font-size: 20rpx;
-  font-weight: 400;
-  vertical-align: middle;
-}
-
 /* 「⋯」管理入口:足够大的点击热区 */
 .row-more {
   margin-left: 12rpx;

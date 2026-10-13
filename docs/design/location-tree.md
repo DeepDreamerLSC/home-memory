@@ -19,7 +19,7 @@
 | issue #18 验收标准 | 本设计的落实 |
 | --- | --- |
 | 1. 已有自然语言位置可稳定生成树结构 | `scanHousehold` 批量解析(未挂载物品增量池、块间近义提示)→ 向导逐支确认 → `applyScan` 一次调用入库挂载(§5.9、§5.10、§7.3) |
-| 2. 用户可以浏览房间 → 家具 → 容器 → 物品 | `list` action + `pages/locations` 逐层下钻,节点页=子节点+该层物品;常驻「生成/更新空间树」入口 + 未归位计数让浏览面持续对齐真实库存(§5.1、§7.1、§7.3) |
+| 2. 用户可以逐层浏览空间结构,直到找到物品 | `list` action + `pages/locations` 逐层下钻,节点页=子节点+该层物品;常驻「生成/更新空间树」入口 + 未归位计数让浏览面持续对齐真实库存(§5.1、§7.1、§7.3) |
 | 3. 编辑位置不会破坏历史记录 | 节点编辑**绝不改写** items 的 `location_text`/`name`/`note`;一切挂载变更(含 merge/applyScan)一律走 items 既有版本链的**条件更新**,绝不无条件改写 version(§5.5-5.8、§5.10、§6.4) |
 | 4. AI 不确定时必须请求确认,而不是自动创建错误空间 | `parseLocation`/`scanHousehold` **零写库**;只有 `ensurePath`(经 ensurePath 或 applyScan 内部)能建节点且只由用户确认后的客户端调用;低置信段、未锚定段、**错序段**一律强制 `need_confirm=true`(§6.4) |
 
@@ -52,14 +52,14 @@
 | `parent_id` | string | 父节点 `_id`;home 根节点为空字符串 `""`(根哨兵) |
 | `name` | string | 去首尾空白后 1-30 字(码点) |
 | `name_norm` | string | `normalizeName(name)`,与 itemsApi 同款算法(副本纪律见 §4.2) |
-| `type` | string | 枚举 `"home" \| "room" \| "furniture" \| "container"` |
+| `type` | string | **历史兼容字段**:创建时按深度派生写入(根=`"home"`;depth1=`"room"`、2=`"furniture"`、≥3=`"container"`),响应继续返回,供旧客户端展示;新代码不得依赖其语义(业务规则一律用 `parent_id`/`path` 的结构事实,issue #30) |
 | `path` | string[] | 从根(不含 home 根)到本节点(含)的名字数组;home 根为 `[]`;例:桌子节点 `["书房"]`,抽屉节点 `["书房","桌子","右边第二个抽屉"]` |
 | `created_from` | string | 枚举 `"bootstrap"`(home 根)\|`"scan"`(向导 applyScan)\|`"parse"`(单条解析)\|`"manual"`(页面手建);merge 不产生新节点故无此来源 |
 | `created_at` / `updated_at` | string | ISO 字符串,`deps.now()` |
 
-**home 根节点**:每个 household 恰一个,type=`"home"`,name 固定 `"我的家"`,`path=[]`、`parent_id=""`。由 `ensurePath`/首次 `list` 惰性创建(`created_from:"bootstrap"`);**不可改名、不可移动、不可合并、不可删除**(服务端对这些操作校验 type 后拒绝,错误码 `INVALID_INPUT`)。物品不允许直接挂在 home 根上(`linkItem`/`applyScan` 校验目标 type≠home)。统一「非根节点必有父」的语义,节点页与面包屑有稳定锚点。
+**home 根节点**:每个 household 恰一个,name 固定 `"我的家"`,`path=[]`、`parent_id=""`(根哨兵;type 历史兼容写 `"home"`)。由 `ensurePath`/首次 `list` 惰性创建(`created_from:"bootstrap"`);**不可改名、不可移动、不可合并、不可删除**(服务端对这些操作按 `parent_id===""` 判根后拒绝,错误码 `INVALID_INPUT`;type 漂移不影响保护,issue #30 PR A)。物品不允许直接挂在 home 根上(`linkItem`/`applyScan` 同款判根拒绝)。统一「非根节点必有父」的语义,节点页与面包屑有稳定锚点。
 
-**深度约束**:`path.length` ∈ [1,6](1=room,2=furniture,≥3=container;container 允许嵌套,如「抽屉里的盒子」,封顶 6 层防失控)。
+**深度约束**:`path.length` ∈ [1,6](深层允许嵌套,如「抽屉里的盒子」,封顶 6 层防失控;type 的深度映射只用于历史兼容字段的派生写入,不是层级规则本身)。
 
 **删除语义:硬删除**。与 items 的软删除不同,理由:(a) items 软删除是为 operation_id 重放与内容抹空;位置节点的「历史」由 items 的 `location_text` 原始话语承载,节点只是派生结构;(b) 软删除会占据 `(household_id, parent_id, name_norm)` 唯一索引槽位,导致「删掉书房后无法重建书房」;(c) 删除有空节点保护 + 摘除补偿(§5.7),悬挂挂载有读侧容忍兜底(§5.8)。
 
@@ -141,7 +141,7 @@ cloudfunctions/locations/
 
 ### 5.1 `list` —— 树浏览(纯读,含一次惰性建根)
 
-- **请求**:`{ action:"list", parent_id?: string }`。省略/空串 = home 根(房间层)。
+- **请求**:`{ action:"list", parent_id?: string }`。省略/空串 = home 根(第一层)。
 - **语义**:返回 parent 节点(或根)的直接子节点与**直接挂载**于该节点的未删物品。`item_count` 为**整棵子树**(该节点自身+全部后代)挂载的未删物品数,child_count 为直接子节点数——两个计数都需全量拉 nodes 与 items 后在内存计算(家庭规模下可行,与 itemsApi query 的内存匹配模式同构)。
 - **home 根惰性创建**:请求根层且 home 根不存在时,先创建 home 根(`created_from:"bootstrap"`),再查子节点(通常为空列表)。这是唯一会在 `list` 里发生的写,幂等(唯一索引 + E11000 回查复用)。
 - **未归位计数(统一定义,全文档唯一口径)**:`unmounted_count` = 该家庭未删除且**未挂载**的物品数,「未挂载」= location_node_id **缺失、null,或指向不存在的节点**(悬挂,来源见 §12.1;悬挂件同时计入 `unmounted_count` 与 `dangling_mounts` 两个计数,后者单独标示其中多少是悬挂)。该定义同时是 scanHousehold 增量扫描池的取数口径(§5.9)——悬挂件因此**回流扫描池**,§12.1「经向导重挂自愈」的通道由此在公式上成立,而不是仅靠口头承诺。它是首页/节点页「生成/更新空间树」常驻入口的诚实数据源(§7.1)。
@@ -154,7 +154,7 @@ cloudfunctions/locations/
   "items": [ { "item_id":"it_..", "name":"..", "location_text":"..", "note":"..", "version":3, "updated_at":".." } ],
   "unmounted_count": 4, "dangling_mounts": 0 }
 ```
-  根层请求时 `node` 即 home 根;`children` 按 item_count 降序、同数按 name 升序;`items` 按 updated_at 降序。parent 不存在/跨家庭 → `NOT_FOUND`。
+  根层请求时 `node` 即 home 根;`children` 按 item_count 降序、同数按 name 升序;`items` 按 updated_at 降序。parent 不存在/跨家庭 → `NOT_FOUND`。node/children 里的 `type` 为历史兼容字段(§1.1):服务端照常返回供旧客户端展示,新代码不得依赖其语义。
 - **错误码**:NOT_FOUND。
 
 ### 5.2 `parseLocation` —— 单条位置文本 → 层级候选(LLM,零写库)
@@ -172,7 +172,7 @@ cloudfunctions/locations/
 ```
 - **服务端校验与修正**(validate.js,规则可执行):
   - JSON 提取容忍围栏/前后废话(照抄 `extractDraft/lib/validate.js:44-61`);解析失败带错误重试一次,仍失败 `AI_UNAVAILABLE`(照抄 `handler.js:103-116`)。
-  - segments 数组 1-6 项;name 去空白 1-30 字;confidence ∈ [0,1];type 必须按深度映射(depth1=room、depth2=furniture、depth≥3=container),不符即修正为按深度映射的类型(仅此一处允许修正,其余一律拒绝)。
+  - segments 数组 1-6 项;name 去空白 1-30 字;confidence ∈ [0,1];模型输出**不再要求 type**(issue #30 PR A:不再向 LLM 购买分段类型,省 token 与幻觉面),响应 segments 里的 `type` 一律由服务端按深度派生填充——历史兼容字段,供旧客户端展示,新代码不得依赖其语义。
   - **有序不重叠锚定校验**(「位置必须来自原文」的服务端兜底,防编造**且防错序/错切**):对每段在 `normalizeName(text)` 中求匹配区间,要求**按段序单调递增且互不重叠**(第 i+1 段的匹配起点必须大于第 i 段的匹配终点;实现为顺序游标——首段从头找,后续段从前一段区间之后找)。例:「书房桌子右边第二个抽屉」若被输出为「桌子,书房」,「书房」无法在「桌子」区间之后锚定 → 整条 `order_violation:true` 并强制 `need_confirm=true`。锚定同时防高置信错序:置信度再高,顺序违规也不许默认勾选入库。
   - merge_suggestions 中的 existing_location_id 必须属于本家庭且存在,否则**丢弃该条**(不失败);`reason` 由模型给出(「同名」/「近义」),服务端对 name_norm 完全相等的同级节点自动补全同名建议(不依赖模型)。
   - **need_confirm 置真规则(任一即真)**:任一段 confidence < 0.8(服务端常量 `SEGMENT_CONFIDENT_MIN`);或锚定校验未通过(含顺序违规,另置 `order_violation:true`);或该段未通过锚定且无 merge_suggestion 覆盖;或模型自报不确定。need_confirm=true 时该响应只是候选,客户端必须让用户核对后才可进入 ensurePath。confidence ≥ 阈值也仍是草稿(全流程只有用户点保存才算确认),UI 上低置信段标黄、顺序违规整条标黄强调。
@@ -181,15 +181,15 @@ cloudfunctions/locations/
 ### 5.3 `ensurePath` —— 确认后沿路径建缺失节点(唯一建节点的入口,幂等)
 
 - **请求**:`{ action:"ensurePath", path: ["书房","桌子","右边第二个抽屉"], created_from: "scan"|"parse"|"manual" }`。path 1-6 段,每段去空白 1-30 字;created_from 缺省 `"manual"`(applyScan 内部复用本逻辑时传 `"scan"`)。
-- **语义**:先确保 home 根存在;自根逐段下钻:查 `(household_id, parent_id, name_norm)` 命中即复用,未命中则创建(type 按深度映射,path = 父 path + name)。**只创建,不改任何已存在节点,不碰 items**。
+- **语义**:先确保 home 根存在;自根逐段下钻:查 `(household_id, parent_id, name_norm)` 命中即复用,未命中则创建(type 按深度派生写入——历史兼容字段,path = 父 path + name)。**只创建,不改任何已存在节点,不碰 items**。
 - **幂等**:按路径天然幂等——同一 path 重复调用返回相同节点序列,第二段起 `created:false`。并发同名竞态:唯一索引拒绝第二笔插入,捕获 E11000(识别逻辑照抄 `itemsApi/handler.js:81-85`)后回查复用,绝不双建。无需 operation_id(路径本身就是幂等键)。
 - **响应**:`{ ok:true, nodes:[LocationNodeSummary...], created:[true,false,false] }`(nodes 与 path 等长,含复用节点;LocationNodeSummary 字段同 list.children)。
-- **错误码**:INVALID_INPUT(path 层数/长度/类型不符)。
+- **错误码**:INVALID_INPUT(path 层数/长度不符)。
 
 ### 5.4 `rename` —— 节点改名(path 级联)
 
 - **请求**:`{ action:"rename", node_id, name }`。
-- **校验**:node 存在且属本家庭(否则 NOT_FOUND);type≠home(否则 INVALID_INPUT);新名去空白 1-30 字;**同级重名检查**——同一 parent 下其他子节点 name_norm 相同 → `NODE_CONFLICT`。
+- **校验**:node 存在且属本家庭(否则 NOT_FOUND);非 home 根(按 `parent_id===""` 判根,否则 INVALID_INPUT);新名去空白 1-30 字;**同级重名检查**——同一 parent 下其他子节点 name_norm 相同 → `NODE_CONFLICT`。
 - **级联**:更新本节点 name/name_norm/updated_at,并把本节点与**全部后代**的 path 逐个重写(后代 path 中本节点位置的名字替换;tree.js 收集子树:`parent_id` 链全量拉取后内存过滤)。节点文档无版本号,级联为无条件批量 update(节点无并发编辑不变量,见 §12.6)。
 - **不碰 items**:物品的 location_text 保持原始话语;挂载关系(location_node_id)引用的是节点 id,改名不影响。
 - **响应**:`{ ok:true, node: LocationNodeSummary }`(更新后)。
@@ -198,7 +198,7 @@ cloudfunctions/locations/
 ### 5.5 `move` —— 节点移动(path 级联)
 
 - **请求**:`{ action:"move", node_id, new_parent_id }`。
-- **校验**:两节点存在且属本家庭(NOT_FOUND);node type≠home、new_parent type≠home(INVALID_INPUT);new_parent 不是 node 自身及其后代(否则 `NODE_CONFLICT`,message「不能移动到自己下面」);新家同级无 name_norm 重名(`NODE_CONFLICT`);移动后 node 子树最大深度 ≤ 6(否则 INVALID_INPUT,message「层级太深了」)。
+- **校验**:两节点存在且属本家庭(NOT_FOUND);node 与 new_parent 均非 home 根(按 `parent_id===""` 判根,INVALID_INPUT);new_parent 不是 node 自身及其后代(否则 `NODE_CONFLICT`,message「不能移动到自己下面」);新家同级无 name_norm 重名(`NODE_CONFLICT`);移动后 node 子树最大深度 ≤ 6(否则 INVALID_INPUT,message「层级太深了」)。
 - **级联**:node.parent_id 更新 + node 与全部后代 path 整体重写(新前缀 = new_parent.path + [node.name])。不碰 items。
 - **响应**:`{ ok:true, node: LocationNodeSummary }`。
 - **错误码**:INVALID_INPUT、NOT_FOUND、NODE_CONFLICT。
@@ -206,7 +206,7 @@ cloudfunctions/locations/
 ### 5.6 `merge` —— 合并重复节点(物品条件重挂载,不破坏版本链)
 
 - **请求**:`{ action:"merge", source_node_id, target_node_id }`。
-- **校验**:两节点存在且属本家庭;source ≠ target(`NODE_CONFLICT`);二者 type 相同——**例外(issue #27):source 无直接子节点(叶子)时允许跨类型/跨层级合并**,因为类型按深度推导,同一实物在不同深度的重复(根层「冰箱」vs「书房/冰箱」)永远不同型,而叶子合并只重挂物品、删 source,不产生子树类型漂移;source 带子树时跨类型仍拒绝(INVALID_INPUT,文案引导先移动到同级);target 不是 source 的后代(否则 NODE_CONFLICT);**source 的直接子节点与 target 的直接子节点无 name_norm 重名**(有则 `NODE_CONFLICT`,响应附 `detail:{ clashing_names:[..] }` 供客户端展示——名称出现在响应里合法,出现在日志里违规)。
+- **校验**:两节点存在且属本家庭;source ≠ target(`NODE_CONFLICT`);**纯结构深度规则(issue #30 PR A,替代旧的「二者 type 相同才可合并」)**:source 无直接子节点(叶子)时**任意深度允许**——同一实物在不同深度的重复(根层「冰箱」vs「书房/冰箱」)正是要合并的对象,叶子合并只重挂物品、删 source,不移动任何子树(issue #27);source 带直接子节点时必须与 target **同深度**(path.length 相等)——跨深度嫁接会整体改变子树层级结构 → INVALID_INPUT(文案引导先把 source 移动到与目标同级,或把里面的位置移走);target 不是 source 的后代(否则 NODE_CONFLICT);**source 的直接子节点与 target 的直接子节点无 name_norm 重名**(有则 `NODE_CONFLICT`,响应附 `detail:{ clashing_names:[..] }` 供客户端展示——名称出现在响应里合法,出现在日志里违规)。
 - **执行顺序(逐件条件更新 + 冲突即中止 + 可重试收敛)**:
   1. **物品阶段**:逐件处理直接挂在 source 上的未删物品。每件:读当前 version `v` → 条件更新 `where({ _id, household_id, deleted:false, version:v })` 置 `{ location_node_id: target._id, version: v+1, updated_at, last_update_id: "merge:"+digest(source_id+"→"+target_id+":"+item_id)(派生标识,规格见 §5.8), last_update_fingerprint }`。**0 命中**(并发修改,如 itemsApi.update 或另一 linkItem)→ 重读一次:若该件 `location_node_id` 已等于 target(本次或上次 merge 已完成)则视为已完成继续下一件;否则**中止整个 merge**,返回 `{ ok:false, error:"VERSION_CONFLICT", message:"部分物品刚被修改,请重试", detail:{ conflicted:[{item_id, current_version}] } }`——**绝不无条件改写 version**,绝不覆盖并发修改。中止时已成功重挂的件**保持已挂 target**(语义无损,version 已正确 +1),source 未动,重试安全(重放识别靠派生标识的确定性:同 source/target/item 输入恒得同标识,与 §5.10 收敛语义一致)。
   2. **后置校验(收窄 linkItem(source) 并发窗口)**:物品阶段完成后、删除 source 之前,再查一次 source 的直接挂载物品;若并发冒出新挂物品,对其执行同款条件重挂(0 命中且非已挂 → 同样中止);确认为空才继续。
@@ -221,7 +221,7 @@ cloudfunctions/locations/
 
 - **请求**:`{ action:"delete", node_id, force?: boolean }`。
 - **校验与语义**:
-  - node 存在且属本家庭;type≠home(否则 INVALID_INPUT)。
+  - node 存在且属本家庭;非 home 根(按 `parent_id===""` 判根,否则 INVALID_INPUT)。
   - 统计子树(自身+后代)挂载的未删物品数 `item_count`、后代节点数 `descendant_count`。
   - `force` 缺省/false:`item_count > 0 || descendant_count > 0` → `NODE_NOT_EMPTY`(响应附 `detail:{ item_count, descendant_count }`,客户端展示「这里还有 N 件物品、M 个子位置」)。
   - `force=true`(用户在 UI 二次确认后):若子树内**仍有任何未删物品** → 依旧 `NODE_NOT_EMPTY`(物品永远不能被结构操作丢弃,必须先移走);无物品但有空的后代分支 → 允许删除,整支空分支一并硬删除。
@@ -237,7 +237,7 @@ cloudfunctions/locations/
 - **内部派生标识规格(merge/compensate/applyScan 的服务端写入统一遵守)**:locations 内部批量写入(§5.6 merge 重挂载、§5.7 补偿摘除、§5.10 applyScan)不接收客户端 update_id,改用**确定性派生标识**写入 `last_update_id`:`"<op>:" + digest(拼接串)`,`op ∈ merge|compensate|scan`,`digest(s)` 为 sha256(s) 十六进制前 16 位(经 deps 注入,见 §4.3),拼接串分别为 `source_id+"→"+target_id+":"+item_id`、`node_id+":"+item_id`、`operation_id+":"+item_id`。派生标识**恒 ≤27 字符**,与客户端 update_id 的「非空 ≤64」同档,可直接复用同款 validUpdateId 形状校验,不存在压线或超限;重放识别只做**相等比较**(与 itemsApi `handler.js:302` 一致,长度仅是写入纪律),确定性哈希保证同输入恒得同标识——这是 §5.6/§5.10 收敛式重试的前提。派生标识不要求可逆解析出原文 id。
 - **`linkItem` 请求**:`{ action:"linkItem", item_id, node_id, expected_version, update_id }`;**`unlinkItem` 请求**:`{ action:"unlinkItem", item_id, expected_version, update_id }`。
   - `expected_version`:正整数;`update_id`:非空 ≤64(客户端每次逻辑操作生成 uuid,失败重试同内容复用——照抄 `pages/item/item.ts:36-44` 的 pendingRetry 语义)。
-- **校验**:node 存在、属本家庭、type≠home(NOT_FOUND/INVALID_INPUT);item 存在、属本家庭、deleted=false(否则 NOT_FOUND);item 当前 `location_node_id` 已等于 node_id 且版本匹配 → 视为内容变化仅版本元数据的正常更新(照常 +1;不做「无变化短路」,保持与 itemsApi.update 相同语义)。
+- **校验**:node 存在、属本家庭、非 home 根(NOT_FOUND/INVALID_INPUT);item 存在、属本家庭、deleted=false(否则 NOT_FOUND);item 当前 `location_node_id` 已等于 node_id 且版本匹配 → 视为内容变化仅版本元数据的正常更新(照常 +1;不做「无变化短路」,保持与 itemsApi.update 相同语义)。
 - **执行**:条件更新 `where({ _id:item_id, household_id, deleted:false, version:expected_version })` 置 `{ location_node_id: node_id(或 null), version: expected_version+1, updated_at, last_update_id, last_update_fingerprint }`。命中 → `{ ok:true, item:{ item_id, version, updated_at } }`。0 命中 → 回查(同 itemsApi):三重条件(版本恰为 expected+1、last_update_id 相同、fingerprint 相同)成立 → `{ ok:true, replayed:true, item }`;存在但条件不符 → `VERSION_CONFLICT`;不存在/已删/跨家庭 → `NOT_FOUND`。
 - **错误码**:INVALID_INPUT、NOT_FOUND、VERSION_CONFLICT。
 - **并发竞态如实声明**:linkItem「校验节点存在」与「写 items」之间,存在与 delete(force)/merge 硬删该节点交错的窗口。该窗口由三层机制**收窄与兜底**(删除保护的计数、删除/merge 的后置校验与补偿扫描、读侧容忍),但补偿之后仍有理论残余窗口,无法在无跨文档事务时绝对封死(§12.1)。**本设计不宣称「不变量闭环」**,承诺的是:单线程语义下不变量成立(TS-INV),并发下最坏产生悬挂挂载且读侧按未挂载容忍、计数可见、可经向导重挂自愈。
@@ -281,7 +281,7 @@ cloudfunctions/locations/
   "branches":[ { "path":["书房","桌子"] }, { "path":["主卧"] } ],
   "mounts":[ { "item_id":"it_..", "expected_version":3, "path":["书房","桌子","右边第二个抽屉"] } ] }
 ```
-  `operation_id`:本次向导提交的幂等键(uuid),失败重试/恢复时**原样复用**。**branches 与 mounts 是两个独立的确认单元,无前缀约束**:branches 是「建结构、暂无物品挂载」的纯结构确认(0-30 条,可为空数组,每条 path 1-6 段);**mounts 逐件(1-30 件),mount.path 即该件的完整确认路径**——向导 UI 上逐件草案展示并勾选的就是完整路径(含容器末段,如上例 mount 深于 branch),末段节点由本 action 自己沿路径创建,不要求(也不依赖)任何 branch 先建到该层。
+  `operation_id`:本次向导提交的幂等键(uuid),失败重试/恢复时**原样复用**。**branches 与 mounts 是两个独立的确认单元,无前缀约束**:branches 是「建结构、暂无物品挂载」的纯结构确认(0-30 条,可为空数组,每条 path 1-6 段);**mounts 逐件(1-30 件),mount.path 即该件的完整确认路径**——向导 UI 上逐件草案展示并勾选的就是完整路径(含最深一段,如上例 mount 深于 branch),末段节点由本 action 自己沿路径创建,不要求(也不依赖)任何 branch 先建到该层。
 - **参数校验(执行前,零写入)**:operation_id 非空 ≤64;branches/mounts 数量与各 path 结构(1-6 段、每段去空白 1-30 字)不合法 → `INVALID_INPUT`,此时**任何写入都不发生**。
 - **执行(串行,全部条件更新)**:
   1. 对每条 branch 执行 ensurePath 同款逻辑(created_from:"scan"),得到每条的节点 id 序列;
@@ -303,7 +303,7 @@ cloudfunctions/locations/
 
 ### 6.1 SYSTEM_PROMPT 要点(照 extractDraft 的组织方式,`lib/handler.js:19-32`)
 
-「你是家庭位置结构解析器。用户给出物品的位置描述(单条或一批),你只负责拆解层级,不负责回答或闲聊。」规则:1) 每条位置拆成 1-6 段,顺序从大到小(房间→家具→容器);2) 每段名字必须**逐字取自原文且按原文顺序**,禁止改写、概括、推理、调序;3) 每段给 confidence(0-1),拿不准就给低分,**宁可低分不可编造**;4) 与【既有空间树】中同层同名或近义(如「主卧」与「主人房」)的段,在 merge_suggestions 里给出建议;5) 只输出一个 JSON 对象,无任何其他文字或围栏。字段 schema:parseLocation 为 `{ segments:[{name,type,confidence}], merge_suggestions:[{segment_index,name,reason}], uncertain:bool }`;scan 每块为 `{ results:[{ index, segments:[...], uncertain }] }`(index 对应块内序号)。type 仅做模型参考输出,服务端一律按深度修正。
+「你是家庭位置结构解析器。用户给出物品的位置描述(单条或一批),你只负责拆解层级,不负责回答或闲聊。」规则:1) 每条位置拆成 1-6 段,顺序从大到小;2) 每段名字必须**逐字取自原文且按原文顺序**,禁止改写、概括、推理、调序;3) 每段给 confidence(0-1),拿不准就给低分,**宁可低分不可编造**;4) 与【既有空间树】中同层同名或近义(如「主卧」与「主人房」)的段,在 merge_suggestions 里给出建议;5) 只输出一个 JSON 对象,无任何其他文字或围栏。字段 schema:parseLocation 为 `{ segments:[{name,confidence}], merge_suggestions:[{segment_index,name,reason}], uncertain:bool }`;scan 每块为 `{ results:[{ index, segments:[...], uncertain }] }`(index 对应块内序号)。**schema 不含 type**(issue #30 PR A):分段类型由深度派生、零独立信息,不再向模型购买;响应 segments 的 type 由服务端按深度派生填充(历史兼容字段,§1.1)。
 
 ### 6.2 近义比对 prompt(scanHousehold 归并后专用)
 
@@ -328,12 +328,12 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 
 ### 7.1 `pages/locations` —— 我的家(树浏览 + 节点管理)
 
-- **入口参数**:`?node_id=<location_id>`(缺省=根层)与 `?picker=1&exclude=..&type=..`(选择模式,§7.1 末)。onShow 调 `loadNode`(缓存先行 + 条件刷新,见下条)。
+- **入口参数**:`?node_id=<location_id>`(缺省=根层)与 `?picker=1&exclude=..`(选择模式,§7.1 末)。onShow 调 `loadNode`(缓存先行 + 条件刷新,见下条)。
 - **加载策略(冷启动感知优化,issue #23)**:云函数冷启动实测 3-4s、热态 0.5s,本策略只改感知不改客观时长。`utils/locations-cache.ts` 按层缓存 list 响应(只含节点结构与物品摘要,与页面已展示的同级数据;不缓存语音原文/prompt;key 不加用户维度——小程序 storage 按账号隔离,取舍见模块注释)。渲染分四态:无缓存首载=骨架屏;有缓存=旧树立即上屏(`requestSeq` 递增序号防迟到响应覆盖新数据,不上屏不写缓存);刷新成功=原位 setData;刷新失败=保留旧树 + 「当前为上次记录,下拉或点按重试」。TTL 2 分钟只是性能策略:TTL 内不发请求(降低冷启动触发频率);下拉刷新(enablePullDownRefresh)、选择模式(picker=1,影响真实数据操作前的校验)一律绕过 TTL 直连服务端;缓存带 24h 绝对过期,app onLaunch 清理。失效为第一版全量:任何一次成功写操作(locations 变更类 action、itemsApi create/update/delete)清空整棵树缓存,收口在 API 层封装(utils/locations-api.ts、utils/api.ts),页面不自己记「该清哪层」;后台刷新失败不更新缓存的任何时间戳。
 - **结构**:面包屑(path 渲染:「我的家 / 书房 / 桌子」)+ 子节点列表(item-row 样式,右侧显示 `item_count` 件 + chevron 下钻)+ 该层物品列表(直接挂载;显示物品名与原始 location_text 小字;点击进 pages/item 详情)。
 - **「生成/更新空间树」常驻入口(非空态限定)**:根层页头常驻一行入口——空树时呈现为主引导卡(「还没建过空间,从已录入物品生成」),已有房间时呈现为次级行「生成 / 更新空间树 · N 件未归位」(N=list 响应的 `unmounted_count`,N=0 时显示「全部已归位」)。入口永久可用:录入链路持续产生树外物品,该入口是浏览面与真实库存持续对齐的回流通道(扫描池=未挂载物品,§5.9)。`dangling_mounts>0` 时入口行附如实提示「N 件挂载异常,建议重新挂载」。
 - **手动添加房间**:次级入口(showModal editable 输入名称 → ensurePath created_from:"manual"),任何层级可用(建子节点)。
-- **节点管理**(子节点行点「⋯」或长按 → wx.showActionSheet):改名(wx.showModal editable)/移动/合并/删除。移动与合并进入**选择模式**:本页以 `picker=1&exclude=<node_id>&type=<type>` 参数重入自身,仅高亮可选节点(移动排除自身子树、合并仅列同 type),选中后回传(页面栈或 EventChannel)执行 move/merge。删除:先调 delete 试探,`NODE_NOT_EMPTY` 时弹 detail 数字让用户选择「去移动物品」或(无物品仅空分支)`force` 二次确认;响应含 `compensated>0` 时如实 toast「N 件刚挂上来的物品已自动摘除」。
+- **节点管理**(子节点行点「⋯」或长按 → wx.showActionSheet):改名(wx.showModal editable)/移动/合并/删除。移动与合并进入**选择模式**:本页以 `picker=1&exclude=<排除子树 path>` 参数重入自身(移动/合并均排除自身子树;**不做类型预筛**——跨层级选择交给服务端结构规则裁决,叶子跨层允许、带子树跨深度拒绝,issue #30),选中后回传(EventChannel)执行 move/merge。删除:先调 delete 试探,`NODE_NOT_EMPTY` 时弹 detail 数字让用户选择「去移动物品」或(无物品仅空分支)`force` 二次确认;响应含 `compensated>0` 时如实 toast「N 件刚挂上来的物品已自动摘除」。
 - **物品移动**:物品行「⋯」→「移动到…」→ 选择模式(linkItem,冲突按 VERSION_CONFLICT 提示刷新)或「从这里摘除」(unlinkItem)。
 - 所有危险操作(force 删除、merge)二次确认;所有失败如实展示 errorMessage,不静默。
 
@@ -379,7 +379,7 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 | TS-EP | **ensurePath 幂等** | 同 path 调两次:第二次 nodes 同 id、created 全 false;部分存在的路径只补缺失段;并发 E11000(memoryDb 唯一索引模拟)→ 回查复用,不双建;跨家庭 ensurePath 同名互不影响 |
 | TS-NC1 | **need_confirm 阻止静默建节点** | mock 低置信输出 → parseLocation 返回 need_confirm=true **且** locations/items 两集合文档数与内容零变化;未锚定段(编造名)强制 need_confirm;**错序段**(「桌子,书房」:每段都是子串但顺序违规)→ order_violation=true 且 need_confirm=true;merge_suggestions 引用不存在节点 id 被丢弃 |
 | TS-NC2 | scanHousehold 零写库 | mock 3 块 + 近义响应 → scan 成功返回后两集合零变化;任一块失败或近义调用失败 → 整体 AI_UNAVAILABLE 且零写入;truncated/unmounted_total 计数正确;扫描池=§5.1 统一「未挂载」口径(已挂载件不进 mounts;**悬挂挂载件回流池**——注入悬挂后重扫,该件出现在 mounts 草案中);**空位置件**(location_text 为空)进池、不送 LLM(callLLM mock 断言收到的件数不含它)、归入 skipped(reason="位置为空") |
-| TS-MG | **merge 级联** | 全部条件重挂载成功:path 级联重写;source 直接物品 location_node_id → target、version+1、location_text/name/note 不变;source 后代节点 id 不变、其上物品 version 不变;source 消失;**并发冲突中止**:memoryDb 预置一件在 merge 读版本后被改的物品(测试内先读后改再触发)→ VERSION_CONFLICT 中止、source 仍在、已重挂件保持、重试收敛到完成;同名子节点 → NODE_CONFLICT 且带 clashing_names、数据零变化;source=target、跨 type、target 为 source 后代 → 拒绝 |
+| TS-MG | **merge 级联** | 全部条件重挂载成功:path 级联重写;source 直接物品 location_node_id → target、version+1、location_text/name/note 不变;source 后代节点 id 不变、其上物品 version 不变;source 消失;**并发冲突中止**:memoryDb 预置一件在 merge 读版本后被改的物品(测试内先读后改再触发)→ VERSION_CONFLICT 中止、source 仍在、已重挂件保持、重试收敛到完成;同名子节点 → NODE_CONFLICT 且带 clashing_names、数据零变化;source=target、**带子树跨深度(纯结构规则,issue #30 PR A;叶子跨深度允许,TS-MG3)**、target 为 source 后代 → 拒绝 |
 | TS-DL | **delete 保护** | 有物品 → NODE_NOT_EMPTY(带 item_count);force 且子树有物品 → 仍 NODE_NOT_EMPTY;空分支 force → 整支删除且 deleted_nodes 计数;删后重建同名节点可行(硬删除语义);home 根删除 → INVALID_INPUT;**补偿**:直接往 memoryDb 注入「location_node_id 指向待删节点的物品」模拟交错 → delete 后该件被条件摘除(version+1)、compensated 计数如实 |
 | TS-LK1 | **linkItem 不破坏版本链** | itemsApi.create 建 v1 → locations.linkItem(v1)→ v2;**再用 itemsApi.update(v2) 改 note → v3 且 location_node_id 保留**;反之 linkItem 后 itemsApi.update 用旧版本 → VERSION_CONFLICT;**merge/applyScan 的重挂载同样以 itemsApi.update 验证交叉**(任一写入方过期即冲突,version 永不被无条件回写) |
 | TS-LK2 | linkItem 重放识别 | 响应丢失重试(同 update_id 同内容,expected_version 仍为旧值)→ replayed:true;同 update_id 不同 node → VERSION_CONFLICT(不吞新意图) |
@@ -487,6 +487,7 @@ deepseek.js 副本同款(纪律 §4.2):model `deepseek-flash`、temperature 0.1�
 
 ## 修订记录
 
+- **v5(issue #30 PR B,类型表象清理的文档同步)**:① `type` 全文口径统一为**历史兼容字段**:创建时按深度派生写入、响应继续返回,供旧客户端展示;新代码不得依赖其语义(§1.1 字段表、§5.1/§5.2 响应说明);② §5.2/§6.1:parseLocation 不再向模型要求 segment type(schema 删 type),响应 type 由服务端按深度派生填充;③ §5.4/§5.5/§5.6/§5.7/§5.8 校验条款与 PR A 行为对齐:home 根保护按 `parent_id===""` 判根,merge 换纯结构深度规则(叶子任意深度允许、带子树须同深度),删除「同 type 才能合并」「type≠home」等类型业务表述;④ §7.1:选择器 URL 不再有 `type` 参数,移动/合并不做类型预筛(客户端 pickType/typeText 标签已随 PR B 删除);⑤ TS-MG 行同步为跨深度结构规则。
 - **v4(架构初审修订)**:① §13.1 删除语义裁定:子树内有未删物品时 force 也拒(NODE_NOT_EMPTY),物品位置事实在任何删除路径都不丢,严于「移到父/标未知/合并」三选一兜底,维持现状;② §13.2 合同落位:V1 无自动合并、无 embedding,近义只作候选、用户逐项裁决,错误合并损害大于重复故宁留重复事后 merge 清理;③ 新增 §5.11(§13.3)位置变更历史 `item_location_history`:append-only、仅 locations 函数写入、from≠to 才记、重放不记、写失败不阻断,V1 无读取入口;④ §13.4 入口定位:详情页「挂到空间」= 高频自然入口,扫描向导 = 低频批处理,录入确认页钩子待 #17 合并后另议;⑤ splitChunks 的 size 上限修复(原 size 为死参数,SCAN_CHUNK_SIZE=10 从未生效;当前常量 30 件/target 3/size 10 行为与旧版逐位一致,超限自动增块,40 件 → 4 块 × ≤10),补 TS-CHUNK。
 - **v3(二轮评审修订)**:① §5.10 消除自相矛盾:去掉「mount.path 须以 branch 为前缀」约束,branches(纯结构确认,可空)与 mounts(逐件完整确认路径)改为**独立确认单元**,执行步骤 2 对 mount **完整 path** 复用 ensurePath 建到容器末段(修复「mount 深于 branch 必然 not_found」但示例却是 mounted 的矛盾),TS-AS 补该正路径用例;② 「未挂载」定义全文统一为「location_node_id 缺失、null **或指向不存在的节点**」(§5.1/§5.9/TS-INV/TS-LST 同一口径),悬挂件回流扫描池,§12.1「向导重挂自愈」与 §5.6「重进向导可再挂」在公式上成立;③ scanHousehold 取数**不再排除空位置件**:空位置件进池、不送 LLM、归入 skipped(reason:"位置为空"),消除「skipped 示例有它但取数规则挡它」与「unmounted_count 含它但向导永远看不见它」两处口径冲突,§7.3 加 skipped 分流引导(去详情页补位置);④ §5.8 新增「内部派生标识规格」:`<op>:"+digest(拼接串)`(sha256 前 16 hex,恒 ≤27 字符,与外部 update_id ≤64 同档),替换 merge/compensate/applyScan 三处原文拼接式派生 id(原 89/66/恰 64 字符),deps 增 `digest(s)` 注入(§4.3)。
 - **v2(评审修订)**:① §5.6 merge 重挂载由「读版本后无条件 +1」改为逐件**条件更新 + 冲突中止 + 收敛重试**,与 §5.8 单一版本链一致(原两节矛盾);② §5.7/§5.8 删除与 linkItem 的并发竞态改为如实表述:删除保护 + 后置校验 + 补偿摘除 + 读侧容忍三层机制,残余窗口列入 §12.1,不再宣称「闭环」;③ §5.9 增加归并后**近义比对 LLM 调用**与 synonym_groups,修复并行分块下块间近义不可见(issue 验收「同义位置能够合并或提示」);④ §5.9 明确**并行分块**并给出耗时预算(最坏 ~50s < 函数 60s),客户端超时改为严格大于服务端的 70s;⑤ 新增 **applyScan** action(§5.10)承接向导提交:一次调用、逐件条件更新、收敛式幂等、storage 中断恢复,替代数十次客户端编排;⑥ 向导入口由「空态限定」改为 **locations 页常驻入口** + unmounted_count,扫描池显式定义为未挂载物品(增量);⑦ 锚定校验由「子串」升级为**有序不重叠锚定**,错序/错切强制 need_confirm + order_violation;⑧ §4 拆出 §4.1/§4.2/§4.3,修复「§4.2」失实自引用。
