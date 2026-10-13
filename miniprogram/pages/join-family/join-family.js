@@ -20,6 +20,7 @@ Page({
     data: {
         phase: "loading",
         token: "",
+        manualToken: "",
         familyName: "",
         errorText: "",
         joining: false,
@@ -38,20 +39,40 @@ Page({
         }
         token = token.trim();
         if (!token) {
-            this.setData({ phase: "error", errorText: "缺少邀请参数,请让家人重新分享邀请卡片" });
+            // 无卡片参数(体验版分享受限的手输兜底入口):进手输阶段而非报错
+            this.setData({ phase: "manual" });
             return;
         }
         this.setData({ token });
-        void (async () => {
-            try {
-                const info = await (0, households_api_1.fetchInviteInfo)(token);
-                this.setData({ phase: "confirm", familyName: info.display_name });
+        void this.verifyToken(token);
+    },
+    /** 令牌预检:inviteInfo 拿家庭名 → 确认页;失败如实进错误页(可重输) */
+    async verifyToken(token) {
+        this.setData({ phase: "loading", token });
+        try {
+            const info = await (0, households_api_1.fetchInviteInfo)(token);
+            this.setData({ phase: "confirm", familyName: info.display_name });
+        }
+        catch (e) {
+            // 令牌不存在/已撤销/已过期/家庭已解散:服务端统一 NOT_FOUND,如实展示
+            this.setData({ phase: "error", errorText: (0, api_1.errorMessage)(e) });
+        }
+    },
+    onManualTokenInput(e) {
+        this.setData({ manualToken: (e.detail.value || "").trim() });
+    },
+    onManualSubmitTap() {
+        const token = this.data.manualToken;
+        if (this.data.joining || !token) {
+            if (!token) {
+                wx.showToast({ title: "请先粘贴邀请码", icon: "none" });
             }
-            catch (e) {
-                // 令牌不存在/已撤销/已过期/家庭已解散:服务端统一 NOT_FOUND,如实展示
-                this.setData({ phase: "error", errorText: (0, api_1.errorMessage)(e) });
-            }
-        })();
+            return;
+        }
+        void this.verifyToken(token);
+    },
+    onManualRetryTap() {
+        this.setData({ phase: "manual" });
     },
     /** 确认加入:join 幂等(已是成员直接成功);成功后作用域切到共享家庭并回首页 */
     async onJoinTap() {

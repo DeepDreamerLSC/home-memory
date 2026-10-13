@@ -84,6 +84,8 @@ Page<
     /* 邀请(owner) */
     onInviteTap(): Promise<void>;
     onShareTap(): void;
+    onCopyInviteTap(): void;
+    onJoinByCodeTap(): void;
     onRevokeTap(e: WechatMiniprogram.CustomEvent): void;
     inviteAt(index: number): DisplayInvite | undefined;
     /* 成员(owner) */
@@ -299,6 +301,30 @@ Page<
   /** 分享卡片按钮(open-type=share 触发 onShareAppMessage) */
   onShareTap() {
     // 实际分享内容由 onShareAppMessage 提供;此处仅作显式入口
+  },
+
+  /** 复制邀请码(体验版兜底:分享卡片受限时,家人手动输入令牌加入) */
+  onCopyInviteTap() {
+    const token = this.data.shareToken;
+    if (!token) {
+      return;
+    }
+    wx.setClipboardData({
+      data: token,
+      success: () => {
+        wx.showToast({ title: "邀请码已复制,发给家人即可", icon: "none", duration: 2500 });
+      },
+    });
+  },
+
+  /** 单人态「收到邀请码」入口:进入加入页手输阶段 */
+  onJoinByCodeTap() {
+    wx.navigateTo({
+      url: "/pages/join-family/join-family",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
   },
 
   /**
