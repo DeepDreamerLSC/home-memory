@@ -3,12 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const locations_api_1 = require("../../utils/locations-api");
 const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
-const TYPE_TEXT = {
-    home: "",
-    room: "房间",
-    furniture: "家具",
-    container: "容器",
-};
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     if (!s) {
@@ -46,7 +40,6 @@ Page({
         isRoot: true,
         currentNodeId: "",
         currentNodeName: "",
-        currentNodeType: "home",
         children: [],
         items: [],
         unmountedCount: 0,
@@ -57,7 +50,6 @@ Page({
     },
     nodeId: "",
     nodePath: [],
-    pickType: "",
     pickExcludePath: "",
     pendingPick: null,
     requestSeq: (0, locations_cache_1.createRequestSeq)(),
@@ -68,7 +60,6 @@ Page({
         this.renderedOnce = false;
         const isPicker = options.picker === "1";
         this.nodeId = safeDecode(options.node_id);
-        this.pickType = isPicker ? safeDecode(options.type) : "";
         this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
         this.setData({
             mode: isPicker ? "pick" : "browse",
@@ -180,7 +171,6 @@ Page({
             isRoot,
             currentNodeId: res.node.location_id,
             currentNodeName: res.node.name,
-            currentNodeType: res.node.type,
             children: this.decorate(res.children),
             items,
             unmountedCount: res.unmounted_count,
@@ -189,7 +179,7 @@ Page({
             canScan: res.unmounted_count > 0,
         });
     },
-    /** 子节点渲染装饰:类型/计数文案;选择模式下计算禁用与原因 */
+    /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因 */
     decorate(children) {
         const pickMode = this.data.mode === "pick";
         return children.map((c) => {
@@ -216,7 +206,6 @@ Page({
             }
             return {
                 ...c,
-                typeText: TYPE_TEXT[c.type] || "",
                 countText: parts.length > 0 ? parts.join(" · ") : "空",
                 disabled,
                 disabledReason,
@@ -231,7 +220,7 @@ Page({
         const item = this.data.items[index];
         return item ? item : undefined;
     },
-    /** 点子节点:下钻一层(选择模式也保留逐层下钻,过滤参数随行) */
+    /** 点子节点:下钻一层(选择模式也保留逐层下钻,排除参数随行) */
     onChildTap(e) {
         const index = Number(e.currentTarget.dataset.index);
         const node = this.childAt(index);
@@ -253,9 +242,6 @@ Page({
         if (this.data.mode === "pick") {
             params.push("picker=1");
             params.push("title=" + encodeURIComponent(this.data.pickTitle));
-            if (this.pickType) {
-                params.push("type=" + encodeURIComponent(this.pickType));
-            }
             if (this.pickExcludePath) {
                 params.push("exclude_path=" + encodeURIComponent(this.pickExcludePath));
             }
@@ -324,7 +310,6 @@ Page({
         this.finishPick({
             location_id: this.data.currentNodeId,
             name: this.data.currentNodeName,
-            type: this.data.currentNodeType,
             path,
         });
     },
@@ -742,9 +727,6 @@ Page({
     openPicker(title, opts, onPick) {
         this.pendingPick = onPick;
         const params = ["picker=1", "title=" + encodeURIComponent(title)];
-        if (opts.type) {
-            params.push("type=" + encodeURIComponent(opts.type));
-        }
         if (opts.excludePath) {
             params.push("exclude_path=" + encodeURIComponent(opts.excludePath));
         }
@@ -769,10 +751,11 @@ Page({
     finishPick(node) {
         const channel = this.getOpenerEventChannel();
         if (channel && typeof channel.emit === "function") {
+            // 载荷只回传标识与展示必需字段(issue #30 PR B:type 不再随载荷下发,
+            // 仓库内监听方——本页 openPicker 回调与 item 页手动兜底——均只读 location_id)
             channel.emit("pickNode", {
                 location_id: node.location_id,
                 name: node.name,
-                type: node.type,
                 path: node.path,
             });
         }

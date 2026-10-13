@@ -9,7 +9,7 @@ import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
 } from "../../utils/locations-api";
-import type { ItemSummary, LocationType } from "../../types";
+import type { ItemSummary } from "../../types";
 
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s: string): string {
@@ -22,13 +22,6 @@ function safeDecode(s: string): string {
 
 /** 刷新最新数据的结果 */
 type RefreshResult = "refreshed" | "notfound" | "error";
-
-const TYPE_TEXT: Record<LocationType, string> = {
-  home: "",
-  room: "房间",
-  furniture: "家具",
-  container: "容器",
-};
 
 Page<
   {
@@ -48,7 +41,6 @@ Page<
     mountSegments: Array<{
       idx: number;
       name: string;
-      typeText: string;
       confidenceText: string;
       needConfirm: boolean;
       hintName: string;
@@ -422,7 +414,6 @@ Page<
         mountSegments: parse.segments.map((seg, i) => ({
           idx: i,
           name: seg.name,
-          typeText: TYPE_TEXT[seg.type] || "",
           confidenceText: Math.round(seg.confidence * 100) + "%",
           needConfirm: seg.confidence < 0.8,
           hintName: hints.get(i) || "",

@@ -4,12 +4,6 @@ const locations_api_1 = require("../../utils/locations-api");
 const api_1 = require("../../utils/api");
 /** 中断恢复:提交前写入 storage 的完整请求(operation_id 原样复用,收敛式重放) */
 const PENDING_KEY = "location_scan_pending";
-const TYPE_TEXT = {
-    home: "",
-    room: "房间",
-    furniture: "家具",
-    container: "容器",
-};
 Page({
     data: {
         phase: "loading",
@@ -126,7 +120,6 @@ Page({
                 const d = {
                     uid: "n" + this.uidSeq++,
                     name: c.name,
-                    type: c.type,
                     confidence: c.confidence,
                     needConfirm: c.need_confirm,
                     hintName: c.merge_hints && c.merge_hints.length > 0
@@ -204,7 +197,6 @@ Page({
                     uid: n.uid,
                     depth,
                     name: n.name,
-                    typeText: TYPE_TEXT[n.type] || "",
                     confidenceText: Math.round(n.confidence * 100) + "%",
                     needConfirm: n.needConfirm,
                     hintName: n.hintName,

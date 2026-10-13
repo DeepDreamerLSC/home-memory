@@ -44,9 +44,7 @@
       >
         <view class="tree-check">{{ item.checked ? '☑' : '☐' }}</view>
         <view class="item-main">
-          <view class="item-name">
-            {{ item.name }}<text wx:if="{{ item.typeText }}" class="node-type">{{ item.typeText }}</text>
-          </view>
+          <view class="item-name">{{ item.name }}</view>
           <view class="item-location">
             把握 {{ item.confidenceText }}{{ item.hintName ? ' · 与已有的「' + item.hintName + '」同名,入库会直接用已有位置' : '' }}
           </view>

@@ -11,12 +11,6 @@ function safeDecode(s) {
         return s;
     }
 }
-const TYPE_TEXT = {
-    home: "",
-    room: "房间",
-    furniture: "家具",
-    container: "容器",
-};
 Page({
     data: {
         itemId: "",
@@ -336,7 +330,6 @@ Page({
                 mountSegments: parse.segments.map((seg, i) => ({
                     idx: i,
                     name: seg.name,
-                    typeText: TYPE_TEXT[seg.type] || "",
                     confidenceText: Math.round(seg.confidence * 100) + "%",
                     needConfirm: seg.confidence < 0.8,
                     hintName: hints.get(i) || "",

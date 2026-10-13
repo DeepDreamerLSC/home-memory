@@ -72,7 +72,7 @@
       class="field"
     >
       <view class="label">
-        第 {{ index + 1 }} 段 · {{ item.typeText }} · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · AI 不太确定' : '' }}
+        第 {{ index + 1 }} 段 · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · AI 不太确定' : '' }}
       </view>
       <input
         class="input {{ item.needConfirm ? 'input-warn' : '' }}"
