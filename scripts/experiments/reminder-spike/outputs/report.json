@@ -1,0 +1,274 @@
+{
+  "generated_at": "2026-10-13T11:01:16.173338+00:00",
+  "reference_date": "2026-10-13",
+  "note": "mock 评测:响应为固定 mock 文件,不涉及任何真实模型;检出结论只证明评测框架可用,不代表模型质量。",
+  "sha256": {
+    "corpus.jsonl": "b5069b54a77b94bd457d55d0927a5248b82751189818c411abf4e71857a6eeb4",
+    "mock-responses.jsonl": "f045468a6aa5f8f96ea07fff419361012a99cf9dd88cd0190c97a55bd711ab92",
+    "prompt-draft.txt": "b9f31a3da6dd2738f061376d08a9cd46436b7a4d8f39ef453659d66054e7d9a7"
+  },
+  "counts": {
+    "corpus_sentences": 34,
+    "mock_responses": 34,
+    "injected_deviations": 6,
+    "injected_detected": 6,
+    "missed": [],
+    "clean_sentences": 28,
+    "clean_with_unexpected_issues": []
+  },
+  "rows": [
+    {
+      "id": "c01",
+      "category": "relative_period",
+      "parse_error": null,
+      "violations": [
+        "R1_HALLUCINATED_LOCATION"
+      ],
+      "diffs": [
+        "$.location_certain: False != True",
+        "$.location_text: '' != '厨房水槽下面的柜子里'"
+      ]
+    },
+    {
+      "id": "c02",
+      "category": "relative_period",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c03",
+      "category": "relative_period",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c04",
+      "category": "relative_period",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c05",
+      "category": "recurring_period",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c06",
+      "category": "recurring_period",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c07",
+      "category": "recurring_period",
+      "parse_error": null,
+      "violations": [
+        "R5_CONFIRM_FREE_TOO_LOOSE"
+      ],
+      "diffs": []
+    },
+    {
+      "id": "c08",
+      "category": "relative_weekday",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c09",
+      "category": "absolute_date",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c10",
+      "category": "absolute_date",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c11",
+      "category": "absolute_date",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c12",
+      "category": "after_open",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c13",
+      "category": "after_open",
+      "parse_error": null,
+      "violations": [],
+      "diffs": [
+        "$.due.date: '2027-04-13' != '2027-04-12'"
+      ]
+    },
+    {
+      "id": "c14",
+      "category": "after_open",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c15",
+      "category": "production_shelf_life",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c16",
+      "category": "production_shelf_life",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c17",
+      "category": "production_shelf_life",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c18",
+      "category": "warranty_month",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c19",
+      "category": "warranty_month",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c20",
+      "category": "warranty_day",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c21",
+      "category": "location_only",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c22",
+      "category": "location_only",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c23",
+      "category": "location_only",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c24",
+      "category": "location_only",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c25",
+      "category": "task_no_time",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c26",
+      "category": "task_no_time",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c27",
+      "category": "vague",
+      "parse_error": null,
+      "violations": [
+        "R2_VAGUE_DATE_FORBIDDEN"
+      ],
+      "diffs": []
+    },
+    {
+      "id": "c28",
+      "category": "vague",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c29",
+      "category": "vague",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c30",
+      "category": "medical_excluded",
+      "parse_error": null,
+      "violations": [],
+      "diffs": [
+        "$.excluded_medical: False != True",
+        "$.has_reminder: True != False"
+      ]
+    },
+    {
+      "id": "c31",
+      "category": "medical_excluded",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c32",
+      "category": "asr_noise",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c33",
+      "category": "asr_noise",
+      "parse_error": null,
+      "violations": [],
+      "diffs": []
+    },
+    {
+      "id": "c34",
+      "category": "user_cancel",
+      "parse_error": "RESPONSE_NOT_JSON",
+      "violations": [],
+      "diffs": []
+    }
+  ],
+  "verdict": "PASS"
+}
