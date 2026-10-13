@@ -72,6 +72,10 @@ Page<
     loadError: string;
     breadcrumbText: string;
     isRoot: boolean;
+    /** 当前层自身节点(「就选这里」用;根层为空) */
+    currentNodeId: string;
+    currentNodeName: string;
+    currentNodeType: string;
     children: DisplayNode[];
     items: DisplayItem[];
     unmountedCount: number;
@@ -105,6 +109,7 @@ Page<
     onChildTap(e: WechatMiniprogram.CustomEvent): void;
     onPickTap(e: WechatMiniprogram.CustomEvent): void;
     onChildMore(e: WechatMiniprogram.CustomEvent): void;
+    onPickCurrentTap(): void;
     showNodeActions(node: DisplayNode): void;
     renameNode(node: DisplayNode): void;
     doRename(node: DisplayNode, name: string): Promise<void>;
@@ -145,6 +150,9 @@ Page<
     loadError: "",
     breadcrumbText: "我的家",
     isRoot: true,
+    currentNodeId: "",
+    currentNodeName: "",
+    currentNodeType: "home",
     children: [],
     items: [],
     unmountedCount: 0,
@@ -281,6 +289,9 @@ Page<
         ? "我的家"
         : "我的家 / " + res.node.path.join(" / "),
       isRoot,
+      currentNodeId: res.node.location_id,
+      currentNodeName: res.node.name,
+      currentNodeType: res.node.type,
       children: this.decorate(res.children),
       items,
       unmountedCount: res.unmounted_count,
@@ -369,18 +380,35 @@ Page<
       }
     }
     const url = "/pages/locations/locations?" + params.join("&");
-    wx.navigateTo({
-      url,
-      fail: () => {
-        // 页面栈满时退化为替换当前页(仍可逐层返回)
-        wx.redirectTo({
-          url,
-          fail: () => {
-            wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+    const navFail = () => {
+      // 页面栈满时退化为替换当前页(仍可逐层返回)
+      wx.redirectTo({
+        url,
+        fail: () => {
+          wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+        },
+      });
+    };
+    // 选择模式下钻时把 pickNode 逐层转发回发起页:EventChannel 只连相邻两层,
+    // 而发起页(openPicker/物品详情)只在第一层注册了监听——不转发则深层选中
+    // 只会退栈一格、事件静默丢失(issue #27 真机「点击不生效」的断点)。
+    if (this.data.mode === "pick") {
+      wx.navigateTo({
+        url,
+        events: {
+          pickNode: (d: PickedLocation) => {
+            const channel = this.getOpenerEventChannel();
+            if (channel && typeof channel.emit === "function") {
+              channel.emit("pickNode", d);
+            }
+            wx.navigateBack({ fail: () => {} });
           },
-        });
-      },
-    });
+        },
+        fail: navFail,
+      });
+      return;
+    }
+    wx.navigateTo({ url, fail: navFail });
   },
 
   /** 选择模式点「选这个」:选中回传给发起页(禁用项在行上如实标注原因,不出此按钮) */
@@ -398,6 +426,31 @@ Page<
       return;
     }
     this.finishPick(node);
+  },
+
+  /** 选择模式「就选这里」:直接选中当前层(下钻过深时不必退回找「选这个」) */
+  onPickCurrentTap() {
+    if (this.data.mode !== "pick" || this.data.isRoot) {
+      return;
+    }
+    const path = this.nodePath;
+    if (this.pickExcludePath) {
+      const p = path.join("/");
+      if (p === this.pickExcludePath || p.indexOf(this.pickExcludePath + "/") === 0) {
+        wx.showToast({ title: "不能选它自己", icon: "none" });
+        return;
+      }
+    }
+    if (this.pickType && this.data.currentNodeType !== this.pickType) {
+      wx.showToast({ title: "类型不同,不能合并到这里", icon: "none" });
+      return;
+    }
+    this.finishPick({
+      location_id: this.data.currentNodeId,
+      name: this.data.currentNodeName,
+      type: this.data.currentNodeType,
+      path,
+    } as DisplayNode);
   },
 
   /** 子节点「⋯」:改名 / 移动 / 合并 / 删除(home 根不在列表,天然无此入口) */
