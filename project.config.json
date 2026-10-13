@@ -11,5 +11,18 @@
     "minified": true,
     "enhance": true,
     "ignoreUploadUnusedFiles": true
+  },
+  "packOptions": {
+    "ignore": [
+      {
+        "type": "file",
+        "value": "tsconfig.json"
+      },
+      {
+        "type": "suffix",
+        "value": ".ts"
+      }
+    ],
+    "include": []
   }
 }
