@@ -32,7 +32,7 @@ var SEGMENT_CONFIDENT_MIN = validate.SEGMENT_CONFIDENT_MIN; // 0.8,低于即强�
 var SYSTEM_PROMPT = [
   "你是家庭位置结构解析器。用户给出物品的位置描述(单条或一批),你只负责拆解层级,不负责回答或闲聊。",
   "规则:",
-  "1. 每条位置拆成 1-6 段,顺序从大到小(房间→家具→容器)。",
+  "1. 每条位置拆成 1-6 段,顺序从大到小。",
   "2. 每段名字必须逐字取自原文且按原文顺序,禁止改写、概括、推理、调序。",
   "3. 每段给 confidence(0 到 1 的小数),拿不准就给低分,宁可低分不可编造。",
   "4. 与【既有空间树】中同层同名或近义(如「主卧」与「主人房」)的段,在 merge_suggestions 里给出建议。",
@@ -43,7 +43,7 @@ var SYSTEM_PROMPT = [
 
 var PARSE_SCHEMA = [
   "本次输出格式(JSON 对象):",
-  "- segments:数组,1-6 项,每项 { \"name\": 段名(逐字取自原文,不超过 30 字), \"type\": \"room\"|\"furniture\"|\"container\", \"confidence\": 0-1 }",
+  "- segments:数组,1-6 项,每项 { \"name\": 段名(逐字取自原文,不超过 30 字), \"confidence\": 0-1 }",
   "- merge_suggestions:数组,每项 { \"segment_index\": 段下标(0 起), \"name\": 既有空间树中同名或近义的节点名, \"reason\": \"同名\"|\"近义\" }",
   "- uncertain:布尔,整体拿不准时为 true"
 ].join("\n");
@@ -320,7 +320,7 @@ async function parseLocation(event, deps) {
   var anchoring = validate.anchorSegments(segments, userText);
 
   // merge_suggestions 作用域(issue #22 终审):候选必须挂在该段的父节点下
-  // (首段=根,其余=上一命中段)且 type 与该段一致;父级未命中/无法确定时不给建议,
+  // (首段=根,其余=上一命中段);父级未命中/无法确定时不给建议,
   // 保留人工选择——绝不做全树同名择一(「卧室/桌上」不得被建议到「书房/桌子」)。
   // 服务端对下钻命中的同名节点自动补全(不依赖模型)。
   // 模型给的下标基于原始分段:先经 indexMap 重映射,被并入段的建议一并丢弃。
@@ -350,20 +350,16 @@ async function parseLocation(event, deps) {
     var norm = normalizeName(s.name);
     var matched = null;
     var scopePid = scopeParentId(mapped);
-    if (scopePid !== null && segments[mapped]) {
+    if (scopePid !== null) {
       for (var k = 0; k < nodes.length; k++) {
-        if (
-          nodes[k].name_norm === norm &&
-          nodes[k].parent_id === scopePid &&
-          nodes[k].type === segments[mapped].type
-        ) {
-          matched = nodes[k]; // 同父同型下 name_norm 唯一(组合唯一索引),无需择一
+        if (nodes[k].name_norm === norm && nodes[k].parent_id === scopePid) {
+          matched = nodes[k]; // 同父下 name_norm 唯一(组合唯一索引),无需择一
           break;
         }
       }
     }
     if (!matched) {
-      continue; // 父级无法确定/跨父/类型不符/不存在:丢弃该条,不失败
+      continue; // 父级无法确定/跨父/不存在:丢弃该条,不失败
     }
     var key = s.segment_index + "|" + matched._id;
     if (seen[key]) {
@@ -381,9 +377,6 @@ async function parseLocation(event, deps) {
     if (!hits[d]) {
       continue;
     }
-    if (segments[d] && hits[d].type !== segments[d].type) {
-      continue; // 同名同父但类型不一致:不自动列为候选(issue #22 终审,交人工确认)
-    }
     var autoKey = d + "|" + hits[d]._id;
     if (seen[autoKey]) {
       continue;
@@ -397,7 +390,7 @@ async function parseLocation(event, deps) {
     });
   }
   // 可比名近义(issue #21):桌上≈桌子、冰箱里≈冰箱——确定性补全建议,仍由用户裁决合并。
-  // 同样受父节点+类型作用域约束(issue #22 终审):只在该段父节点的孩子里匹配,
+  // 同样受父节点作用域约束(issue #22 终审):只在该段父节点的孩子里匹配,
   // 父级未命中不越级建议(错误合并比重复更有害)。
   for (var q = 0; q < segments.length; q++) {
     var segNormQ = normalizeName(segments[q].name);
@@ -413,7 +406,6 @@ async function parseLocation(event, deps) {
       var cand = nodes[cn];
       if (
         cand.parent_id !== parentIdQ ||
-        cand.type !== segments[q].type ||
         cand.name_norm === segNormQ ||
         comparableName(cand.name_norm) !== segComp
       ) {

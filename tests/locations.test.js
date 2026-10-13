@@ -3,7 +3,9 @@
 /**
  * locations 离线合同测试(docs/design/location-tree.md §9,issue #18)。
  * 覆盖 16 个必测点:TS-ISO/TS-EP/TS-NC1/TS-NC2/TS-MG/TS-DL/TS-LK1/TS-LK2/TS-LK3/
- * TS-AS/TS-SCAN/TS-RN/TS-MV/TS-LST/TS-INV/TS-LOG/TS-SRC,外加 index.js 胶水层加载测试。
+ * TS-AS/TS-SCAN/TS-RN/TS-MV/TS-LST/TS-INV/TS-LOG/TS-SRC,外加 index.js 胶水层加载测试;
+ * issue #30 PR A 增补:TS-ROOT(根节点五动作按 parent_id 判定)与
+ * TS-MG3(merge 纯结构规则:带子树跨深度拒绝、叶子跨深度允许)。
  * 与 itemsApi 在同一 memoryDb 上交叉驱动(单一版本链验证);LLM 全部 mock 注入,
  * 零外部依赖、零网络;绝不 require wx-server-sdk(胶水测试用 stub 替身加载)。
  */
@@ -508,11 +510,12 @@ test("TS-NC1:parseLocation 零写库;低置信/编造段/错序段强制 need_co
     items: await rawDocs(t.db, "items")
   };
 
-  // 高置信有序:仅低置信末段(0.6 < 0.8)→ need_confirm=true,零写库
+  // 高置信有序:仅低置信末段(0.6 < 0.8)→ need_confirm=true,零写库。
+  // LLM 输出已不要求 type(issue #30 PR A):schema 删字段,校验层容忍缺省
   var lowConfRaw = parseRaw([
-    { name: "书房", type: "room", confidence: 0.95 },
-    { name: "桌子", type: "furniture", confidence: 0.9 },
-    { name: "右边第二个抽屉", type: "container", confidence: 0.6 }
+    { name: "书房", confidence: 0.95 },
+    { name: "桌子", confidence: 0.9 },
+    { name: "右边第二个抽屉", confidence: 0.6 }
   ]);
   var mock1 = seqMock([lowConfRaw]);
   var res1 = await locHandler(
@@ -523,7 +526,10 @@ test("TS-NC1:parseLocation 零写库;低置信/编造段/错序段强制 need_co
   assert.equal(res1.parse.need_confirm, true, "任一段 confidence<0.8 必须 need_confirm");
   assert.equal(res1.parse.order_violation, false);
   assert.equal(res1.parse.segments.length, 3);
-  assert.equal(res1.parse.segments[0].type, "room", "type 按深度映射");
+  // 兼容:响应 segment 仍带按深度派生的 type(旧客户端展示依赖;输入无 type 也照常派生)
+  assert.equal(res1.parse.segments[0].type, "room", "深度 1 派生 room");
+  assert.equal(res1.parse.segments[1].type, "furniture", "深度 2 派生 furniture");
+  assert.equal(res1.parse.segments[2].type, "container", "深度 ≥3 派生 container");
   assert.deepEqual(
     await rawDocs(t.db, "locations"),
     before.locations,
@@ -1167,7 +1173,7 @@ test("TS-LK3:unlinkItem 置 null;未挂载物品照常 +1;越权/已删 NOT_FOUN
 
 // ---------- TS-MG:merge 级联 ----------
 
-test("TS-MG:merge 全部条件重挂载 + path 级联;source 后代 id 不变物品不动;重试收敛;同名子节点/自并/异类/后代目标拒绝", async function () {
+test("TS-MG:merge 全部条件重挂载 + path 级联;source 后代 id 不变物品不动;重试收敛;同名子节点/自并/跨深度带子树/后代目标拒绝", async function () {
   var t = fresh();
   // 主卧(子:衣柜)/主人房;甲挂主卧,乙挂衣柜
   var tree = await ensurePath(t.deps, ["主卧", "衣柜"]);
@@ -1305,23 +1311,23 @@ test("TS-MG:merge 全部条件重挂载 + path 级联;source 后代 id 不变物
   assert.deepEqual(clash.detail.clashing_names, ["架子"]);
   assert.deepEqual(await rawDocs(t3.db, "locations"), before3, "冲突时数据零变化");
 
-  // source=target / 跨 type / target 为 source 后代(同 type 才能到后代检查)
+  // source=target / 跨深度带子树 / target 为 source 后代
   var self = await locHandler(
     { action: "merge", source_node_id: g3.nodes[0].location_id, target_node_id: g3.nodes[0].location_id },
     t3.deps
   );
   assert.equal(self.error, "NODE_CONFLICT");
-  // 跨类型且 source 带子树 → 拒绝并引导先移动(issue #27:类型按深度推导,
-  // 子树嫁接到不同深度会整段类型漂移,故带子树的跨层级合并仍不允许)
+  // 跨深度且 source 带子树 → 拒绝并引导先移动(issue #30 PR A:类型检查已换成
+  // 纯结构规则,子树挂靠到不同深度会整体改变其层级结构,故仍不允许)
   await ensurePath(t3.deps, ["杂物间", "架子", "盒子"]);
-  var crossTypeSubtree = await locHandler(
+  var crossDepthSubtree = await locHandler(
     { action: "merge", source_node_id: g3.nodes[1].location_id, target_node_id: g3.nodes[0].location_id },
     t3.deps
   );
-  assert.equal(crossTypeSubtree.error, "INVALID_INPUT");
+  assert.equal(crossDepthSubtree.error, "INVALID_INPUT");
   assert.ok(
-    (crossTypeSubtree.message || "").indexOf("层级不同") !== -1,
-    "跨类型带子树应引导先移动,实际 " + crossTypeSubtree.message
+    (crossDepthSubtree.message || "").indexOf("层级不同") !== -1,
+    "跨深度带子树应引导先移动,实际 " + crossDepthSubtree.message
   );
   var nested = await ensurePath(t3.deps, ["书房", "桌子", "抽屉", "蓝色盒子"]);
   var toDescendant = await locHandler(
@@ -1371,6 +1377,65 @@ test("TS-MG2:跨层级叶子合并——根层「冰箱」(room)并入「书房/
     return d._id === targetId;
   });
   assert.equal(targetNode.type, "furniture", "target 自身类型不受影响");
+});
+
+test("TS-MG3:merge 纯结构规则(issue #30 PR A)——同 type 跨深度带子树拒绝;容器层叶子跨深度允许;同深度带子树允许", async function () {
+  var t = fresh();
+  // 同 type(container)但不同深度:source 深度 5 带直接子节点,target 深度 3——
+  // 旧「同类型」规则(depth≥3 一律 container)会放行,结构规则按 path.length 拒绝
+  var src = await ensurePath(t.deps, ["走廊", "柜子", "第一层", "第二格", "盒子A", "盒中盒"]);
+  var tgt = await ensurePath(t.deps, ["书房", "桌子", "抽屉"]);
+  var srcId = src.nodes[4].location_id;
+  var tgtId = tgt.nodes[2].location_id;
+  assert.equal(src.nodes[4].type, "container");
+  assert.equal(tgt.nodes[2].type, "container", "前置:两者 type 相同(均为 container)");
+  var rejected = await locHandler(
+    { action: "merge", source_node_id: srcId, target_node_id: tgtId },
+    t.deps
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, "INVALID_INPUT");
+  assert.ok(
+    (rejected.message || "").indexOf("层级不同") !== -1,
+    "结构规则应引导先移动,实际 " + rejected.message
+  );
+  var nodes = await rawDocs(t.db, "locations");
+  assert.ok(
+    nodes.some(function (d) {
+      return d._id === srcId;
+    }),
+    "拒绝时 source 不动"
+  );
+
+  // 叶子(无直接子节点)跨深度 → 允许:深度 3 的冷冻层并入深度 4 的门上格
+  var leaf = await ensurePath(t.deps, ["厨房", "冰箱", "冷冻层"]);
+  var deepTarget = await ensurePath(t.deps, ["厨房", "冰箱", "保鲜层", "门上格"]);
+  var leafMerge = await locHandler(
+    { action: "merge", source_node_id: leaf.nodes[2].location_id, target_node_id: deepTarget.nodes[3].location_id },
+    t.deps
+  );
+  assert.equal(leafMerge.ok, true, JSON.stringify(leafMerge));
+  var afterLeaf = await rawDocs(t.db, "locations");
+  assert.equal(
+    afterLeaf.some(function (d) {
+      return d._id === leaf.nodes[2].location_id;
+    }),
+    false,
+    "叶子 source 照常硬删"
+  );
+
+  // 同深度带子树 → 允许(现行为不变):带衣柜的储藏室并入同深度的杂物间
+  var withChild = await ensurePath(t.deps, ["储藏室", "架子"]);
+  var flat = await ensurePath(t.deps, ["杂物间"]);
+  var sameDepth = await locHandler(
+    { action: "merge", source_node_id: withChild.nodes[0].location_id, target_node_id: flat.nodes[0].location_id },
+    t.deps
+  );
+  assert.equal(sameDepth.ok, true, JSON.stringify(sameDepth));
+  var shelf = (await rawDocs(t.db, "locations")).find(function (d) {
+    return d._id === withChild.nodes[1].location_id;
+  });
+  assert.equal(shelf.parent_id, flat.nodes[0].location_id, "同深度子树照常挂靠 target");
 });
 
 test("TS-DL:delete 空节点保护;force 拦截有物品子树;空分支整支删;删后重建;home 根拒绝;补偿摘除", async function () {
@@ -1584,6 +1649,83 @@ test("TS-MV:move 到自身/后代 NODE_CONFLICT;超深 INVALID_INPUT;成功后 p
     t.deps
   );
   assert.equal(moveHome.error, "INVALID_INPUT");
+});
+
+// ---------- TS-ROOT:home 根五动作保护(issue #30 PR A:判定改 parent_id) ----------
+
+test("TS-ROOT:home 根五动作仍拒(parent_id 判根);type 漂移不改变判根结果", async function () {
+  var t = fresh();
+  var tree = await ensurePath(t.deps, ["书房", "桌子"]);
+  var studyId = tree.nodes[0].location_id;
+  var homeList = await locHandler({ action: "list" }, t.deps);
+  var homeId = homeList.node.location_id;
+  var item = await createItem(t.deps, "op-root-1", "充电宝", "书房桌子");
+
+  // 五动作逐一拒绝:rename / move(自身被移 & 作新父)/ merge(作 source & 作 target)/
+  // delete / linkItem(挂到根)——判定换成 parent_id==="" 后行为不变
+  assert.equal((await locHandler({ action: "rename", node_id: homeId, name: "新家" }, t.deps)).error, "INVALID_INPUT");
+  assert.equal((await locHandler({ action: "move", node_id: homeId, new_parent_id: studyId }, t.deps)).error, "INVALID_INPUT");
+  assert.equal((await locHandler({ action: "move", node_id: studyId, new_parent_id: homeId }, t.deps)).error, "INVALID_INPUT");
+  assert.equal((await locHandler({ action: "merge", source_node_id: homeId, target_node_id: studyId }, t.deps)).error, "INVALID_INPUT");
+  assert.equal((await locHandler({ action: "merge", source_node_id: studyId, target_node_id: homeId }, t.deps)).error, "INVALID_INPUT");
+  assert.equal((await locHandler({ action: "delete", node_id: homeId, force: true }, t.deps)).error, "INVALID_INPUT");
+  assert.equal(
+    (await locHandler(
+      { action: "linkItem", item_id: item.item.item_id, node_id: homeId, expected_version: 1, update_id: "u-root-1" },
+      t.deps
+    )).error,
+    "INVALID_INPUT",
+    "物品不允许直接挂 home 根"
+  );
+
+  // 结构判根正向:注入 parent_id="" 但 type 漂移为 room 的异常根 → 保护仍生效
+  var anomRootId = "lc_seed_anomalous_root";
+  await t.db.collection("locations").add({
+    data: {
+      _id: anomRootId,
+      household_id: t.deps.householdId,
+      parent_id: "",
+      name: "旧入口",
+      name_norm: normalizeName("旧入口"),
+      type: "room",
+      path: [],
+      created_from: "seed",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    }
+  });
+  assert.equal(
+    (await locHandler({ action: "rename", node_id: anomRootId, name: "新入口" }, t.deps)).error,
+    "INVALID_INPUT",
+    "parent_id 为空即根,type=room 不放行"
+  );
+  assert.equal((await locHandler({ action: "delete", node_id: anomRootId, force: true }, t.deps)).error, "INVALID_INPUT");
+
+  // 反向:type 不再参与判定——普通节点 type 被漂移写成 home,动作照常可用
+  var anomChildId = "lc_seed_home_typed_child";
+  await t.db.collection("locations").add({
+    data: {
+      _id: anomChildId,
+      household_id: t.deps.householdId,
+      parent_id: studyId,
+      name: "飘窗",
+      name_norm: normalizeName("飘窗"),
+      type: "home",
+      path: ["书房", "飘窗"],
+      created_from: "seed",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    }
+  });
+  var renamed = await locHandler({ action: "rename", node_id: anomChildId, name: "窗台" }, t.deps);
+  assert.equal(renamed.ok, true, "type=home 但 parent_id 非空:不是根,rename 可用");
+  var moved = await locHandler({ action: "move", node_id: anomChildId, new_parent_id: tree.nodes[1].location_id }, t.deps);
+  assert.equal(moved.ok, true, "同上,move 可用");
+  var linked = await locHandler(
+    { action: "linkItem", item_id: item.item.item_id, node_id: anomChildId, expected_version: 1, update_id: "u-root-2" },
+    t.deps
+  );
+  assert.equal(linked.ok, true, "同上,linkItem 目标校验可用");
 });
 
 // ---------- TS-ISO:跨家庭隔离 ----------
@@ -2338,11 +2480,12 @@ test("TS-LOC6:父级下无同根孩子时不越房间建议——卧室为空房
   }
 });
 
-test("TS-LOC7:类型不符不列候选——既有同名节点 type 异常时不自动列为候选", async function () {
+test("TS-LOC7:建议不再受 type 影响——既有节点 type 异常(历史漂移数据)仍列候选(issue #30 PR A)", async function () {
   var t = fresh();
   var bedTree = await ensurePath(t.deps, ["卧室"]);
   var bedId = bedTree.nodes[0].location_id;
-  // 直接注入历史异常数据:深度 2 的节点 type 却是 container(正常按深度应为 furniture)
+  // 直接注入历史异常数据:深度 2 的节点 type 却是 container(正常按深度应为 furniture)——
+  // move 不重算 type 的漂移残留;issue #30 后 type 不参与任何业务判定
   var anomalyId = "lc_seed_type_anomaly";
   await t.db.collection("locations").add({
     data: {
@@ -2352,13 +2495,14 @@ test("TS-LOC7:类型不符不列候选——既有同名节点 type 异常时不
       name: "桌上",
       name_norm: normalizeName("桌上"),
       type: "container",
-      path: ["我的家", "卧室"],
+      path: ["卧室", "桌上"],
       created_from: "seed",
       created_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z"
     }
   });
 
+  // 路径一(下钻同名自动补全):同名同父即候选,异常 type 不再拦截
   var mock = seqMock([
     parseRaw([
       { name: "卧室", type: "room", confidence: 0.95 },
@@ -2370,13 +2514,79 @@ test("TS-LOC7:类型不符不列候选——既有同名节点 type 异常时不
     Object.assign({}, t.deps, { callLLM: mock.callLLM })
   );
   assert.equal(res.ok, true);
+  var auto = res.parse.merge_suggestions.filter(function (s) {
+    return s.segment_index === 1;
+  });
   assert.equal(
-    res.parse.merge_suggestions.filter(function (s) {
-      return s.segment_index === 1;
-    }).length,
-    0,
-    "同名同父但类型不一致:不得自动列为候选:" + JSON.stringify(res.parse.merge_suggestions)
+    auto.length,
+    1,
+    "同名同父即候选,type 异常不拦截:" + JSON.stringify(res.parse.merge_suggestions)
   );
+  assert.equal(auto[0].existing_location_id, anomalyId);
+  assert.equal(auto[0].reason, "同名");
+
+  // 路径二(模型建议):候选匹配只看父节点+名字,异常 type 不再拦截
+  var mock2 = seqMock([
+    parseRaw(
+      [
+        { name: "卧室", type: "room", confidence: 0.95 },
+        { name: "柜子", type: "furniture", confidence: 0.9 }
+      ],
+      [{ segment_index: 1, name: "桌上", reason: "近义" }]
+    )
+  ]);
+  var res2 = await locHandler(
+    { action: "parseLocation", text: "遥控器在卧室柜子" },
+    Object.assign({}, t.deps, { callLLM: mock2.callLLM })
+  );
+  assert.equal(res2.ok, true);
+  var byModel = res2.parse.merge_suggestions.filter(function (s) {
+    return s.segment_index === 1;
+  });
+  assert.equal(
+    byModel.length,
+    1,
+    "模型建议匹配不看 type:" + JSON.stringify(res2.parse.merge_suggestions)
+  );
+  assert.equal(byModel[0].existing_location_id, anomalyId);
+
+  // 路径三(可比名近义):候选 type 与段深度派生值不一致,仍给确定性近义建议
+  var anomaly2Id = "lc_seed_type_anomaly2";
+  await t.db.collection("locations").add({
+    data: {
+      _id: anomaly2Id,
+      household_id: t.deps.householdId,
+      parent_id: bedId,
+      name: "柜子",
+      name_norm: normalizeName("柜子"),
+      type: "room",
+      path: ["卧室", "柜子"],
+      created_from: "seed",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z"
+    }
+  });
+  var mock3 = seqMock([
+    parseRaw([
+      { name: "卧室", type: "room", confidence: 0.95 },
+      { name: "柜子里", type: "furniture", confidence: 0.9 }
+    ])
+  ]);
+  var res3 = await locHandler(
+    { action: "parseLocation", text: "钥匙在卧室柜子里" },
+    Object.assign({}, t.deps, { callLLM: mock3.callLLM })
+  );
+  assert.equal(res3.ok, true);
+  var near = res3.parse.merge_suggestions.filter(function (s) {
+    return s.reason === "近义" && s.segment_index === 1;
+  });
+  assert.equal(
+    near.length,
+    1,
+    "可比名近义不受 type 影响:" + JSON.stringify(res3.parse.merge_suggestions)
+  );
+  assert.equal(near[0].existing_location_id, anomaly2Id);
+  assert.equal(near[0].existing_name, "柜子");
 });
 
 test("TS-SCAN2:同义组同父终检——跨父不建组(卧室/桌上 vs 书房/桌子);同父保留(卧室内 桌上/桌子)", async function () {

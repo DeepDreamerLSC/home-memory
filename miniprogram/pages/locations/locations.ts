@@ -89,7 +89,7 @@ Page<
     nodeId: string;
     /** 当前节点的完整 path(根层为空数组);手动添加子位置时作前缀 */
     nodePath: string[];
-    /** 选择模式的类型过滤(空串 = 不限;merge 只列同 type) */
+    /** 选择模式的类型参数(仅保留 URL 透传结构;已不据此过滤,issue #30 PR A) */
     pickType: string;
     /** 选择模式排除的子树(exclude 节点 path + 自身名 join "/"),空串 = 无排除 */
     pickExcludePath: string;
@@ -318,10 +318,8 @@ Page<
             disabledReason = "不能选它自己";
           }
         }
-        if (!disabled && this.pickType && c.type !== this.pickType) {
-          disabled = true;
-          disabledReason = "类型不同,不能合并到这里";
-        }
+        // 不再按 type 过滤(issue #30 PR A):跨层级选择交给服务端结构规则裁决
+        // (叶子跨层允许、带子树跨深度拒绝),选择器不做类型预筛。
       }
       const parts: string[] = [];
       if (c.item_count > 0) {
@@ -441,10 +439,7 @@ Page<
         return;
       }
     }
-    if (this.pickType && this.data.currentNodeType !== this.pickType) {
-      wx.showToast({ title: "类型不同,不能合并到这里", icon: "none" });
-      return;
-    }
+    // 不再按 type 校验(issue #30 PR A):跨层级选择交给服务端结构规则裁决。
     this.finishPick({
       location_id: this.data.currentNodeId,
       name: this.data.currentNodeName,
@@ -554,7 +549,7 @@ Page<
     }
   },
 
-  /** 合并重复节点:只列同类型位置;source 自己与其子树不可选 */
+  /** 合并重复节点:不做类型过滤;source 自己与其子树不可选 */
   mergeNode(node) {
     wx.showModal({
       title: "合并重复位置",
@@ -566,13 +561,11 @@ Page<
         if (!r.confirm) {
           return;
         }
-        // 叶子位置放开跨层级合并(issue #27:同一实物在不同深度的重复,如根层「冰箱」
-        // 与「书房/冰箱」);带子位置仍限同类型(服务端同款约束),避免子树类型漂移。
+        // 选择器不再按 type 预筛(issue #30 PR A):叶子跨层级合并允许(issue #27),
+        // 带子树的跨深度合并由服务端结构规则拒绝并引导先移动。
         this.openPicker(
           "把「" + node.name + "」并进…",
-          node.child_count > 0
-            ? { type: node.type, excludePath: node.path.join("/") }
-            : { excludePath: node.path.join("/") },
+          { excludePath: node.path.join("/") },
           (picked) => {
             void this.doMerge(node, picked.location_id);
           },

@@ -48,6 +48,15 @@ function isString(v) {
   return typeof v === "string";
 }
 
+/**
+ * home 根判定(issue #30 PR A):结构化判根——parent_id 为空串的唯一节点
+ * (ensureHomeRoot 保证)。不再读取 type 字段:type 由深度派生、move 不重算,
+ * 存量文档的 type 已可漂移,只有 parent_id 才是可靠的结构事实。
+ */
+function isHomeRoot(node) {
+  return node.parent_id === "";
+}
+
 function codePointLength(s) {
   return Array.from(s).length;
 }
@@ -554,7 +563,7 @@ async function renameAction(event, deps) {
   if (!node) {
     return fail("NOT_FOUND");
   }
-  if (node.type === "home") {
+  if (isHomeRoot(node)) {
     return fail("INVALID_INPUT");
   }
   var nodes = await fetchHouseholdNodes(deps);
@@ -593,7 +602,7 @@ async function moveAction(event, deps) {
   if (!newParent) {
     return fail("NOT_FOUND");
   }
-  if (node.type === "home" || newParent.type === "home") {
+  if (isHomeRoot(node) || isHomeRoot(newParent)) {
     return fail("INVALID_INPUT");
   }
   var nodes = await fetchHouseholdNodes(deps);
@@ -731,7 +740,7 @@ async function mergeAction(event, deps) {
   if (source._id === target._id) {
     return fail("NODE_CONFLICT");
   }
-  if (source.type === "home" || target.type === "home") {
+  if (isHomeRoot(source) || isHomeRoot(target)) {
     return fail("INVALID_INPUT"); // home 根不可合并(§1.1)
   }
   var nodes = await fetchHouseholdNodes(deps);
@@ -739,10 +748,12 @@ async function mergeAction(event, deps) {
     return fail("NODE_CONFLICT"); // target 是 source 的后代
   }
   var sourceChildren = tree.directChildren(nodes, source._id);
-  if (source.type !== target.type && sourceChildren.length > 0) {
-    // 类型按深度推导,「同类型」=「同深度」:同一实物在不同深度的重复(根层「冰箱」vs
-    // 「书房/冰箱」)永远同不了型。叶子 source 放开跨类型合并——只重挂物品、删 source,
-    // 不产生子树类型漂移;source 带子树仍拒绝并引导先移动(issue #27)。
+  if (sourceChildren.length > 0 && source.path.length !== target.path.length) {
+    // 纯结构规则(issue #30 PR A,替代 PR #28 的类型检查;path 可能为空数组——根,
+    // 但根已在上方 isHomeRoot 拦截,这里按 path.length 比较深度):source 带直接子节点
+    // 且与 target 不同深度 → 拒绝,子树嫁接到不同深度会整体改变其层级结构,引导先移动;
+    // 叶子 source(无直接子节点)任意深度允许——只重挂物品、删 source,不移动任何子树
+    // (issue #27);同深度带子树允许——子树随挂靠仅换同层前缀,结构不变。
     return fail(
       "INVALID_INPUT",
       "两者层级不同,不能直接合并;可先把「" + source.name + "」移动到与目标同级,或把它里面的位置移走后再合并"
@@ -827,7 +838,7 @@ async function deleteAction(event, deps) {
   if (!node) {
     return fail("NOT_FOUND");
   }
-  if (node.type === "home") {
+  if (isHomeRoot(node)) {
     return fail("INVALID_INPUT");
   }
   var nodes = await fetchHouseholdNodes(deps);
@@ -910,7 +921,7 @@ async function linkItemAction(event, deps) {
   if (!node) {
     return fail("NOT_FOUND");
   }
-  if (node.type === "home") {
+  if (isHomeRoot(node)) {
     return fail("INVALID_INPUT"); // 物品不允许直接挂在 home 根上(§1.1)
   }
   var item = await itemsCol(deps)
