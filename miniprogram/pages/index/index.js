@@ -10,7 +10,7 @@ const locations_cache_1 = require("../../utils/locations-cache");
 function toDisplayItems(items) {
     return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at) }));
 }
-/** 确认日期短文案(如 10-08);非法时间如实返回空串 */
+/** 记录更新日期短文案(如 10-08;updated_at 不代表位置确认时间);非法时间如实返回空串 */
 function shortDate(iso) {
     const t = Date.parse(iso);
     if (Number.isNaN(t)) {

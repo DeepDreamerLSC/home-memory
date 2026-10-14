@@ -12,7 +12,7 @@ function safeDecode(s) {
         return s;
     }
 }
-/** 确认日期短文案(如 10-08,与首页一致);非法时间如实返回空串 */
+/** 记录更新日期短文案(如 10-08,与首页一致;updated_at 不代表位置确认时间);非法时间如实返回空串 */
 function shortDate(iso) {
     const t = Date.parse(iso);
     if (Number.isNaN(t)) {
@@ -146,6 +146,8 @@ Page({
             location: s.location_text,
             note: s.note,
         };
+        // PR #48 复审 B2:updated_at 在名称/备注/位置任意修改时都会刷新,不能冒充
+        // 「位置确认时间」——文案只如实说明记录更新时间
         const short = shortDate(s.updated_at);
         this.setData({
             itemId: s.item_id,
@@ -155,9 +157,9 @@ Page({
             version: s.version,
             updatedAtText: (0, api_1.formatDateTime)(s.updated_at),
             lastConfirmedText: short
-                ? "上次确认 " + short
+                ? "记录更新于 " + short
                 : s.updated_at
-                    ? "更新于 " + (0, api_1.formatDateTime)(s.updated_at)
+                    ? "记录更新于 " + (0, api_1.formatDateTime)(s.updated_at)
                     : "",
         });
     },

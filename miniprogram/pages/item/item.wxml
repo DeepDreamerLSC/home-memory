@@ -1,5 +1,5 @@
 <view class="page page-with-voice-bar">
-  <!-- 先答案:物品名 + 上次确认时间;操作全收进「⋯」 -->
+  <!-- 先答案:物品名 + 记录更新时间;操作全收进「⋯」 -->
   <view class="detail-head">
     <view class="detail-title">
       <view class="pagetitle">{{ name }}</view>

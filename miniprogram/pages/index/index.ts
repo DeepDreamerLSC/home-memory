@@ -33,7 +33,7 @@ type DisplayRoom = {
   countText: string;
 };
 
-/** 用于渲染的物品条目(附确认日期短文案,H1b 结果与容器条目共用) */
+/** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用) */
 type DisplayItem = ItemSummary & { updated_at_short: string };
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
@@ -46,7 +46,7 @@ function toDisplayItems(items: ItemSummary[]): DisplayItem[] {
   return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at) }));
 }
 
-/** 确认日期短文案(如 10-08);非法时间如实返回空串 */
+/** 记录更新日期短文案(如 10-08;updated_at 不代表位置确认时间);非法时间如实返回空串 */
 function shortDate(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) {

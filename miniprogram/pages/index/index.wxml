@@ -135,7 +135,7 @@
               <view class="item-icon">{{ item.name[0] }}</view>
               <view class="item-main">
                 <view class="item-name">{{ item.name }}</view>
-                <view class="item-location">{{ item.location_text }} · 上次确认 {{ item.updated_at_short }}</view>
+                <view class="item-location">{{ item.location_text }} · 记录更新于 {{ item.updated_at_short }}</view>
               </view>
               <view class="chevron">›</view>
             </view>
