@@ -12,6 +12,12 @@
  * ④ 未完成批次三选门:继续核对上一批 / 放弃上一批(二次确认)/ 中止;
  * ⑤ 授权被拒选「用文字」:回退只路由给发起按压的宿主;
  * ⑥ 单例广播:多宿主同报状态,detach 后不再收。
+ *
+ * B1 回归(PR #48 复审,deferred promise 控制提取时序):
+ * ⑦ 提取在途切到别的家庭(A→B):迟到结果丢弃——不建草稿、不跳页、如实提示;
+ * ⑧ A→B→A 回切同样丢弃(以发起时的作用域代数为准,不以家庭 id 相等放行);
+ * ⑨ 发起页面失效(invalidate)后提取返回:同样丢弃;
+ * ⑩ 正常路径(未切换)仍建草稿跳确认页,提示链路不误伤。
  */
 
 var test = require("node:test");
@@ -19,6 +25,7 @@ var assert = require("node:assert/strict");
 
 var voiceEntry = require("../miniprogram/utils/voice-entry");
 var draftSession = require("../miniprogram/utils/draft-session");
+var householdScope = require("../miniprogram/utils/household-scope");
 
 /* ---------------- wx 桩 ---------------- */
 
@@ -30,12 +37,20 @@ function makeWxStub(opts) {
   var sheets = [];
   var navs = [];
   var cloudCalls = [];
+  var pendingCloud = [];
   var stub = {
     toasts: toasts,
     modals: modals,
     sheets: sheets,
     navs: navs,
     cloudCalls: cloudCalls,
+    /** 手动放行一笔挂起的提取调用(deferExtract 时序控制用) */
+    resolveExtract: function (result) {
+      var o = pendingCloud.shift();
+      if (o) {
+        o.success({ result: result || defaultExtractResult() });
+      }
+    },
     wx: {
       getStorageSync: function (k) { return storage.has(k) ? storage.get(k) : ""; },
       setStorageSync: function (k, v) { storage.set(k, v); },
@@ -58,6 +73,10 @@ function makeWxStub(opts) {
       cloud: {
         callFunction: function (o) {
           cloudCalls.push(o);
+          if (opts.deferExtract) {
+            pendingCloud.push(o); // 挂起等测试手动放行(控制提取在途的时序)
+            return;
+          }
           o.success({ result: opts.extractResult || defaultExtractResult() });
         },
       },
@@ -311,4 +330,126 @@ test("⑥ 单例广播:多宿主同报状态;detach 后不再收", async functio
   var aAfterDetach = hostA.states.filter(function (s) { return s.partialText === "降压药在厨房第二个抽屉"; }).length;
   assert.equal(aAfterDetach > 0, true, "仍在挂的宿主照常收到转写结果");
   handleA.detach();
+});
+
+/* ---------------- B1 回归:提取在途的家庭切换 / 页面失效 ---------------- */
+
+/** toast 文案汇总(断言用) */
+function toastTitles(stub) {
+  return stub.toasts.map(function (t) { return t.title; }).join("|");
+}
+
+/** 语音链路推进到「提取在途」:按住→录音→松手→转写返回(deferred,提取已发出未返回) */
+async function pressUntilExtractPending(ctx, handle) {
+  await pressAndWait(handle, 500);
+  ctx.deps.recorder.__fireStart();
+  handle.pressEnd();
+  ctx.deps.recorder.__fireStop({ tempFilePath: "/tmp/a.mp3" });
+  await settle();
+  assert.equal(ctx.stub.cloudCalls.length, 1, "有效转写应已发出提取请求");
+}
+
+test("⑦ B1:语音提取在途切到别的家庭(A→B),迟到结果丢弃:不建草稿、不跳页、如实提示", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup({ deferExtract: true });
+    householdScope.captureHouseholdId("hh_family_a"); // 语音在家庭 A 发起
+    var handle = voiceEntry.attachVoiceEntry(makeHost("家庭页"));
+    await pressUntilExtractPending(ctx, handle);
+
+    householdScope.captureHouseholdId("hh_family_b"); // AI 提取在途,家里切到 B
+    ctx.stub.resolveExtract();
+    await settle();
+
+    assert.equal(ctx.stub.navs.length, 0, "迟到结果不得跳确认页");
+    assert.equal(
+      draftSession.getUnfinishedDraftSession(), null,
+      "不得在切换后的家庭 B 出现新草稿/恢复入口"
+    );
+    householdScope.captureHouseholdId("hh_family_a");
+    assert.equal(
+      draftSession.getUnfinishedDraftSession(), null,
+      "发起家庭 A 的命名空间同样不得出现迟到草稿"
+    );
+    var toasts = toastTitles(ctx.stub);
+    assert.ok(toasts.indexOf("家里刚切换过") !== -1, "应如实提示家里刚切换过:" + toasts);
+    assert.ok(toasts.indexOf("没记住") !== -1, "提示应说明这次没记住:" + toasts);
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});
+
+test("⑧ B1:A→B→A 回切同样丢弃(以发起时的作用域代数为准,不以家庭 id 相等放行)", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup({ deferExtract: true });
+    householdScope.captureHouseholdId("hh_family_a");
+    var handle = voiceEntry.attachVoiceEntry(makeHost("家庭页"));
+    await pressUntilExtractPending(ctx, handle);
+
+    householdScope.captureHouseholdId("hh_family_b");
+    householdScope.captureHouseholdId("hh_family_a"); // 又切回 A:家庭 id 与发起时相同
+    ctx.stub.resolveExtract();
+    await settle();
+
+    assert.equal(ctx.stub.navs.length, 0, "家庭 id 虽回到发起时的 A,但期间切换过,不得跳页");
+    assert.equal(
+      draftSession.getUnfinishedDraftSession(), null,
+      "回切后不得以「家庭 id 相等」放行建草稿"
+    );
+    var toasts = toastTitles(ctx.stub);
+    assert.ok(toasts.indexOf("家里刚切换过") !== -1, "应如实提示家里刚切换过:" + toasts);
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});
+
+test("⑨ B1:发起页面失效(invalidate)后提取返回,同样丢弃", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup({ deferExtract: true });
+    householdScope.captureHouseholdId("hh_family_a");
+    var handle = voiceEntry.attachVoiceEntry(makeHost("家庭页"));
+    await pressUntilExtractPending(ctx, handle);
+
+    handle.invalidate(); // 发起页面 hide/unload:在途提取的落盘/跳页副作用一并作废
+    ctx.stub.resolveExtract();
+    await settle();
+
+    assert.equal(ctx.stub.navs.length, 0, "页面失效后不得跳确认页");
+    assert.equal(draftSession.getUnfinishedDraftSession(), null, "页面失效后不得建草稿");
+    var toasts = toastTitles(ctx.stub);
+    assert.ok(toasts.indexOf("没记住") !== -1, "应给一句如实提示(这次没记住):" + toasts);
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});
+
+test("⑩ B1:正常路径(家庭未切换)提取返回仍建草稿跳确认页,不误伤", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup({ deferExtract: true });
+    householdScope.captureHouseholdId("hh_family_a");
+    var handle = voiceEntry.attachVoiceEntry(makeHost("家庭页"));
+    await pressUntilExtractPending(ctx, handle);
+
+    ctx.stub.resolveExtract(); // 提取期间家庭未切换
+    await settle();
+
+    assert.equal(ctx.stub.navs.length, 1, "正常路径应照常跳确认页");
+    assert.ok(
+      ctx.stub.navs[0].indexOf("/pages/confirm/confirm?sid=") === 0,
+      "跳转确认页且携带会话 id:" + ctx.stub.navs[0]
+    );
+    var unfinished = draftSession.getUnfinishedDraftSession();
+    assert.ok(unfinished !== null, "草稿建在发起家庭 A 的命名空间,恢复入口照常");
+    assert.equal(unfinished.payload.drafts.length, 1, "默认提取结果为单件");
+    assert.equal(toastTitles(ctx.stub).indexOf("没记住"), -1, "正常路径不得出现丢弃提示");
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
 });

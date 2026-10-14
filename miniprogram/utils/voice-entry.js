@@ -16,6 +16,12 @@
  * - 未完成批次三选门(继续核对上一批 / 放弃上一批 / 中止)+ 放弃二次确认;
  * - 提取(v2 多件 / needs_split 防御 / v1 单草稿兜底)→ 跳确认页。
  *
+ * 家庭一致性(PR #48 复审 B1):语音从按下、转写到提取响应全程绑定发起时的
+ * 作用域代数(captureScopeGeneration);转写到达与提取返回后、写草稿或跳确认页
+ * 之前逐级显式复核——代数变化(创建/加入/退出/被移除/解散/漂移复核,均经
+ * 既有 verifyHouseholdScope/capture 系列递增同一代数)或发起页面已失效
+ * (invalidate)即丢弃迟到结果:不建新家庭草稿、不导航,只给一句如实提示。
+ *
  * 宿主要务:触摸四事件转 pressStart/pressMove/pressEnd/pressCancel;
  * 页面 onHide/组件所在页 hide 调 invalidate;卸载时 detach;
  * 录音授权被拒选「用文字」经 fallbackToText 回退(首页=切文字模式,
@@ -28,6 +34,11 @@ exports.__resetVoiceEntryForTest = __resetVoiceEntryForTest;
 const api_1 = require("./api");
 const voice_1 = require("./voice");
 const draft_session_1 = require("./draft-session");
+const household_scope_1 = require("./household-scope");
+/** 家庭切换后丢弃迟到结果的如实提示(用户词汇,不带开发术语) */
+const STALE_SCOPE_TOAST = "家里刚切换过,这次没记住,再说一次就好";
+/** 发起页面失效后丢弃迟到结果的如实提示 */
+const STALE_PAGE_TOAST = "刚离开说话的页面,这次没记住,再说一次就好";
 /** 默认跳确认页(与原 index goToConfirm 一致:失败如实 toast) */
 function defaultGoConfirm(url) {
     wx.navigateTo({
@@ -61,6 +72,28 @@ let presser = null;
 const hosts = new Set();
 /** 语音控制器依赖工厂(默认生产依赖;测试可注入) */
 let depsFactory = voice_1.createDefaultVoiceDeps;
+/** 本次按压的发起绑定(pressStart 捕获;onStop 转交提取链路) */
+let pressBinding = null;
+/** 提取作废代数:invalidate(页面 hide/unload)递增,作废在途提取的落盘/跳页副作用 */
+let extractAbortEpoch = 0;
+/**
+ * 发起绑定是否仍有效(null=有效):发起后家庭切换过(作用域代数变化,含
+ * verifyHouseholdScope 漂移复核揭示的异地切换)或发起页面已失效。
+ * 返回值为给用户的如实提示文案。
+ */
+function staleBindingReason(b) {
+    if (!(0, household_scope_1.isScopeGenerationCurrent)(b.scopeGen)) {
+        return STALE_SCOPE_TOAST;
+    }
+    if (b.abortEpoch !== extractAbortEpoch) {
+        return STALE_PAGE_TOAST;
+    }
+    return null;
+}
+/** 绑定失效(迟到结果)的统一处置:不建草稿不导航,只给一句如实提示 */
+function dropStaleExtract(b) {
+    wx.showToast({ title: staleBindingReason(b) || STALE_SCOPE_TOAST, icon: "none", duration: 2500 });
+}
 /** 状态变更通知(等价于原页面逐次 setData;单宿主异常不殃及其他宿主) */
 function patch(next) {
     state = { ...state, ...next };
@@ -111,7 +144,14 @@ function ensureVoiceCtrl() {
             if (presser !== null && presser.onTranscript) {
                 presser.onTranscript(text);
             }
-            void actions.extract(text);
+            // 转写到达先复核发起绑定:按下后家庭切换过(或发起页面已失效),
+            // 这句话不属于现在的家庭,不进提取——迟到的语音绝不落进新家庭的草稿
+            const binding = pressBinding;
+            if (binding !== null && staleBindingReason(binding) !== null) {
+                dropStaleExtract(binding);
+                return;
+            }
+            void extractText(text, binding);
         },
         onError: (code, message) => {
             clearRecordTimer();
@@ -159,7 +199,13 @@ function confirmDiscardDraft() {
         });
     });
 }
-async function extractText(text) {
+/**
+ * 文字/语音共用的提取链路。binding = 语音按压时的发起绑定;null(文字直提)
+ * 在入口捕获此刻的代数。每个异步步骤(三选门弹窗/放弃确认/AI 提取)回来后、
+ * 任何写草稿或跳页副作用之前显式复核绑定:家庭切换或发起页面失效 → 丢弃
+ * 迟到结果(不建草稿、不导航),只给一句如实提示。
+ */
+async function extractText(text, binding = null) {
     const trimmed = text.trim();
     if (!trimmed) {
         wx.showToast({ title: "请先输入一句话", icon: "none" });
@@ -168,9 +214,15 @@ async function extractText(text) {
     if (state.extracting) {
         return;
     }
+    const bind = binding !== null ? binding : { scopeGen: (0, household_scope_1.captureScopeGeneration)(), abortEpoch: extractAbortEpoch };
     const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
     if (unfinished !== null) {
         const choice = await askDraftEntryIntent(unfinished.payload.drafts.length);
+        // 弹窗期间家庭可能已切换:恢复入口属于发起时的家庭,复核不过不跳页
+        if (staleBindingReason(bind) !== null) {
+            dropStaleExtract(bind);
+            return;
+        }
         if (choice === "resume") {
             defaultGoConfirm("/pages/confirm/confirm?sid=" + unfinished.sid);
             return;
@@ -182,11 +234,21 @@ async function extractText(text) {
         if (!(await confirmDiscardDraft())) {
             return;
         }
+        if (staleBindingReason(bind) !== null) {
+            dropStaleExtract(bind);
+            return;
+        }
         (0, draft_session_1.clearDraftSession)(unfinished.sid);
     }
     patch({ extracting: true });
     try {
         const res = await (0, api_1.callExtractDraft)(trimmed, { protocol: 2 });
+        // 提取响应回来:写草稿/跳确认页之前显式复核发起绑定(代数未变且页面未失效),
+        // 复核不过 → 丢弃迟到结果,绝不把语音结果写进切换后的家庭
+        if (staleBindingReason(bind) !== null) {
+            dropStaleExtract(bind);
+            return;
+        }
         if ("drafts" in res) {
             // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
             const sid = (0, draft_session_1.createDraftSession)(res.original_text, res.drafts, res.truncated);
@@ -207,6 +269,12 @@ async function extractText(text) {
         defaultGoConfirm("/pages/confirm/confirm?sid=" + sid);
     }
     catch (e) {
+        // 迟到的失败同样整链作废:不再弹「AI 不可用手动录入」或失败弹窗(那都是
+        // 针对仍有效提取的引导),只给一句如实提示
+        if (staleBindingReason(bind) !== null) {
+            dropStaleExtract(bind);
+            return;
+        }
         if (e instanceof api_1.ApiError && e.code === "AI_UNAVAILABLE") {
             // 契约流程:AI 不可用时征得确认后进入手动录入
             wx.showModal({
@@ -273,6 +341,9 @@ const actions = {
         }
         touchStartY = clientY;
         activeVoiceSession = null;
+        // 发起时捕获绑定:此刻的家庭代数与作废代数,转写/提取响应回来逐级比对,
+        // 期间家庭切换或页面失效 → 迟到结果整链丢弃(B1)
+        pressBinding = { scopeGen: (0, household_scope_1.captureScopeGeneration)(), abortEpoch: extractAbortEpoch };
         ensureVoiceCtrl();
         // 页面级会话号只管「授权异步返回」窗口:松手/切换/离开后授权才返回则不发起录音
         const session = sessionGuard !== null ? sessionGuard.begin() : 0;
@@ -337,6 +408,9 @@ const actions = {
         if (session !== null && voiceCtrl !== null) {
             voiceCtrl.cancel(session);
         }
+        // 同时作废已发出的提取 await:响应回来时不再写草稿、不跳确认页(B1)。
+        // 正常链路的跳页完成后页面才 hide,作废只影响"页面失效时尚在途"的那次提取
+        extractAbortEpoch += 1;
         clearRecordTimer();
         if (state.voiceState !== "idle" || state.transcribing) {
             patch({ voiceState: "idle", transcribing: false, partialText: "" });
@@ -382,13 +456,15 @@ function __setVoiceEntryDepsForTest(factory) {
     depsFactory = factory;
     __resetVoiceEntryForTest();
 }
-/** 测试钩子:复位单例状态(清宿主/计时器/会话;不影响持久草稿会话) */
+/** 测试钩子:复位单例状态(清宿主/计时器/会话/发起绑定;不影响持久草稿会话) */
 function __resetVoiceEntryForTest() {
     clearRecordTimer();
     voiceCtrl = null;
     sessionGuard = (0, voice_1.createSessionGuard)();
     activeVoiceSession = null;
     presser = null;
+    pressBinding = null;
+    extractAbortEpoch = 0;
     hosts.clear();
     state = {
         voiceState: "idle",
