@@ -8,7 +8,7 @@
     <view class="more-inline" bindtap="onMoreTap">⋯</view>
   </view>
 
-  <!-- 只读大卡:空间路径(知道时)+ 原话常显 -->
+  <!-- 只读大卡:空间路径(知道时)+ 原话常显 +「可能已移动」提示(D1 P0 三组成) -->
   <view class="bigcard">
     <view class="bigcard-lbl">上次记在</view>
     <view class="bigcard-loc">
@@ -25,6 +25,7 @@
         </view>
       </view>
     </view>
+    <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
   </view>
 
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->

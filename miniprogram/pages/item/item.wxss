@@ -106,6 +106,14 @@
   color: var(--text-3);
 }
 
+/* 「可能已移动」静态提示(原型 bigcard 内 tiny 句:如实区分上次记录与现在) */
+.bigcard-tiny {
+  margin-top: 18rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
 /* ============ 编辑折叠(展开后=原有表单与保存路径) ============ */
 .fold {
   display: flex;
