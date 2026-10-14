@@ -64,6 +64,7 @@ Page({
     requestSeq: (0, locations_cache_1.createRequestSeq)(),
     renderedCurrentView: false,
     renderedScopeGen: null,
+    queriedScopeGen: null,
     lastFirstUse: true,
     viewStack: [],
     currentNodeId: "",
@@ -73,6 +74,7 @@ Page({
         this.requestSeq = (0, locations_cache_1.createRequestSeq)();
         this.renderedCurrentView = false;
         this.renderedScopeGen = null;
+        this.queriedScopeGen = null;
         this.lastFirstUse = true;
         this.viewStack = [];
         this.currentNodeId = "";
@@ -204,9 +206,16 @@ Page({
         if (this.data.querying) {
             return;
         }
+        // 家庭切换(创建/加入/退出/被移除)会递增作用域代数:查询在途回来时
+        // 家庭已变,旧家庭的结果与失败提示都不上屏(T5:无旧家庭缓存穿透)
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
         this.setData({ querying: true, queryError: "" });
         try {
             const res = await (0, api_1.callItemsApi)({ action: "query", q });
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return; // 查询在途期间家庭已切换:旧家庭结果不上屏
+            }
+            this.queriedScopeGen = scopeGen;
             this.setData({
                 queried: true,
                 queryKeyword: q,
@@ -214,6 +223,10 @@ Page({
             });
         }
         catch (e) {
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return; // 同上:旧家庭的失败提示也不上屏
+            }
+            this.queriedScopeGen = scopeGen;
             this.setData({
                 queried: true,
                 queryKeyword: q,
@@ -233,6 +246,7 @@ Page({
         }
     },
     onCollapseResultsTap() {
+        this.queriedScopeGen = null;
         this.setData({ queried: false, queryKeyword: "", queryResults: [], queryError: "" });
     },
     onResumeTap() {
@@ -265,15 +279,20 @@ Page({
      */
     async loadMapLayer(force, retryOnStaleGen) {
         const scopeGen = (0, household_scope_1.captureScopeGeneration)();
-        if (this.renderedScopeGen !== null &&
-            !(0, household_scope_1.isScopeGenerationCurrent)(this.renderedScopeGen)) {
-            // 家庭已切换(创建/加入/退出/被移除):屏上旧家庭内容立即清空、视图回
-            // 根层,再按当前家庭加载(X1 硬约束:不先显示旧家庭再等纠正)
+        if ((this.renderedScopeGen !== null &&
+            !(0, household_scope_1.isScopeGenerationCurrent)(this.renderedScopeGen)) ||
+            (this.queriedScopeGen !== null &&
+                !(0, household_scope_1.isScopeGenerationCurrent)(this.queriedScopeGen))) {
+            // 家庭已切换(创建/加入/退出/被移除):屏上旧家庭内容立即清空——含
+            // H1b 搜索结果(旧家庭的搜索会整页压住新家庭地图)、视图回根层,再按
+            // 当前家庭加载(X1 硬约束:不先显示旧家庭再等纠正)
             this.viewStack = [];
             this.currentNodeId = "";
             this.currentNodePath = [];
             this.renderedCurrentView = false;
             this.renderedScopeGen = null;
+            this.queriedScopeGen = null;
+            this.lastFirstUse = true;
             this.setData({
                 rooms: [],
                 directItems: [],
@@ -287,6 +306,10 @@ Page({
                 mapStale: false,
                 mapRefreshing: false,
                 mapLoading: true,
+                queried: false,
+                queryKeyword: "",
+                queryResults: [],
+                queryError: "",
             });
         }
         const nodeId = this.viewStack.length > 0
@@ -332,11 +355,14 @@ Page({
             }
             if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
                 // 在途期间家庭切换:旧家庭响应不上屏不写缓存;回根层按新家庭重载
+                //(搜索结果同样按 queriedScopeGen 在入口守卫里一并收起)
                 this.viewStack = [];
                 this.currentNodeId = "";
                 this.currentNodePath = [];
                 this.renderedCurrentView = false;
                 this.renderedScopeGen = null;
+                this.queriedScopeGen = null;
+                this.lastFirstUse = true;
                 this.setData({
                     rooms: [],
                     directItems: [],
@@ -350,6 +376,10 @@ Page({
                     mapStale: false,
                     mapRefreshing: false,
                     mapLoading: true,
+                    queried: false,
+                    queryKeyword: "",
+                    queryResults: [],
+                    queryError: "",
                 });
                 void this.loadMapLayer(false, false);
                 return;
@@ -402,6 +432,7 @@ Page({
         const firstUse = isRoot && rooms.length === 0 && res.items.length === 0 && res.unmounted_count === 0;
         // 首件已记住(H0 → H1):旧的空搜索结果不再挡着地图,自动收起
         if (this.lastFirstUse && !firstUse && this.data.queried) {
+            this.queriedScopeGen = null;
             this.setData({ queried: false, queryKeyword: "", queryResults: [], queryError: "" });
         }
         this.lastFirstUse = firstUse;

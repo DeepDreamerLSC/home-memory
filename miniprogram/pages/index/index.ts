@@ -142,6 +142,8 @@ Page<
     renderedCurrentView: boolean;
     /** 上次上屏时的家庭作用域代数(切换后旧家庭内容先清空再加载) */
     renderedScopeGen: number | null;
+    /** 上次上屏的搜索结果所属家庭作用域代数(H1b 与地图同一防旧覆盖硬约束) */
+    queriedScopeGen: number | null;
     /** 上次上屏是否首用态(检测「首件已记住」的转折,自动收起旧空搜索) */
     lastFirstUse: boolean;
     /** 容器视图栈(本页状态内维护;离开再返回仍停在原层) */
@@ -214,6 +216,7 @@ Page<
   requestSeq: createRequestSeq(),
   renderedCurrentView: false,
   renderedScopeGen: null as number | null,
+  queriedScopeGen: null as number | null,
   lastFirstUse: true,
   viewStack: [] as ViewLayer[],
   currentNodeId: "",
@@ -224,6 +227,7 @@ Page<
     this.requestSeq = createRequestSeq();
     this.renderedCurrentView = false;
     this.renderedScopeGen = null;
+    this.queriedScopeGen = null;
     this.lastFirstUse = true;
     this.viewStack = [];
     this.currentNodeId = "";
@@ -369,15 +373,26 @@ Page<
     if (this.data.querying) {
       return;
     }
+    // 家庭切换(创建/加入/退出/被移除)会递增作用域代数:查询在途回来时
+    // 家庭已变,旧家庭的结果与失败提示都不上屏(T5:无旧家庭缓存穿透)
+    const scopeGen = captureScopeGeneration();
     this.setData({ querying: true, queryError: "" });
     try {
       const res = await callItemsApi({ action: "query", q });
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return; // 查询在途期间家庭已切换:旧家庭结果不上屏
+      }
+      this.queriedScopeGen = scopeGen;
       this.setData({
         queried: true,
         queryKeyword: q,
         queryResults: toDisplayItems(res.items),
       });
     } catch (e) {
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return; // 同上:旧家庭的失败提示也不上屏
+      }
+      this.queriedScopeGen = scopeGen;
       this.setData({
         queried: true,
         queryKeyword: q,
@@ -398,6 +413,7 @@ Page<
   },
 
   onCollapseResultsTap() {
+    this.queriedScopeGen = null;
     this.setData({ queried: false, queryKeyword: "", queryResults: [], queryError: "" });
   },
 
@@ -435,16 +451,21 @@ Page<
   async loadMapLayer(force?: boolean, retryOnStaleGen?: boolean): Promise<void> {
     const scopeGen = captureScopeGeneration();
     if (
-      this.renderedScopeGen !== null &&
-      !isScopeGenerationCurrent(this.renderedScopeGen)
+      (this.renderedScopeGen !== null &&
+        !isScopeGenerationCurrent(this.renderedScopeGen)) ||
+      (this.queriedScopeGen !== null &&
+        !isScopeGenerationCurrent(this.queriedScopeGen))
     ) {
-      // 家庭已切换(创建/加入/退出/被移除):屏上旧家庭内容立即清空、视图回
-      // 根层,再按当前家庭加载(X1 硬约束:不先显示旧家庭再等纠正)
+      // 家庭已切换(创建/加入/退出/被移除):屏上旧家庭内容立即清空——含
+      // H1b 搜索结果(旧家庭的搜索会整页压住新家庭地图)、视图回根层,再按
+      // 当前家庭加载(X1 硬约束:不先显示旧家庭再等纠正)
       this.viewStack = [];
       this.currentNodeId = "";
       this.currentNodePath = [];
       this.renderedCurrentView = false;
       this.renderedScopeGen = null;
+      this.queriedScopeGen = null;
+      this.lastFirstUse = true;
       this.setData({
         rooms: [],
         directItems: [],
@@ -458,6 +479,10 @@ Page<
         mapStale: false,
         mapRefreshing: false,
         mapLoading: true,
+        queried: false,
+        queryKeyword: "",
+        queryResults: [],
+        queryError: "",
       });
     }
     const nodeId = this.viewStack.length > 0
@@ -505,11 +530,14 @@ Page<
       }
       if (!isScopeGenerationCurrent(scopeGen)) {
         // 在途期间家庭切换:旧家庭响应不上屏不写缓存;回根层按新家庭重载
+        //(搜索结果同样按 queriedScopeGen 在入口守卫里一并收起)
         this.viewStack = [];
         this.currentNodeId = "";
         this.currentNodePath = [];
         this.renderedCurrentView = false;
         this.renderedScopeGen = null;
+        this.queriedScopeGen = null;
+        this.lastFirstUse = true;
         this.setData({
           rooms: [],
           directItems: [],
@@ -523,6 +551,10 @@ Page<
           mapStale: false,
           mapRefreshing: false,
           mapLoading: true,
+          queried: false,
+          queryKeyword: "",
+          queryResults: [],
+          queryError: "",
         });
         void this.loadMapLayer(false, false);
         return;
@@ -575,6 +607,7 @@ Page<
       isRoot && rooms.length === 0 && res.items.length === 0 && res.unmounted_count === 0;
     // 首件已记住(H0 → H1):旧的空搜索结果不再挡着地图,自动收起
     if (this.lastFirstUse && !firstUse && this.data.queried) {
+      this.queriedScopeGen = null;
       this.setData({ queried: false, queryKeyword: "", queryResults: [], queryError: "" });
     }
     this.lastFirstUse = firstUse;
