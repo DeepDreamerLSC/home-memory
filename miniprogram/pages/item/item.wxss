@@ -37,8 +37,8 @@
   border-radius: 18rpx;
   font-size: 30rpx;
   font-weight: 800;
-  min-height: 72rpx;
-  min-width: 72rpx;
+  min-height: 88rpx;
+  min-width: 88rpx;
   box-sizing: border-box;
   display: flex;
   align-items: center;

@@ -166,13 +166,15 @@ test("冻结设计基线:wxml 文案与 wxss 取值(--vb-*/安全区/按压反�
   assert.ok(css.indexOf("--vb-hold-bg") !== -1 && css.indexOf("--vb-btn-line") !== -1, "--vb-* 变量组已入 app.wxss");
 });
 
-test("挂载范围:locations/family/item 三页挂载;confirm/join-family 不挂", function () {
+test("挂载范围:locations/family/item 三页挂载;confirm/join-family 不挂;locations 选择模式(picker)不挂", function () {
   ["locations", "family", "item"].forEach(function (p) {
     var cfg = JSON.parse(readPage(p, p + ".json"));
     assert.equal(cfg.usingComponents && cfg.usingComponents["voice-bar"], "/components/voice-bar/voice-bar", p + " 页应挂载语音条");
-    assert.ok(readPage(p, p + ".wxml").indexOf("<voice-bar />") !== -1, p + " 页 wxml 应包含 voice-bar 标签");
+    assert.ok(readPage(p, p + ".wxml").indexOf("<voice-bar") !== -1, p + " 页 wxml 应包含 voice-bar 标签");
     assert.ok(readPage(p, p + ".wxml").indexOf("page-with-voice-bar") !== -1, p + " 页根节点应让出底部空间");
   });
+  var locWxml = readPage("locations", "locations.wxml");
+  assert.ok(locWxml.indexOf("mode !== 'pick'") !== -1, "locations 选择位置(picker)为过渡任务流,语音条应排除");
   ["confirm", "join-family"].forEach(function (p) {
     var cfg = JSON.parse(readPage(p, p + ".json"));
     assert.ok(!cfg.usingComponents || !cfg.usingComponents["voice-bar"], p + " 页不得挂载语音条(确认流程/引导流程)");

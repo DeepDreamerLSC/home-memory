@@ -143,7 +143,7 @@
   font-size: 25rpx;
   font-weight: 700;
   padding: 0 28rpx;
-  height: 76rpx;
+  height: 88rpx;
   box-sizing: border-box;
 }
 
