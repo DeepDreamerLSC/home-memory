@@ -45,27 +45,124 @@
         保存
       </button>
     </view>
+    <view class="trust-line">你确认后,我才会真正记住。</view>
   </block>
 
-  <!-- AI 草稿:列表式批量确认(Issue #14) -->
+  <!-- 语音/文字记下后核对:单件摘要(C1/C1b)或多件勾选(C2) -->
   <block wx:else>
-    <view class="banner">AI 草稿,请确认({{ rows.length }} 件)</view>
-    <view class="quote-card">
-      <view class="quote-label">你说的原话</view>
-      <view class="quote-text">{{ originalText }}</view>
+    <view class="c-head">
+      <view class="c-title">{{ headTitle }}</view>
+      <view class="c-sub">{{ headSub }}</view>
     </view>
+
+    <!-- 单件:摘要卡 + 「改」行内编辑;位置没听清时(C1b)警示框显眼展开、必填才放行 -->
+    <block wx:if="{{ rows.length === 1 }}">
+      <view class="card sum-card">
+        <view class="sumrow line">
+          <view class="k">物品</view>
+          <view class="v">{{ rows[0].name || '还没写名称' }}</view>
+          <view class="sum-edit" data-field="name" bindtap="onToggleEdit">改</view>
+        </view>
+        <view wx:if="{{ editingName }}" class="field sum-field">
+          <input
+            class="input"
+            placeholder="物品名称(必填)"
+            placeholder-class="placeholder"
+            value="{{ rows[0].name }}"
+            maxlength="50"
+            disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
+            data-index="0"
+            bindinput="onRowNameInput"
+          />
+        </view>
+        <block wx:if="{{ rows[0].certain }}">
+          <view class="sumrow">
+            <view class="k">位置</view>
+            <view class="v {{ rows[0].locationText ? '' : 'warn' }}">{{ rows[0].locationText || '还没写位置' }}</view>
+            <view class="sum-edit" data-field="location" bindtap="onToggleEdit">改</view>
+          </view>
+          <view wx:if="{{ editingLocation }}" class="field sum-field">
+            <input
+              class="input"
+              placeholder="放在哪里"
+              placeholder-class="placeholder"
+              value="{{ rows[0].locationText }}"
+              maxlength="200"
+              disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
+              data-index="0"
+              bindinput="onRowLocationInput"
+            />
+          </view>
+        </block>
+        <view wx:if="{{ rows[0].status !== 'pending' }}" class="sum-status">
+          <text wx:if="{{ rows[0].status === 'saved' }}" class="st saved">已记住</text>
+          <text wx:elif="{{ rows[0].status === 'saving' }}" class="st saving">保存中…</text>
+          <text wx:elif="{{ rows[0].status === 'failed' }}" class="st failed">未保存</text>
+        </view>
+      </view>
+
+      <!-- C1b:位置没听清的警示框(常驻展开,不藏进折叠) -->
+      <view wx:if="{{ !rows[0].certain }}" class="warnbox">
+        <view class="wtitle">⚠ 位置没听清,放在哪儿?</view>
+        <view class="whint">不确定的位置不猜、也不先存;补上才能确认。</view>
+        <input
+          class="winput"
+          placeholder="例:客厅电视柜第二格"
+          placeholder-class="placeholder"
+          value="{{ rows[0].locationText }}"
+          maxlength="200"
+          disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
+          data-index="0"
+          bindinput="onRowLocationInput"
+        />
+      </view>
+
+      <view wx:if="{{ rows[0].qualifiersText }}" class="sum-meta">限定语:{{ rows[0].qualifiersText }}</view>
+      <view wx:if="{{ rows[0].anchorShared }}" class="sum-meta warn">这段原话里有两件东西,位置请核对后再确认</view>
+      <view wx:if="{{ rows[0].sourceQuote }}" class="sum-meta quote">原话:{{ rows[0].sourceQuote }}</view>
+      <view wx:elif="{{ rows[0].status !== 'saved' }}" class="sum-meta warn">AI 没给出这段的原话依据,请自行核对</view>
+
+      <view wx:if="{{ rows[0].status === 'failed' }}" class="row-fail sum-fail">
+        <text class="fail-msg">{{ rows[0].failMsg }}</text>
+        <text wx:if="{{ rows[0].itemId }}" class="fail-link" data-index="0" catchtap="onRowDetail">去详情页</text>
+      </view>
+
+      <!-- 默认未勾选但位置已听清(两件东西/来源不充分):核对过再勾 -->
+      <view
+        wx:if="{{ rows[0].certain && !rows[0].checked && rows[0].status === 'pending' }}"
+        class="sum-check-row"
+        data-index="0"
+        bindtap="onRowToggle"
+      >
+        <view class="check {{ rows[0].checked ? 'on' : '' }}"></view>
+        <text class="sum-check-label">核对过这段,记住这件</text>
+      </view>
+    </block>
+
+    <!-- 原话:默认折叠,点开核对;警示场景初始展开 -->
+    <view class="fold" bindtap="onToggleQuote">
+      <text class="fold-label">原话(点开核对)</text>
+      <text class="chev {{ quoteOpen ? 'open' : '' }}">›</text>
+    </view>
+    <view wx:if="{{ quoteOpen }}" class="fold-body">
+      <view class="fold-quote">{{ originalText }}</view>
+    </view>
+
     <view wx:if="{{ truncated || rows.length >= 5 }}" class="truncated-banner">
       {{ truncated ? '这句话里的东西超过 5 件,先记住下面这 5 件,剩下的回头再说一句。' : '这句话正好列了 5 件,如果还有没列出来的,回头再补说一句。' }}
     </view>
 
-    <view class="card batch-card">
+    <!-- 多件:逐件勾选核对(C2) -->
+    <view wx:if="{{ rows.length > 1 }}" class="card batch-card">
       <view wx:for="{{ rows }}" wx:key="key" class="row {{ item.status }}">
         <view class="row-head">
-          <view
-            class="check {{ item.checked ? 'on' : '' }} {{ item.status === 'saved' ? 'fixed' : '' }}"
-            data-index="{{ index }}"
-            bindtap="onRowToggle"
-          >{{ item.status === 'saved' ? '✓' : item.checked ? '✓' : '' }}</view>
+          <view class="row-head-left">
+            <view class="check-hit" data-index="{{ index }}" bindtap="onRowToggle">
+              <view class="check {{ item.checked ? 'on' : '' }} {{ item.status === 'saved' ? 'fixed' : '' }}">{{ item.status === 'saved' ? '✓' : item.checked ? '✓' : '' }}</view>
+            </view>
+            <text wx:if="{{ !item.certain }}" class="flag">⚠ 位置待核实</text>
+            <text wx:elif="{{ item.anchorShared || !item.sourceQuote }}" class="flag">⚠ 请核对</text>
+          </view>
           <view class="row-status">
             <text wx:if="{{ item.status === 'saved' }}" class="st saved">已记住</text>
             <text wx:elif="{{ item.status === 'saving' }}" class="st saving">保存中…</text>
@@ -90,7 +187,7 @@
           <view class="label">位置(必填)</view>
           <input
             class="input row-location"
-            placeholder="{{ item.certain ? '放在哪里' : 'AI 没听准位置,请补填' }}"
+            placeholder="{{ item.certain ? '放在哪里' : '放在哪儿?例:书房插座旁' }}"
             placeholder-class="placeholder"
             value="{{ item.locationText }}"
             maxlength="200"
@@ -99,6 +196,7 @@
             bindinput="onRowLocationInput"
           />
         </view>
+        <view wx:if="{{ !item.certain && !item.checked && item.status !== 'saved' }}" class="row-warn-line">没听清放在哪儿;补上位置再勾选。</view>
 
         <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>
         <view wx:if="{{ item.anchorShared }}" class="row-meta warn">这段原话里有两件东西,位置请核对后再勾选</view>
@@ -120,5 +218,19 @@
         确认保存 {{ checkedCount }} 件
       </button>
     </view>
+
+    <!-- 单件:唯一确认(位置没补上前禁用) -->
+    <block wx:if="{{ rows.length === 1 }}">
+      <button
+        class="btn primary block cta-btn"
+        loading="{{ batchSaving }}"
+        disabled="{{ checkedCount === 0 }}"
+        bindtap="onSaveBatchTap"
+      >
+        {{ !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}
+      </button>
+    </block>
+
+    <view class="trust-line">你确认后,我才会真正记住。</view>
   </block>
 </view>
