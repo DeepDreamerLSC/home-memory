@@ -724,8 +724,13 @@ Page({
             version: item.version,
             updated_at: item.updated_at,
         };
+        const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
+        // 条目直接记在当前层:带上这条路径给详情页(只读大卡「上次记在」);根层无路径
+        if (!this.data.isRoot && this.nodePath.length > 0) {
+            params.push("path=" + encodeURIComponent(JSON.stringify(this.nodePath)));
+        }
         wx.navigateTo({
-            url: "/pages/item/item?data=" + encodeURIComponent(JSON.stringify(summary)),
+            url: "/pages/item/item?" + params.join("&"),
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },

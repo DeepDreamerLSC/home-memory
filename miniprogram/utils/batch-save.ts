@@ -63,9 +63,19 @@ export function batchSummary(rows: BatchRow[]): {
   return { total: rows.length, checked, saved, failed };
 }
 
-/** 默认勾选决策(下沉以便测试):有专属原话证据且锚定不共享才默认勾选,其余一律人工核对后手动勾 */
-export function shouldDefaultChecked(sourceQuote: string, anchorShared: boolean): boolean {
-  return sourceQuote !== "" && !anchorShared;
+/**
+ * 默认勾选决策(下沉以便测试;PR #48 复审 B3):位置确定的(certain)且有专属
+ * 原话证据、锚定不共享才默认勾选。位置没听清的(certain=false)即使有原话证据
+ * 也一律不默认勾——「⚠ 位置待核实 + 已勾选」会让整批提交卡在必填校验上;
+ * 补充位置后由用户明确勾选(单件 C1b 保留「填了位置自动允许确认」的专用分支,
+ * 见确认页 onRowLocationInput)。
+ */
+export function shouldDefaultChecked(
+  sourceQuote: string,
+  anchorShared: boolean,
+  certain: boolean,
+): boolean {
+  return certain && sourceQuote !== "" && !anchorShared;
 }
 
 /** 单行写入(注入真实 create 或测试替身) */

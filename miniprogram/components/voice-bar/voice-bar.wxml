@@ -1,0 +1,63 @@
+<!--
+  常驻语音条(issue #45:语音入口全局可达)。
+  整颗胶囊 = 按住热区(热区即色块,七轮):麦克风圆点内嵌左端作图标,
+  按住/松手/上滑取消手势与文案沿用首页语音录入语义(utils/voice-entry 单例)。
+  录音中 = 半屏半透明小窗浮层(冻结原型一/二轮:页面不动 + 小窗回弹入场),
+  松手/上滑手势仍绑在胶囊上,小窗只呈现不接管手势。
+-->
+<block wx:if="{{ !kbOpen && (voiceState === 'recording' || voiceState === 'cancelPending') }}">
+  <!-- 压暗背板:页面保持可见 -->
+  <view class="recback"></view>
+  <!-- 小窗:不滚动,全部信息一次排下;悬浮于语音条上方 -->
+  <view class="recsheet">
+    <view class="rec-title">{{ voiceState === 'cancelPending' ? '好,当我没听见。' : '说吧,我记着呢。' }}</view>
+    <view class="recrow">
+      <view class="recmic">
+        <view class="mic-cap"></view>
+        <view class="mic-stand"></view>
+        <view class="mic-base"></view>
+      </view>
+      <view class="wave">
+        <view class="wv"></view>
+        <view class="wv"></view>
+        <view class="wv"></view>
+        <view class="wv"></view>
+        <view class="wv"></view>
+        <view class="wv"></view>
+        <view class="wv"></view>
+      </view>
+    </view>
+    <view wx:if="{{ voiceState === 'recording' }}" class="rec-hint">松手后先给你核对一遍,<text class="rec-hint-b">确认了才算记住</text>。</view>
+    <view wx:if="{{ voiceState === 'recording' }}" class="rec-cta">松开,去核对</view>
+    <view class="rec-cancel">{{ voiceState === 'cancelPending' ? '↓ 滑回来就继续说' : '↑ 上滑取消 · 取消就当没说过,什么都不记' }}</view>
+  </view>
+</block>
+<view class="voicebar {{ kbOpen ? 'kb-hide' : '' }}">
+  <view
+    class="hold {{ pressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+    catchtouchstart="onHoldTouchStart"
+    catchtouchmove="onHoldTouchMove"
+    catchtouchend="onHoldTouchEnd"
+    catchtouchcancel="onHoldTouchCancel"
+  >
+    <view class="micdot">
+      <block wx:if="{{ voiceState === 'recording' }}">
+        <view class="mic-seconds">{{ recordSeconds }}s</view>
+      </block>
+      <block wx:else>
+        <view class="mic-cap"></view>
+        <view class="mic-stand"></view>
+        <view class="mic-base"></view>
+      </block>
+    </view>
+    <view class="hold-label">
+      {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话,松开识别' }}
+    </view>
+  </view>
+  <view
+    class="txtbtn {{ voiceState !== 'idle' || transcribing || extracting ? 'disabled' : '' }}"
+    catchtap="onTextTap"
+  >
+    文字
+  </view>
+</view>

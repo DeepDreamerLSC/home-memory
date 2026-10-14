@@ -1,8 +1,22 @@
-/* 首页样式:参考图 v3——黄块主视觉 + 黑圆麦克风,跟随系统深浅色(颜色变量见 app.wxss) */
+/*
+ * 首页样式(issue #45 冻结原型 H0/H1/H1b/X1/X2):
+ * - 家庭地图两列格子 + 容器视图整页切换(抬头随容器变,返回胶囊逐层退回);
+ * - H0 大语音 CTA 与语音条同用 --vb-* 冻结配色(九/十轮);
+ * - 尺寸按原型 px×2=rpx(375px 画布基准),颜色只用全局 CSS 变量(app.wxss)。
+ */
 
-/* 品牌头部 */
+/* ============ 品牌头部与家庭上下文入口 ============ */
 .brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
   padding: 24rpx 32rpx 8rpx;
+}
+
+.brand-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .brand-name {
@@ -18,152 +32,35 @@
   color: var(--text-3);
 }
 
-/* 找东西:独立区,内嵌深槽 + 圆形执行钮 */
-.search-wrap {
-  margin: 16rpx 32rpx;
-}
-
-.section-title {
-  font-size: 26rpx;
-  font-weight: 600;
-  color: var(--text-2);
-  margin-bottom: 12rpx;
-}
-
-/* 「找」按钮外包透明热区:视觉圆 80rpx 不变,实际可点范围四周外扩 */
-.search-go-hit {
-  flex-shrink: 0;
-  /* 左侧 16rpx 恰好接上原按钮与输入框的间距,视觉位置不变;其余方向各外扩 20rpx */
-  padding: 20rpx 20rpx 20rpx 16rpx;
-  /* 负边距抵消上下外扩占用的行高,布局与改前一致 */
-  margin: -20rpx 0;
-}
-
-.search-go {
-  width: 80rpx;
-  height: 80rpx;
+/* 家庭上下文头:共享=「我们家」+圆点;个人=「我的家」(原型 fam-chip) */
+.fam-chip {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: var(--go-bg);
-  color: var(--go-fg);
-  border-radius: 50%;
-  font-size: 28rpx;
+  gap: 10rpx;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  border-radius: 999rpx;
+  padding: 16rpx 26rpx;
+  min-height: 76rpx;
+  box-sizing: border-box;
+  font-size: 25rpx;
   font-weight: 700;
-}
-
-.search-go.busy {
-  opacity: 0.5;
-}
-
-/* 按住说话:明黄大块 + 黑圆麦克风,一屏唯一强调面 */
-.talk-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20rpx;
-  margin: 16rpx 0 20rpx;
-  padding: 48rpx 0 44rpx;
-  background: var(--accent);
-  border: none;
-  border-radius: 32rpx;
-  color: #191919;
-  user-select: none;
-  box-shadow: 0 8rpx 0 var(--accent-shadow);
-}
-
-.talk-btn.busy {
-  background: var(--accent-dim);
-  box-shadow: none;
-}
-
-.talk-btn.cancel {
-  background: var(--danger-bg);
-  box-shadow: 0 8rpx 0 var(--danger-shadow);
-}
-
-/* 麦克风图形:整个黄块即按钮,图形默认黑色;取消态随文案转红 */
-.mic-icon {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  --mic: #191919;
-}
-
-.talk-btn.cancel .mic-icon {
-  --mic: var(--danger);
-}
-
-.mic-cap {
-  width: 32rpx;
-  height: 54rpx;
-  border-radius: 16rpx;
-  background: var(--mic, #191919);
-}
-
-.mic-stand {
-  width: 6rpx;
-  height: 16rpx;
-  background: var(--mic, #191919);
-  margin-top: 6rpx;
-}
-
-.mic-base {
-  width: 44rpx;
-  height: 6rpx;
-  border-radius: 3rpx;
-  background: var(--mic, #191919);
-  margin-top: 4rpx;
-}
-
-.mic-seconds {
-  color: #191919;
-  font-size: 44rpx;
-  font-weight: 700;
-}
-
-.talk-btn.busy .mic-icon {
-  opacity: 0.45;
-}
-
-.talk-label {
-  font-size: 30rpx;
-  font-weight: 700;
-}
-
-.talk-btn.busy .talk-label {
-  color: var(--text-2);
-  font-weight: 400;
-}
-
-.talk-btn.cancel .talk-label {
-  color: var(--danger);
-}
-
-.partial-text {
-  padding: 16rpx 20rpx;
-  border-radius: 16rpx;
-  background: var(--card-inset);
-  font-size: 28rpx;
   color: var(--text);
-  line-height: 1.5;
-  margin-bottom: 4rpx;
+  flex-shrink: 0;
 }
 
-.example {
-  font-size: 24rpx;
-  color: var(--text-3);
-  text-align: center;
+.fam-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 50%;
+  background: var(--accent-shadow);
+  flex-shrink: 0;
 }
 
-/* 模式切换:块下方居中的次级链接 */
-.mode-link {
-  margin-top: 20rpx;
-  font-size: 26rpx;
+.fam-caret {
+  font-size: 20rpx;
   color: var(--text-2);
-  text-align: center;
+  line-height: 1;
 }
 
 /* 未完成草稿恢复横幅 */
@@ -177,92 +74,524 @@
   color: var(--text);
 }
 
-/* 品牌行:左标题右头像 */
-.brand {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-}
-.brand-main {
-  flex: 1;
-  min-width: 0;
-}
-.home-avatar-btn {
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  border: none;
-  line-height: 1;
-  flex-shrink: 0;
-}
-.home-avatar-btn::after {
-  border: none;
-}
-.home-avatar {
-  width: 88rpx;
-  height: 88rpx;
-  border-radius: 50%;
-  background: var(--accent-dim, #f3edd9);
-}
-.home-avatar-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 30rpx;
-  color: var(--text-3, #a39d8d);
-  font-weight: 600;
+/* 刷新失败:保留旧内容,如实提示(与 locations 页同款) */
+.stale-banner {
+  margin: 16rpx 32rpx 0;
+  padding: 16rpx 20rpx;
+  border-radius: 12rpx;
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+  font-size: 24rpx;
+  color: var(--text);
 }
 
-/* 昵称弹窗 */
-.nick-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+/* 中间区域统一左右边距 */
+.map-area {
+  margin: 16rpx 32rpx 0;
+}
+
+/* ============ 通用排版(原型 small/note/tiny) ============ */
+.pagetitle {
+  font-size: 52rpx;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: 1rpx;
+  margin: 12rpx 0;
+}
+
+.lead {
+  font-size: 25rpx;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.note {
+  background: var(--card-inset);
+  border-radius: 28rpx;
+  padding: 24rpx 26rpx;
+  margin-top: 24rpx;
+}
+
+.note-title {
+  font-size: 25rpx;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8rpx;
+}
+
+.note-text {
+  font-size: 23rpx;
+  color: var(--text-2);
+  line-height: 1.65;
+}
+
+.section-label {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+  margin: 40rpx 0 18rpx;
+}
+
+.tiny-center {
+  font-size: 22rpx;
+  color: var(--text-3);
+  text-align: center;
+  margin-top: 8rpx;
+}
+
+/* ============ H0 大语音 CTA(--vb-* 冻结配色,与语音条同族) ============ */
+.voice-cta {
+  margin-top: 32rpx;
+  border: 2rpx solid var(--vb-line);
+  border-radius: 38rpx;
+  background: var(--vb-bg);
+  color: var(--vb-fg);
+  box-shadow: 0 10rpx 0 var(--vb-cta-shadow);
+  padding: 44rpx 28rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18rpx;
+  font-weight: 750;
+  font-size: 31rpx;
+  user-select: none;
+  /* 录音中浮层压暗页面时,按住的按钮保持在背板之上可见(原型 V1:按下态仍可见) */
+  position: relative;
+  z-index: 41;
+}
+
+.voice-cta.pressed {
+  transform: translateY(4rpx);
+  box-shadow: 0 6rpx 0 var(--vb-cta-shadow);
+}
+
+.voice-cta.busy {
+  opacity: 0.78;
+}
+
+.voice-cta.cancel {
+  opacity: 0.92;
+}
+
+/* 麦克风圆点:米黄油底(--vb-hold-bg)+ 单色麦克风图形 */
+.cta-micdot {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: var(--vb-hold-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.cta-micdot .mic-cap {
+  width: 24rpx;
+  height: 38rpx;
+  border-radius: 12rpx;
+  background: var(--vb-hold-fg);
+}
+
+.cta-micdot .mic-stand {
+  width: 5rpx;
+  height: 14rpx;
+  background: var(--vb-hold-fg);
+  margin-top: 6rpx;
+}
+
+.cta-micdot .mic-base {
+  width: 34rpx;
+  height: 5rpx;
+  border-radius: 3rpx;
+  background: var(--vb-hold-fg);
+  margin-top: 6rpx;
+}
+
+.cta-micdot .mic-seconds {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--vb-hold-fg);
+}
+
+.cta-label {
+  text-align: center;
+}
+
+.partial-text {
+  margin-top: 20rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: var(--card-inset);
+  font-size: 28rpx;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* 「用文字记」:CTA 下的次级链接(与语音条「文字」同入口) */
+.cta-sublnk {
+  margin-top: 20rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: var(--text-2);
+  text-align: center;
+  padding: 12rpx 0;
+}
+
+/* ============ 搜索(H0/H1/H1b 共用,原型 searchbar) ============ */
+.searchbar {
+  display: flex;
+  align-items: center;
+}
+
+.searchbar .search-input {
+  flex: 1;
+  min-width: 0;
+  height: 96rpx;
+  box-sizing: border-box;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 26rpx;
+  padding: 0 26rpx;
+  font-size: 27rpx;
+  color: var(--text);
+}
+
+/* 「找」按钮外包透明热区:视觉方块不变,实际可点范围四周外扩 */
+.search-go-hit {
+  flex-shrink: 0;
+  padding: 20rpx 20rpx 20rpx 16rpx;
+  margin: -20rpx 0;
+}
+
+.search-go {
+  width: 96rpx;
+  height: 96rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 99;
-}
-.nick-card {
-  width: 580rpx;
-  padding: 40rpx 36rpx 28rpx;
-  border-radius: 28rpx;
-  background: var(--card, #ffffff);
-}
-.nick-title {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: var(--text, #191919);
-}
-.nick-hint {
-  margin-top: 8rpx;
-  font-size: 24rpx;
-  color: var(--text-3, #a39d8d);
-}
-.nick-input {
-  margin-top: 24rpx;
-  padding: 20rpx 24rpx;
-  border-radius: 16rpx;
-  background: var(--card-inset, #f1ede0);
-  color: var(--text, #191919);
-  font-size: 30rpx;
-}
-.nick-actions {
-  margin-top: 28rpx;
-  display: flex;
-  gap: 20rpx;
-}
-.nick-btn {
-  flex: 1;
-  text-align: center;
-  padding: 18rpx 0;
-  border-radius: 999rpx;
-  background: var(--card-inset, #f1ede0);
-  color: var(--text-2, #4c483e);
+  background: var(--go-bg);
+  color: var(--go-fg);
+  border-radius: 26rpx;
   font-size: 28rpx;
+  font-weight: 750;
 }
-.nick-btn.primary {
-  background: var(--go-bg, #191919);
-  color: #fff;
+
+.search-go.busy {
+  opacity: 0.5;
+}
+
+/* ============ 搜索空态(H1b:不造假) ============ */
+.empty-note {
+  margin-top: 24rpx;
+  border: 2rpx dashed var(--line);
+  border-radius: 28rpx;
+  padding: 28rpx;
+  background: var(--card);
+}
+
+.empty-note-main {
+  font-size: 26rpx;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.empty-note-sub {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-top: 6rpx;
+}
+
+.empty-note-btn {
+  margin-top: 20rpx;
+}
+
+/* 墨底主 CTA(记一件 / 再试一次) */
+.btn.ink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  border-radius: 30rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.btn.ink.block {
+  display: flex;
+  width: 100%;
+}
+
+/* ============ H1b 结果 / 容器条目:卡片内分隔行 ============ */
+.result-card {
+  background: var(--card);
+  border-radius: 36rpx;
+  padding: 8rpx 24rpx;
+}
+
+.result-row {
+  display: flex;
+  align-items: center;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid var(--line);
+}
+
+.result-row:last-child {
+  border-bottom: none;
+}
+
+/* 物品首字图标:墨底黄字(浅)/白底墨字(深),随主题翻转 */
+.result-row .item-icon {
+  background: var(--go-bg);
+  color: var(--go-fg);
+}
+
+.collapse-link {
+  margin-top: 28rpx;
+  text-align: center;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 12rpx 0;
+}
+
+/* ============ 家庭地图:抬头 / 返回胶囊 / 「⋯」整理 ============ */
+.map-head {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin: 40rpx 0 18rpx;
+  min-height: 72rpx;
+}
+
+.mtitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 30rpx;
+  font-weight: 800;
+  color: var(--text);
+}
+
+/* 后台刷新轻量指示(屏上已有内容,不整页 loading) */
+.refresh-flag {
+  font-size: 22rpx;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.backchip {
+  border-radius: 999rpx;
+  background: var(--card-inset);
+  color: var(--text);
+  font-size: 25rpx;
+  font-weight: 700;
+  padding: 12rpx 24rpx;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.more-inline {
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 18rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  min-height: 88rpx;
+  min-width: 88rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16rpx;
+  flex-shrink: 0;
+}
+
+/* ============ 房间格子两列(原型 roomgrid/roomtile) ============ */
+.roomgrid {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 20rpx;
+}
+
+.roomtile {
+  position: relative;
+  width: calc(50% - 10rpx);
+  margin-right: 20rpx;
+  margin-bottom: 20rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14rpx;
+  padding: 26rpx 28rpx 24rpx;
+  border: 1rpx solid var(--line);
+  border-radius: 32rpx;
+  background: var(--card);
+  color: var(--text);
+  min-height: 236rpx;
+  transition: transform 0.14s ease;
+}
+
+.roomtile.odd {
+  margin-right: 0;
+}
+
+.roomtile-active {
+  transform: scale(0.97);
+}
+
+.rico {
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 26rpx;
+  background: var(--card-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  font-weight: 800;
+  color: var(--text-2);
+  flex: none;
+}
+
+.rname {
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.rcount {
+  font-size: 24rpx;
+  color: var(--text-2);
+}
+
+.roomtile .chev {
+  position: absolute;
+  top: 24rpx;
+  right: 24rpx;
+  font-size: 28rpx;
+  color: var(--text-3);
+  font-weight: 300;
+}
+
+/* 「尚未归类」通栏格:只显计数(明细服务端不投影,不自造清单) */
+.roomtile.wide {
+  width: 100%;
+  margin-right: 0;
+  flex-direction: row;
+  align-items: center;
+  min-height: 0;
+  gap: 20rpx;
+  padding: 24rpx 28rpx;
+}
+
+.roomtile.wide .rico {
+  width: 76rpx;
+  height: 76rpx;
+  font-size: 36rpx;
+  border-radius: 22rpx;
+}
+
+.wide-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.empty-map {
+  padding: 40rpx 0;
+  font-size: 25rpx;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.7;
+}
+
+/* ============ X1 骨架屏(占位几何与真实格子一致,只动透明度) ============ */
+.skel-grid {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 20rpx;
+}
+
+.skel-tile {
+  width: calc(50% - 10rpx);
+  margin-right: 20rpx;
+  margin-bottom: 20rpx;
+  height: 236rpx;
+  border: 1rpx solid var(--line);
+  border-radius: 32rpx;
+  background: var(--card);
+  box-sizing: border-box;
+}
+
+.skel-tile.odd {
+  margin-right: 0;
+}
+
+.skel-wide {
+  width: 100%;
+  height: 132rpx;
+  border: 1rpx solid var(--line);
+  border-radius: 32rpx;
+  background: var(--card);
+  box-sizing: border-box;
+}
+
+.skel-tile,
+.skel-wide {
+  animation: skel-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes skel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ============ X2 失败态(失败的是这次加载,不是记录没了) ============ */
+.fail-view {
+  margin-top: 96rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.fail-ico {
+  font-size: 80rpx;
+  line-height: 1;
+}
+
+.fail-title {
+  font-size: 52rpx;
+  font-weight: 800;
+  color: var(--text);
+  margin-top: 16rpx;
+}
+
+.fail-sub {
+  font-size: 25rpx;
+  color: var(--text-2);
+  text-align: center;
+  line-height: 1.6;
+  margin-top: 12rpx;
+}
+
+.fail-btn {
+  margin-top: 32rpx;
+  width: 100%;
 }

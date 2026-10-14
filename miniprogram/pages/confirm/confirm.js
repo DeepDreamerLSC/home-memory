@@ -16,6 +16,11 @@ Page({
         rows: [],
         batchSaving: false,
         checkedCount: 0,
+        headTitle: "",
+        headSub: "",
+        quoteOpen: false,
+        editingName: false,
+        editingLocation: false,
     },
     /** 草稿会话 id(onUnload 清理用) */
     sid: "",
@@ -43,8 +48,10 @@ Page({
             key: "row-" + i,
             name: d.name,
             locationText: d.location_text,
-            // 默认勾选决策下沉 utils:有专属证据且锚定不共享才默认勾,其余(无证据/整句共享)人工核对后手动勾
-            checked: (0, batch_save_1.shouldDefaultChecked)(d.source_quote, d.anchor_shared === true),
+            // 默认勾选决策下沉 utils:位置确定且有专属证据、锚定不共享才默认勾;
+            // 位置没听清的(certain=false)一律不默认勾(B3),补充位置后由用户明确勾选;
+            // 其余(无证据/整句共享)人工核对后手动勾
+            checked: (0, batch_save_1.shouldDefaultChecked)(d.source_quote, d.anchor_shared === true, d.certain === true),
             status: "pending",
             failMsg: "",
             operationId: (0, api_1.uuid)(),
@@ -68,12 +75,29 @@ Page({
                 };
             });
         }
+        // 原话默认折叠;但任一行含警示(来源不充分/两件东西)时必须初始展开——
+        // 折叠只收起原话全文,行级警示文案常驻在行上,绝不藏
+        const quoteOpen = rows.some((r) => r.anchorShared || r.sourceQuote === "");
+        // 标题文案(用户词汇):单件核对 / 单件补位置 / 多件清点
+        const single = rows.length === 1;
+        const uncertainSingle = single && !rows[0].certain;
         this.setData({
             isManual: false,
             originalText: payload.originalText,
             truncated: payload.truncated,
             rows,
             checkedCount: (0, batch_save_1.batchSummary)(rows).checked,
+            headTitle: single
+                ? uncertainSingle
+                    ? "我听到了,但有件事要补一下"
+                    : "我听到了,核对一下"
+                : "识别出 " + rows.length + " 件东西",
+            headSub: single
+                ? uncertainSingle
+                    ? "位置没听清,补一句就行。"
+                    : "看一眼,没问题就确认。"
+                : "逐件核对,勾选要记住的。",
+            quoteOpen,
         });
     },
     /** 行状态序列化回写会话(供进程回收后恢复原幂等键与已保存状态) */
@@ -199,9 +223,27 @@ Page({
             return; // 整批提交中冻结输入
         }
         const index = Number(e.currentTarget.dataset.index);
-        this.setData({
-            ["rows[" + index + "].locationText"]: e.detail && e.detail.value ? e.detail.value : "",
-        });
+        const value = e.detail && e.detail.value ? e.detail.value : "";
+        const row = this.data.rows[index];
+        if (!row) {
+            return;
+        }
+        // 单件且「位置没听清」(C1b):补上位置才放行、清空回到禁用——
+        // 只联动勾选态,保存仍走同一 onSaveBatchTap 合同(必填校验/幂等键均不变)
+        if (this.data.rows.length === 1 && !row.certain && row.status === "pending") {
+            const filled = value.trim() !== "";
+            if (filled !== row.checked) {
+                const rows = this.data.rows.slice();
+                rows[index] = { ...row, locationText: value, checked: filled };
+                this.setData({
+                    ["rows[" + index + "].locationText"]: value,
+                    ["rows[" + index + "].checked"]: filled,
+                    checkedCount: (0, batch_save_1.batchSummary)(rows).checked,
+                });
+                return;
+            }
+        }
+        this.setData({ ["rows[" + index + "].locationText"]: value });
     },
     onRowToggle(e) {
         const index = Number(e.currentTarget.dataset.index);
@@ -226,6 +268,21 @@ Page({
         wx.navigateTo({
             url: "/pages/item/item?data=" + encodeURIComponent(JSON.stringify(row.existing)),
         });
+    },
+    /** 原话折叠/展开(默认折叠;含警示场景 onLoad 已初始展开) */
+    onToggleQuote() {
+        this.setData({ quoteOpen: !this.data.quoteOpen });
+    },
+    /** 单件摘要卡「改」:切换该字段的行内编辑 */
+    onToggleEdit(e) {
+        const field = e.currentTarget.dataset.field;
+        if (field === "name") {
+            this.setData({ editingName: !this.data.editingName });
+            return;
+        }
+        if (field === "location") {
+            this.setData({ editingLocation: !this.data.editingLocation });
+        }
     },
     /**
      * 批量保存:提交瞬间对整页行做不可变快照,快照里的名称/位置/幂等键即本轮写入内容

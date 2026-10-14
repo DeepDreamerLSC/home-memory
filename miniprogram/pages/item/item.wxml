@@ -1,70 +1,96 @@
-<view class="page">
-  <view class="card">
-    <view class="meta">当前版本 v{{ version }} · 更新于 {{ updatedAtText }}</view>
-
-    <view class="field">
-      <view class="label">名称</view>
-      <input
-        class="input"
-        placeholder="物品名称(必填)"
-        placeholder-class="placeholder"
-        value="{{ name }}"
-        maxlength="50"
-        bindinput="onNameInput"
-      />
+<view class="page page-with-voice-bar">
+  <!-- 先答案:物品名 + 记录更新时间;操作全收进「⋯」 -->
+  <view class="detail-head">
+    <view class="detail-title">
+      <view class="pagetitle">{{ name }}</view>
+      <view wx:if="{{ lastConfirmedText }}" class="detail-meta">{{ lastConfirmedText }}</view>
     </view>
-    <view class="field">
-      <view class="label">位置(必填)</view>
-      <input
-        class="input"
-        placeholder="放在哪里"
-        placeholder-class="placeholder"
-        value="{{ locationText }}"
-        maxlength="200"
-        bindinput="onLocationInput"
-      />
-    </view>
-    <view class="field">
-      <view class="label">备注</view>
-      <textarea
-        class="textarea"
-        placeholder="选填,最多 200 字"
-        placeholder-class="placeholder"
-        value="{{ note }}"
-        maxlength="200"
-        auto-height
-        bindinput="onNoteInput"
-      />
-    </view>
-
-    <button
-      class="btn primary block"
-      loading="{{ saving }}"
-      bindtap="onSaveTap"
-    >
-      保存修改
-    </button>
-    <button
-      class="btn block"
-      loading="{{ mounting }}"
-      bindtap="onMountTap"
-    >
-      挂到空间
-    </button>
-    <button
-      class="btn danger block"
-      loading="{{ deleting }}"
-      bindtap="onDeleteTap"
-    >
-      删除这条记录
-    </button>
+    <view class="more-inline" bindtap="onMoreTap">⋯</view>
   </view>
 
-  <!-- 挂到空间:AI 候选分段,逐段核对后确认(ensurePath 只在确认后建节点) -->
+  <!-- 只读大卡:空间路径(知道时)+ 原话常显 +「可能已移动」提示(D1 P0 三组成) -->
+  <view class="bigcard">
+    <view class="bigcard-lbl">上次记在</view>
+    <view class="bigcard-loc">
+      <view class="bigcard-pin">📍</view>
+      <view class="bigcard-main">
+        <view wx:if="{{ spacePath.length > 0 }}" class="bigcard-path">
+          <block wx:for="{{ spacePath }}" wx:key="*this">
+            <text>{{ item }}</text>
+            <text wx:if="{{ index < spacePath.length - 1 }}" class="bigcard-sep"> › </text>
+          </block>
+        </view>
+        <view class="bigcard-quote">
+          你当时说的是:「{{ locationText }}」<text class="bigcard-quote-sub">——原文一直保留,整理位置时也不会被改掉。</text>
+        </view>
+      </view>
+    </view>
+    <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
+  </view>
+
+  <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
+  <view
+    class="fold {{ editPanelOpen ? 'open' : '' }}"
+    hover-class="fold-hover"
+    hover-stay-time="80"
+    bindtap="onEditToggle"
+  >
+    <text>编辑物品信息</text>
+    <text class="fold-chev {{ editPanelOpen ? 'up' : '' }}">›</text>
+  </view>
+  <view class="fold-body {{ editPanelOpen ? 'open' : '' }}">
+    <view class="card edit-card">
+      <view class="field">
+        <view class="label">名称</view>
+        <input
+          class="input"
+          placeholder="物品名称(必填)"
+          placeholder-class="placeholder"
+          value="{{ name }}"
+          maxlength="50"
+          bindinput="onNameInput"
+        />
+      </view>
+      <view class="field">
+        <view class="label">位置(必填)</view>
+        <input
+          class="input"
+          placeholder="放在哪里"
+          placeholder-class="placeholder"
+          value="{{ locationText }}"
+          maxlength="200"
+          bindinput="onLocationInput"
+        />
+      </view>
+      <view class="field">
+        <view class="label">备注</view>
+        <textarea
+          class="textarea"
+          placeholder="选填,最多 200 字"
+          placeholder-class="placeholder"
+          value="{{ note }}"
+          maxlength="200"
+          auto-height
+          bindinput="onNoteInput"
+        />
+      </view>
+
+      <button
+        class="btn ink block"
+        loading="{{ saving }}"
+        bindtap="onSaveTap"
+      >
+        保存修改
+      </button>
+      <view class="fold-note">如果别处改过这份记录,保存时会先提醒你核对,不会悄悄覆盖。</view>
+    </view>
+  </view>
+
+  <!-- 整理位置:候选分段逐段核对,确认后才会创建位置并记入(ensurePath 只在确认后建节点) -->
   <view wx:if="{{ mountPanelOpen }}" class="card">
-    <view class="card-title">挂到空间(AI 草案,请核对)</view>
+    <view class="card-title">整理位置(请核对)</view>
     <view class="hint">
-      从大到小逐段核对,可以直接改;{{ mountOrderViolation ? '分段顺序与原文对不上,务必逐段核对。' : '' }}确认后才会创建位置并挂载。
+      从大到小逐段核对,可以直接改;{{ mountOrderViolation ? '分段顺序与原文对不上,务必逐段核对。' : '' }}确认后才会记到这个位置。
     </view>
     <view
       wx:for="{{ mountSegments }}"
@@ -72,7 +98,7 @@
       class="field"
     >
       <view class="label">
-        第 {{ index + 1 }} 段 · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · AI 不太确定' : '' }}
+        第 {{ index + 1 }} 段 · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · 不太确定' : '' }}
       </view>
       <input
         class="input {{ item.needConfirm ? 'input-warn' : '' }}"
@@ -82,16 +108,43 @@
         bindinput="onMountSegmentInput"
       />
       <view wx:if="{{ item.hintName }}" class="hint">
-        与已有的「{{ item.hintName }}」同名,入库会直接用已有位置
+        与已有的「{{ item.hintName }}」同名,确认后直接用那个位置
       </view>
     </view>
     <button
-      class="btn primary block"
+      class="btn ink block"
       loading="{{ mountSaving }}"
       bindtap="confirmMount"
     >
-      确认挂载
+      确认放这里
     </button>
     <button class="btn block" bindtap="cancelMount">取消</button>
   </view>
 </view>
+
+<!-- 「⋯」次级菜单:底部弹层(分享给家人 / 整理位置 / 删除) -->
+<view
+  class="sheet-mask {{ moreOpen ? 'open' : '' }}"
+  bindtap="onSheetClose"
+  catchtouchmove="noop"
+>
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-title">{{ name || '这件物品' }} · 更多</view>
+    <view wx:if="{{ familyShared }}" class="sheet-act" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onShareTap">
+      <view class="sheet-act-name">分享给家人</view>
+      <view class="sheet-act-sub">家里人都能看到这条记录</view>
+    </view>
+    <view class="sheet-act" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onTidyTap">
+      <view class="sheet-act-name">整理位置</view>
+      <view class="sheet-act-sub">选择它属于哪个房间 / 家具</view>
+    </view>
+    <view class="sheet-act warn" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onDeleteTap">
+      <view class="sheet-act-name">删除这条记录</view>
+      <view class="sheet-act-sub">需要二次确认</view>
+    </view>
+    <view class="sheet-close" bindtap="onSheetClose">取消</view>
+  </view>
+</view>
+
+<!-- 常驻语音条:按住说话记一件(issue #45 全局可达) -->
+<voice-bar />

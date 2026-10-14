@@ -1,4 +1,7 @@
 {
   "navigationBarTitleText": "我的家",
-  "enablePullDownRefresh": true
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "voice-bar": "/components/voice-bar/voice-bar"
+  }
 }

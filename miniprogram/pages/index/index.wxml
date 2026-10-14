@@ -1,31 +1,24 @@
-<view class="page">
-  <!-- 品牌头部 -->
+<!-- 容器抬头:返回胶囊(逐层退回)+ 抬头(随容器变)+ 「⋯」整理位置 + 刷新指示 -->
+<template name="map-head">
+  <view class="map-head">
+    <view wx:if="{{ backLabel }}" class="backchip" bindtap="onBackTap">‹ {{ backLabel }}</view>
+    <view class="mtitle">{{ mapTitle }}</view>
+    <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
+    <view wx:if="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
+  </view>
+</template>
+
+<view class="page page-with-voice-bar">
+  <!-- 品牌头部:右侧家庭上下文入口(共享=我们家·圆点,个人=我的家) -->
   <view class="brand">
     <view class="brand-main">
       <view class="brand-name">我靠东西呢</view>
       <view class="brand-sub">东西放哪儿了?我记得。</view>
     </view>
-    <!-- 共享家庭:点头像直接设置(微信头像昵称填写能力);个人家庭:提示 -->
-    <button
-      wx:if="{{ familyShared }}"
-      class="home-avatar-btn"
-      open-type="chooseAvatar"
-      bindchooseavatar="onHomeAvatarChosen"
-    >
-      <image
-        wx:if="{{ selfAvatar }}"
-        class="home-avatar"
-        src="{{ selfAvatar }}"
-        mode="aspectFill"
-      />
-      <view wx:else class="home-avatar home-avatar-empty">{{ selfNick ? selfNick[0] : '我' }}</view>
-    </button>
-    <view
-      wx:else
-      class="home-avatar-btn"
-      bindtap="onHomeAvatarPersonalTap"
-    >
-      <view class="home-avatar home-avatar-empty">我</view>
+    <view class="fam-chip" bindtap="onFamilyTap">
+      <view wx:if="{{ familyShared }}" class="fam-dot"></view>
+      <view class="fam-name">{{ familyShared ? '我们家' : '我的家' }}</view>
+      <view class="fam-caret">▾</view>
     </view>
   </view>
 
@@ -34,64 +27,29 @@
     上次有 {{ resumeSession.count }} 件没记完,继续核对 ›
   </view>
 
-  <!-- 找东西:紧跟品牌,打开就能找 -->
-  <view class="search-wrap">
-    <view class="section-title">找东西</view>
-    <view class="search-row">
-      <input
-        class="search-input"
-        placeholder="搜钥匙、证件、充电宝…"
-        placeholder-class="placeholder"
-        value="{{ queryText }}"
-        confirm-type="search"
-        bindinput="onQueryInput"
-        bindconfirm="onQueryTap"
-      />
-      <view class="search-go-hit" bindtap="onQueryTap">
-        <view class="search-go {{ querying ? 'busy' : '' }}">
-          {{ querying ? '…' : '找' }}
-        </view>
-      </view>
-    </view>
-
-    <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
-
-    <block wx:if="{{ queried && !queryError }}">
-      <view wx:if="{{ queryResults.length === 0 }}" class="empty-text">
-        糟了,这个叫法我还真没对上。试试别的叫法,比如全名或俗称。
-      </view>
-      <view
-        wx:for="{{ queryResults }}"
-        wx:key="item_id"
-        class="item-row"
-        data-index="{{ index }}"
-        bindtap="onResultTap"
-      >
-        <view class="item-icon">{{ item.name[0] }}</view>
-        <view class="item-main">
-          <view class="item-name">{{ item.name }}</view>
-          <view class="item-location">上次记录:{{ item.location_text }}</view>
-        </view>
-        <view class="chevron">›</view>
-      </view>
-    </block>
+  <!-- 后台刷新失败:保留旧内容,如实提示(点按强制重试) -->
+  <view wx:if="{{ mapStale }}" class="stale-banner" bindtap="onRetryTap">
+    当前为上次记录(刷新失败),点按重试
   </view>
 
-  <!-- 顺手记一件:一屏唯一主视觉,按住就能记 -->
-  <view class="card">
-    <view class="card-title">顺手记一件</view>
+  <!-- ================ H0 首用态(无数据分支) ================ -->
+  <block wx:if="{{ firstUse && !queried }}">
+    <view class="map-area">
+      <view class="pagetitle">先让我记住一件东西</view>
+      <view class="lead">下次找不到,就不用满屋翻啦。</view>
+      <view class="note">
+        <view class="note-text">比如说:「备用钥匙放在书房抽屉里」</view>
+      </view>
 
-    <!-- 语音模式:按住说话 -->
-    <block wx:if="{{ inputMode === 'voice' }}">
-      <view class="example">比如说:"充电宝放在书房抽屉里"</view>
+      <!-- 页内大语音 CTA(一屏唯一强调面,按住说话;配色随 --vb-* 冻结值) -->
       <view
-        class="talk-btn {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+        class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
         catchtouchstart="onTalkTouchStart"
         catchtouchmove="onTalkTouchMove"
         catchtouchend="onTalkTouchEnd"
         catchtouchcancel="onTalkTouchCancel"
       >
-        <view class="mic-icon">
+        <view class="cta-micdot">
           <block wx:if="{{ voiceState === 'recording' }}">
             <view class="mic-seconds">{{ recordSeconds }}s</view>
           </block>
@@ -101,106 +59,173 @@
             <view class="mic-base"></view>
           </block>
         </view>
-        <view class="talk-label">
-          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开识别' }}
+        <view class="cta-label">
+          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话,试试看' }}
         </view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
-      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
-        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
-      </view>
-    </block>
+      <view class="cta-sublnk" bindtap="onTextRecordTap">用文字记</view>
+      <view class="tiny-center">你确认后,我才会真正记住。</view>
 
-    <!-- 文字模式:次级入口,保留用户输入 -->
-    <block wx:else>
-      <view class="hint">用一句话说出物品和位置,AI 帮你整理成草稿</view>
-      <textarea
-        class="memo-input"
-        placeholder="例如:降压药放在厨房第二个抽屉"
-        placeholder-class="placeholder"
-        value="{{ memoText }}"
-        maxlength="500"
-        auto-height
-        bindinput="onMemoInput"
-      />
-      <view class="char-count">{{ memoText.length }}/500</view>
-      <button
-        class="btn primary block"
-        loading="{{ extracting }}"
-        bindtap="onExtractTap"
-      >
-        提取并确认
-      </button>
-      <view class="mode-link" bindtap="{{ inputMode === 'voice' ? 'onModeText' : 'onModeVoice' }}">
-        {{ inputMode === 'voice' ? '改用文字录入' : '改用语音' }}
+      <view class="section-label">找东西</view>
+      <view class="searchbar">
+        <input
+          class="search-input"
+          placeholder="搜东西,如备用钥匙"
+          placeholder-class="placeholder"
+          value="{{ queryText }}"
+          confirm-type="search"
+          bindinput="onQueryInput"
+          bindconfirm="onQueryTap"
+        />
+        <view class="search-go-hit" bindtap="onQueryTap">
+          <view class="search-go {{ querying ? 'busy' : '' }}">
+            {{ querying ? '…' : '找' }}
+          </view>
+        </view>
       </view>
-    </block>
-  </view>
+      <!-- 空搜索不造假:结果就地展开(H1b 同款空态,搜完自动切到结果视图) -->
 
-  <!-- 我的家:按空间浏览(次级入口,不抢语音主视觉) -->
-  <view class="card">
-    <view class="card-title">我的家</view>
-    <view class="item-row" bindtap="onHomeTreeTap">
-      <view class="item-icon">家</view>
-      <view class="item-main">
-        <view class="item-name">按空间浏览</view>
-        <view class="item-location">房间 → 家具 → 抽屉,东西在哪儿一目了然</view>
+      <view class="note">
+        <view class="note-title">首件完成后</view>
+        <view class="note-text">真的记住第一件后,这里会变成家里的地图——每个房间一格,点进去整页就是房间里的东西。</view>
       </view>
-      <view class="chevron">›</view>
     </view>
-    <view class="item-row" bindtap="onFamilyTap">
-      <view class="item-icon">庭</view>
-      <view class="item-main">
-        <view class="item-name">家庭</view>
-        <view class="item-location">创建共享家庭、邀请家人、退出或解散</view>
-      </view>
-      <view class="chevron">›</view>
-    </view>
-  </view>
+  </block>
 
-  <!-- 最近记住的:紧凑,可点击 -->
-  <view class="card">
-    <view class="card-title">最近记住的</view>
-    <view wx:if="{{ recentError }}" class="error-text">{{ recentError }}</view>
-    <view wx:elif="{{ recentLoading }}" class="empty-text">加载中…</view>
-    <view wx:elif="{{ recentItems.length === 0 }}" class="empty-text">
-      还没记过东西。按住上面的按钮,说一句就行。
-    </view>
-    <view
-      wx:for="{{ recentItems }}"
-      wx:key="item_id"
-      class="item-row"
-      data-index="{{ index }}"
-      bindtap="onRecentTap"
-    >
-      <view class="item-icon">{{ item.name[0] }}</view>
-      <view class="item-main">
-        <view class="item-name">{{ item.name }}</view>
-        <view class="item-location">上次记录:{{ item.location_text }}</view>
+  <!-- ================ 有数据态:搜索 + 家庭地图 / 搜索结果 ================ -->
+  <block wx:else>
+    <view class="map-area">
+      <!-- 顶部搜索(H1/H1b 共用) -->
+      <view class="searchbar">
+        <input
+          class="search-input"
+          placeholder="搜东西,如备用钥匙"
+          placeholder-class="placeholder"
+          value="{{ queryText }}"
+          confirm-type="search"
+          bindinput="onQueryInput"
+          bindconfirm="onQueryTap"
+        />
+        <view class="search-go-hit" bindtap="onQueryTap">
+          <view class="search-go {{ querying ? 'busy' : '' }}">
+            {{ querying ? '…' : '找' }}
+          </view>
+        </view>
       </view>
-      <view class="chevron">›</view>
+
+      <!-- H1b 搜索结果:命中按物品分组,替换中间区域 -->
+      <block wx:if="{{ queried }}">
+        <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
+        <block wx:else>
+          <view class="section-label">找到 {{ queryResults.length }} 件</view>
+          <view wx:if="{{ queryResults.length === 0 }}" class="empty-note">
+            <view class="empty-note-main">没记住过「{{ queryKeyword }}」。要不要现在记一件?</view>
+            <view class="empty-note-sub">搜索不会编造不存在的记录。</view>
+            <view class="btn ink block empty-note-btn" bindtap="onTextRecordTap">记一件</view>
+          </view>
+          <view wx:else class="result-card">
+            <view
+              wx:for="{{ queryResults }}"
+              wx:key="item_id"
+              class="result-row"
+              data-index="{{ index }}"
+              bindtap="onResultTap"
+            >
+              <view class="item-icon">{{ item.name[0] }}</view>
+              <view class="item-main">
+                <view class="item-name">{{ item.name }}</view>
+                <view class="item-location">{{ item.location_text }} · 记录更新于 {{ item.updated_at_short }}</view>
+              </view>
+              <view class="chevron">›</view>
+            </view>
+          </view>
+        </block>
+        <view class="collapse-link" bindtap="onCollapseResultsTap">{{ firstUse ? '收起' : '收起,回家里地图' }}</view>
+      </block>
+
+      <!-- X1 加载骨架屏:当前层无内容,不拿旧数据冒充 -->
+      <block wx:elif="{{ mapLoading }}">
+        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
+        <view class="skel-grid">
+          <view class="skel-tile {{ index % 2 === 1 ? 'odd' : '' }}" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this"></view>
+          <view class="skel-wide"></view>
+        </view>
+      </block>
+
+      <!-- X2 失败态:失败的是这次加载,不是记录没了;可重试 -->
+      <block wx:elif="{{ mapError }}">
+        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
+        <view class="fail-view">
+          <view class="fail-ico">⚠️</view>
+          <view class="fail-title">网络好像断了</view>
+          <view class="fail-sub">刚才没加载出来。已确认记住的记录不受影响,联网后照常能找。</view>
+          <view class="btn ink block fail-btn" bindtap="onRetryTap">再试一次</view>
+        </view>
+      </block>
+
+      <!-- H1 家庭地图:根层=房间格子两列;点格子整页切入容器视图 -->
+      <block wx:else>
+        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
+
+        <view class="roomgrid">
+          <view
+            wx:for="{{ rooms }}"
+            wx:key="location_id"
+            class="roomtile {{ index % 2 === 1 ? 'odd' : '' }}"
+            hover-class="roomtile-active"
+            hover-stay-time="80"
+            data-index="{{ index }}"
+            bindtap="onRoomTap"
+          >
+            <view class="rico">{{ item.initial }}</view>
+            <view class="rname">{{ item.name }}</view>
+            <view class="rcount">{{ item.countText }}</view>
+            <view class="chev">›</view>
+          </view>
+          <!-- 尚未归类通栏格:只显计数(未挂物品明细服务端不投影,不自造清单) -->
+          <view wx:if="{{ isRootView && unmountedCount > 0 }}" class="roomtile wide">
+            <view class="rico">?</view>
+            <view class="wide-main">
+              <view class="rname">尚未归类</view>
+              <view class="rcount">{{ unmountedCount }} 件位置待核实——不硬塞进房间</view>
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{ rooms.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">
+          这里还没有更细的位置。点右上「⋯」改名、移动或合并,或记东西时把位置说清楚。
+        </view>
+
+        <!-- 容器内:直接记录在这个位置的条目(点开看它上次放在哪儿) -->
+        <block wx:if="{{ !isRootView && directItems.length > 0 }}">
+          <view class="section-label">直接记录在{{ containerName }}</view>
+          <view class="result-card">
+            <view
+              wx:for="{{ directItems }}"
+              wx:key="item_id"
+              class="result-row"
+              data-index="{{ index }}"
+              bindtap="onDirectItemTap"
+            >
+              <view class="item-icon">{{ item.name[0] }}</view>
+              <view class="item-main">
+                <view class="item-name">{{ item.name }}</view>
+                <view class="item-location">上次记在:{{ item.location_text }}</view>
+              </view>
+              <view class="chevron">›</view>
+            </view>
+          </view>
+        </block>
+
+        <view wx:if="{{ isRootView }}" class="note">
+          <view class="note-title">点进去就是它的全部</view>
+          <view class="note-text">点一个房间(或家具),这页整个换成里面的东西,抬头也跟着变成「某某房间里有什么」;再点东西,看它上次放在哪儿。每一层都只列核对确认过的记录,没确认完的草稿不进来、不计数。</view>
+        </view>
+      </block>
     </view>
-  </view>
+  </block>
 </view>
 
-<!-- 设置昵称弹窗(与头像一起保存;取消则丢弃本次头像) -->
-<view wx:if="{{ nickModalOpen }}" class="nick-mask" bindtap="onNickModalCancel">
-  <view class="nick-card" catchtap="">
-    <view class="nick-title">我的昵称</view>
-    <view class="nick-hint">家人怎么称呼你(仅这个家庭的家人可见)</view>
-    <input
-      class="nick-input"
-      type="nickname"
-      value="{{ nickDraft }}"
-      placeholder="如:老爸、小林"
-      maxlength="20"
-      focus="{{ nickModalOpen }}"
-      bindinput="onNickDraftInput"
-    />
-    <view wx:if="{{ profileSaving }}" class="nick-hint">保存中…</view>
-    <view class="nick-actions">
-      <view class="nick-btn" bindtap="onNickModalCancel">取消</view>
-      <view class="nick-btn primary" bindtap="onNickModalSave">保存</view>
-    </view>
-  </view>
-</view>
+<!-- 常驻语音条(issue #45 全局可达:首页全部状态) -->
+<voice-bar />
