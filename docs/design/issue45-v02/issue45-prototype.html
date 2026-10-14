@@ -206,10 +206,6 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .member .avatar{height:38px;width:38px;border-radius:50%;background:var(--go-bg);color:var(--go-fg);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex:none}
 .member .mn{flex:1;font-size:14px;font-weight:700}
 .member .role{font-size:11px;color:var(--text-2);background:var(--card-inset);border-radius:999px;padding:3px 9px}
-/* L1 面包屑 */
-.breadcrumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-2);margin:7px 0 12px}
-.breadcrumb button{border:0;padding:3px 0;min-height:30px;background:transparent;color:var(--text-2);cursor:pointer;font-size:12px}
-.breadcrumb b{color:var(--text);font-weight:700}
 .more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:36px;min-width:36px;cursor:pointer;flex:none;padding:0 8px}
 /* H1 家庭地图(家里内容平铺,点房间摊开;用户反馈三轮) */
 .roomgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
@@ -276,7 +272,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 
 <div class="proto-top">
   <h1>我靠东西呢 · 交互重构 v0.2 可点击原型</h1>
-  <p class="desc">Issue #45 D0-A 设计交付 · docs-only。主 9 屏 + 附加 3 态,可点屏号切换或直接在屏内点击跳转;浅色/深色两套主题与产品 tokens 一致。所有数据均为示意,<b>一切「确认 / 保存」都是模拟,不写任何数据</b>。</p>
+  <p class="desc">Issue #45 D0-A 设计交付 · docs-only。主 8 屏 + 附加 3 态,可点屏号切换或直接在屏内点击跳转;浅色/深色两套主题与产品 tokens 一致。所有数据均为示意,<b>一切「确认 / 保存」都是模拟,不写任何数据</b>。</p>
   <div class="proto-controls">
     <div class="chips" id="chips">
       <button class="chip on" data-nav="h0">H0 首用</button>
@@ -287,7 +283,6 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <button class="chip" data-nav="c1b">C1b 不确定</button>
       <button class="chip" data-nav="c2">C2 多件确认</button>
       <button class="chip" data-nav="f1">F1 家庭</button>
-      <button class="chip" data-nav="l1">L1 按位置</button>
       <button class="chip" data-nav="v1">附加·录音中</button>
       <button class="chip" data-nav="x1">附加·加载</button>
       <button class="chip" data-nav="x2">附加·网络失败</button>
@@ -364,13 +359,12 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     <div id="h1v-home">
       <div class="map-head">
         <span class="mtitle">家里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-h1down="living">
           <span class="rico" aria-hidden="true">▱</span>
           <span class="rname">客厅</span>
-          <span class="rcount">9 件东西</span>
+          <span class="rcount">8 件东西</span>
           <span class="chev" aria-hidden="true">›</span>
         </button>
         <button class="roomtile" data-h1down="study">
@@ -407,7 +401,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="home">‹ 家里</button>
         <span class="mtitle">客厅里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <button class="more-inline" data-opensheet="tidy" aria-label="整理客厅位置">⋯</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-toast="示意:电视柜(第一格、第二格,3 件;结构同书房,可继续点进去)">
@@ -429,7 +423,18 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
         <span class="info"><strong>遥控器</strong><span>上次记在:客厅 / 茶几抽屉</span></span>
         <span class="arrow">›</span>
       </button>
-      <button class="morelink" data-nav="l1">还有 3 件 · 按位置逐层看 ›</button>
+      <div class="divider" style="margin:8px 0"></div>
+      <button class="item" data-nav="d1" data-itemswap="香薰蜡烛|客厅 / 电视柜第二格|香薰蜡烛摆在电视柜第二格">
+        <span class="ico">香</span>
+        <span class="info"><strong>香薰蜡烛</strong><span>上次记在:客厅 / 电视柜第二格</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <div class="divider" style="margin:8px 0"></div>
+      <button class="item" data-nav="d1" data-itemswap="备用电池|客厅 / 茶几抽屉|备用电池也在茶几抽屉里">
+        <span class="ico">电</span>
+        <span class="info"><strong>备用电池</strong><span>上次记在:客厅 / 茶几抽屉</span></span>
+        <span class="arrow">›</span>
+      </button>
     </div>
 
     <!-- 视图=书房 -->
@@ -437,7 +442,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="home">‹ 家里</button>
         <span class="mtitle">书房里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <button class="more-inline" data-opensheet="tidy" aria-label="整理书房位置">⋯</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-h1down="desk">
@@ -466,7 +471,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="study">‹ 书房</button>
         <span class="mtitle">书桌里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <button class="more-inline" data-opensheet="tidy" aria-label="整理书桌位置">⋯</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-toast="示意:右侧第二个抽屉(备用钥匙等 5 件;再往里就是单件东西了)">
@@ -496,7 +501,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="home">‹ 家里</button>
         <span class="mtitle">卧室里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <button class="more-inline" data-opensheet="tidy" aria-label="整理卧室位置">⋯</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-toast="示意:床头柜(第一个抽屉:体温计,1 件)">
@@ -519,7 +524,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="home">‹ 家里</button>
         <span class="mtitle">厨房里有什么</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <button class="more-inline" data-opensheet="tidy" aria-label="整理厨房位置">⋯</button>
       </div>
       <div class="roomgrid">
         <button class="roomtile" data-toast="示意:水槽下柜(净水器备用滤芯,1 件)">
@@ -535,7 +540,12 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
           <span class="chev" aria-hidden="true">›</span>
         </button>
       </div>
-      <button class="morelink" data-nav="l1">还有 1 件 · 按位置逐层看 ›</button>
+      <div class="section-label">直接记录在厨房</div>
+      <button class="item" data-nav="d1" data-itemswap="洗洁精备用装|厨房 / 水槽边|洗洁精备用装就在水槽边上">
+        <span class="ico">洗</span>
+        <span class="info"><strong>洗洁精备用装</strong><span>上次记在:厨房 / 水槽边</span></span>
+        <span class="arrow">›</span>
+      </button>
     </div>
 
     <!-- 视图=尚未归类 -->
@@ -543,7 +553,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div class="map-head">
         <button class="backchip" data-h1up="home">‹ 家里</button>
         <span class="mtitle">尚未归类 · 2 件待核实</span>
-        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+        <span style="width:36px;flex:none" aria-hidden="true"></span>
       </div>
       <button class="item" data-toast="示意:原话是「那个双肩包,不知道塞哪儿了」——位置没核实前,不归入房间,也不计数">
         <span class="ico">?</span>
@@ -802,72 +812,6 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     <div class="note"><strong>加入确认页同样保留这两条事实</strong><p>家人可看整个共享家庭已录入的物品;每人已有私人记录不会自动迁入。不为视觉清爽藏掉隐私提示。</p></div>
   </section>
 
-  <!-- ================= L1 按位置找东西(空间浏览,次级) ================= -->
-  <section class="screen" data-screen="l1">
-    <div id="l1-rooms">
-      <h1 class="pagetitle">按位置找东西</h1>
-      <div class="breadcrumb"><b>我的家</b></div>
-      <p class="small">先逛后整理:每一行点进去就是那个位置;整理(改名/移动/合并)在「⋯」里,不抢主操作。</p>
-
-      <div style="margin-top:12px">
-        <div class="rowbtn" style="width:100%">
-          <span class="ico room">▤</span>
-          <span class="info"><strong>书房</strong><span>书桌、小冰箱等</span></span>
-          <span class="count">12 件</span>
-          <button class="more-inline" data-opensheet="l1-more" aria-label="书房更多操作">⋯</button>
-        </div>
-        <button class="rowbtn" data-l1down="study">
-          <span class="ico room">▤</span>
-          <span class="info"><strong>书房</strong><span>进入书房</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <button class="rowbtn" data-toast="示意:客厅(同书房结构,逐层下钻)">
-          <span class="ico room">▱</span><span class="info"><strong>客厅</strong><span>电视柜、玄关柜等</span></span><span class="count">9 件</span><span class="arrow">›</span>
-        </button>
-        <button class="rowbtn" data-toast="示意:卧室(同书房结构,逐层下钻)">
-          <span class="ico room">▥</span><span class="info"><strong>卧室</strong><span>床头柜、衣柜等</span></span><span class="count">3 件</span><span class="arrow">›</span>
-        </button>
-        <button class="rowbtn" data-toast="示意:位置还不明确的记录,原文可查,不硬塞进房间">
-          <span class="ico room">?</span><span class="info"><strong>尚未归类</strong><span>位置待核实的 2 件</span></span><span class="arrow">›</span>
-        </button>
-      </div>
-      <div class="note"><strong>件数来自已确认记录</strong><p>「X 件」= 该位置及其下级去重后的已确认物品数;没确认完的草稿不计入。</p></div>
-    </div>
-
-    <div id="l1-study" style="display:none">
-      <h1 class="pagetitle">书房</h1>
-      <div class="breadcrumb"><button data-l1up="rooms">我的家</button> › <b>书房</b></div>
-      <div class="section-label">往里看看</div>
-      <button class="rowbtn" data-l1down="desk">
-        <span class="ico room">▤</span><span class="info"><strong>书桌</strong><span>桌面、右侧第二个抽屉</span></span><span class="count">8 件</span><span class="arrow">›</span>
-      </button>
-      <button class="rowbtn" data-toast="示意:小冰箱(冷藏层、门侧,3 件)">
-        <span class="ico room">▣</span><span class="info"><strong>小冰箱</strong><span>冷藏层、门侧</span></span><span class="count">3 件</span><span class="arrow">›</span>
-      </button>
-      <div class="section-label">直接记录在书房 · 1 件</div>
-      <button class="item" data-nav="d1" data-itemswap="扫地机器人|书房 / 地面">
-        <span class="ico">扫</span><span class="info"><strong>扫地机器人</strong><span>上次记在:书房 / 地面</span></span><span class="arrow">›</span>
-      </button>
-    </div>
-
-    <div id="l1-desk" style="display:none">
-      <h1 class="pagetitle">书桌</h1>
-      <div class="breadcrumb"><button data-l1up="rooms">我的家</button> › <button data-l1up="study">书房</button> › <b>书桌</b></div>
-      <div class="section-label">往里看看</div>
-      <button class="rowbtn" data-toast="示意:右侧第二个抽屉(5 件,叶子位置)">
-        <span class="ico room">▭</span><span class="info"><strong>右侧第二个抽屉</strong><span>备用钥匙等 5 件</span></span><span class="count">5 件</span><span class="arrow">›</span>
-      </button>
-      <div class="section-label">直接记录在书桌 · 2 件</div>
-      <button class="item" data-nav="d1" data-itemswap="充电宝|书桌 / 桌面右侧|充电宝就放书桌右手边">
-        <span class="ico">充</span><span class="info"><strong>充电宝</strong><span>上次记在:书桌 / 桌面右侧</span></span><span class="arrow">›</span>
-      </button>
-      <button class="item" data-toast="示意:说明书(书桌 / 抽屉一)">
-        <span class="ico">说</span><span class="info"><strong>说明书</strong><span>上次记在:书桌 / 抽屉一</span></span><span class="arrow">›</span>
-      </button>
-      <div class="note"><strong>原文一直保留</strong><p>整理空间(改名/移动/合并)不会改写你确认时说的原话。</p></div>
-    </div>
-  </section>
-
   <!-- ================= 附加:V1 录音中(T1)——半屏小窗悬浮于"被按下的"黄色按钮上方 ================= -->
   <section class="screen" data-screen="v1" style="padding:0">
     <!-- 背景即按住前的首页(静态复刻;真实实现=页面不动+浮层) -->
@@ -876,7 +820,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
         <div class="brand-row"><div><div class="brand-name">我靠东西呢</div><div class="brand-sub">东西放哪儿了?我记得。</div></div><button class="fam-chip" style="pointer-events:none">我们家 ▾</button></div>
       </div>
       <div style="padding:12px 16px 0"><div class="searchbar"><input placeholder="搜东西,如备用钥匙" aria-label="搜索"><button class="go">找</button></div></div>
-      <div style="padding:14px 16px 0"><div class="rowhead"><h2 class="sect">家里有什么</h2><button class="lnk">按位置整理 ›</button></div>
+      <div style="padding:14px 16px 0"><div class="rowhead"><h2 class="sect">家里有什么</h2></div>
         <div class="roomgrid">
           <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▱</span><span class="rname">客厅</span><span class="rcount">9 件东西</span></div>
           <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▤</span><span class="rname">书房</span><span class="rcount">12 件东西</span></div>
@@ -973,10 +917,10 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     </div>
   </div>
 
-  <!-- 弹层:L1 整理位置 -->
-  <div class="sheet-mask" id="sheet-l1-more">
+  <!-- 弹层:整理位置(各容器抬头「⋯」共用) -->
+  <div class="sheet-mask" id="sheet-tidy">
     <div class="sheet">
-      <div class="st">书房 · 整理位置(次级)</div>
+      <div class="st">整理这个位置(次级)</div>
       <button class="act" data-toast="示意:重命名(确认后才生效,不写库)">重命名</button>
       <button class="act" data-toast="示意:移动到别的房间(跨父层归并需确认)">移动</button>
       <button class="act" data-toast="示意:与相似位置合并(需人工确认,不自动合并)">合并相似位置</button>
@@ -1012,7 +956,6 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     c1b:{title:'核对一下',tag:'C1b · 不确定态(显眼展开,不藏) — 任务 T1 / T3',voice:false},
     c2:{title:'核对一下',tag:'C2 · 多件确认(模糊项默认不选) — 任务 T3',voice:false},
     f1:{title:'家庭',tag:'F1 · 家庭管理(家人优先/创建者文案) — 任务 T5',voice:false},
-    l1:{title:'按位置找东西',tag:'L1 · 空间浏览(先逛后整理) — 二级页示意',voice:false},
     v1:{title:'录音中',tag:'V1 · 录音中态 — 任务 T1(上滑取消/松手去核对)',voice:false},
     x1:{title:'我靠东西呢',tag:'X1 · 加载态 — 任务 T7(骨架屏,不用旧数据冒充)',voice:false},
     x2:{title:'出了点问题',tag:'X2 · 网络失败态 — 任务 T7(可重试,记录不受影响)',voice:false}
@@ -1071,7 +1014,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 
   /* 事件委托:导航 / 返回 / toast / 弹层 / 折叠 */
   document.addEventListener('click',function(e){
-    var t=e.target.closest('[data-nav],[data-back],[data-toast],[data-opensheet],[data-closesheet],[data-toggle],[data-editrow],[data-l1down],[data-l1up],[data-h1down],[data-h1up],[data-closetoggle]');
+    var t=e.target.closest('[data-nav],[data-back],[data-toast],[data-opensheet],[data-closesheet],[data-toggle],[data-editrow],[data-h1down],[data-h1up],[data-closetoggle]');
     if(!t)return;
     if(t.dataset.nav){
       if(t.dataset.origin)voiceOrigin=t.dataset.origin;
@@ -1108,18 +1051,6 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     }
     if(t.dataset.h1down){h1Show(t.dataset.h1down);return}
     if(t.dataset.h1up){h1Show(t.dataset.h1up);return}
-    if(t.dataset.l1down){
-      document.getElementById('l1-rooms').style.display='none';
-      var v=document.getElementById('l1-'+t.dataset.l1down);
-      if(v)v.style.display='';
-      viewport.scrollTop=0;return;
-    }
-    if(t.dataset.l1up){
-      ['l1-rooms','l1-study','l1-desk'].forEach(function(id){document.getElementById(id).style.display='none'});
-      var u=document.getElementById('l1-'+t.dataset.l1up);
-      if(u)u.style.display='';
-      viewport.scrollTop=0;return;
-    }
   });
 
   /* C1/C1b 行内改字段 */
