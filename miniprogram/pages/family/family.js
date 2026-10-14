@@ -29,10 +29,6 @@ Page({
         isOwner: false,
         members: [],
         memberListAvailable: false,
-        profileNick: "",
-        selfAvatarTemp: "",
-        selfAvatarFileId: "",
-        profileSaving: false,
         invites: [],
         inviteListError: "",
         shareToken: "",
@@ -98,7 +94,6 @@ Page({
                             role_text: m.role === "owner" ? "创建者" : "成员",
                         })),
                     });
-                    this.applySelfProfile();
                 }
                 catch (e) {
                     this.setData({ loadError: "成员列表加载失败:" + (0, api_1.errorMessage)(e) });
@@ -222,120 +217,6 @@ Page({
     onShareTap() {
         // 实际分享内容由 onShareAppMessage 提供;此处仅作显式入口
     },
-    /** 本人资料同步到输入区(仅初值;用户编辑期间不覆盖) */
-    applySelfProfile() {
-        const self = this.data.members.filter((m) => m.is_self)[0];
-        if (!self) {
-            return;
-        }
-        this.setData({
-            profileNick: this.data.profileNick || self.nickname || "",
-            selfAvatarFileId: self.avatar_file_id || "",
-        });
-    },
-    /** 选头像(微信头像昵称填写能力:open-type=chooseAvatar,可一键用微信头像) */
-    onChooseAvatar(e) {
-        const url = e.detail && e.detail.avatarUrl;
-        if (typeof url === "string" && url.length > 0) {
-            this.setData({ selfAvatarTemp: url });
-        }
-    },
-    onProfileNickInput(e) {
-        this.setData({ profileNick: (e.detail.value || "").trim() });
-    },
-    /** 保存资料:头像临时文件先传云存储(fileID 入库),再 updateProfile */
-    async onSaveProfileTap() {
-        if (this.data.profileSaving) {
-            return;
-        }
-        const patch = {};
-        const nick = this.data.profileNick.trim();
-        if (nick !== "") {
-            patch.nickname = nick;
-        }
-        this.setData({ profileSaving: true });
-        try {
-            if (this.data.selfAvatarTemp) {
-                const up = await wx.cloud.uploadFile({
-                    cloudPath: "household-avatars/" +
-                        Date.now() +
-                        "-" +
-                        Math.floor(Math.random() * 1000000) +
-                        ".jpg",
-                    filePath: this.data.selfAvatarTemp,
-                });
-                if (up.fileID) {
-                    patch.avatar_file_id = up.fileID;
-                }
-            }
-            if (Object.keys(patch).length === 0) {
-                wx.showToast({ title: "没有要保存的资料", icon: "none" });
-                return;
-            }
-            await (0, households_api_1.updateHouseholdProfile)(patch);
-            wx.showToast({ title: "已保存", icon: "success" });
-            this.setData({ selfAvatarTemp: "" });
-            const members = await (0, households_api_1.fetchMemberList)();
-            this.setData({
-                members: members.members.map((m) => ({
-                    ...m,
-                    joined_text: (0, api_1.formatDateTime)(m.joined_at),
-                    role_text: m.role === "owner" ? "创建者" : "成员",
-                })),
-            });
-            this.applySelfProfile();
-        }
-        catch (e) {
-            wx.showModal({ title: "保存失败", content: (0, api_1.errorMessage)(e), showCancel: false });
-        }
-        finally {
-            this.setData({ profileSaving: false });
-        }
-    },
-    /** 复制邀请码(体验版兜底:分享卡片受限时,家人手动输入令牌加入) */
-    onCopyInviteTap() {
-        const token = this.data.shareToken;
-        if (!token) {
-            return;
-        }
-        wx.setClipboardData({
-            data: token,
-            success: () => {
-                wx.showToast({ title: "邀请码已复制,发给家人即可", icon: "none", duration: 2500 });
-            },
-        });
-    },
-    /** 单人态「收到邀请码」入口:进入加入页手输阶段 */
-    onJoinByCodeTap() {
-        wx.navigateTo({
-            url: "/pages/join-family/join-family",
-            fail: () => {
-                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
-            },
-        });
-    },
-    /**
-     * 微信分享卡片:仅携带邀请令牌(门票),落地页为加入确认页(一步确认,
-     * 不静默加入)。未生成令牌时分享首页(不给无效卡片)。
-     */
-    onShareAppMessage() {
-        const token = this.data.shareToken;
-        if (token) {
-            return {
-                title: "邀请你加入家庭「" + (this.data.displayName || "我的家") + "」",
-                path: "/pages/join-family/join-family?invite=" + encodeURIComponent(token),
-            };
-        }
-        return {
-            title: "我靠东西呢——东西放哪儿了?我记得。",
-            path: "/pages/index/index",
-        };
-    },
-    inviteAt(index) {
-        const invite = this.data.invites[index];
-        return invite ? invite : undefined;
-    },
-    /** 撤销邀请:二次确认后 inviteRevoke(立即失效);清掉页面持有的分享令牌 */
     /** 邀请记录「管理」:弹窗分发新邀请码或撤销(安全约束:旧令牌原文不落库,
      *  无法"再次分发同一个码"——分发即生成新邀请,旧邀请保留有效直至过期/撤销) */
     onInviteRowTap(e) {
@@ -389,6 +270,31 @@ Page({
         finally {
             this.setData({ acting: false });
         }
+    },
+    /** 复制邀请码(体验版兜底:分享卡片受限时,家人手动输入令牌加入) */
+    onCopyInviteTap() {
+        const token = this.data.shareToken;
+        if (!token) {
+            return;
+        }
+        wx.setClipboardData({
+            data: token,
+            success: () => {
+                wx.showToast({ title: "邀请码已复制,发给家人即可", icon: "none", duration: 2500 });
+            },
+        });
+    },
+    /** 单人态「收到邀请码」入口:进入加入页手输阶段 */
+    onJoinByCodeTap() {
+        wx.navigateTo({
+            url: "/pages/join-family/join-family",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    inviteAt(index) {
+        return this.data.invites[index];
     },
     onRevokeTap(e) {
         const index = Number(e.currentTarget.dataset.index);

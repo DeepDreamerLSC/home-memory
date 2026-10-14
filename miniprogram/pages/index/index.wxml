@@ -1,8 +1,32 @@
 <view class="page">
   <!-- 品牌头部 -->
   <view class="brand">
-    <view class="brand-name">我靠东西呢</view>
-    <view class="brand-sub">东西放哪儿了?我记得。</view>
+    <view class="brand-main">
+      <view class="brand-name">我靠东西呢</view>
+      <view class="brand-sub">东西放哪儿了?我记得。</view>
+    </view>
+    <!-- 共享家庭:点头像直接设置(微信头像昵称填写能力);个人家庭:提示 -->
+    <button
+      wx:if="{{ familyShared }}"
+      class="home-avatar-btn"
+      open-type="chooseAvatar"
+      bindchooseavatar="onHomeAvatarChosen"
+    >
+      <image
+        wx:if="{{ selfAvatar }}"
+        class="home-avatar"
+        src="{{ selfAvatar }}"
+        mode="aspectFill"
+      />
+      <view wx:else class="home-avatar home-avatar-empty">{{ selfNick ? selfNick[0] : '我' }}</view>
+    </button>
+    <view
+      wx:else
+      class="home-avatar-btn"
+      bindtap="onHomeAvatarPersonalTap"
+    >
+      <view class="home-avatar home-avatar-empty">我</view>
+    </view>
   </view>
 
   <!-- 未完成草稿恢复(中途退出/进程回收;原幂等键续存) -->
@@ -155,6 +179,28 @@
         <view class="item-location">上次记录:{{ item.location_text }}</view>
       </view>
       <view class="chevron">›</view>
+    </view>
+  </view>
+</view>
+
+<!-- 设置昵称弹窗(与头像一起保存;取消则丢弃本次头像) -->
+<view wx:if="{{ nickModalOpen }}" class="nick-mask" bindtap="onNickModalCancel">
+  <view class="nick-card" catchtap="">
+    <view class="nick-title">我的昵称</view>
+    <view class="nick-hint">家人怎么称呼你(仅这个家庭的家人可见)</view>
+    <input
+      class="nick-input"
+      type="nickname"
+      value="{{ nickDraft }}"
+      placeholder="如:老爸、小林"
+      maxlength="20"
+      focus="{{ nickModalOpen }}"
+      bindinput="onNickDraftInput"
+    />
+    <view wx:if="{{ profileSaving }}" class="nick-hint">保存中…</view>
+    <view class="nick-actions">
+      <view class="nick-btn" bindtap="onNickModalCancel">取消</view>
+      <view class="nick-btn primary" bindtap="onNickModalSave">保存</view>
     </view>
   </view>
 </view>

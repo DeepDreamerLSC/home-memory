@@ -112,6 +112,7 @@ function captureAndInvalidate(householdId, shared, scopeRevision, displayName) {
         if (displayName === undefined) {
             (0, household_scope_1.captureHouseholdScopeName)(null); // 换家未携带新名:清空,不跟旧名
         }
+        (0, household_scope_1.captureHouseholdSelfProfile)({ nickname: null, avatar_file_id: null });
     }
     if (displayName !== undefined) {
         (0, household_scope_1.captureHouseholdScopeName)(displayName);
@@ -166,6 +167,8 @@ function parseStatus(r) {
         role,
         scope_revision: typeof r.scope_revision === "number" ? r.scope_revision : null,
         display_name: typeof r.display_name === "string" ? r.display_name : null,
+        self_nickname: typeof r.self_nickname === "string" ? r.self_nickname : null,
+        self_avatar_file_id: typeof r.self_avatar_file_id === "string" ? r.self_avatar_file_id : null,
     };
 }
 /**
@@ -176,6 +179,10 @@ async function fetchHouseholdStatus() {
     const r = await callHouseholds({ action: "status" });
     const status = parseStatus(r);
     captureAndInvalidate(status.household_id, status.shared, status.scope_revision, status.display_name === undefined ? null : status.display_name);
+    (0, household_scope_1.captureHouseholdSelfProfile)({
+        nickname: status.self_nickname,
+        avatar_file_id: status.self_avatar_file_id,
+    });
     return status;
 }
 /** 前台切回时重置验证状态后再复核(app.onShow 用;复用 household-scope 同名函数) */
@@ -375,6 +382,11 @@ async function updateHouseholdProfile(profile) {
     if (r.ok !== true || typeof r.profile !== "object" || r.profile === null) {
         throw new api_1.ApiError(api_1.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
+    const prof = r.profile;
+    (0, household_scope_1.captureHouseholdSelfProfile)({
+        nickname: typeof prof.nickname === "string" ? prof.nickname : undefined,
+        avatar_file_id: typeof prof.avatar_file_id === "string" ? prof.avatar_file_id : undefined,
+    });
     return { ok: true, profile: r.profile };
 }
 async function fetchMemberList() {

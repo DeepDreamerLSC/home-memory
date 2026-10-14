@@ -38,6 +38,8 @@ exports.captureHouseholdId = captureHouseholdId;
 exports.captureHouseholdScope = captureHouseholdScope;
 exports.captureHouseholdScopeName = captureHouseholdScopeName;
 exports.householdScopeName = householdScopeName;
+exports.captureHouseholdSelfProfile = captureHouseholdSelfProfile;
+exports.householdSelfProfile = householdSelfProfile;
 exports.householdScopeId = householdScopeId;
 exports.isHouseholdScopeCaptured = isHouseholdScopeCaptured;
 exports.isHouseholdScopeShared = isHouseholdScopeShared;
@@ -277,6 +279,72 @@ function householdScopeName() {
         }
     }
     return rememberedName;
+}
+/**
+ * 本人展示资料记忆(主页头像入口渲染;与家庭名同样的独立键策略):
+ * 来源=status 响应的 self_nickname/self_avatar_file_id 与 updateProfile 回显;
+ * 个人家庭/未捕获为 null。切换家庭未携带新资料时清空。
+ */
+const SELF_NICK_KEY = "home-memory:self-nick";
+const SELF_AVATAR_KEY = "home-memory:self-avatar";
+let rememberedSelf;
+function readKey(key) {
+    const storage = activeStorage();
+    if (storage === null) {
+        return null;
+    }
+    try {
+        const raw = storage.getStorageSync(key);
+        return typeof raw === "string" && raw.length > 0 && raw.length <= 300 ? raw : null;
+    }
+    catch (e) {
+        return null;
+    }
+}
+function writeKey(key, value) {
+    const storage = activeStorage();
+    if (storage === null) {
+        return;
+    }
+    try {
+        if (value === null) {
+            storage.removeStorageSync(key);
+        }
+        else {
+            storage.setStorageSync(key, value);
+        }
+    }
+    catch (e) {
+        // best-effort:资料仅展示用
+    }
+}
+/** 捕获本人资料(undefined 不动;null 显式清空;家庭切换时整体清) */
+function captureHouseholdSelfProfile(p) {
+    if (rememberedSelf === undefined) {
+        rememberedSelf = {
+            nickname: readKey(SELF_NICK_KEY),
+            avatarFileId: readKey(SELF_AVATAR_KEY),
+        };
+    }
+    if (p.nickname !== undefined) {
+        rememberedSelf.nickname = p.nickname && p.nickname.length > 0 ? p.nickname : null;
+        writeKey(SELF_NICK_KEY, rememberedSelf.nickname);
+    }
+    if (p.avatar_file_id !== undefined) {
+        rememberedSelf.avatarFileId =
+            p.avatar_file_id && p.avatar_file_id.length > 0 ? p.avatar_file_id : null;
+        writeKey(SELF_AVATAR_KEY, rememberedSelf.avatarFileId);
+    }
+}
+/** 当前本人资料(未捕获/个人家庭为 null) */
+function householdSelfProfile() {
+    if (rememberedSelf === undefined) {
+        captureHouseholdSelfProfile({});
+    }
+    return {
+        nickname: rememberedSelf ? rememberedSelf.nickname : null,
+        avatarFileId: rememberedSelf ? rememberedSelf.avatarFileId : null,
+    };
 }
 function householdScopeId() {
     ensureLoaded();
