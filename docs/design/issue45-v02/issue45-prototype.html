@@ -49,10 +49,11 @@ html[data-theme="dark"] .phone{
   --go-bg:#f5f4f0; --go-fg:#111111;
   --danger:#ff6b6b; --danger-bg:#3a2222; --danger-shadow:#57302e;
   --banner-bg:rgba(247,214,75,.14); --banner-line:#6b5b10;
+  /* 语音条深色(十轮用户要求去黄):黑灰组合,无任何黄 */
   --vb-bg:#1e1e1e; --vb-fg:#f5f4f0; --vb-line:#2e2e2e;
-  --vb-hold-bg:rgba(247,214,75,.12); --vb-hold-fg:#f7d64b;
-  --vb-mic-bg:#1e1e1e; --vb-mic-fg:#f7d64b;
-  --vb-btn-bg:transparent; --vb-btn-fg:#a8a69e; --vb-btn-line:#2e2e2e;
+  --vb-hold-bg:#2e2e2e; --vb-hold-fg:#f5f4f0;
+  --vb-mic-bg:#1e1e1e; --vb-mic-fg:#a8a69e;
+  --vb-btn-bg:transparent; --vb-btn-fg:#a8a69e; --vb-btn-line:#3a3a3a;
   --vb-cta-shadow:rgba(0,0,0,.45);
   --banner-manual-bg:#262626; --banner-manual-fg:#a8a69e;
 }
@@ -251,6 +252,10 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .recrow{display:flex;align-items:center;gap:12px}
 .recmic{height:58px;width:58px;border-radius:50%;background:var(--accent);color:#191919;display:flex;align-items:center;justify-content:center;font-size:23px;box-shadow:0 0 0 10px var(--accent-dim);animation:pulse 1.6s infinite;flex:none}
 @keyframes pulse{0%{box-shadow:0 0 0 10px var(--accent-dim)}70%{box-shadow:0 0 0 26px transparent}100%{box-shadow:0 0 0 10px transparent}}
+/* 深色去黄(十轮):录音麦克风圆与所有麦克风图标转黑灰,不出现黄 */
+html[data-theme="dark"] .recmic{background:#2e2e2e;color:#f5f4f0;box-shadow:0 0 0 10px rgba(255,255,255,.06);animation-name:pulsedark;filter:grayscale(1) brightness(1.45)}
+@keyframes pulsedark{0%{box-shadow:0 0 0 10px rgba(255,255,255,.06)}70%{box-shadow:0 0 0 26px transparent}100%{box-shadow:0 0 0 10px transparent}}
+html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:grayscale(1) brightness(1.45)}
 .wave{display:flex;gap:4px;align-items:center;height:30px}
 .wave i{width:5px;border-radius:3px;background:var(--go-bg);animation:wv 1s infinite ease-in-out}
 .wave i:nth-child(1){height:12px;animation-delay:0s}.wave i:nth-child(2){height:24px;animation-delay:.12s}.wave i:nth-child(3){height:30px;animation-delay:.24s}.wave i:nth-child(4){height:20px;animation-delay:.36s}.wave i:nth-child(5){height:14px;animation-delay:.48s}.wave i:nth-child(6){height:26px;animation-delay:.6s}.wave i:nth-child(7){height:11px;animation-delay:.72s}
