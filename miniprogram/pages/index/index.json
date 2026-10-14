@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "我靠东西呢"
+  "navigationBarTitleText": "我靠东西呢",
+  "usingComponents": {
+    "voice-bar": "/components/voice-bar/voice-bar"
+  }
 }
