@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>我靠东西呢 · Issue #45 交互重构 v0.2 可点击原型(D0-A 设计稿)</title>
+<style>
+/* ============ 原型页外框(非产品 UI) ============ */
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;background:#e9e6dd;color:#191919;color-scheme:light dark}
+.proto-top{max-width:820px;margin:0 auto;padding:22px 18px 8px}
+.proto-top h1{font-size:19px;margin:0 0 4px}
+.proto-top .desc{font-size:12.5px;color:#5c574a;line-height:1.7;margin:0 0 14px}
+.proto-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:280px}
+.chip{border:1px solid #c9c3b2;background:#fff;color:#191919;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer;min-height:34px}
+.chip.on{background:#191919;color:#ffe15a;border-color:#191919}
+.theme-seg{display:flex;border:1px solid #c9c3b2;border-radius:999px;overflow:hidden;background:#fff}
+.theme-seg button{border:0;background:none;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;min-height:34px;color:#191919}
+.theme-seg button.on{background:#191919;color:#ffe15a}
+.stage{display:flex;justify-content:center;padding:14px 0 40px}
+
+/* ============ 手机框 375px ============ */
+.phone{width:375px;height:790px;border-radius:34px;border:1px solid #b9b3a2;box-shadow:0 16px 50px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+
+/* ============ 设计 Tokens:与 miniprogram/app.wxss 变量一一对应(见 handoff 对照表) ============ */
+.phone{
+  --bg:#faf8f2; --card:#ffffff; --card-inset:#f1ede0;
+  --text:#191919; --text-2:#4c483e; --text-3:#a39d8d;
+  --line:#e8e3d6; --placeholder:#b8b2a4;
+  --accent:#ffe15a; --accent-shadow:#e5c431; --accent-dim:#f3edd9;
+  --go-bg:#191919; --go-fg:#ffe15a;
+  --danger:#d93025; --danger-bg:#fdecec; --danger-shadow:#ecc2c0;
+  --banner-bg:#fff3bf; --banner-line:#ffe15a;
+  --banner-manual-bg:#f4f1e6; --banner-manual-fg:#4c483e;
+}
+html[data-theme="dark"] .phone{
+  --bg:#111111; --card:#1e1e1e; --card-inset:#161616;
+  --text:#f5f4f0; --text-2:#a8a69e; --text-3:#8a8880;
+  --line:#2e2e2e; --placeholder:#82807a;
+  --accent:#f7d64b; --accent-shadow:#8f7a1e; --accent-dim:#3a3627;
+  --go-bg:#f5f4f0; --go-fg:#111111;
+  --danger:#ff6b6b; --danger-bg:#3a2222; --danger-shadow:#57302e;
+  --banner-bg:rgba(247,214,75,.14); --banner-line:#6b5b10;
+  --banner-manual-bg:#262626; --banner-manual-fg:#a8a69e;
+}
+
+/* ============ 手机内部:状态栏 / 导航 / 屏幕标签 ============ */
+.status{height:32px;flex:none;display:flex;justify-content:space-between;align-items:flex-end;padding:6px 20px 2px;font-size:12px;font-weight:700;color:var(--text)}
+.native{flex:none;min-height:50px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:15.5px}
+.native .back{border:0;background:none;color:var(--text);font-size:26px;width:38px;min-height:44px;padding:0;cursor:pointer}
+.native .more{border:0;background:none;color:var(--text);font-size:20px;width:38px;min-height:44px;padding:0;cursor:pointer;letter-spacing:1px}
+.native .capsule{margin-left:auto;padding:4px 13px;border:1px solid var(--line);border-radius:30px;background:var(--card);font-size:12px;letter-spacing:2px;color:var(--text-2);font-weight:400}
+.screentag{flex:none;display:flex;align-items:center;gap:7px;padding:7px 16px;background:var(--banner-manual-bg);color:var(--banner-manual-fg);font-size:11px;line-height:1.4}
+.screentag b{font-size:11px;border:1px solid var(--banner-manual-fg);border-radius:5px;padding:1px 6px;font-weight:700}
+
+/* ============ 视口与屏幕切换 ============ */
+.viewport{flex:1;overflow-y:auto;padding:14px 18px 26px;scrollbar-width:thin;position:relative}
+.screen{display:none}
+.screen.active{display:block;animation:fade .18s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ============ 通用排版 ============ */
+h1.pagetitle{font-size:26px;line-height:1.2;margin:6px 0 6px;font-weight:800;letter-spacing:.3px}
+h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
+.small{font-size:12.5px;color:var(--text-2);line-height:1.6}
+.tiny{font-size:11px;color:var(--text-3);line-height:1.6}
+.section-label{margin:20px 0 9px;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between}
+.section-label .lnk{font-size:12.5px;color:var(--text-2);background:none;border:0;cursor:pointer;min-height:32px;padding:2px 0;font-weight:600}
+.card{background:var(--card);border-radius:18px;padding:15px 14px;margin-top:12px}
+.note{background:var(--card-inset);border-radius:14px;padding:12px 13px;margin-top:14px}
+.note strong{font-size:12.5px;display:block;margin-bottom:4px}
+.note p{font-size:11.5px;color:var(--text-2);margin:0;line-height:1.65}
+.divider{height:1px;background:var(--line);margin:14px 0}
+
+/* ============ 品牌头与家庭上下文 ============ */
+.brand-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-top:4px}
+.brand-name{font-size:21px;font-weight:800;letter-spacing:.5px}
+.brand-sub{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.fam-chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 13px;font-size:12.5px;font-weight:700;color:var(--text);cursor:pointer;min-height:38px;flex:none}
+.fam-chip .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-shadow);margin-right:5px;vertical-align:1px}
+
+/* ============ 搜索 ============ */
+.searchbar{display:flex;gap:8px;align-items:center}
+.searchbar input{min-width:0;flex:1;height:48px;border-radius:13px;background:var(--card);border:1px solid var(--line);padding:0 13px;font-size:13.5px;color:var(--text);outline-offset:2px}
+.searchbar input::placeholder{color:var(--placeholder)}
+.searchbar .go{height:48px;width:48px;border:0;border-radius:13px;background:var(--go-bg);color:var(--go-fg);font-size:14px;font-weight:750;cursor:pointer;flex:none}
+.kb-hint{display:none;margin-top:9px;font-size:11px;color:var(--text-2);background:var(--banner-bg);border:1px dashed var(--banner-line);border-radius:10px;padding:7px 10px;line-height:1.5}
+.phone.kb-open .kb-hint{display:block}
+.empty-note{margin-top:12px;border:1px dashed var(--line);border-radius:14px;padding:14px;font-size:12px;color:var(--text-2);line-height:1.7;background:var(--card)}
+
+/* ============ 列表行 ============ */
+.item{width:100%;display:flex;align-items:center;gap:11px;padding:11px 10px;background:var(--card);border:1px solid var(--line);border-radius:15px;color:var(--text);text-align:left;cursor:pointer;min-height:70px}
+.item+.item{margin-top:8px}
+.ico{height:42px;width:42px;border-radius:12px;background:var(--go-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;flex:none}
+.item .info{flex:1;min-width:0}
+.item .info strong{font-size:15px;display:block;margin-bottom:3px;font-weight:750}
+.item .info span{font-size:11.5px;color:var(--text-2);line-height:1.45;display:block}
+.arrow{font-size:24px;color:var(--text-3);font-weight:300;flex:none}
+.count{font-size:12px;color:var(--text-2);font-weight:700;white-space:nowrap;flex:none}
+.rowbtn{width:100%;display:flex;align-items:center;gap:12px;padding:12px 11px;background:var(--card);border:1px solid var(--line);border-radius:16px;color:var(--text);text-align:left;cursor:pointer;min-height:74px}
+.rowbtn+.rowbtn{margin-top:9px}
+.rowbtn .ico.room{background:var(--card-inset);color:var(--text);font-size:18px}
+.rowbtn .info strong{font-size:15px;display:block;margin-bottom:3px}
+.rowbtn .info span{font-size:11.5px;color:var(--text-2)}
+.newpill{display:inline-block;background:var(--accent-dim);color:var(--text-2);border:1px solid var(--line);font-size:10px;border-radius:999px;padding:1px 7px;margin-left:6px;font-weight:600;vertical-align:1px}
+
+/* ============ 语音入口(每屏唯一大面积明黄) ============ */
+.voice-cta{width:100%;border:0;border-radius:19px;background:var(--accent);color:#191919;box-shadow:0 5px 0 var(--accent-shadow);padding:22px 14px;display:flex;flex-direction:column;align-items:center;gap:9px;font-weight:750;font-size:15.5px;cursor:pointer;margin-top:16px}
+.voice-cta:active{transform:translateY(2px);box-shadow:0 3px 0 var(--accent-shadow)}
+.voicebar{flex:none;display:flex;align-items:center;gap:10px;background:var(--accent);color:#191919;padding:9px 10px 9px 14px}
+.voicebar .micdot{height:38px;width:38px;border-radius:50%;background:#191919;color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+.voicebar .hold{flex:1;border:0;background:none;font-size:13.5px;font-weight:750;color:#191919;cursor:pointer;text-align:left;padding:10px 0;min-height:44px}
+.voicebar .txtbtn{border:0;border-radius:11px;background:#191919;color:var(--accent);font-size:12.5px;font-weight:750;padding:0 14px;height:38px;cursor:pointer;flex:none}
+.phone.kb-open .voicebar{display:none}
+
+/* ============ 模拟键盘(键盘态避让示意) ============ */
+.kb{display:none;flex:none;background:var(--card-inset);border-top:1px solid var(--line);padding:8px 8px 10px}
+.phone.kb-open .kb{display:block}
+.kb .krow{display:flex;gap:5px;margin-top:5px}
+.kb .krow span{flex:1;height:34px;border-radius:6px;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-2)}
+.kb .done{width:100%;margin-top:7px;border:0;border-radius:8px;background:var(--go-bg);color:var(--go-fg);font-size:12px;font-weight:700;padding:9px;cursor:pointer}
+
+/* ============ 详情/确认 ============ */
+.detail-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.detail-head .meta{font-size:11.5px;color:var(--text-3);white-space:nowrap}
+.bigcard{background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:16px 15px;margin-top:12px}
+.bigcard .lbl{font-size:12px;color:var(--text-3);font-weight:700;margin-bottom:9px}
+.bigcard .loc{display:flex;gap:9px;align-items:flex-start}
+.bigcard .loc .pin{font-size:19px;flex:none;line-height:1.2}
+.bigcard .loc .path{font-size:18px;font-weight:800;line-height:1.4}
+.bigcard .loc .path em{font-style:normal;color:var(--text-3);font-weight:400;margin:0 3px}
+.bigcard .quote{margin-top:9px;font-size:11.5px;color:var(--text-2);line-height:1.6}
+.bigcard .quote b{font-weight:700;color:var(--text-2)}
+.btnrow{display:flex;gap:9px;margin-top:13px}
+.btnrow button{flex:1;min-height:50px;border-radius:14px;font-size:14px;font-weight:750;cursor:pointer;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text)}
+.btnrow button.primary{background:var(--go-bg);color:var(--go-fg)}
+.obs-tag{display:inline-block;margin-top:9px;font-size:10.5px;color:var(--text-2);background:var(--banner-manual-bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.fold{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:0;background:var(--card);border-radius:15px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:52px;margin-top:10px;text-align:left}
+.fold-body{overflow:hidden;max-height:0;transition:max-height .25s ease}
+.fold-body.open{max-height:1200px}
+.fold-body .inner{padding:4px 2px 8px}
+.fold .chev{font-size:18px;color:var(--text-3);transition:transform .2s}
+.fold[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.field{margin-top:13px}
+.field label{font-size:12.5px;font-weight:750;display:block;margin-bottom:6px}
+.field input,.field textarea{width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);font:inherit;font-size:13.5px;padding:11px 12px}
+.field input::placeholder,.field textarea::placeholder{color:var(--placeholder)}
+.field textarea{min-height:88px;resize:vertical}
+.cta{display:block;width:100%;border:0;border-radius:15px;background:var(--go-bg);color:var(--go-fg);font-size:15px;font-weight:800;min-height:54px;margin-top:16px;cursor:pointer}
+.cta:disabled{opacity:.38;cursor:not-allowed}
+.sublnk{display:flex;gap:18px;justify-content:center;margin-top:13px}
+.sublnk button{border:0;background:none;color:var(--text-2);font-size:12.5px;cursor:pointer;min-height:40px;padding:4px 8px;font-weight:600}
+/* 摘要字段行(C1/C1b) */
+.sumrow{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.sumrow:last-child{border-bottom:0}
+.sumrow .k{font-size:12.5px;color:var(--text-3);font-weight:700;width:44px;flex:none}
+.sumrow .v{flex:1;font-size:15px;font-weight:750;min-width:0}
+.sumrow .v.warn{color:var(--danger)}
+.sumrow .edit{border:1px solid var(--line);background:var(--card-inset);color:var(--text-2);font-size:11.5px;font-weight:700;border-radius:9px;padding:7px 11px;cursor:pointer;min-height:36px;flex:none}
+.sumrow .inlinedit{flex:1;display:none}
+.sumrow.editing .v{display:none}
+.sumrow.editing .inlinedit{display:block}
+.sumrow .inlinedit input{width:100%;min-height:42px;border:1.5px solid var(--accent-shadow);border-radius:11px;background:var(--card);color:var(--text);font:inherit;font-size:13.5px;padding:9px 11px}
+.warnbox{background:var(--danger-bg);border:1.5px solid var(--danger-shadow);border-radius:13px;padding:12px 13px;margin-top:4px}
+.warnbox .wtitle{font-size:13px;font-weight:750;color:var(--danger);display:flex;align-items:center;gap:6px}
+.warnbox .whint{font-size:11.5px;color:var(--text-2);margin-top:5px;line-height:1.6}
+.warnbox input{width:100%;min-height:44px;border:1.5px solid var(--danger-shadow);border-radius:11px;background:var(--card);color:var(--text);font:inherit;font-size:13.5px;padding:10px 12px;margin-top:9px}
+/* C2 清单 */
+.qrow{display:flex;align-items:center;gap:9px;margin-top:11px}
+.qrow .q{flex:1;font-size:12px;color:var(--text-2);line-height:1.5;font-style:normal}
+.qrow .qlnk{border:0;background:none;color:var(--text-2);font-size:11.5px;font-weight:700;cursor:pointer;min-height:36px;flex:none;text-decoration:underline;text-underline-offset:3px}
+#c2-quote{display:none;margin-top:8px;background:var(--card-inset);border-radius:11px;padding:10px 12px;font-size:12px;color:var(--text-2);line-height:1.6}
+#c2-quote.open{display:block}
+.batch{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:5px 12px;margin-top:12px}
+.brow{padding:12px 0;border-bottom:1px solid var(--line)}
+.brow:last-child{border-bottom:0}
+.brow .head{display:flex;align-items:center;gap:10px}
+.ck{height:26px;width:26px;border-radius:8px;border:2px solid var(--placeholder);background:var(--card);cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;color:transparent;font-weight:800}
+.brow.sel .ck{background:var(--accent);border-color:var(--accent-shadow);color:#191919}
+.brow .nm{flex:1;font-size:15px;font-weight:750;min-width:0}
+.brow .nm .flag{display:inline-flex;align-items:center;gap:4px;margin-left:7px;font-size:10.5px;color:var(--danger);background:var(--danger-bg);border-radius:999px;padding:2px 8px;font-weight:700;vertical-align:1px}
+.brow .edit{border:1px solid var(--line);background:var(--card-inset);color:var(--text-2);font-size:11.5px;font-weight:700;border-radius:9px;padding:7px 11px;cursor:pointer;min-height:36px;flex:none}
+.brow .sub{font-size:11.5px;color:var(--text-2);margin:7px 0 0 36px;line-height:1.5}
+.brow .form{display:none;margin:9px 0 2px 36px}
+.brow.open .form{display:block}
+.brow .form input{width:100%;min-height:42px;border:1px solid var(--line);border-radius:10px;background:var(--card-inset);color:var(--text);font:inherit;font-size:13px;padding:9px 11px;margin-bottom:7px}
+/* F1 */
+.famhead{display:flex;align-items:center;gap:9px;margin-top:4px}
+.famhead h1{margin:0}
+.pill{background:var(--accent-dim);border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:11.5px;font-weight:700;color:var(--text-2)}
+.privacy{background:var(--banner-bg);border:1.5px solid var(--banner-line);border-radius:15px;padding:12px 14px;margin-top:12px}
+.privacy strong{font-size:12.5px;display:block;margin-bottom:6px}
+.privacy li{font-size:11.5px;color:var(--text-2);line-height:1.65;margin:4px 0}
+.btn{display:block;width:100%;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text);border-radius:14px;font-size:14px;font-weight:750;min-height:50px;margin-top:11px;cursor:pointer}
+.btn.ink{background:var(--go-bg);color:var(--go-fg)}
+.btn.danger{border-color:var(--danger);color:var(--danger);background:var(--danger-bg)}
+.danger-zone{border:1.5px dashed var(--danger-shadow);border-radius:15px;padding:10px 12px 12px;margin-top:9px;background:var(--card)}
+.member{display:flex;align-items:center;gap:10px;padding:10px 2px}
+.member+.member{border-top:1px solid var(--line)}
+.member .avatar{height:38px;width:38px;border-radius:50%;background:var(--go-bg);color:var(--go-fg);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex:none}
+.member .mn{flex:1;font-size:14px;font-weight:700}
+.member .role{font-size:11px;color:var(--text-2);background:var(--card-inset);border-radius:999px;padding:3px 9px}
+/* L1 面包屑 */
+.breadcrumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-2);margin:7px 0 12px}
+.breadcrumb button{border:0;padding:3px 0;min-height:30px;background:transparent;color:var(--text-2);cursor:pointer;font-size:12px}
+.breadcrumb b{color:var(--text);font-weight:700}
+.more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:36px;min-width:36px;cursor:pointer;flex:none;padding:0 8px}
+/* 录音中 */
+.recwrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:420px;gap:16px;text-align:center}
+.recmic{height:96px;width:96px;border-radius:50%;background:var(--accent);color:#191919;display:flex;align-items:center;justify-content:center;font-size:38px;box-shadow:0 0 0 14px var(--accent-dim);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 10px var(--accent-dim)}70%{box-shadow:0 0 0 26px transparent}100%{box-shadow:0 0 0 10px transparent}}
+.wave{display:flex;gap:4px;align-items:center;height:30px}
+.wave i{width:5px;border-radius:3px;background:var(--go-bg);animation:wv 1s infinite ease-in-out}
+.wave i:nth-child(1){height:12px;animation-delay:0s}.wave i:nth-child(2){height:24px;animation-delay:.12s}.wave i:nth-child(3){height:30px;animation-delay:.24s}.wave i:nth-child(4){height:20px;animation-delay:.36s}.wave i:nth-child(5){height:14px;animation-delay:.48s}.wave i:nth-child(6){height:26px;animation-delay:.6s}.wave i:nth-child(7){height:11px;animation-delay:.72s}
+@keyframes wv{0%,100%{transform:scaleY(.55)}50%{transform:scaleY(1)}}
+.reclinks{display:flex;gap:16px}
+/* 加载/失败 */
+.skel{background:var(--card);border:1px solid var(--line);border-radius:15px;height:70px;margin-top:9px;position:relative;overflow:hidden}
+.skel:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--card-inset),transparent);animation:shimmer 1.3s infinite}
+@keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.failico{font-size:40px;text-align:center;margin-top:60px}
+
+/* ============ 弹层 / 菜单 / Toast ============ */
+.sheet-mask{position:absolute;inset:0;background:rgba(0,0,0,.42);display:none;align-items:flex-end;z-index:30}
+.sheet-mask.open{display:flex}
+.sheet{width:100%;background:var(--bg);border-radius:22px 22px 0 0;padding:16px 18px 22px}
+.sheet .st{font-size:13px;font-weight:750;margin-bottom:10px;color:var(--text-2)}
+.sheet .act{display:block;width:100%;text-align:left;border:0;background:var(--card);border-radius:13px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:52px;margin-top:8px}
+.sheet .act small{display:block;font-size:11px;color:var(--text-3);font-weight:400;margin-top:3px}
+.sheet .act.warn{color:var(--danger)}
+.sheet .close{display:block;width:100%;border:0;background:none;color:var(--text-3);font-size:13px;margin-top:12px;cursor:pointer;min-height:44px}
+.invitecode{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card-inset);border-radius:13px;padding:14px;margin-top:6px}
+.invitecode b{font-size:20px;letter-spacing:3px;font-weight:800}
+.toast{position:absolute;bottom:118px;left:50%;transform:translateX(-50%);background:var(--go-bg);color:var(--go-fg);border-radius:16px;padding:10px 15px;font-size:12px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .22s;max-width:320px;text-align:center;line-height:1.5;z-index:40}
+.toast.visible{opacity:1}
+/* 页脚固定声明(原型边界) */
+.proto-footer{flex:none;padding:7px 12px;text-align:center;font-size:10.5px;color:var(--text-3);background:var(--banner-manual-bg);border-top:1px solid var(--line);line-height:1.4}
+@media(max-width:430px){.stage{padding:0}.phone{width:100%;height:100dvh;border-radius:0;border:0;box-shadow:none}.proto-top{padding:12px 14px 4px}}
+</style>
+</head>
+<body>
+
+<div class="proto-top">
+  <h1>我靠东西呢 · 交互重构 v0.2 可点击原型</h1>
+  <p class="desc">Issue #45 D0-A 设计交付 · docs-only。主 9 屏 + 附加 3 态,可点屏号切换或直接在屏内点击跳转;浅色/深色两套主题与产品 tokens 一致。所有数据均为示意,<b>一切「确认 / 保存」都是模拟,不写任何数据</b>。</p>
+  <div class="proto-controls">
+    <div class="chips" id="chips">
+      <button class="chip on" data-nav="h0">H0 首用</button>
+      <button class="chip" data-nav="h1">H1 首页·有数据</button>
+      <button class="chip" data-nav="h1b">H1b 搜索结果</button>
+      <button class="chip" data-nav="d1">D1 物品详情</button>
+      <button class="chip" data-nav="c1">C1 单件确认</button>
+      <button class="chip" data-nav="c1b">C1b 不确定</button>
+      <button class="chip" data-nav="c2">C2 多件确认</button>
+      <button class="chip" data-nav="f1">F1 家庭</button>
+      <button class="chip" data-nav="l1">L1 按位置</button>
+      <button class="chip" data-nav="v1">附加·录音中</button>
+      <button class="chip" data-nav="x1">附加·加载</button>
+      <button class="chip" data-nav="x2">附加·网络失败</button>
+    </div>
+    <div class="theme-seg" role="group" aria-label="主题切换">
+      <button id="th-light" class="on" type="button">浅色</button>
+      <button id="th-dark" type="button">深色</button>
+    </div>
+  </div>
+</div>
+
+<div class="stage">
+<div class="phone" id="phone">
+  <div class="status"><span>9:41</span><span>●●● ▰</span></div>
+  <div class="native">
+    <button class="back" id="backBtn" aria-label="返回" hidden>‹</button>
+    <span id="navTitle">我靠东西呢</span>
+    <span class="capsule">•••</span>
+  </div>
+  <div class="screentag" id="screentag"><b>H0</b><span>首页首用态 · 对应任务 T1(首次语音记住一件)</span></div>
+
+  <div class="viewport" id="viewport">
+
+  <!-- ================= H0 首页首用态(T1) ================= -->
+  <section class="screen active" data-screen="h0">
+    <div class="brand-row">
+      <div>
+        <div class="brand-name">我靠东西呢</div>
+        <div class="brand-sub">东西放哪儿了?我记得。</div>
+      </div>
+      <button class="fam-chip" data-toast="示意:个人家庭没有成员管理;先记第一件东西">我的家 ▾</button>
+    </div>
+
+    <h1 class="pagetitle">先让我记住一件东西</h1>
+    <p class="small">下次找不到,就不用满屋翻啦。</p>
+    <div class="note" style="margin-top:8px"><p>比如说:「备用钥匙放在书房抽屉里」</p></div>
+
+    <button class="voice-cta" data-nav="v1" data-origin="h0">
+      <span aria-hidden="true" style="font-size:30px;line-height:1">🎙</span>
+      按住说话,试试看
+    </button>
+    <div class="sublnk"><button data-nav="c1" data-mode="text">用文字记</button></div>
+    <p class="tiny" style="text-align:center;margin:2px 0 0">你确认后,我才会真正记住。</p>
+
+    <div class="section-label">找东西</div>
+    <div class="searchbar">
+      <input id="h0-search" placeholder="搜东西,如备用钥匙" aria-label="搜东西">
+      <button class="go" data-emptysearch="h0-empty" aria-label="找">找</button>
+    </div>
+    <div class="empty-note" id="h0-empty" hidden>
+      还没有记住的东西——先记一件,下次就能直接找到了。<br>搜索不会编造不存在的记录。
+    </div>
+
+    <div class="note"><strong>首件完成后</strong><p>真的记住第一件后,这里会提示「现在试着找找它」,马上体验一次可信检索,不用重复输入。</p></div>
+  </section>
+
+  <!-- ================= H1 首页·有数据态(T2) ================= -->
+  <section class="screen" data-screen="h1">
+    <div class="brand-row">
+      <div>
+        <div class="brand-name">我靠东西呢</div>
+        <div class="brand-sub">东西放哪儿了?我记得。</div>
+      </div>
+      <button class="fam-chip" data-nav="f1"><span class="dot"></span>我们家 ▾</button>
+    </div>
+
+    <h1 class="pagetitle">今天要找什么?</h1>
+    <div class="searchbar">
+      <input id="h1-search" placeholder="搜东西,如备用钥匙" aria-label="搜东西" value="钥匙">
+      <button class="go" data-nav="h1b" aria-label="找">找</button>
+    </div>
+    <div class="kb-hint">键盘打开时,底部语音条自动避让让位,不遮挡输入框(T7)。</div>
+
+    <div class="section-label">最近记住的 <button class="lnk" data-toast="示意:展开全部历史记录,按确认时间排序">全部 ›</button></div>
+    <div id="h1-recent">
+      <button class="item" data-nav="d1" data-itemswap="备用钥匙|书房 / 书桌 / 右边第二个抽屉|书房书桌右边第二个抽屉">
+        <span class="ico">备</span>
+        <span class="info"><strong>备用钥匙</strong><span>上次记在:书房 / 右侧抽屉</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <button class="item" data-nav="d1" data-itemswap="净水器备用滤芯|厨房 / 水槽下柜|净水器的备用滤芯,在水槽下面的柜子里">
+        <span class="ico">净</span>
+        <span class="info"><strong>净水器备用滤芯</strong><span>上次记在:厨房 / 水槽下柜</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <button class="item" data-nav="d1" data-itemswap="充电宝|客厅 / 电视柜第一格|充电宝收在电视柜第一格了">
+        <span class="ico">充</span>
+        <span class="info"><strong>充电宝</strong><span>上次记在:客厅 / 电视柜第一格</span></span>
+        <span class="arrow">›</span>
+      </button>
+    </div>
+
+    <button class="rowbtn" data-nav="l1" style="margin-top:12px">
+      <span class="ico room">⌂</span>
+      <span class="info"><strong>按位置看看家里有什么</strong><span>按房间翻翻已记住的东西</span></span>
+      <span class="arrow">›</span>
+    </button>
+
+    <div class="note"><strong>只显示确认过的</strong><p>「最近记住的」只放核对确认过的记录,3 条以内;没确认完的草稿会用一条横幅提醒继续,不会混进来。</p></div>
+  </section>
+
+  <!-- ================= H1b 搜索结果态(T2) ================= -->
+  <section class="screen" data-screen="h1b">
+    <div class="searchbar" style="margin-top:6px">
+      <input value="钥匙" aria-label="搜索词">
+      <button class="go" data-nav="h1" aria-label="返回首页">找</button>
+    </div>
+
+    <div class="section-label">找到 2 件</div>
+    <div class="card" style="padding:4px 12px">
+      <button class="item" data-nav="d1" data-itemswap="备用钥匙|书房 / 书桌 / 右边第二个抽屉|书房书桌右边第二个抽屉" style="border:0;background:none">
+        <span class="ico">备</span>
+        <span class="info"><strong>备用钥匙</strong><span>书房 / 右侧抽屉 · 上次确认 10-08</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <div class="divider" style="margin:2px 0"></div>
+      <button class="item" data-nav="d1" data-itemswap="车钥匙|客厅 / 玄关抽屉|车钥匙在玄关抽屉里" style="border:0;background:none">
+        <span class="ico">车</span>
+        <span class="info"><strong>车钥匙</strong><span>客厅 / 玄关抽屉 · 上次确认 09-30</span></span>
+        <span class="arrow">›</span>
+      </button>
+    </div>
+
+    <div class="note"><strong>命中按物品分组</strong><p>结果直接按物品归组展示,点开就是「上次确认的位置」;只显示已确认记住的记录,没找到不会硬凑相似词。</p></div>
+
+    <button class="fold" data-toggle="h1b-miss" aria-expanded="false">看看「没找到时」的样子 <span class="chev">›</span></button>
+    <div class="fold-body" id="h1b-miss"><div class="inner">
+      <div class="empty-note">没记住过「护照」。<br>要不要现在记一件?<div class="btnrow"><button class="primary" data-nav="c1" data-mode="text">记一件</button></div></div>
+    </div></div>
+  </section>
+
+  <!-- ================= D1 物品详情(T2 / T4 / T6) ================= -->
+  <section class="screen" data-screen="d1">
+    <div class="detail-head">
+      <h1 class="pagetitle" style="margin:6px 0">备用钥匙</h1>
+      <span class="meta">上次确认 10-08</span>
+    </div>
+
+    <div class="bigcard">
+      <div class="lbl">上次确认的位置</div>
+      <div class="loc">
+        <span class="pin">📍</span>
+        <div>
+          <div class="path">书房 <em>›</em> 书桌 <em>›</em> 右边第二个抽屉</div>
+          <div class="quote">你当时说的是:「书房书桌右边第二个抽屉」——原文一直保留,整理空间时也不会被改掉。</div>
+        </div>
+      </div>
+      <div class="tiny" style="margin-top:9px">这是上次记录的位置,东西可能已经移动。</div>
+    </div>
+
+    <div class="btnrow">
+      <button class="primary" data-toast="模拟:记一次「找到了」。位置是否依然有效依 #2 另行审定,当前不写库">找到了</button>
+      <button data-toggle="d1-miss">没在这里 / 更新</button>
+    </div>
+    <span class="obs-tag">观察原型 · 依 #2 另审,不写库</span>
+
+    <div class="fold-body" id="d1-miss"><div class="inner">
+      <div class="warnbox" style="margin-top:12px">
+        <div class="wtitle">⚠ 先不猜新位置</div>
+        <div class="whint">没在这里时,只建议把这条记录标记为「待核实」,或由你亲手修改位置;不会自动推测、也不会悄悄改。</div>
+        <div class="btnrow">
+          <button data-toast="模拟:已标记「待核实」(依 #2 另审,当前不写库)">标记待核实</button>
+          <button data-toggle="d1-edit" data-closetoggle="d1-miss">修改位置 ›</button>
+        </div>
+      </div>
+    </div></div>
+
+    <button class="fold" data-toggle="d1-edit" aria-expanded="false">编辑物品信息 <span class="chev">›</span></button>
+    <div class="fold-body" id="d1-edit"><div class="inner">
+      <div class="field"><label>名称</label><input value="备用钥匙" maxlength="50"></div>
+      <div class="field"><label>位置(必填)</label><input value="书房 / 书桌 / 右边第二个抽屉" maxlength="200"></div>
+      <div class="field"><label>备注</label><textarea maxlength="200">配了一把新的,旧的还在</textarea></div>
+      <button class="cta" data-toast="模拟:保存修改(设计示意,不写数据)">保存修改</button>
+      <p class="tiny" style="margin-top:9px">如果别处还留着这份的旧改动,保存前会先让你看完两版再选,不会悄悄覆盖。</p>
+    </div></div>
+
+    <div class="note"><strong>先答案,后操作</strong><p>常态先给「上次确认放在哪」;编辑、整理位置、删除都收进次级入口(右上「⋯」),不再一屏堆满表单。</p></div>
+  </section>
+
+  <!-- ================= C1 AI 单件确认(T1) ================= -->
+  <section class="screen" data-screen="c1">
+    <h1 class="pagetitle">我听到了,核对一下 <span class="pill" id="c1-mode" style="display:none;vertical-align:4px">文字记</span></h1>
+    <p class="small">看一眼,没问题就确认。</p>
+
+    <div class="card">
+      <div class="sumrow" id="c1-row-name">
+        <span class="k">物品</span>
+        <span class="v">备用钥匙</span>
+        <span class="inlinedit"><input value="备用钥匙" aria-label="修改物品名"></span>
+        <button class="edit" data-editrow="c1-row-name">改</button>
+      </div>
+      <div class="sumrow" id="c1-row-loc">
+        <span class="k">位置</span>
+        <span class="v">书房 / 右边第二抽屉</span>
+        <span class="inlinedit"><input value="书房 / 右边第二抽屉" aria-label="修改位置"></span>
+        <button class="edit" data-editrow="c1-row-loc">改</button>
+      </div>
+    </div>
+
+    <button class="fold" data-toggle="c1-quote" aria-expanded="false">原话(点开核对) <span class="chev">›</span></button>
+    <div class="fold-body" id="c1-quote"><div class="inner">
+      <div class="note" style="margin-top:8px"><p>「备用钥匙放在书房抽屉里了,别弄丢。」</p></div>
+    </div></div>
+
+    <button class="cta" id="c1-confirm" data-receipt="备用钥匙">确认记住</button>
+    <div class="sublnk"><button data-nav="v1" data-origin="h0">重说</button><button data-back>返回修改</button></div>
+    <p class="tiny" style="text-align:center;margin:4px 0 0">点「确认记住」之前,什么都不会保存。</p>
+  </section>
+
+  <!-- ================= C1b AI 不确定态(T1) ================= -->
+  <section class="screen" data-screen="c1b">
+    <h1 class="pagetitle">我听到了,但有件事要补一下</h1>
+    <p class="small">位置没听清,补一句就行。</p>
+
+    <div class="card">
+      <div class="sumrow" id="c1b-row-name">
+        <span class="k">物品</span>
+        <span class="v">充电器</span>
+        <span class="inlinedit"><input value="充电器" aria-label="修改物品名"></span>
+        <button class="edit" data-editrow="c1b-row-name">改</button>
+      </div>
+    </div>
+
+    <div class="warnbox" style="margin-top:12px">
+      <div class="wtitle">⚠ 位置没听清,放在哪儿?</div>
+      <div class="whint">不确定的位置不猜、也不先存;补上才能确认。</div>
+      <input id="c1b-loc" placeholder="例:客厅电视柜第二格" aria-label="补充位置">
+    </div>
+
+    <button class="fold" data-toggle="c1b-quote" aria-expanded="false">原话(点开核对) <span class="chev">›</span></button>
+    <div class="fold-body" id="c1b-quote"><div class="inner">
+      <div class="note" style="margin-top:8px"><p>「充电器放那个……柜子上了。」——就是这句里没听清。</p></div>
+    </div></div>
+
+    <button class="cta" id="c1b-confirm" data-receipt="充电器" disabled>先补充位置</button>
+    <div class="sublnk"><button data-nav="v1" data-origin="h0">重说</button><button data-back>返回修改</button></div>
+    <p class="tiny" style="text-align:center;margin:4px 0 0">不确定的项始终展开在你眼前,不会藏进折叠里。</p>
+  </section>
+
+  <!-- ================= C2 AI 多件确认(T3) ================= -->
+  <section class="screen" data-screen="c2">
+    <h1 class="pagetitle">识别出 3 件东西</h1>
+    <div class="qrow">
+      <span class="q">「周末把钥匙、充电宝还有充电线收一下……」</span>
+      <button class="qlnk" data-toggle="c2-quote" aria-expanded="false">展开原话 ▾</button>
+    </div>
+    <div id="c2-quote" class="">原话:「周末把钥匙、充电宝还有充电线收一下,免得找不到。」</div>
+
+    <div class="batch">
+      <div class="brow sel" data-c2row>
+        <div class="head">
+          <button class="ck" aria-label="勾选 备用钥匙">✓</button>
+          <span class="nm">备用钥匙</span>
+          <button class="edit" data-editrow>编辑</button>
+        </div>
+        <div class="sub">书房 / 右边第二抽屉</div>
+        <div class="form">
+          <input value="备用钥匙" aria-label="物品名">
+          <input value="书房 / 右边第二抽屉" aria-label="位置">
+        </div>
+      </div>
+      <div class="brow sel" data-c2row>
+        <div class="head">
+          <button class="ck" aria-label="勾选 充电宝">✓</button>
+          <span class="nm">充电宝</span>
+          <button class="edit" data-editrow>编辑</button>
+        </div>
+        <div class="sub">电视柜 / 第一格</div>
+        <div class="form">
+          <input value="充电宝" aria-label="物品名">
+          <input value="电视柜 / 第一格" aria-label="位置">
+        </div>
+      </div>
+      <div class="brow" data-c2row>
+        <div class="head">
+          <button class="ck" aria-label="勾选 充电线">✓</button>
+          <span class="nm">充电线 <span class="flag">⚠ 位置待核实</span></span>
+          <button class="edit" data-editrow>编辑</button>
+        </div>
+        <div class="sub" style="color:var(--danger)">没听清放在哪儿,默认不勾选;补上位置或手动填了再选。</div>
+        <div class="form">
+          <input placeholder="放在哪儿?例:书房插座旁" aria-label="补充充电线位置">
+        </div>
+      </div>
+    </div>
+
+    <button class="cta" id="c2-confirm" data-receipt-multi>确认保存 2 件</button>
+    <p class="tiny" style="text-align:center;margin:9px 0 0">有疑问的项目会标出来,不会直接存。勾选数变化时,按钮数量跟着变。</p>
+  </section>
+
+  <!-- ================= F1 家庭管理(T5) ================= -->
+  <section class="screen" data-screen="f1">
+    <div class="famhead"><h1 class="pagetitle">我们家</h1><span class="pill">共享中</span></div>
+    <p class="small">和家人一起记住东西放在哪儿。</p>
+
+    <div class="privacy">
+      <strong>两件要知道的事</strong>
+      <ul style="margin:0;padding-left:17px">
+        <li>加入的家人,可以看到这个共享家庭里已录入的<b>全部物品</b>。</li>
+        <li>每个人已有的私人记录,<b>不会自动搬进来</b>——要不要共享由本人决定。</li>
+      </ul>
+    </div>
+
+    <button class="fold" data-toggle="f1-members" aria-expanded="false">家人 · 2 人 <span class="chev">›</span></button>
+    <div class="fold-body" id="f1-members"><div class="inner card" style="margin-top:8px;padding:6px 14px">
+      <div class="member"><span class="avatar">妈</span><span class="mn">妈妈</span><span class="role">创建者</span></div>
+      <div class="member"><span class="avatar">我</span><span class="mn">我</span><span class="role">成员</span></div>
+    </div></div>
+
+    <button class="btn ink" data-opensheet="f1-invite">邀请家人</button>
+    <p class="tiny" style="margin:6px 0 0">邀请 7 天内有效,可随时撤销;只有创建者能邀请。</p>
+
+    <button class="rowbtn" data-toast="示意:头像和昵称沿用微信「头像昵称填写能力」,不改权限">
+      <span class="ico room">我</span>
+      <span class="info"><strong>我的资料</strong><span>头像 · 昵称</span></span>
+      <span class="arrow">›</span>
+    </button>
+
+    <button class="fold" data-toggle="f1-admin" aria-expanded="false">管理 <span class="chev">›</span></button>
+    <div class="fold-body" id="f1-admin"><div class="inner">
+      <button class="rowbtn" data-toast="示意:邀请记录——复制新邀请码 / 撤销(沿用现有能力)">
+        <span class="ico room">✉</span><span class="info"><strong>邀请记录</strong><span>复制新邀请码 / 撤销</span></span><span class="arrow">›</span>
+      </button>
+      <button class="rowbtn" data-toast="示意:管理成员(创建者);权限规则不变,仅文案区分创建者/成员">
+        <span class="ico room">☰</span><span class="info"><strong>管理成员</strong><span>创建者可见</span></span><span class="arrow">›</span>
+      </button>
+    </div></div>
+
+    <button class="rowbtn" data-toast="示意:家庭设置(家庭名等)">
+      <span class="ico room">⚙</span><span class="info"><strong>家庭设置</strong></span><span class="arrow">›</span>
+    </button>
+
+    <button class="fold" data-toggle="f1-danger" aria-expanded="false">危险操作 <span class="chev">›</span></button>
+    <div class="fold-body" id="f1-danger"><div class="inner danger-zone">
+      <p class="tiny" style="margin:2px 0 4px">退出后,你在这个家庭共享的记录仍留给家人;解散仅当家里只剩你一人。</p>
+      <button class="btn" data-toast="模拟:退出前会再让你确认一次(示意,不写数据)">退出家庭</button>
+      <button class="btn danger" data-toast="模拟:解散需二次确认;数据将保留但无人可访问(示意,不写数据)">解散家庭</button>
+    </div></div>
+
+    <div class="note"><strong>加入确认页同样保留这两条事实</strong><p>家人可看整个共享家庭已录入的物品;每人已有私人记录不会自动迁入。不为视觉清爽藏掉隐私提示。</p></div>
+  </section>
+
+  <!-- ================= L1 按位置找东西(空间浏览,次级) ================= -->
+  <section class="screen" data-screen="l1">
+    <div id="l1-rooms">
+      <h1 class="pagetitle">按位置找东西</h1>
+      <div class="breadcrumb"><b>我的家</b></div>
+      <p class="small">先逛后整理:每一行点进去就是那个位置;整理(改名/移动/合并)在「⋯」里,不抢主操作。</p>
+
+      <div style="margin-top:12px">
+        <div class="rowbtn" style="width:100%">
+          <span class="ico room">▤</span>
+          <span class="info"><strong>书房</strong><span>书桌、小冰箱等</span></span>
+          <span class="count">12 件</span>
+          <button class="more-inline" data-opensheet="l1-more" aria-label="书房更多操作">⋯</button>
+        </div>
+        <button class="rowbtn" data-l1down="study">
+          <span class="ico room">▤</span>
+          <span class="info"><strong>书房</strong><span>进入书房</span></span>
+          <span class="arrow">›</span>
+        </button>
+        <button class="rowbtn" data-toast="示意:客厅(同书房结构,逐层下钻)">
+          <span class="ico room">▱</span><span class="info"><strong>客厅</strong><span>电视柜、玄关柜等</span></span><span class="count">9 件</span><span class="arrow">›</span>
+        </button>
+        <button class="rowbtn" data-toast="示意:卧室(同书房结构,逐层下钻)">
+          <span class="ico room">▥</span><span class="info"><strong>卧室</strong><span>床头柜、衣柜等</span></span><span class="count">3 件</span><span class="arrow">›</span>
+        </button>
+        <button class="rowbtn" data-toast="示意:位置还不明确的记录,原文可查,不硬塞进房间">
+          <span class="ico room">?</span><span class="info"><strong>尚未归类</strong><span>位置待核实的 2 件</span></span><span class="arrow">›</span>
+        </button>
+      </div>
+      <div class="note"><strong>件数来自已确认记录</strong><p>「X 件」= 该位置及其下级去重后的已确认物品数;没确认完的草稿不计入。</p></div>
+    </div>
+
+    <div id="l1-study" style="display:none">
+      <h1 class="pagetitle">书房</h1>
+      <div class="breadcrumb"><button data-l1up="rooms">我的家</button> › <b>书房</b></div>
+      <div class="section-label">往里看看</div>
+      <button class="rowbtn" data-l1down="desk">
+        <span class="ico room">▤</span><span class="info"><strong>书桌</strong><span>桌面、右侧第二个抽屉</span></span><span class="count">8 件</span><span class="arrow">›</span>
+      </button>
+      <button class="rowbtn" data-toast="示意:小冰箱(冷藏层、门侧,3 件)">
+        <span class="ico room">▣</span><span class="info"><strong>小冰箱</strong><span>冷藏层、门侧</span></span><span class="count">3 件</span><span class="arrow">›</span>
+      </button>
+      <div class="section-label">直接记录在书房 · 1 件</div>
+      <button class="item" data-nav="d1" data-itemswap="扫地机器人|书房 / 地面">
+        <span class="ico">扫</span><span class="info"><strong>扫地机器人</strong><span>上次记在:书房 / 地面</span></span><span class="arrow">›</span>
+      </button>
+    </div>
+
+    <div id="l1-desk" style="display:none">
+      <h1 class="pagetitle">书桌</h1>
+      <div class="breadcrumb"><button data-l1up="rooms">我的家</button> › <button data-l1up="study">书房</button> › <b>书桌</b></div>
+      <div class="section-label">往里看看</div>
+      <button class="rowbtn" data-toast="示意:右侧第二个抽屉(5 件,叶子位置)">
+        <span class="ico room">▭</span><span class="info"><strong>右侧第二个抽屉</strong><span>备用钥匙等 5 件</span></span><span class="count">5 件</span><span class="arrow">›</span>
+      </button>
+      <div class="section-label">直接记录在书桌 · 2 件</div>
+      <button class="item" data-nav="d1" data-itemswap="充电宝|书桌 / 桌面右侧|充电宝就放书桌右手边">
+        <span class="ico">充</span><span class="info"><strong>充电宝</strong><span>上次记在:书桌 / 桌面右侧</span></span><span class="arrow">›</span>
+      </button>
+      <button class="item" data-toast="示意:说明书(书桌 / 抽屉一)">
+        <span class="ico">说</span><span class="info"><strong>说明书</strong><span>上次记在:书桌 / 抽屉一</span></span><span class="arrow">›</span>
+      </button>
+      <div class="note"><strong>原文一直保留</strong><p>整理空间(改名/移动/合并)不会改写你确认时说的原话。</p></div>
+    </div>
+  </section>
+
+  <!-- ================= 附加:V1 录音中(T1) ================= -->
+  <section class="screen" data-screen="v1">
+    <div class="recwrap">
+      <div class="recmic" aria-hidden="true">🎙</div>
+      <div style="font-size:19px;font-weight:800">说吧,我记着呢。</div>
+      <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p class="small" style="max-width:250px">松手后先给你核对一遍,<b>确认了才算记住</b>。</p>
+      <button class="cta" id="v1-release" style="max-width:250px">松开,去核对</button>
+      <div class="reclinks">
+        <button class="sublnk-btn" data-back style="border:0;background:none;color:var(--text-2);font-size:12.5px;min-height:44px;cursor:pointer;text-decoration:underline;text-underline-offset:3px">↑ 上滑取消</button>
+      </div>
+      <p class="tiny">取消的话,就当没说过,什么都不记。</p>
+    </div>
+  </section>
+
+  <!-- ================= 附加:X1 加载态(T7) ================= -->
+  <section class="screen" data-screen="x1">
+    <div class="brand-row">
+      <div><div class="brand-name">我靠东西呢</div><div class="brand-sub">东西放哪儿了?我记得。</div></div>
+      <button class="fam-chip" data-toast="示意:加载中不可切换家庭,避免旧数据上屏">我们家 ▾</button>
+    </div>
+    <h1 class="pagetitle">正在找…</h1>
+    <div class="searchbar"><input value="钥匙" disabled aria-label="搜索词"><button class="go" disabled>找</button></div>
+    <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+    <div class="note"><strong>加载中不拿旧数据冒充最新</strong><p>切换家庭或弱网时,列表先给骨架屏;上个家庭的记录绝不能先显示再等纠正。</p></div>
+  </section>
+
+  <!-- ================= 附加:X2 网络失败态(T7) ================= -->
+  <section class="screen" data-screen="x2">
+    <div class="failico">⚠️</div>
+    <h1 class="pagetitle" style="text-align:center">网络好像断了</h1>
+    <p class="small" style="text-align:center">刚才没加载出来。已确认记住的记录不受影响,联网后照常能找。</p>
+    <button class="cta" data-toast="模拟:重试成功,回到首页(示意)">再试一次</button>
+    <div class="note"><strong>失败要说清两件事</strong><p>失败的是「这次加载」,不是「你的记录没了」;重试可恢复,不诱导重复录入。</p></div>
+  </section>
+
+  </div><!-- /viewport -->
+
+  <!-- 底部常驻语音条(H0/H1/H1b 显示;键盘态自动避让) -->
+  <div class="voicebar" id="voicebar">
+    <span class="micdot" aria-hidden="true">🎙</span>
+    <button class="hold" data-nav="v1" data-origin="bar">按住说话,记住一件事</button>
+    <button class="txtbtn" data-nav="c1" data-mode="text">文字</button>
+  </div>
+
+  <!-- 模拟键盘(键盘态避让示意) -->
+  <div class="kb" aria-hidden="true">
+    <div class="krow"><span>拼</span><span>钥匙</span><span>开启</span><span>了</span></div>
+    <div class="krow"><span>备</span><span>用</span><span>书</span><span>房</span><span>，</span></div>
+    <button class="done" data-kbclose>收起键盘(看语音条回来)</button>
+  </div>
+
+  <!-- 页脚固定声明 -->
+  <div class="proto-footer">D0 设计原型——一切「确认 / 保存」均为模拟,不写任何数据</div>
+
+  <!-- 弹层:D1 更多菜单 -->
+  <div class="sheet-mask" id="sheet-d1">
+    <div class="sheet">
+      <div class="st">备用钥匙 · 更多</div>
+      <button class="act" data-toast="示意:分享给家人后,共享家庭里都能看到这条记录">分享给家人<small>放进「我们家」的共享记录</small></button>
+      <button class="act" data-toast="示意:进入「整理位置」选择挂靠的空间(次级入口)">整理位置<small>选择它属于哪个房间 / 家具</small></button>
+      <button class="act warn" data-toast="模拟:删除前会再问一次「确定删除吗」(示意,不写数据)">删除这条记录<small>需要二次确认</small></button>
+      <button class="close" data-closesheet>取消</button>
+    </div>
+  </div>
+
+  <!-- 弹层:F1 邀请 -->
+  <div class="sheet-mask" id="sheet-f1-invite">
+    <div class="sheet">
+      <div class="st">邀请家人 · 模拟</div>
+      <p class="small" style="margin:4px 0 8px">把这张卡片发给家人,对方打开并确认后即加入;7 天内有效,可随时撤销。</p>
+      <div class="invitecode"><b>KM7Q · 3ZTA</b><button class="txtbtn" style="background:var(--go-bg);color:var(--go-fg);height:36px" data-toast="模拟:邀请码已复制(设计示意,不写数据)">复制邀请码</button></div>
+      <button class="btn" data-toast="模拟:撤销后旧卡片立即失效(示意,不写数据)">撤销这次邀请</button>
+      <p class="tiny" style="margin-top:8px">加入确认页会写明:家人可看全部共享记录;已有私人记录不自动迁入。</p>
+      <button class="close" data-closesheet>关闭</button>
+    </div>
+  </div>
+
+  <!-- 弹层:L1 整理位置 -->
+  <div class="sheet-mask" id="sheet-l1-more">
+    <div class="sheet">
+      <div class="st">书房 · 整理位置(次级)</div>
+      <button class="act" data-toast="示意:重命名(确认后才生效,不写库)">重命名</button>
+      <button class="act" data-toast="示意:移动到别的房间(跨父层归并需确认)">移动</button>
+      <button class="act" data-toast="示意:与相似位置合并(需人工确认,不自动合并)">合并相似位置</button>
+      <button class="close" data-closesheet>取消</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var phone=document.getElementById('phone');
+  var viewport=document.getElementById('viewport');
+  var backBtn=document.getElementById('backBtn');
+  var navTitle=document.getElementById('navTitle');
+  var screentag=document.getElementById('screentag');
+  var toastEl=document.getElementById('toast');
+  var voicebar=document.getElementById('voicebar');
+  var history=[];
+  var voiceOrigin='h1';
+  var toastTimer=null;
+
+  /* 屏号 → (标题, 标签说明, 是否显示语音条) */
+  var SCREENS={
+    h0:{title:'我靠东西呢',tag:'H0 · 首页首用态 — 任务 T1(首次语音记住一件)',voice:false,chrome:'我靠东西呢'},
+    h1:{title:'我靠东西呢',tag:'H1 · 首页有数据态 — 任务 T2(找到已记录物品)',voice:true},
+    h1b:{title:'搜索结果',tag:'H1b · 搜索结果态 — 任务 T2(命中分组展示)',voice:true},
+    d1:{title:'物品详情',tag:'D1 · 物品详情「先答案后操作」— 任务 T2 / T4 / T6',voice:false},
+    c1:{title:'核对一下',tag:'C1 · 单件确认摘要卡 — 任务 T1(松手≠已保存)',voice:false},
+    c1b:{title:'核对一下',tag:'C1b · 不确定态(显眼展开,不藏) — 任务 T1 / T3',voice:false},
+    c2:{title:'核对一下',tag:'C2 · 多件确认(模糊项默认不选) — 任务 T3',voice:false},
+    f1:{title:'家庭',tag:'F1 · 家庭管理(家人优先/创建者文案) — 任务 T5',voice:false},
+    l1:{title:'按位置找东西',tag:'L1 · 空间浏览(先逛后整理) — 二级页示意',voice:false},
+    v1:{title:'录音中',tag:'V1 · 录音中态 — 任务 T1(上滑取消/松手去核对)',voice:false},
+    x1:{title:'我靠东西呢',tag:'X1 · 加载态 — 任务 T7(骨架屏,不用旧数据冒充)',voice:false},
+    x2:{title:'出了点问题',tag:'X2 · 网络失败态 — 任务 T7(可重试,记录不受影响)',voice:false}
+  };
+
+  function current(){return history.length?history[history.length-1]:'h1'}
+  function navTo(id,push){
+    if(!SCREENS[id])return;
+    var cur=current();
+    if(push!==false&&cur!==id)history.push(id);else if(push===false)history[history.length-1]=id;
+    document.querySelectorAll('.screen').forEach(function(s){s.classList.toggle('active',s.dataset.screen===id)});
+    var meta=SCREENS[id];
+    navTitle.textContent=meta.title;
+    screentag.innerHTML='<b>'+id.toUpperCase()+'</b><span>'+meta.tag.replace(/^[A-Z0-9]+ · /,'')+'</span>';
+    voicebar.style.display=meta.voice?'':'none';
+    backBtn.hidden=history.length<=1;
+    document.querySelectorAll('#chips .chip').forEach(function(c){c.classList.toggle('on',c.dataset.nav===id)});
+    viewport.scrollTop=0;
+    closeKeyboard();
+  }
+  function goBack(){
+    if(history.length>1){history.pop();navTo(current(),false)}
+  }
+
+  /* toast */
+  function toast(msg){
+    toastEl.textContent=msg;toastEl.classList.add('visible');
+    clearTimeout(toastTimer);toastTimer=setTimeout(function(){toastEl.classList.remove('visible')},2600);
+  }
+
+  /* 键盘避让示意 */
+  function openKeyboard(){phone.classList.add('kb-open')}
+  function closeKeyboard(){phone.classList.remove('kb-open')}
+  var h1s=document.getElementById('h1-search');
+  if(h1s){h1s.addEventListener('focus',openKeyboard);h1s.addEventListener('click',function(){phone.classList.toggle('kb-open')})}
+  document.querySelectorAll('[data-kbclose]').forEach(function(b){b.addEventListener('click',closeKeyboard)});
+
+  /* H0 空搜索:不给假结果 */
+  document.querySelectorAll('[data-emptysearch]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var t=document.getElementById(b.dataset.emptysearch);
+      if(t)t.hidden=!t.hidden;
+      toast('示意:无已确认记录时,搜索只给空态说明,不编造结果');
+    });
+  });
+
+  /* 事件委托:导航 / 返回 / toast / 弹层 / 折叠 */
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-nav],[data-back],[data-toast],[data-opensheet],[data-closesheet],[data-toggle],[data-editrow],[data-l1down],[data-l1up],[data-closetoggle]');
+    if(!t)return;
+    if(t.dataset.nav){
+      if(t.dataset.origin)voiceOrigin=t.dataset.origin;
+      if(t.dataset.mode==='text'){var m=document.getElementById('c1-mode');if(m)m.style.display=''}
+      if(t.dataset.itemswap){
+        var p=t.dataset.itemswap.split('|');
+        var st=document.querySelector('[data-screen="d1"] .detail-head .pagetitle');
+        var lp=document.querySelector('[data-screen="d1"] .bigcard .path');
+        if(st)st.textContent=p[0];
+        if(lp)lp.innerHTML=p[1].replace(/\//g,' <em>›</em> ');
+        var q=document.querySelector('[data-screen="d1"] .bigcard .quote b');
+        if(q&&p[2])q.textContent='「'+p[2]+'」';
+      }
+      navTo(t.dataset.nav);
+      return;
+    }
+    if(t.hasAttribute('data-back')){goBack();return}
+    if(t.dataset.toast){toast(t.dataset.toast);return}
+    if(t.dataset.opensheet){var s=document.getElementById('sheet-'+t.dataset.opensheet);if(s)s.classList.add('open');return}
+    if(t.hasAttribute('data-closesheet')){document.querySelectorAll('.sheet-mask').forEach(function(m){m.classList.remove('open')});return}
+    if(t.dataset.toggle){
+      var body=document.getElementById(t.dataset.toggle);
+      var open=body.classList.toggle('open');
+      t.setAttribute('aria-expanded',open?'true':'false');
+      if(t.dataset.closetoggle){var other=document.getElementById(t.dataset.closetoggle);if(other&&open)other.classList.remove('open')}
+      return;
+    }
+    if(t.hasAttribute('data-editrow')){
+      var row=t.closest('.sumrow,.brow');
+      if(row)row.classList.toggle('editing');
+      row=t.closest('.brow');
+      if(t.hasAttribute('data-editrow')&&t.dataset.editrow===undefined&&row)row.classList.toggle('open');
+      return;
+    }
+    if(t.dataset.l1down){
+      document.getElementById('l1-rooms').style.display='none';
+      var v=document.getElementById('l1-'+t.dataset.l1down);
+      if(v)v.style.display='';
+      viewport.scrollTop=0;return;
+    }
+    if(t.dataset.l1up){
+      ['l1-rooms','l1-study','l1-desk'].forEach(function(id){document.getElementById(id).style.display='none'});
+      var u=document.getElementById('l1-'+t.dataset.l1up);
+      if(u)u.style.display='';
+      viewport.scrollTop=0;return;
+    }
+  });
+
+  /* C1/C1b 行内改字段 */
+  document.querySelectorAll('.sumrow .edit').forEach(function(b){
+    b.addEventListener('click',function(e){
+      e.stopImmediatePropagation();
+      var row=document.getElementById(b.dataset.editrow);
+      if(row)row.classList.toggle('editing');
+    });
+  });
+  /* C2 行:勾选 + 编辑展开 */
+  document.querySelectorAll('[data-c2row]').forEach(function(row){
+    var ck=row.querySelector('.ck');
+    ck.addEventListener('click',function(e){
+      e.stopPropagation();
+      if(row.querySelector('.flag')&&!row.classList.contains('resolved')){toast('位置没核实前,这件先不勾——补上位置后可勾选(安全门示意)');return}
+      row.classList.toggle('sel');updateC2();
+    });
+    var ed=row.querySelector('.edit');
+    ed.addEventListener('click',function(e){
+      e.stopImmediatePropagation();e.stopPropagation();
+      row.classList.toggle('open');
+    });
+    var pin=row.querySelector('.form input[placeholder*="放在哪儿"]');
+    if(pin){pin.addEventListener('input',function(){
+      if(pin.value.trim()){row.classList.add('resolved');row.querySelector('.flag').style.display='none';row.querySelector('.sub').textContent='已补充:' +pin.value.trim()}
+      else{row.classList.remove('resolved')}
+    })}
+  });
+  function updateC2(){
+    var n=document.querySelectorAll('[data-c2row].sel').length;
+    var btn=document.getElementById('c2-confirm');
+    btn.textContent=n>0?('确认保存 '+n+' 件'):'先勾选要记住的';
+    btn.disabled=n===0;
+  }
+  /* C1b 补充位置后才可确认 */
+  var c1bLoc=document.getElementById('c1b-loc'),c1bBtn=document.getElementById('c1b-confirm');
+  c1bLoc.addEventListener('input',function(){
+    var has=c1bLoc.value.trim().length>0;
+    c1bBtn.disabled=!has;
+    c1bBtn.textContent=has?'确认记住':'先补充位置';
+  });
+  /* 确认回执:模拟,不写数据 */
+  document.querySelectorAll('[data-receipt]').forEach(function(b){
+    b.addEventListener('click',function(){
+      toast('模拟回执:「'+b.dataset.receipt+'」已记住(设计示意,不写任何数据)');
+      prependRecent(b.dataset.receipt);
+      setTimeout(function(){navTo('h1')},900);
+    });
+  });
+  var c2Btn=document.getElementById('c2-confirm');
+  c2Btn.addEventListener('click',function(){
+    var names=[].map.call(document.querySelectorAll('[data-c2row].sel .nm'),function(n){return n.textContent.trim().split(' ')[0]});
+    toast('模拟回执:已记住 '+names.length+' 件('+names.join('、')+')(设计示意,不写任何数据)');
+    names.forEach(prependRecent);
+    setTimeout(function(){navTo('h1')},1100);
+  });
+  function prependRecent(name){
+    var list=document.getElementById('h1-recent');
+    var exists=[].some.call(list.querySelectorAll('.item strong'),function(s){return s.textContent.indexOf(name)===0});
+    if(exists)return;
+    var btn=document.createElement('button');
+    btn.className='item';btn.setAttribute('data-nav','d1');
+    btn.innerHTML='<span class="ico">'+name[0]+'</span><span class="info"><strong>'+name+'<span class="newpill">刚记住</span></strong><span>上次记在:本原型示意</span></span><span class="arrow">›</span>';
+    list.insertBefore(btn,list.firstChild);
+    if(list.children.length>3)list.removeChild(list.lastChild);
+  }
+  /* 录音松手 → 核对(单件走 C1,多件走 C2) */
+  var release=document.getElementById('v1-release');
+  release.addEventListener('click',function(){
+    release.textContent='整理你刚说的话…';release.disabled=true;
+    setTimeout(function(){
+      release.textContent='松开,去核对';release.disabled=false;
+      navTo(voiceOrigin==='h0'?'c1':'c2');
+    },750);
+  });
+  /* D1 标题里「更多 ⋯」:nav 右侧按钮 */
+  var moreBtn=document.createElement('button');
+  moreBtn.className='more';moreBtn.setAttribute('aria-label','更多操作');moreBtn.textContent='⋯';moreBtn.hidden=true;
+  moreBtn.addEventListener('click',function(){document.getElementById('sheet-d1').classList.add('open')});
+  document.querySelector('.native').insertBefore(moreBtn,document.querySelector('.capsule'));
+  var _navTo=navTo;
+  /* 覆写 navTo 以同步「⋯」可见性(D1 独有) */
+  navTo=function(id,push){_navTo(id,push);moreBtn.hidden=(id!=='d1')};
+
+  /* 返回按钮 */
+  backBtn.addEventListener('click',goBack);
+
+  /* 主题切换 */
+  var thL=document.getElementById('th-light'),thD=document.getElementById('th-dark');
+  function setTheme(t){
+    document.documentElement.dataset.theme=t;
+    thL.classList.toggle('on',t==='light');thD.classList.toggle('on',t==='dark');
+  }
+  thL.addEventListener('click',function(){setTheme('light')});
+  thD.addEventListener('click',function(){setTheme('dark')});
+  if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)setTheme('dark');
+
+  /* 初始:H1 为默认入口(芯片第一个是 H0,但演示从有数据态更能走全路径;两者均可点) */
+  history=['h1'];navTo('h1',false);updateC2();
+})();
+</script>
+</body>
+</html>
