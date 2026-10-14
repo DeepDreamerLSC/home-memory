@@ -52,14 +52,16 @@ html[data-theme="dark"] .phone{
   --vb-cta-shadow:var(--accent-shadow);
   --banner-manual-bg:#262626; --banner-manual-fg:#a8a69e;
 }
-/* 语音条配色候选(六轮:大黄常驻过艳,可切换对比,待拍板;七轮:B 改「热区即色块」——
-   按住区=整条黄色胶囊,色块到哪热区就到哪,圆点只是胶囊左端的图标) */
-.phone.vb-b{--vb-bg:#fffdf4;--vb-fg:#191919;--vb-line:#e8e3d6;--vb-hold-bg:#ffe15a;--vb-hold-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#ffe15a;--vb-btn-bg:transparent;--vb-btn-fg:#4c483e;--vb-btn-line:#ddd6c2;--vb-cta-shadow:#e6dfca}
-html[data-theme="dark"] .phone.vb-b{--vb-bg:#1e1e1e;--vb-fg:#f5f4f0;--vb-line:#2e2e2e;--vb-hold-bg:#f7d64b;--vb-hold-fg:#191919;--vb-mic-bg:#111111;--vb-mic-fg:#f7d64b;--vb-btn-fg:#a8a69e;--vb-btn-line:#2e2e2e;--vb-cta-shadow:rgba(0,0,0,.45)}
-.phone.vb-c{--vb-bg:#f4d97c;--vb-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#ffe15a;--vb-btn-bg:#191919;--vb-btn-fg:#f4d97c;--vb-cta-shadow:#d9b952}
-html[data-theme="dark"] .phone.vb-c{--vb-bg:#caa92f;--vb-cta-shadow:#8a7414}
-.phone.vb-d{--vb-bg:#191919;--vb-fg:#f5f4f0;--vb-hold-bg:rgba(255,251,240,.08);--vb-mic-bg:#ffe15a;--vb-mic-fg:#191919;--vb-btn-bg:transparent;--vb-btn-fg:#f5f4f0;--vb-btn-line:#4c483e;--vb-cta-shadow:rgba(0,0,0,.35)}
-html[data-theme="dark"] .phone.vb-d{--vb-bg:#1e1e1e;--vb-btn-line:#3a3a3a}
+/* 语音条配色候选(六轮起:大黄常驻过艳;七轮定型奶油条+胶囊「热区即色块」;
+   八轮:胶囊本身降饱和,四档柔软度阶梯待拍板。B2=推荐平衡点) */
+.phone.vb-b1{--vb-bg:#fffdf4;--vb-fg:#191919;--vb-line:#e8e3d6;--vb-hold-bg:#ffe15a;--vb-hold-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#ffe15a;--vb-btn-bg:transparent;--vb-btn-fg:#4c483e;--vb-btn-line:#ddd6c2;--vb-cta-shadow:#e6dfca}
+html[data-theme="dark"] .phone.vb-b1{--vb-bg:#1e1e1e;--vb-fg:#f5f4f0;--vb-line:#2e2e2e;--vb-hold-bg:#f7d64b;--vb-hold-fg:#191919;--vb-mic-bg:#111111;--vb-mic-fg:#f7d64b;--vb-btn-fg:#a8a69e;--vb-btn-line:#2e2e2e;--vb-cta-shadow:rgba(0,0,0,.45)}
+.phone.vb-b2{--vb-bg:#fffdf4;--vb-fg:#191919;--vb-line:#e8e3d6;--vb-hold-bg:#ffe98c;--vb-hold-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#ffe98c;--vb-btn-bg:transparent;--vb-btn-fg:#4c483e;--vb-btn-line:#ddd6c2;--vb-cta-shadow:#e8e0c4}
+html[data-theme="dark"] .phone.vb-b2{--vb-bg:#1e1e1e;--vb-fg:#f5f4f0;--vb-line:#2e2e2e;--vb-hold-bg:#d9b93e;--vb-hold-fg:#191919;--vb-mic-bg:#111111;--vb-mic-fg:#d9b93e;--vb-btn-fg:#a8a69e;--vb-btn-line:#2e2e2e;--vb-cta-shadow:rgba(0,0,0,.45)}
+.phone.vb-b3{--vb-bg:#fffdf4;--vb-fg:#191919;--vb-line:#e8e3d6;--vb-hold-bg:#f7e9c4;--vb-hold-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#f7e9c4;--vb-btn-bg:transparent;--vb-btn-fg:#4c483e;--vb-btn-line:#ddd6c2;--vb-cta-shadow:#eae3cf}
+html[data-theme="dark"] .phone.vb-b3{--vb-bg:#1e1e1e;--vb-fg:#f5f4f0;--vb-line:#2e2e2e;--vb-hold-bg:rgba(247,214,75,.22);--vb-hold-fg:#f7d64b;--vb-mic-bg:#f7d64b;--vb-mic-fg:#111111;--vb-btn-fg:#a8a69e;--vb-btn-line:#2e2e2e;--vb-cta-shadow:rgba(0,0,0,.45)}
+.phone.vb-b4{--vb-bg:#fffdf4;--vb-fg:#191919;--vb-line:#e8e3d6;--vb-hold-bg:#f3edd9;--vb-hold-fg:#191919;--vb-mic-bg:#191919;--vb-mic-fg:#f3edd9;--vb-btn-bg:transparent;--vb-btn-fg:#4c483e;--vb-btn-line:#ddd6c2;--vb-cta-shadow:#ece6d6}
+html[data-theme="dark"] .phone.vb-b4{--vb-bg:#1e1e1e;--vb-fg:#f5f4f0;--vb-line:#2e2e2e;--vb-hold-bg:rgba(247,214,75,.12);--vb-hold-fg:#f7d64b;--vb-mic-bg:#f7d64b;--vb-mic-fg:#111111;--vb-btn-fg:#a8a69e;--vb-btn-line:#2e2e2e;--vb-cta-shadow:rgba(0,0,0,.45)}
 
 /* ============ 手机内部:状态栏 / 导航 / 屏幕标签 ============ */
 .status{height:32px;flex:none;display:flex;justify-content:space-between;align-items:flex-end;padding:6px 20px 2px;font-size:12px;font-weight:700;color:var(--text)}
@@ -307,11 +309,12 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <button id="th-light" class="on" type="button">浅色</button>
       <button id="th-dark" type="button">深色</button>
     </div>
-    <div class="theme-seg" role="group" aria-label="语音条配色候选">
-      <button class="on" data-vb="a" type="button" title="现行:#ffe15a 明黄铺底">A 明黄</button>
-      <button data-vb="b" type="button" title="推荐:奶油白条,黄色只留给麦克风圆点">B 奶油·荐</button>
-      <button data-vb="c" type="button" title="降饱和暖黄,保留色块但柔和">C 暖黄·柔</button>
-      <button data-vb="d" type="button" title="墨黑条+黄点,夜间舒适高对比">D 墨黑·黄点</button>
+    <div class="theme-seg" role="group" aria-label="语音条胶囊色阶候选">
+      <button class="on" data-vb="base" type="button" title="现行:#ffe15a 明黄铺底(对照用)">现行·明黄条</button>
+      <button data-vb="b1" type="button" title="奶油条+明黄胶囊 #ffe15a">胶囊·明黄</button>
+      <button data-vb="b2" type="button" title="推荐:奶油黄胶囊 #ffe98c,降一档饱和">胶囊·奶油黄</button>
+      <button data-vb="b3" type="button" title="淡杏胶囊 #f7e9c4,再柔一档">胶囊·淡杏</button>
+      <button data-vb="b4" type="button" title="米黄油胶囊 #f3edd9(即产品 accent-dim token),最安静">胶囊·米黄油</button>
     </div>
   </div>
 </div>
@@ -1169,8 +1172,8 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
   thD.addEventListener('click',function(){setTheme('dark')});
   if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)setTheme('dark');
 
-  /* 语音条配色切换(六轮候选,待拍板) */
-  var VBKEYS=['a','b','c','d'];
+  /* 语音条胶囊色阶切换(八轮候选,待拍板;base=现行明黄条对照) */
+  var VBKEYS=['b1','b2','b3','b4'];
   document.querySelectorAll('[data-vb]').forEach(function(b){
     b.addEventListener('click',function(){
       document.querySelectorAll('[data-vb]').forEach(function(x){x.classList.toggle('on',x===b)});
