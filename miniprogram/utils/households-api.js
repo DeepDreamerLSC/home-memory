@@ -14,6 +14,7 @@ exports.createInvite = createInvite;
 exports.revokeInvite = revokeInvite;
 exports.fetchInviteList = fetchInviteList;
 exports.fetchInviteInfo = fetchInviteInfo;
+exports.updateHouseholdProfile = updateHouseholdProfile;
 exports.fetchMemberList = fetchMemberList;
 exports.removeFamilyMember = removeFamilyMember;
 /**
@@ -367,6 +368,15 @@ async function fetchInviteInfo(token) {
     return { ok: true, display_name: r.display_name };
 }
 /** memberList(owner):成员清单(owner 在前、按加入时间升序)。 */
+/** 设置本人在本家庭的展示资料(头像昵称填写能力;只写自己的会员行) */
+async function updateHouseholdProfile(profile) {
+    const event = { action: "updateProfile", ...profile };
+    const r = await callHouseholds(event);
+    if (r.ok !== true || typeof r.profile !== "object" || r.profile === null) {
+        throw new api_1.ApiError(api_1.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    return { ok: true, profile: r.profile };
+}
 async function fetchMemberList() {
     const r = await callHouseholds({ action: "memberList" });
     const raw = r.members;
@@ -384,6 +394,8 @@ async function fetchMemberList() {
         joined_at: v.joined_at,
         invited_by: typeof v.invited_by === "string" ? v.invited_by : null,
         is_self: v.is_self === true,
+        nickname: typeof v.nickname === "string" && v.nickname.length > 0 ? v.nickname : null,
+        avatar_file_id: typeof v.avatar_file_id === "string" && v.avatar_file_id.length > 0 ? v.avatar_file_id : null,
     }));
     return { ok: true, members };
 }

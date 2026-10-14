@@ -26,6 +26,7 @@ import {
   leaveFamily,
   removeFamilyMember,
   revokeInvite,
+  updateHouseholdProfile,
 } from "../../utils/households-api";
 import type {
   HouseholdInviteMeta,
@@ -58,6 +59,11 @@ Page<
     members: DisplayMember[];
     /** 成员清单是否已拉取(全体成员可见;管理动作按 isOwner 区分) */
     memberListAvailable: boolean;
+    /** 我的资料:昵称输入值/待上传头像临时路径/已存头像/保存中 */
+    profileNick: string;
+    selfAvatarTemp: string;
+    selfAvatarFileId: string;
+    profileSaving: boolean;
     invites: DisplayInvite[];
     inviteListError: string;
     /** 最新一次 inviteCreate 的裸令牌(只在响应出现一次,页面内存持有,不持久化) */
@@ -84,6 +90,10 @@ Page<
     /* 邀请(owner) */
     onInviteTap(): Promise<void>;
     onShareTap(): void;
+    onChooseAvatar(e: WechatMiniprogram.CustomEvent): void;
+    onProfileNickInput(e: WechatMiniprogram.CustomEvent): void;
+    onSaveProfileTap(): Promise<void>;
+    applySelfProfile(): void;
     onCopyInviteTap(): void;
     onJoinByCodeTap(): void;
     onRevokeTap(e: WechatMiniprogram.CustomEvent): void;
@@ -111,6 +121,10 @@ Page<
     isOwner: false,
     members: [],
     memberListAvailable: false,
+    profileNick: "",
+    selfAvatarTemp: "",
+    selfAvatarFileId: "",
+    profileSaving: false,
     invites: [],
     inviteListError: "",
     shareToken: "",
@@ -179,6 +193,7 @@ Page<
               role_text: m.role === "owner" ? "创建者" : "成员",
             })),
           });
+          this.applySelfProfile();
         } catch (e) {
           this.setData({ loadError: "成员列表加载失败:" + errorMessage(e) });
         }
@@ -303,6 +318,79 @@ Page<
   /** 分享卡片按钮(open-type=share 触发 onShareAppMessage) */
   onShareTap() {
     // 实际分享内容由 onShareAppMessage 提供;此处仅作显式入口
+  },
+
+  /** 本人资料同步到输入区(仅初值;用户编辑期间不覆盖) */
+  applySelfProfile() {
+    const self = this.data.members.filter((m) => m.is_self)[0];
+    if (!self) {
+      return;
+    }
+    this.setData({
+      profileNick: this.data.profileNick || self.nickname || "",
+      selfAvatarFileId: self.avatar_file_id || "",
+    });
+  },
+
+  /** 选头像(微信头像昵称填写能力:open-type=chooseAvatar,可一键用微信头像) */
+  onChooseAvatar(e) {
+    const url = e.detail && e.detail.avatarUrl;
+    if (typeof url === "string" && url.length > 0) {
+      this.setData({ selfAvatarTemp: url });
+    }
+  },
+
+  onProfileNickInput(e) {
+    this.setData({ profileNick: (e.detail.value || "").trim() });
+  },
+
+  /** 保存资料:头像临时文件先传云存储(fileID 入库),再 updateProfile */
+  async onSaveProfileTap() {
+    if (this.data.profileSaving) {
+      return;
+    }
+    const patch: { nickname?: string; avatar_file_id?: string } = {};
+    const nick = this.data.profileNick.trim();
+    if (nick !== "") {
+      patch.nickname = nick;
+    }
+    this.setData({ profileSaving: true });
+    try {
+      if (this.data.selfAvatarTemp) {
+        const up = await wx.cloud.uploadFile({
+          cloudPath:
+            "household-avatars/" +
+            Date.now() +
+            "-" +
+            Math.floor(Math.random() * 1000000) +
+            ".jpg",
+          filePath: this.data.selfAvatarTemp,
+        });
+        if (up.fileID) {
+          patch.avatar_file_id = up.fileID;
+        }
+      }
+      if (Object.keys(patch).length === 0) {
+        wx.showToast({ title: "没有要保存的资料", icon: "none" });
+        return;
+      }
+      await updateHouseholdProfile(patch);
+      wx.showToast({ title: "已保存", icon: "success" });
+      this.setData({ selfAvatarTemp: "" });
+      const members = await fetchMemberList();
+      this.setData({
+        members: members.members.map((m) => ({
+          ...m,
+          joined_text: formatDateTime(m.joined_at),
+          role_text: m.role === "owner" ? "创建者" : "成员",
+        })),
+      });
+      this.applySelfProfile();
+    } catch (e) {
+      wx.showModal({ title: "保存失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ profileSaving: false });
+    }
   },
 
   /** 复制邀请码(体验版兜底:分享卡片受限时,家人手动输入令牌加入) */
