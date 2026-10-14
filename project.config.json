@@ -21,6 +21,10 @@
       {
         "type": "suffix",
         "value": ".ts"
+      },
+      {
+        "type": "file",
+        "value": "types.js"
       }
     ],
     "include": []
