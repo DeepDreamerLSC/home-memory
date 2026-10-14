@@ -108,7 +108,12 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 /* ============ 语音入口(每屏唯一大面积明黄) ============ */
 .voice-cta{width:100%;border:0;border-radius:19px;background:var(--accent);color:#191919;box-shadow:0 5px 0 var(--accent-shadow);padding:22px 14px;display:flex;flex-direction:column;align-items:center;gap:9px;font-weight:750;font-size:15.5px;cursor:pointer;margin-top:16px}
 .voice-cta:active{transform:translateY(2px);box-shadow:0 3px 0 var(--accent-shadow)}
-.voicebar{flex:none;display:flex;align-items:center;gap:10px;background:var(--accent);color:#191919;padding:9px 10px 9px 14px}
+.phone{--vbar-h:58px}
+.voicebar{flex:none;display:flex;align-items:center;gap:10px;background:var(--accent);color:#191919;padding:9px 10px 9px 14px;transition:transform .09s ease,box-shadow .09s ease,filter .09s ease}
+.voicebar.pressed{transform:scale(.955) translateY(1px);filter:brightness(.94) saturate(1.05);box-shadow:inset 0 3px 8px rgba(0,0,0,.14)}
+.voicebar.pressed .micdot{animation:micpress .5s ease}
+@keyframes micpress{0%{transform:scale(.8)}55%{transform:scale(1.12)}100%{transform:scale(1)}}
+.voicebar .hold.rec-label{color:#191919;font-size:13px}
 .voicebar .micdot{height:38px;width:38px;border-radius:50%;background:#191919;color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
 .voicebar .hold{flex:1;border:0;background:none;font-size:13.5px;font-weight:750;color:#191919;cursor:pointer;text-align:left;padding:10px 0;min-height:44px}
 .voicebar .txtbtn{border:0;border-radius:11px;background:#191919;color:var(--accent);font-size:12.5px;font-weight:750;padding:0 14px;height:38px;cursor:pointer;flex:none}
@@ -206,17 +211,20 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .breadcrumb button{border:0;padding:3px 0;min-height:30px;background:transparent;color:var(--text-2);cursor:pointer;font-size:12px}
 .breadcrumb b{color:var(--text);font-weight:700}
 .more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:36px;min-width:36px;cursor:pointer;flex:none;padding:0 8px}
-/* 录音中:半屏贴底半透明小窗(用户反馈:不全屏、重心不跳、轻微透明承载按住态) */
-.recback{position:absolute;inset:0;background:rgba(0,0,0,.24);backdrop-filter:blur(1.5px)}
-.recsheet{position:absolute;left:0;right:0;bottom:0;max-height:52%;overflow:hidden auto;border-radius:24px 24px 0 0;
+/* 录音中:半屏半透明小窗悬浮于黄色按钮上方(用户反馈二轮:不滚动、信息全收录、
+   黄条按住时仍可见且呈按下态、按压动效可感知) */
+.recback{position:absolute;inset:0;background:rgba(0,0,0,.22);backdrop-filter:blur(1.5px)}
+.recsheet{position:absolute;left:12px;right:12px;bottom:calc(var(--vbar-h) + 12px);
+  border-radius:22px;overflow:hidden; /* 不滚动:所有信息一次排下 */
   background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(14px) saturate(1.15);
-  box-shadow:0 -10px 34px rgba(0,0,0,.16);padding:20px 20px calc(18px + env(safe-area-inset-bottom));
-  display:flex;flex-direction:column;align-items:center;gap:13px;text-align:center;
-  animation:recup .22s ease-out}
-@keyframes recup{from{transform:translateY(36px);opacity:.4}to{transform:none;opacity:1}}
-.recsheet .grab{width:38px;height:4.5px;border-radius:99px;background:var(--text-3);opacity:.5;margin-bottom:2px}
-.recwrap{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;width:100%}
-.recmic{height:72px;width:72px;border-radius:50%;background:var(--accent);color:#191919;display:flex;align-items:center;justify-content:center;font-size:29px;box-shadow:0 0 0 11px var(--accent-dim);animation:pulse 1.6s infinite}
+  box-shadow:0 10px 30px rgba(0,0,0,.18);padding:16px 16px 14px;
+  display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;
+  animation:recpop .3s cubic-bezier(.2,.9,.3,1.35)} /* 回弹入场=被"顶"出来的感觉 */
+@keyframes recpop{0%{transform:translateY(46px) scale(.97);opacity:0}60%{transform:translateY(-4px);opacity:1}100%{transform:none}}
+.recsheet .grab{display:none}
+.recwrap{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;width:100%}
+.recrow{display:flex;align-items:center;gap:12px}
+.recmic{height:58px;width:58px;border-radius:50%;background:var(--accent);color:#191919;display:flex;align-items:center;justify-content:center;font-size:23px;box-shadow:0 0 0 10px var(--accent-dim);animation:pulse 1.6s infinite;flex:none}
 @keyframes pulse{0%{box-shadow:0 0 0 10px var(--accent-dim)}70%{box-shadow:0 0 0 26px transparent}100%{box-shadow:0 0 0 10px transparent}}
 .wave{display:flex;gap:4px;align-items:center;height:30px}
 .wave i{width:5px;border-radius:3px;background:var(--go-bg);animation:wv 1s infinite ease-in-out}
@@ -671,9 +679,9 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     </div>
   </section>
 
-  <!-- ================= 附加:V1 录音中(T1)——半屏贴底半透明浮层,首页背景保持可见 ================= -->
+  <!-- ================= 附加:V1 录音中(T1)——半屏小窗悬浮于"被按下的"黄色按钮上方 ================= -->
   <section class="screen" data-screen="v1" style="padding:0">
-    <!-- 背景即按住前的首页(静态复刻,仅示意连续性;真实实现为页面不动+浮层) -->
+    <!-- 背景即按住前的首页(静态复刻;真实实现=页面不动+浮层) -->
     <div aria-hidden="true" style="position:absolute;inset:0;overflow:hidden;pointer-events:none;opacity:.9">
       <div style="padding:14px 16px 0">
         <div class="brand-row"><div><div class="brand-name">我靠东西呢</div><div class="brand-sub">东西放哪儿了?我记得。</div></div><button class="fam-chip" style="pointer-events:none">我们家 ▾</button></div>
@@ -686,19 +694,26 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
         </div>
       </div>
     </div>
-    <!-- 半透明底衬:首页内容隐约可见 -->
     <div class="recback"></div>
-    <!-- 半屏小窗:贴底、轻透明、毛玻璃 -->
+    <!-- 小窗:不滚动,全部信息一次排下 -->
     <div class="recsheet" role="dialog" aria-label="正在录音">
-      <div class="grab" aria-hidden="true"></div>
       <div class="recwrap">
-        <div class="recmic" aria-hidden="true">🎙</div>
-        <div style="font-size:17px;font-weight:800">说吧,我记着呢。</div>
-        <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <p class="small" style="max-width:250px">松手后先给你核对一遍,<b>确认了才算记住</b>。</p>
-        <button class="cta" id="v1-release" style="max-width:250px">松开,去核对</button>
-        <button class="sublnk-btn" data-back style="border:0;background:none;color:var(--text-2);font-size:12.5px;min-height:44px;cursor:pointer;text-decoration:underline;text-underline-offset:3px">↑ 上滑取消</button>
-        <p class="tiny">取消的话,就当没说过,什么都不记。</p>
+        <div style="font-size:16.5px;font-weight:800">说吧,我记着呢。</div>
+        <div class="recrow">
+          <div class="recmic" aria-hidden="true">🎙</div>
+          <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <p class="small" style="max-width:270px">松手后先给你核对一遍,<b>确认了才算记住</b>。</p>
+        <button class="cta" id="v1-release" style="max-width:270px;min-height:44px">松开,去核对</button>
+        <button class="sublnk-btn" data-back style="border:0;background:none;color:var(--text-2);font-size:12px;min-height:40px;cursor:pointer;text-decoration:underline;text-underline-offset:3px">↑ 上滑取消 · 取消就当没说过,什么都不记</button>
+      </div>
+    </div>
+    <!-- 被按下的黄色按钮(按住时仍可见;按下态=轻微缩扁+变暗+内阴影) -->
+    <div style="position:absolute;left:0;right:0;bottom:0">
+      <div class="voicebar pressed" aria-label="录音按钮(按下中)">
+        <div class="micdot" aria-hidden="true">🎙</div>
+        <button class="hold rec-label" style="cursor:default">正在听…(松手去核对)</button>
+        <button class="txtbtn" style="pointer-events:none;opacity:.55">文字</button>
       </div>
     </div>
   </section>
