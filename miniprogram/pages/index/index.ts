@@ -1,24 +1,11 @@
 import {
-  ApiError,
-  callExtractDraft,
   callItemsApi,
   errorMessage,
   formatDateTime,
 } from "../../utils/api";
-import {
-  ensureRecordAuth,
-  createSessionGuard,
-  createVoiceController,
-  createDefaultVoiceDeps,
-  isMeaningfulTranscript,
-  isSlideUpCancel,
-  isVoiceEntryBusy,
-  type VoiceSession,
-  type SessionGuard,
-  type VoiceController,
-} from "../../utils/voice";
+import { attachVoiceEntry, type VoiceEntryHandle } from "../../utils/voice-entry";
 import type { ItemSummary } from "../../types";
-import { createDraftSession, clearDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
+import { getUnfinishedDraftSession } from "../../utils/draft-session";
 import {
   householdSelfProfile,
   householdScopeName,
@@ -83,25 +70,10 @@ Page<
   onLoad(options: Record<string, string | undefined>): void;
     onModeText(): void;
     onModeVoice(): void;
-    ensureVoiceCtrl(): void;
-    /** 语音控制器(进入语音模式时惰性创建) */
-    voiceCtrl: VoiceController | null;
-    /** 本次按住的起点 Y(上滑取消判定) */
-    touchStartY: number;
-    /** 录音秒数计时器句柄 */
-    recordTimer: number;
-    /** 按压会话守卫(授权竞态与生命周期失效) */
-    sessionGuard: SessionGuard | null;
-    /** 当前录音会话(begin 之后有效) */
-    activeVoiceSession: VoiceSession | null;
-    clearRecordTimer(): void;
-    invalidateVoiceSession(): void;
-    startRecording(session: number): Promise<void>;
-    onExtractTap(): Promise<void>;
-    /** 未完成批次的新建门禁(第四轮评审):恢复 / 放弃 / 中止 三选 */
-    askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort">;
-    /** 放弃旧批次二次确认(五轮评审):讲清非数据库撤销语义 */
-    confirmDiscardDraft(): Promise<boolean>;
+    ensureVoiceEntry(): void;
+    /** 语音录入入口共享句柄(单例模块;页面加载即挂,卸载时解除) */
+    voiceEntry: VoiceEntryHandle | null;
+    onExtractTap(): void;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
@@ -151,16 +123,10 @@ Page<
     partialText: "",
   },
 
-  voiceCtrl: null,
-  touchStartY: 0,
-  recordTimer: 0,
-  /** 按压会话守卫:授权异步回调、录音、取消、识别结果都必须属于同一次有效按压 */
-  sessionGuard: null as SessionGuard | null,
-  activeVoiceSession: null as VoiceSession | null,
+  voiceEntry: null,
 
   onLoad(options) {
-    this.sessionGuard = createSessionGuard();
-    this.ensureVoiceCtrl();
+    this.ensureVoiceEntry();
     // 邀请卡片落地兜底(issue #34 P1-B):分享卡片 path 指向加入确认页,
     // 冷启动直达;若有其他入口把 invite 带到首页,转送加入确认页(一步确认)
     const invite = options && options.invite ? String(options.invite).trim() : "";
@@ -266,39 +232,16 @@ Page<
   },
 
   onHide() {
-    this.clearRecordTimer();
-    this.invalidateVoiceSession();
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.invalidate();
+    }
   },
 
   onUnload() {
-    this.clearRecordTimer();
-    this.invalidateVoiceSession();
-  },
-
-  /**
-   * 作废当前按压会话并终止在途录音/识别:
-   * 松手早于授权返回、切换模式、离开页面时调用,防止"幽灵录音"与迟到的识别结果触发提取。
-   */
-  invalidateVoiceSession() {
-    if (this.sessionGuard !== null) {
-      this.sessionGuard.invalidate();
-    }
-    // 永久作废在途录音会话:迟到的启动回调与转写结果均按会话丢弃
-    const session = this.activeVoiceSession;
-    this.activeVoiceSession = null;
-    if (session !== null && this.voiceCtrl !== null) {
-      this.voiceCtrl.cancel(session);
-    }
-    this.clearRecordTimer();
-    if (this.data.voiceState !== "idle" || this.data.transcribing) {
-      this.setData({ voiceState: "idle", transcribing: false, partialText: "" });
-    }
-  },
-
-  clearRecordTimer() {
-    if (this.recordTimer) {
-      clearInterval(this.recordTimer);
-      this.recordTimer = 0;
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.invalidate();
+      this.voiceEntry.detach();
+      this.voiceEntry = null;
     }
   },
 
@@ -307,272 +250,89 @@ Page<
   },
 
   onModeText() {
-    this.invalidateVoiceSession();
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.invalidate();
+    }
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
   onModeVoice() {
     this.setData({ inputMode: "voice", voiceState: "idle", transcribing: false, partialText: "", recordSeconds: 0 });
-    this.ensureVoiceCtrl();
+    this.ensureVoiceEntry();
   },
 
-  /** 惰性创建语音控制器(默认语音模式,页面加载即建) */
-  ensureVoiceCtrl() {
-    if (this.voiceCtrl !== null) {
+  /**
+   * 语音录入入口(utils/voice-entry 单例共享模块):
+   * 会话守卫/忙碌门禁/录音转写提取/跳确认全在模块内,本页只挂宿主(渲染+文字回退)。
+   */
+  ensureVoiceEntry() {
+    if (this.voiceEntry !== null) {
       return;
     }
-    this.voiceCtrl = createVoiceController(
-      {
-        onStart: () => {
-          this.clearRecordTimer();
-          this.setData({ voiceState: "recording", partialText: "", recordSeconds: 0 });
-          this.recordTimer = setInterval(() => {
-            this.setData({ recordSeconds: this.data.recordSeconds + 1 });
-          }, 1000);
-        },
-        onTranscribing: () => {
-          this.clearRecordTimer();
-          this.setData({ transcribing: true, partialText: "识别中…" });
-        },
-        onStop: (text) => {
-          this.clearRecordTimer();
-          this.activeVoiceSession = null; // 语音处理结束,释放会话引用
-          this.setData({ voiceState: "idle", transcribing: false, partialText: text });
-          // 空结果或纯语气词(环境噪音)不算有效输入:如实提示,不进提取,
-          // 避免噪音文本被误报成"AI 不可用"
-          if (!text || !isMeaningfulTranscript(text)) {
-            wx.showToast({ title: "没听清,请重试或改用文字", icon: "none", duration: 2500 });
-            return;
-          }
-          // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认)。
-          // 保留语音视图显示「AI 整理草稿中…」;memoText 同步保存,
-          // 用户切「改用文字」时输入仍在(不丢用户文本)。
-          this.setData({ memoText: text });
-          this.onExtractTap();
-        },
-        onError: (code, message) => {
-          this.clearRecordTimer();
-          this.activeVoiceSession = null; // 语音处理结束(失败),释放会话引用
-          this.setData({ voiceState: "idle", transcribing: false });
-          wx.showToast({ title: message, icon: "none", duration: 2500 });
-        },
+    this.voiceEntry = attachVoiceEntry({
+      onStateChange: (s) => {
+        this.setData({
+          voiceState: s.voiceState,
+          transcribing: s.transcribing,
+          extracting: s.extracting,
+          recordSeconds: s.recordSeconds,
+          partialText: s.partialText,
+        });
       },
-      createDefaultVoiceDeps(),
-    );
+      onTranscript: (text) => {
+        // 转写文本同步 memoText:切「改用文字」时输入仍在(不丢用户文本)
+        this.setData({ memoText: text });
+      },
+      fallbackToText: () => {
+        this.voiceFallbackToText();
+      },
+    });
   },
 
   onTalkTouchStart(e) {
-    if (isVoiceEntryBusy(this.data.voiceState, this.data.transcribing, this.data.extracting)) {
+    if (this.voiceEntry === null) {
       return;
     }
     const touch = e.touches && e.touches[0];
-    this.touchStartY = touch ? touch.clientY : 0;
-    this.activeVoiceSession = null;
-    // 页面级会话号只管「授权异步返回」窗口:松手/切换/离开后授权才返回则不发起录音
-    const session = this.sessionGuard !== null ? this.sessionGuard.begin() : 0;
-    void this.startRecording(session);
+    this.voiceEntry.pressStart(touch ? touch.clientY : 0);
   },
 
   onTalkTouchMove(e) {
-    if (this.data.voiceState === "idle") {
+    if (this.voiceEntry === null) {
       return;
     }
     const touch = e.touches && e.touches[0];
     if (!touch) {
       return;
     }
-    // 上滑/滑回仅切换视觉状态;真正作废在松手时按状态决定 stop 或 cancel
-    if (isSlideUpCancel(this.touchStartY, touch.clientY)) {
-      if (this.data.voiceState !== "cancelPending") {
-        this.setData({ voiceState: "cancelPending" });
-      }
-    } else if (this.data.voiceState === "cancelPending") {
-      this.setData({ voiceState: "recording" });
-    }
+    this.voiceEntry.pressMove(touch.clientY);
   },
 
   onTalkTouchEnd() {
-    // 作废授权窗口(松手早于授权返回时不得再发起录音)
-    if (this.sessionGuard !== null) {
-      this.sessionGuard.invalidate();
-    }
-    const session = this.activeVoiceSession;
-    if (session === null) {
-      return; // 录音会话尚未建立(授权未返回):无事可收尾
-    }
-    if (this.voiceCtrl === null) {
-      return;
-    }
-    if (this.data.voiceState === "cancelPending") {
-      this.voiceCtrl.cancel(session); // 上滑取消:永久作废,立即释放引用
-      this.activeVoiceSession = null;
-      this.setData({ voiceState: "idle", partialText: "" });
-    } else {
-      // 正常松手:停止并进入转写。保留会话引用——"手指松开"不等于
-      // "语音处理结束":识别中阶段仍可经 invalidateVoiceSession 取消;
-      // 引用在 onStop/onError 回调(处理完成)时释放。
-      this.voiceCtrl.stop(session);
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.pressEnd();
     }
   },
 
   onTalkTouchCancel() {
-    if (this.sessionGuard !== null) {
-      this.sessionGuard.invalidate();
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.pressCancel();
     }
-    const session = this.activeVoiceSession;
-    this.activeVoiceSession = null;
-    if (session !== null && this.voiceCtrl !== null) {
-      this.voiceCtrl.cancel(session);
-    }
-    this.setData({ voiceState: "idle", partialText: "" });
-  },
-
-  async startRecording(session: number) {
-    const auth = await ensureRecordAuth();
-    if (this.sessionGuard !== null && !this.sessionGuard.isCurrent(session)) {
-      return; // 松手/切换模式/离开页面后授权才返回:本次按压已作废,不发起录音
-    }
-    if (auth === "denied") {
-      wx.showModal({
-        title: "需要录音权限",
-        content: "语音记一件需要使用麦克风。可以到设置中开启,或改用文字输入。",
-        confirmText: "去设置",
-        cancelText: "用文字",
-        success: (r) => {
-          if (r.confirm) {
-            wx.openSetting({});
-          } else {
-            this.voiceFallbackToText();
-          }
-        },
-      });
-      return;
-    }
-    if (this.voiceCtrl === null) {
-      // 授权通过后控制器缺失(不应发生):回退文字
-      this.voiceFallbackToText();
-      return;
-    }
-    // 发起录音会话(建立会话后,启动/取消/转写回调全部按会话校验)
-    this.activeVoiceSession = this.voiceCtrl.begin();
   },
 
   voiceFallbackToText() {
-    this.invalidateVoiceSession();
+    if (this.voiceEntry !== null) {
+      this.voiceEntry.invalidate();
+    }
     this.setData({ inputMode: "text", voiceState: "idle", transcribing: false, partialText: "" });
   },
 
-  /**
-   * 未完成批次的新建门禁(第四轮评审阻断项):存在未完成会话时直接新建会覆盖
-   * 持久化恢复入口,旧批次已保存行的 operation_id 幂等键随之丢失——必须先由
-   * 用户明确裁决:继续核对旧的 / 放弃旧的记新的 / 中止(什么都不动)。
-   */
-  askDraftEntryIntent(count: number): Promise<"resume" | "discard" | "abort"> {
-    return new Promise((resolve) => {
-      wx.showActionSheet({
-        itemList: ["继续核对上一批(共 " + count + " 件)", "放弃上一批,记新的"],
-        success: (r) => {
-          resolve(r.tapIndex === 0 ? "resume" : "discard");
-        },
-        fail: () => {
-          resolve("abort"); // 点遮罩/取消:保留旧批次,本次不提取
-        },
-      });
-    });
-  },
-
-  /**
-   * 放弃旧批次的二次确认(五轮评审):明确「放弃」只是丢掉恢复入口,
-   * 不是数据库撤销——已保存的物品不会回滚,结果未知的物品可能已入库。
-   */
-  confirmDiscardDraft(): Promise<boolean> {
-    return new Promise((resolve) => {
-      wx.showModal({
-        title: "放弃上一批?",
-        content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
-        confirmText: "放弃,记新的",
-        cancelText: "返回",
-        success: (r) => {
-          resolve(r.confirm);
-        },
-        fail: () => {
-          resolve(false);
-        },
-      });
-    });
-  },
-
-  /** 记一件:textarea → extractDraft(v2 多件拆分),草稿入临时会话,确认页按 sid 取 */
-  async onExtractTap() {
-    const text = this.data.memoText.trim();
-    if (!text) {
-      wx.showToast({ title: "请先输入一句话", icon: "none" });
+  /** 记一件(文字模式):textarea 内容走共享提取链路(三选门→提取→跳确认) */
+  onExtractTap() {
+    if (this.voiceEntry === null) {
       return;
     }
-    if (this.data.extracting) {
-      return;
-    }
-    const unfinished = getUnfinishedDraftSession();
-    if (unfinished !== null) {
-      const choice = await this.askDraftEntryIntent(unfinished.payload.drafts.length);
-      if (choice === "resume") {
-        this.goToConfirm("/pages/confirm/confirm?sid=" + unfinished.sid);
-        return;
-      }
-      if (choice === "abort") {
-        return;
-      }
-      // 放弃:二次确认讲清语义(非数据库撤销),显式清除恢复入口后才开始本次提取
-      if (!(await this.confirmDiscardDraft())) {
-        return;
-      }
-      clearDraftSession(unfinished.sid);
-    }
-    this.setData({ extracting: true });
-    try {
-      const res = await callExtractDraft(text, { protocol: 2 });
-      if ("drafts" in res) {
-        // v2:一句话 1-5 件,统一走列表确认页(单件也是 1 行列表)
-        const sid = createDraftSession(res.original_text, res.drafts, res.truncated);
-        this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
-        return;
-      }
-      if ("needs_split" in res) {
-        // 防御:服务端未升级窗口内仍可能返回旧形态
-        wx.showToast({
-          title: res.message || "一次只记一件物品,请分开说",
-          icon: "none",
-          duration: 2500,
-        });
-        return;
-      }
-      // v1 单草稿兜底:同样入会话走列表页
-      const sid = createDraftSession(text, [{ ...res.draft, source_quote: text }], false);
-      this.goToConfirm("/pages/confirm/confirm?sid=" + sid);
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") {
-        // 契约流程:AI 不可用时征得确认后进入手动录入
-        wx.showModal({
-          title: "AI 暂时不可用",
-          content: e.message,
-          confirmText: "手动录入",
-          cancelText: "取消",
-          success: (r) => {
-            if (r.confirm) {
-              this.goToConfirm("/pages/confirm/confirm?manual=true");
-            }
-          },
-        });
-      } else {
-        wx.showModal({
-          title: "提取失败",
-          content: errorMessage(e),
-          showCancel: false,
-        });
-      }
-    } finally {
-      this.setData({ extracting: false });
-    }
+    void this.voiceEntry.extract(this.data.memoText);
   },
 
   /** 找东西:输入名称 → itemsApi query */
@@ -702,4 +462,3 @@ Page<
     });
   },
 });
-
