@@ -178,9 +178,9 @@
           <view
             class="row-action"
             data-index="{{ index }}"
-            catchtap="onRevokeTap"
+            catchtap="onInviteRowTap"
           >
-            撤销
+            管理
           </view>
         </view>
       </block>

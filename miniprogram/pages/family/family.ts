@@ -96,6 +96,8 @@ Page<
     applySelfProfile(): void;
     onCopyInviteTap(): void;
     onJoinByCodeTap(): void;
+    onInviteRowTap(e: WechatMiniprogram.CustomEvent): void;
+    shareNewInviteCode(): Promise<void>;
     onRevokeTap(e: WechatMiniprogram.CustomEvent): void;
     inviteAt(index: number): DisplayInvite | undefined;
     /* 成员(owner) */
@@ -441,6 +443,59 @@ Page<
   },
 
   /** 撤销邀请:二次确认后 inviteRevoke(立即失效);清掉页面持有的分享令牌 */
+  /** 邀请记录「管理」:弹窗分发新邀请码或撤销(安全约束:旧令牌原文不落库,
+   *  无法"再次分发同一个码"——分发即生成新邀请,旧邀请保留有效直至过期/撤销) */
+  onInviteRowTap(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const invite = this.inviteAt(index);
+    if (!invite || this.data.acting) {
+      return;
+    }
+    wx.showActionSheet({
+      itemList: ["复制新邀请码发给别人", "撤销这个邀请"],
+      success: (r) => {
+        if (r.tapIndex === 0) {
+          void this.shareNewInviteCode();
+        } else if (r.tapIndex === 1) {
+          this.onRevokeTap(e);
+        }
+      },
+      fail: () => {},
+    });
+  },
+
+  /** 生成新邀请并复制邀请码(与顶部按钮同源;旧邀请不动) */
+  async shareNewInviteCode() {
+    this.setData({ acting: true });
+    try {
+      const invite = await createInvite();
+      this.setData({ shareToken: invite.token });
+      wx.setClipboardData({
+        data: invite.token,
+        success: () => {
+          wx.showToast({ title: "新邀请码已复制", icon: "none", duration: 2500 });
+        },
+      });
+      const invites = await fetchInviteList();
+      this.setData({
+        invites: invites
+          .filter((v) => !v.revoked && !v.expired)
+          .map((v) => ({
+            ...v,
+            created_text: formatDateTime(v.created_at),
+            expires_text: formatDateTime(v.expires_at),
+            status_text: "有效",
+            active: true,
+          })),
+        inviteListError: "",
+      });
+    } catch (e) {
+      wx.showModal({ title: "生成邀请失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ acting: false });
+    }
+  },
+
   onRevokeTap(e) {
     const index = Number(e.currentTarget.dataset.index);
     const invite = this.inviteAt(index);
