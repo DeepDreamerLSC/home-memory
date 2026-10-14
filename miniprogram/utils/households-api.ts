@@ -29,6 +29,7 @@ import { clearLocationsCache } from "./locations-cache";
 import {
   captureHouseholdScope,
   captureHouseholdScopeName,
+  captureHouseholdSelfProfile,
   householdScopeId,
   isHouseholdScopeShared,
   isScopeVerified,
@@ -142,6 +143,7 @@ function captureAndInvalidate(
     if (displayName === undefined) {
       captureHouseholdScopeName(null); // 换家未携带新名:清空,不跟旧名
     }
+    captureHouseholdSelfProfile({ nickname: null, avatar_file_id: null });
   }
   if (displayName !== undefined) {
     captureHouseholdScopeName(displayName);
@@ -206,6 +208,9 @@ function parseStatus(r: Record<string, unknown>): HouseholdStatusResponse {
     scope_revision:
       typeof r.scope_revision === "number" ? r.scope_revision : null,
     display_name: typeof r.display_name === "string" ? r.display_name : null,
+    self_nickname: typeof r.self_nickname === "string" ? r.self_nickname : null,
+    self_avatar_file_id:
+      typeof r.self_avatar_file_id === "string" ? r.self_avatar_file_id : null,
   };
 }
 
@@ -222,6 +227,10 @@ export async function fetchHouseholdStatus(): Promise<HouseholdStatusResponse> {
     status.scope_revision,
     status.display_name === undefined ? null : status.display_name,
   );
+  captureHouseholdSelfProfile({
+    nickname: status.self_nickname,
+    avatar_file_id: status.self_avatar_file_id,
+  });
   return status;
 }
 
@@ -463,6 +472,11 @@ export async function updateHouseholdProfile(
   if (r.ok !== true || typeof r.profile !== "object" || r.profile === null) {
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
+  const prof = r.profile as { nickname?: unknown; avatar_file_id?: unknown };
+  captureHouseholdSelfProfile({
+    nickname: typeof prof.nickname === "string" ? prof.nickname : undefined,
+    avatar_file_id: typeof prof.avatar_file_id === "string" ? prof.avatar_file_id : undefined,
+  });
   return { ok: true, profile: r.profile as { nickname?: string; avatar_file_id?: string } };
 }
 

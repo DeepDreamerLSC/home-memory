@@ -525,6 +525,9 @@ export interface HouseholdStatusResponse {
   role: HouseholdRole | null;
   scope_revision: number | null;
   display_name: string | null;
+  /** 本人展示资料(status 携带,主页头像入口渲染) */
+  self_nickname: string | null;
+  self_avatar_file_id: string | null;
 }
 
 export interface HouseholdCreateResponse {

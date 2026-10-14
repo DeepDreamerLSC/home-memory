@@ -319,16 +319,27 @@ async function statusAction(event, deps) {
       shared: false,
       role: null,
       scope_revision: null,
-      display_name: null
+      display_name: null,
+      self_nickname: null,
+      self_avatar_file_id: null
     };
   }
+  var own = await fetchAll(deps, MEMBERS_COLLECTION, {
+    household_id: r.householdId,
+    member_key: deps.memberKey
+  });
+  var me = own[0] || {};
   return {
     ok: true,
     household_id: r.householdId,
     shared: true,
     role: r.role,
     scope_revision: r.scopeRevision,
-    display_name: r.displayName
+    display_name: r.displayName,
+    // 本人展示资料(主页头像入口用;仅自己可见自己的这份)
+    self_nickname: typeof me.nickname === "string" && me.nickname.length > 0 ? me.nickname : null,
+    self_avatar_file_id:
+      typeof me.avatar_file_id === "string" && me.avatar_file_id.length > 0 ? me.avatar_file_id : null
   };
 }
 

@@ -19,6 +19,12 @@ import {
 } from "../../utils/voice";
 import type { ItemSummary } from "../../types";
 import { createDraftSession, clearDraftSession, getUnfinishedDraftSession } from "../../utils/draft-session";
+import {
+  householdSelfProfile,
+  householdScopeName,
+  isHouseholdScopeShared,
+} from "../../utils/household-scope";
+import { updateHouseholdProfile } from "../../utils/households-api";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { captureScopeGeneration, isScopeGenerationCurrent } from "../../utils/household-scope";
 
@@ -57,10 +63,24 @@ Page<
     partialText: string;
     /** 未完成草稿会话恢复入口(非空时显示横幅) */
     resumeSession: { sid: string; count: number } | null;
+    /** 主页头像栏:共享家庭标识/本人资料/昵称弹窗 */
+    familyShared: boolean;
+    selfNick: string;
+    selfAvatar: string;
+    nickModalOpen: boolean;
+    nickDraft: string;
+    pendingAvatarTemp: string;
+    profileSaving: boolean;
   },
   {
     onMemoInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
-    onLoad(options: Record<string, string | undefined>): void;
+    refreshProfileBar(): void;
+  onHomeAvatarChosen(e: WechatMiniprogram.CustomEvent): void;
+  onHomeAvatarPersonalTap(): void;
+  onNickDraftInput(e: WechatMiniprogram.CustomEvent): void;
+  onNickModalCancel(): void;
+  onNickModalSave(): Promise<void>;
+  onLoad(options: Record<string, string | undefined>): void;
     onModeText(): void;
     onModeVoice(): void;
     ensureVoiceCtrl(): void;
@@ -104,6 +124,13 @@ Page<
   }
 >({
   data: {
+    familyShared: false,
+    selfNick: "",
+    selfAvatar: "",
+    nickModalOpen: false,
+    nickDraft: "",
+    pendingAvatarTemp: "",
+    profileSaving: false,
     memoText: "",
     extracting: false,
     queryText: "",
@@ -147,7 +174,87 @@ Page<
     }
   },
 
+  /** 头像栏状态刷新(来自 household-scope 记忆;app 前台复核后已最新) */
+  refreshProfileBar() {
+    const prof = householdSelfProfile();
+    this.setData({
+      familyShared: isHouseholdScopeShared(),
+      selfNick: prof.nickname || "",
+      selfAvatar: prof.avatarFileId || "",
+    });
+    void this.setData({ familyNameTip: householdScopeName() || "" });
+  },
+
+  /** 选完头像:弹昵称弹窗(一起保存;取消丢弃) */
+  onHomeAvatarChosen(e) {
+    const url = e.detail && e.detail.avatarUrl;
+    if (typeof url !== "string" || url.length === 0) {
+      return;
+    }
+    this.setData({ pendingAvatarTemp: url, nickModalOpen: true, nickDraft: this.data.selfNick });
+  },
+
+  /** 个人家庭:如实提示(资料是家庭成员间的展示,非账号体系) */
+  onHomeAvatarPersonalTap() {
+    wx.showModal({
+      title: "头像与昵称",
+      content: "头像昵称是给共享家庭的家人看的。创建或加入共享家庭后,在这里点一下即可设置。",
+      showCancel: false,
+      confirmText: "知道了",
+    });
+  },
+
+  onNickDraftInput(e) {
+    this.setData({ nickDraft: (e.detail.value || "").trim() });
+  },
+
+  onNickModalCancel() {
+    this.setData({ nickModalOpen: false, pendingAvatarTemp: "", nickDraft: "" });
+  },
+
+  /** 保存:头像传云存储 → updateProfile → 本地记忆/头像栏更新 */
+  async onNickModalSave() {
+    if (this.data.profileSaving) {
+      return;
+    }
+    const patch: { nickname?: string; avatar_file_id?: string } = {};
+    const nick = this.data.nickDraft.trim();
+    if (nick !== "") {
+      patch.nickname = nick;
+    }
+    this.setData({ profileSaving: true });
+    try {
+      if (this.data.pendingAvatarTemp) {
+        const up = await wx.cloud.uploadFile({
+          cloudPath:
+            "household-avatars/" +
+            Date.now() +
+            "-" +
+            Math.floor(Math.random() * 1000000) +
+            ".jpg",
+          filePath: this.data.pendingAvatarTemp,
+        });
+        if (up.fileID) {
+          patch.avatar_file_id = up.fileID;
+        }
+      }
+      if (Object.keys(patch).length === 0) {
+        wx.showToast({ title: "填个昵称或选个头像再保存", icon: "none" });
+        return;
+      }
+      await updateHouseholdProfile(patch);
+      wx.showToast({ title: "已保存", icon: "success" });
+      this.setData({ nickModalOpen: false, pendingAvatarTemp: "", nickDraft: "" });
+      this.refreshProfileBar();
+    } catch (e) {
+      wx.showModal({ title: "保存失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ profileSaving: false });
+    }
+  },
+
   onShow() {
+    this.refreshProfileBar();
     void this.loadRecent();
     // 未完成草稿会话恢复入口(中途退出/进程回收;原幂等键续存,不重复建档)。
     // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把

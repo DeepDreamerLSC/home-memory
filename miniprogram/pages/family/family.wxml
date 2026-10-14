@@ -83,34 +83,6 @@
       <view wx:if="{{ loadError }}" class="error-text">{{ loadError }}</view>
     </view>
 
-    <!-- 我的资料:头像昵称填写能力(微信 2022 收回静默授权,官方路径=用户自设+微信辅助) -->
-    <view class="card">
-      <view class="card-title">我在这个家庭</view>
-      <view class="profile-row">
-        <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
-          <image
-            wx:if="{{ selfAvatarTemp || selfAvatarFileId }}"
-            class="avatar-img"
-            src="{{ selfAvatarTemp || selfAvatarFileId }}"
-            mode="aspectFill"
-          />
-          <view wx:else class="avatar-img avatar-empty">设头像</view>
-        </button>
-        <input
-          class="profile-nick"
-          type="nickname"
-          value="{{ profileNick }}"
-          placeholder="设置昵称(家人怎么称呼你)"
-          maxlength="20"
-          bindinput="onProfileNickInput"
-        />
-        <button class="btn primary sm" loading="{{ profileSaving }}" bindtap="onSaveProfileTap">
-          保存
-        </button>
-      </view>
-      <view class="hint">头像可选微信头像;昵称仅这个家庭的家人可见。</view>
-    </view>
-
     <!-- 成员(全体成员可见;管理动作按 isOwner 区分) -->
     <view class="card" wx:if="{{ memberListAvailable }}">
       <view class="card-head">

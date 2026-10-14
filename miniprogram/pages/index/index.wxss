@@ -176,3 +176,93 @@
   font-size: 26rpx;
   color: var(--text);
 }
+
+/* 品牌行:左标题右头像 */
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+.brand-main {
+  flex: 1;
+  min-width: 0;
+}
+.home-avatar-btn {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.home-avatar-btn::after {
+  border: none;
+}
+.home-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  background: var(--accent-dim, #f3edd9);
+}
+.home-avatar-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx;
+  color: var(--text-3, #a39d8d);
+  font-weight: 600;
+}
+
+/* 昵称弹窗 */
+.nick-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99;
+}
+.nick-card {
+  width: 580rpx;
+  padding: 40rpx 36rpx 28rpx;
+  border-radius: 28rpx;
+  background: var(--card, #ffffff);
+}
+.nick-title {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: var(--text, #191919);
+}
+.nick-hint {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: var(--text-3, #a39d8d);
+}
+.nick-input {
+  margin-top: 24rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: var(--card-inset, #f1ede0);
+  color: var(--text, #191919);
+  font-size: 30rpx;
+}
+.nick-actions {
+  margin-top: 28rpx;
+  display: flex;
+  gap: 20rpx;
+}
+.nick-btn {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  border-radius: 999rpx;
+  background: var(--card-inset, #f1ede0);
+  color: var(--text-2, #4c483e);
+  font-size: 28rpx;
+}
+.nick-btn.primary {
+  background: var(--go-bg, #191919);
+  color: #fff;
+}
