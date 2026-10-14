@@ -213,23 +213,21 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:36px;min-width:36px;cursor:pointer;flex:none;padding:0 8px}
 /* H1 家庭地图(家里内容平铺,点房间摊开;用户反馈三轮) */
 .roomgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
-.roomtile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:13px 14px 12px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--text);text-align:left;cursor:pointer;min-height:118px;transition:transform .14s ease,border-color .14s ease,box-shadow .14s ease}
+.roomtile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:13px 14px 12px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--text);text-align:left;cursor:pointer;min-height:118px;transition:transform .14s ease}
 .roomtile:active{transform:scale(.97)}
 .roomtile .rico{height:42px;width:42px;border-radius:13px;background:var(--card-inset);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:var(--text-2);flex:none}
-.roomtile .rname{font-size:15px;font-weight:800}
+.roomtile .rname{font-size:15px;font-weight:800;line-height:1.25}
 .roomtile .rcount{font-size:12px;color:var(--text-2)}
-.roomtile .chev{position:absolute;top:12px;right:12px;font-size:14px;color:var(--text-3);transition:transform .2s ease}
-.roomtile.on{border-color:var(--go-bg);box-shadow:0 0 0 2px var(--go-bg)}
-.roomtile.on .chev{transform:rotate(90deg);color:var(--text)}
+.roomtile .chev{position:absolute;top:12px;right:12px;font-size:14px;color:var(--text-3)}
 .roomtile.wide{flex-direction:row;align-items:center;min-height:0;grid-column:1/-1;gap:10px;padding:12px 14px}
 .roomtile.wide .rico{height:38px;width:38px;font-size:18px;border-radius:11px}
 .roomtile.wide .chev{position:static}
-.roompanel{grid-column:1/-1;border:1px solid var(--line);border-radius:16px;background:var(--card);padding:4px 12px 8px;animation:mapopen .24s ease}
-.roompanel[hidden]{display:none}
-.roompanel .phead{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--text-2);padding:9px 2px 5px}
-.roompanel .item{border:0;background:none}
+/* 容器抬头:家里 / 某某房间(家具)里有什么(用户反馈四轮:整页进入,不再下拉摊开) */
+.map-head{margin:20px 0 9px;display:flex;align-items:center;gap:10px}
+.map-head .mtitle{flex:1;font-size:15px;font-weight:800;min-width:0}
+.backchip{border:0;background:var(--card-inset);color:var(--text);font-size:12.5px;font-weight:700;border-radius:999px;padding:6px 12px;min-height:32px;cursor:pointer;flex:none}
+.backchip:active{opacity:.7}
 .morelink{display:block;width:100%;border:0;background:none;color:var(--text-2);font-size:13px;font-weight:700;min-height:44px;cursor:pointer;text-align:center}
-@keyframes mapopen{from{opacity:0;transform:translateY(-6px) scale(.99)}to{opacity:1;transform:none}}
 /* 录音中:半屏半透明小窗悬浮于黄色按钮上方(用户反馈二轮:不滚动、信息全收录、
    黄条按住时仍可见且呈按下态、按压动效可感知) */
 .recback{position:absolute;inset:0;background:rgba(0,0,0,.22);backdrop-filter:blur(1.5px)}
@@ -343,10 +341,10 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       还没有记住的东西——先记一件,下次就能直接找到了。<br>搜索不会编造不存在的记录。
     </div>
 
-    <div class="note"><strong>首件完成后</strong><p>真的记住第一件后,这里会变成家里的「平铺地图」——每个房间一格,点开就看到里面的东西;同时提示「现在试着找找它」,马上体验一次可信检索。</p></div>
+    <div class="note"><strong>首件完成后</strong><p>真的记住第一件后,这里会变成家里的地图——每个房间一格,点进去整页就是房间里的东西;同时提示「现在试着找找它」,马上体验一次可信检索。</p></div>
   </section>
 
-  <!-- ================= H1 首页·有数据态 = 家庭地图平铺(T2;用户反馈三轮) ================= -->
+  <!-- ================= H1 首页·有数据态 = 家庭地图(T2;用户反馈四轮:整页进入,抬头随容器变) ================= -->
   <section class="screen" data-screen="h1">
     <div class="brand-row">
       <div>
@@ -362,137 +360,205 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
     </div>
     <div class="kb-hint">键盘打开时,底部语音条自动避让让位,不遮挡输入框(T7)。</div>
 
-    <div class="section-label">家里有什么 <button class="lnk" data-nav="l1">按位置整理 ›</button></div>
-
-    <!-- 房间平铺:点一格,这一行下方摊开该房间已确认的东西 -->
-    <div class="roomgrid" id="h1-map">
-      <button class="roomtile" data-room="living" aria-expanded="false">
-        <span class="rico" aria-hidden="true">▱</span>
-        <span class="rname">客厅</span>
-        <span class="rcount">9 件东西</span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-      <button class="roomtile" data-room="study" aria-expanded="false">
-        <span class="rico" aria-hidden="true">▤</span>
-        <span class="rname">书房</span>
-        <span class="rcount">12 件东西</span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-
-      <div class="roompanel" id="room-living" hidden>
-        <div class="phead">客厅 · 9 件已确认</div>
-        <button class="item" data-nav="d1" data-itemswap="车钥匙|客厅 / 玄关抽屉|车钥匙在玄关抽屉里">
-          <span class="ico">车</span>
-          <span class="info"><strong>车钥匙</strong><span>上次记在:客厅 / 玄关抽屉</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="充电宝|客厅 / 电视柜第一格|充电宝收在电视柜第一格了">
-          <span class="ico">充</span>
-          <span class="info"><strong>充电宝</strong><span>上次记在:客厅 / 电视柜第一格</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <button class="morelink" data-nav="l1">还有 7 件 · 按位置逐层看 ›</button>
+    <!-- 视图=家里:房间格子平铺;点进去,中间整页换成该房间(家具)的内容,抬头跟着变 -->
+    <div id="h1v-home">
+      <div class="map-head">
+        <span class="mtitle">家里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
       </div>
-
-      <div class="roompanel" id="room-study" hidden>
-        <div class="phead">书房 · 12 件已确认</div>
-        <button class="item" data-nav="d1" data-itemswap="备用钥匙|书房 / 书桌 / 右边第二个抽屉|书房书桌右边第二个抽屉">
-          <span class="ico">备</span>
-          <span class="info"><strong>备用钥匙</strong><span>上次记在:书桌 / 右侧第二个抽屉</span></span>
-          <span class="arrow">›</span>
+      <div class="roomgrid">
+        <button class="roomtile" data-h1down="living">
+          <span class="rico" aria-hidden="true">▱</span>
+          <span class="rname">客厅</span>
+          <span class="rcount">9 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
         </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="扫地机器人|书房 / 地面">
-          <span class="ico">扫</span>
-          <span class="info"><strong>扫地机器人</strong><span>上次记在:书房 / 地面</span></span>
-          <span class="arrow">›</span>
+        <button class="roomtile" data-h1down="study">
+          <span class="rico" aria-hidden="true">▤</span>
+          <span class="rname">书房</span>
+          <span class="rcount">12 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
         </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="说明书|书桌 / 抽屉一|说明书都收在书桌抽屉一里">
-          <span class="ico">说</span>
-          <span class="info"><strong>说明书</strong><span>上次记在:书桌 / 抽屉一</span></span>
-          <span class="arrow">›</span>
+        <button class="roomtile" data-h1down="bedroom">
+          <span class="rico" aria-hidden="true">▥</span>
+          <span class="rname">卧室</span>
+          <span class="rcount">3 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
         </button>
-        <button class="morelink" data-nav="l1">还有 9 件 · 按位置逐层看 ›</button>
-      </div>
-
-      <button class="roomtile" data-room="bedroom" aria-expanded="false">
-        <span class="rico" aria-hidden="true">▥</span>
-        <span class="rname">卧室</span>
-        <span class="rcount">3 件东西</span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-      <button class="roomtile" data-room="kitchen" aria-expanded="false">
-        <span class="rico" aria-hidden="true">▣</span>
-        <span class="rname">厨房</span>
-        <span class="rcount">4 件东西</span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-
-      <div class="roompanel" id="room-bedroom" hidden>
-        <div class="phead">卧室 · 3 件已确认</div>
-        <button class="item" data-nav="d1" data-itemswap="体温计|卧室 / 床头柜抽屉|体温计在床头柜第一个抽屉">
-          <span class="ico">体</span>
-          <span class="info"><strong>体温计</strong><span>上次记在:卧室 / 床头柜抽屉</span></span>
-          <span class="arrow">›</span>
+        <button class="roomtile" data-h1down="kitchen">
+          <span class="rico" aria-hidden="true">▣</span>
+          <span class="rname">厨房</span>
+          <span class="rcount">4 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
         </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="指甲刀|卧室 / 衣柜第一格|指甲刀放在衣柜第一格的小盒里">
-          <span class="ico">指</span>
-          <span class="info"><strong>指甲刀</strong><span>上次记在:卧室 / 衣柜第一格</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="备用床单|卧室 / 衣柜顶层|备用床单叠在衣柜最顶上">
-          <span class="ico">床</span>
-          <span class="info"><strong>备用床单</strong><span>上次记在:卧室 / 衣柜顶层</span></span>
-          <span class="arrow">›</span>
-        </button>
-      </div>
-
-      <div class="roompanel" id="room-kitchen" hidden>
-        <div class="phead">厨房 · 4 件已确认</div>
-        <button class="item" data-nav="d1" data-itemswap="净水器备用滤芯|厨房 / 水槽下柜|净水器的备用滤芯,在水槽下面的柜子里">
-          <span class="ico">净</span>
-          <span class="info"><strong>净水器备用滤芯</strong><span>上次记在:厨房 / 水槽下柜</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-nav="d1" data-itemswap="保鲜盒|厨房 / 吊柜第二格|保鲜盒整套在吊柜第二格">
-          <span class="ico">保</span>
-          <span class="info"><strong>保鲜盒</strong><span>上次记在:厨房 / 吊柜第二格</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <button class="morelink" data-nav="l1">还有 2 件 · 按位置逐层看 ›</button>
-      </div>
-
-      <button class="roomtile wide" data-room="unsorted" aria-expanded="false">
-        <span class="rico" aria-hidden="true">?</span>
-        <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
-          <span class="rname">尚未归类</span>
-          <span class="rcount">2 件位置待核实——不硬塞进房间</span>
-        </span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-
-      <div class="roompanel" id="room-unsorted" hidden>
-        <div class="phead">尚未归类 · 2 件待核实</div>
-        <button class="item" data-toast="示意:原话是「那个双肩包,不知道塞哪儿了」——位置没核实前,不进房间格子,也不计数">
-          <span class="ico">?</span>
-          <span class="info"><strong>双肩包</strong><span>位置待核实 · 点开只看原话</span></span>
-          <span class="arrow">›</span>
-        </button>
-        <div class="divider" style="margin:2px 0"></div>
-        <button class="item" data-toast="示意:原话是「装修发票收好了……在哪来着」——待补位置后才会归入房间">
-          <span class="ico">?</span>
-          <span class="info"><strong>装修发票</strong><span>位置待核实 · 点开只看原话</span></span>
-          <span class="arrow">›</span>
+        <button class="roomtile wide" data-h1down="unsorted">
+          <span class="rico" aria-hidden="true">?</span>
+          <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
+            <span class="rname">尚未归类</span>
+            <span class="rcount">2 件位置待核实——不硬塞进房间</span>
+          </span>
+          <span class="chev" aria-hidden="true">›</span>
         </button>
       </div>
     </div>
 
-    <div class="note"><strong>每一格都是确认过的</strong><p>格子只统计核对确认过的记录:点开房间,里面的东西就摊开;再点东西,看它上次放在哪儿。没确认完的草稿不进格子、不计数,只会在别处提醒你继续。</p></div>
+    <!-- 视图=客厅 -->
+    <div id="h1v-living" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="home">‹ 家里</button>
+        <span class="mtitle">客厅里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <div class="roomgrid">
+        <button class="roomtile" data-toast="示意:电视柜(第一格、第二格,3 件;结构同书房,可继续点进去)">
+          <span class="rico" aria-hidden="true">▭</span>
+          <span class="rname">电视柜</span>
+          <span class="rcount">3 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button class="roomtile" data-toast="示意:玄关柜(玄关抽屉:车钥匙等 2 件)">
+          <span class="rico" aria-hidden="true">◪</span>
+          <span class="rname">玄关柜</span>
+          <span class="rcount">2 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <div class="section-label">直接记录在客厅</div>
+      <button class="item" data-nav="d1" data-itemswap="遥控器|客厅 / 茶几抽屉|遥控器在茶几下面那个抽屉">
+        <span class="ico">遥</span>
+        <span class="info"><strong>遥控器</strong><span>上次记在:客厅 / 茶几抽屉</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <button class="morelink" data-nav="l1">还有 3 件 · 按位置逐层看 ›</button>
+    </div>
+
+    <!-- 视图=书房 -->
+    <div id="h1v-study" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="home">‹ 家里</button>
+        <span class="mtitle">书房里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <div class="roomgrid">
+        <button class="roomtile" data-h1down="desk">
+          <span class="rico" aria-hidden="true">▤</span>
+          <span class="rname">书桌</span>
+          <span class="rcount">8 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button class="roomtile" data-toast="示意:小冰箱(冷藏层、门侧,3 件;结构同书桌,可继续点进去)">
+          <span class="rico" aria-hidden="true">▣</span>
+          <span class="rname">小冰箱</span>
+          <span class="rcount">3 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <div class="section-label">直接记录在书房</div>
+      <button class="item" data-nav="d1" data-itemswap="扫地机器人|书房 / 地面">
+        <span class="ico">扫</span>
+        <span class="info"><strong>扫地机器人</strong><span>上次记在:书房 / 地面</span></span>
+        <span class="arrow">›</span>
+      </button>
+    </div>
+
+    <!-- 视图=书桌(家具层示例:房间 → 家具 → 抽屉/东西) -->
+    <div id="h1v-desk" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="study">‹ 书房</button>
+        <span class="mtitle">书桌里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <div class="roomgrid">
+        <button class="roomtile" data-toast="示意:右侧第二个抽屉(备用钥匙等 5 件;再往里就是单件东西了)">
+          <span class="rico" aria-hidden="true">▭</span>
+          <span class="rname">右侧第二个抽屉</span>
+          <span class="rcount">5 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <div class="section-label">直接记录在书桌</div>
+      <button class="item" data-nav="d1" data-itemswap="充电宝|书桌 / 桌面右侧|充电宝就放书桌右手边">
+        <span class="ico">充</span>
+        <span class="info"><strong>充电宝</strong><span>上次记在:书桌 / 桌面右侧</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <div class="divider" style="margin:8px 0"></div>
+      <button class="item" data-nav="d1" data-itemswap="说明书|书桌 / 抽屉一|说明书都收在书桌抽屉一里">
+        <span class="ico">说</span>
+        <span class="info"><strong>说明书</strong><span>上次记在:书桌 / 抽屉一</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <div class="note"><strong>原文一直保留</strong><p>整理空间(改名/移动/合并)不会改写你确认时说的原话。</p></div>
+    </div>
+
+    <!-- 视图=卧室 -->
+    <div id="h1v-bedroom" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="home">‹ 家里</button>
+        <span class="mtitle">卧室里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <div class="roomgrid">
+        <button class="roomtile" data-toast="示意:床头柜(第一个抽屉:体温计,1 件)">
+          <span class="rico" aria-hidden="true">▢</span>
+          <span class="rname">床头柜</span>
+          <span class="rcount">1 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button class="roomtile" data-toast="示意:衣柜(第一格:指甲刀;顶层:备用床单,共 2 件)">
+          <span class="rico" aria-hidden="true">▥</span>
+          <span class="rname">衣柜</span>
+          <span class="rcount">2 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 视图=厨房 -->
+    <div id="h1v-kitchen" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="home">‹ 家里</button>
+        <span class="mtitle">厨房里有什么</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <div class="roomgrid">
+        <button class="roomtile" data-toast="示意:水槽下柜(净水器备用滤芯,1 件)">
+          <span class="rico" aria-hidden="true">▨</span>
+          <span class="rname">水槽下柜</span>
+          <span class="rcount">1 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button class="roomtile" data-toast="示意:吊柜(第二格:保鲜盒等,2 件)">
+          <span class="rico" aria-hidden="true">◫</span>
+          <span class="rname">吊柜</span>
+          <span class="rcount">2 件东西</span>
+          <span class="chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+      <button class="morelink" data-nav="l1">还有 1 件 · 按位置逐层看 ›</button>
+    </div>
+
+    <!-- 视图=尚未归类 -->
+    <div id="h1v-unsorted" style="display:none">
+      <div class="map-head">
+        <button class="backchip" data-h1up="home">‹ 家里</button>
+        <span class="mtitle">尚未归类 · 2 件待核实</span>
+        <button class="lnk" data-nav="l1">按位置整理 ›</button>
+      </div>
+      <button class="item" data-toast="示意:原话是「那个双肩包,不知道塞哪儿了」——位置没核实前,不归入房间,也不计数">
+        <span class="ico">?</span>
+        <span class="info"><strong>双肩包</strong><span>位置待核实 · 点开只看原话</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <div class="divider" style="margin:8px 0"></div>
+      <button class="item" data-toast="示意:原话是「装修发票收好了……在哪来着」——待补上位置后才会归入房间">
+        <span class="ico">?</span>
+        <span class="info"><strong>装修发票</strong><span>位置待核实 · 点开只看原话</span></span>
+        <span class="arrow">›</span>
+      </button>
+    </div>
+
+    <div class="note"><strong>点进去就是它的全部</strong><p>点一个房间(或家具),这页整个换成里面的东西,抬头也跟着变成「某某房间里有什么」;再点东西,看它上次放在哪儿。每一层都只列核对确认过的记录,没确认完的草稿不进来、不计数。</p></div>
   </section>
 
   <!-- ================= H1b 搜索结果态(T2) ================= -->
@@ -813,14 +879,10 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       <div style="padding:14px 16px 0"><div class="rowhead"><h2 class="sect">家里有什么</h2><button class="lnk">按位置整理 ›</button></div>
         <div class="roomgrid">
           <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▱</span><span class="rname">客厅</span><span class="rcount">9 件东西</span></div>
-          <div class="roomtile on" style="cursor:default"><span class="rico" aria-hidden="true">▤</span><span class="rname">书房</span><span class="rcount">12 件东西</span></div>
-          <div class="roompanel" style="animation:none">
-            <div class="phead">书房 · 12 件已确认</div>
-            <div class="item"><div class="ic">备</div><div class="im"><div class="nm">备用钥匙</div><div class="sub">书桌 / 右侧第二个抽屉</div></div><div class="more-inline">›</div></div>
-            <div class="item"><div class="ic">扫</div><div class="im"><div class="nm">扫地机器人</div><div class="sub">书房 / 地面</div></div><div class="more-inline">›</div></div>
-          </div>
+          <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▤</span><span class="rname">书房</span><span class="rcount">12 件东西</span></div>
           <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▥</span><span class="rname">卧室</span><span class="rcount">3 件东西</span></div>
           <div class="roomtile" style="cursor:default"><span class="rico" aria-hidden="true">▣</span><span class="rname">厨房</span><span class="rcount">4 件东西</span></div>
+          <div class="roomtile wide" style="cursor:default"><span class="rico" aria-hidden="true">?</span><span style="flex:1;display:flex;flex-direction:column;gap:2px"><span class="rname">尚未归类</span><span class="rcount">2 件位置待核实</span></span></div>
         </div>
       </div>
     </div>
@@ -943,7 +1005,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
   /* 屏号 → (标题, 标签说明, 是否显示语音条) */
   var SCREENS={
     h0:{title:'我靠东西呢',tag:'H0 · 首页首用态 — 任务 T1(首次语音记住一件)',voice:false,chrome:'我靠东西呢'},
-    h1:{title:'我靠东西呢',tag:'H1 · 首页=家庭地图(家里内容平铺,点房间摊开)— 任务 T2',voice:true},
+    h1:{title:'我靠东西呢',tag:'H1 · 首页=家庭地图(点房间/家具整页进入,抬头随容器变)— 任务 T2',voice:true},
     h1b:{title:'搜索结果',tag:'H1b · 搜索结果态 — 任务 T2(命中分组展示)',voice:true},
     d1:{title:'物品详情',tag:'D1 · 物品详情「先答案后操作」— 任务 T2 / T4 / T6',voice:false},
     c1:{title:'核对一下',tag:'C1 · 单件确认摘要卡 — 任务 T1(松手≠已保存)',voice:false},
@@ -988,31 +1050,14 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
   if(h1s){h1s.addEventListener('focus',openKeyboard);h1s.addEventListener('click',function(){phone.classList.toggle('kb-open')})}
   document.querySelectorAll('[data-kbclose]').forEach(function(b){b.addEventListener('click',closeKeyboard)});
 
-  /* H1 家庭地图:点房间卡片 → 该卡片所在行的行尾下方,横跨两列摊开该房间内容;
-     再点同一格=收起;点另一格=切换(同屏只摊开一个房间) */
-  var h1map=document.getElementById('h1-map');
-  if(h1map){
-    var rtiles=Array.prototype.slice.call(h1map.querySelectorAll('.roomtile'));
-    var rpanels=Array.prototype.slice.call(h1map.querySelectorAll('.roompanel'));
-    rtiles.forEach(function(t){
-      t.addEventListener('click',function(){
-        var wasOn=t.classList.contains('on');
-        rpanels.forEach(function(p){p.hidden=true});
-        rtiles.forEach(function(x){x.classList.remove('on');x.setAttribute('aria-expanded','false')});
-        if(wasOn)return;
-        var panel=document.getElementById('room-'+t.dataset.room);
-        if(!panel)return;
-        var tapTop=t.getBoundingClientRect().top,rowEnd=t;
-        rtiles.forEach(function(x){
-          var r=x.getBoundingClientRect();
-          if(Math.abs(r.top-tapTop)<8&&r.left>rowEnd.getBoundingClientRect().left)rowEnd=x;
-        });
-        rowEnd.parentNode.insertBefore(panel,rowEnd.nextSibling);
-        panel.hidden=false;
-        t.classList.add('on');t.setAttribute('aria-expanded','true');
-        panel.scrollIntoView({behavior:'smooth',block:'nearest'});
-      });
+  /* H1 家庭地图视图切换(用户反馈四轮):点房间/家具 → 中间整页换成该容器内容,抬头随容器变 */
+  var H1VIEWS=['home','living','study','desk','bedroom','kitchen','unsorted'];
+  function h1Show(id){
+    H1VIEWS.forEach(function(v){
+      var el=document.getElementById('h1v-'+v);
+      if(el)el.style.display=(v===id)?'':'none';
     });
+    viewport.scrollTop=0;
   }
 
   /* H0 空搜索:不给假结果 */
@@ -1026,7 +1071,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 
   /* 事件委托:导航 / 返回 / toast / 弹层 / 折叠 */
   document.addEventListener('click',function(e){
-    var t=e.target.closest('[data-nav],[data-back],[data-toast],[data-opensheet],[data-closesheet],[data-toggle],[data-editrow],[data-l1down],[data-l1up],[data-closetoggle]');
+    var t=e.target.closest('[data-nav],[data-back],[data-toast],[data-opensheet],[data-closesheet],[data-toggle],[data-editrow],[data-l1down],[data-l1up],[data-h1down],[data-h1up],[data-closetoggle]');
     if(!t)return;
     if(t.dataset.nav){
       if(t.dataset.origin)voiceOrigin=t.dataset.origin;
@@ -1061,6 +1106,8 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
       if(t.hasAttribute('data-editrow')&&t.dataset.editrow===undefined&&row)row.classList.toggle('open');
       return;
     }
+    if(t.dataset.h1down){h1Show(t.dataset.h1down);return}
+    if(t.dataset.h1up){h1Show(t.dataset.h1up);return}
     if(t.dataset.l1down){
       document.getElementById('l1-rooms').style.display='none';
       var v=document.getElementById('l1-'+t.dataset.l1down);
