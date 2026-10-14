@@ -120,8 +120,10 @@ Page<
       key: "row-" + i,
       name: d.name,
       locationText: d.location_text,
-      // 默认勾选决策下沉 utils:有专属证据且锚定不共享才默认勾,其余(无证据/整句共享)人工核对后手动勾
-      checked: shouldDefaultChecked(d.source_quote, d.anchor_shared === true),
+      // 默认勾选决策下沉 utils:位置确定且有专属证据、锚定不共享才默认勾;
+      // 位置没听清的(certain=false)一律不默认勾(B3),补充位置后由用户明确勾选;
+      // 其余(无证据/整句共享)人工核对后手动勾
+      checked: shouldDefaultChecked(d.source_quote, d.anchor_shared === true, d.certain === true),
       status: "pending",
       failMsg: "",
       operationId: uuid(),

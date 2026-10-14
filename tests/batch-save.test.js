@@ -141,8 +141,52 @@ test("runBatchSave:onRowUpdate 携带行状态与原始错误(调用方分类 OP
   assert.strictEqual(events[1].error, fakeConflict, "原始错误透传给调用方分类");
 });
 
-test("shouldDefaultChecked:有专属证据且锚定不共享才默认勾选", function () {
-  assert.equal(bs.shouldDefaultChecked("钥匙放在玄关抽屉", false), true, "专属证据默认勾");
-  assert.equal(bs.shouldDefaultChecked("钥匙和充电宝都在玄关抽屉", true), false, "共享锚定不默认勾");
-  assert.equal(bs.shouldDefaultChecked("", false), false, "无证据不默认勾");
+test("shouldDefaultChecked:位置确定且有专属证据、锚定不共享才默认勾;位置没听清一律不默认勾(B3)", function () {
+  assert.equal(bs.shouldDefaultChecked("钥匙放在玄关抽屉", false, true), true, "位置确定+专属证据默认勾");
+  assert.equal(bs.shouldDefaultChecked("钥匙和充电宝都在玄关抽屉", true, true), false, "共享锚定不默认勾");
+  assert.equal(bs.shouldDefaultChecked("", false, true), false, "无证据不默认勾");
+  // B3:certain=false(位置没听清)即使原话证据充分也不默认勾——
+  // 否则出现「⚠ 位置待核实 + 已勾选」,整批提交卡在「还没写位置」上
+  assert.equal(bs.shouldDefaultChecked("降压药好像在厨房抽屉", false, false), false, "位置没听清不默认勾(有原话也不勾)");
+});
+
+/** 确认页初始行的最小同构(与 pages/confirm onLoad 的行构造一致,含 B3 的 certain 维度) */
+function confirmLikeRow(d, i) {
+  return Object.assign(
+    {
+      key: "row-" + i,
+      name: d.name,
+      locationText: d.location_text,
+      checked: bs.shouldDefaultChecked(d.source_quote, d.anchor_shared === true, d.certain === true),
+      status: "pending",
+      failMsg: "",
+      operationId: "op-" + i,
+    },
+  );
+}
+
+test("B3-C2:两件确定 + 一件没听清(原话非空)——默认勾选 2 件,可保存两件,第三件不进入写请求", async function () {
+  const drafts = [
+    { name: "钥匙", location_text: "玄关抽屉", certain: true, source_quote: "钥匙放在玄关抽屉" },
+    { name: "充电宝", location_text: "客厅茶几", certain: true, source_quote: "充电宝在客厅茶几" },
+    // 位置没听清(certain=false)但原话证据非空:旧行为会默认勾选,B3 起必须不勾
+    { name: "护照", location_text: "", certain: false, source_quote: "护照好像在书房某个抽屉" },
+  ];
+  const rows = drafts.map(confirmLikeRow);
+  assert.equal(rows.filter((r) => r.checked).length, 2, "默认勾选数应为 2(uncertain 不勾)");
+  assert.equal(rows[2].checked, false, "没听清位置的第三件默认不勾选");
+  assert.equal(bs.firstInvalidMsg(rows), "", "未勾选行不进必填校验,两件确定的可整批保存");
+
+  const writes = [];
+  const finalRows = await bs.runBatchSave(
+    rows,
+    (r) => {
+      writes.push(r.name);
+      return Promise.resolve();
+    },
+    () => {},
+  );
+  assert.deepEqual(writes, ["钥匙", "充电宝"], "写请求只含勾选的两件,第三件不进入写请求");
+  assert.equal(bs.allCheckedSaved(finalRows), true, "两件全部保存完成");
+  assert.equal(finalRows[2].status, "pending", "未勾选行保持待核对(补位置后由用户明确勾选)");
 });
