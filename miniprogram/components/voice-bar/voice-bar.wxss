@@ -4,7 +4,8 @@
  * - 深色黑灰组合,无任何黄色:麦克风为单色 CSS 图形(--vb-mic-fg),不用彩色 emoji;
  * - 按压反馈:brightness .94 + scale .985 + 圆点回弹(原型二轮);
  * - 键盘弹起自动避让(display:none);底部安全区 env(safe-area-inset-bottom);
- * - 触摸热区 ≥44px(胶囊 min-height 104rpx)。
+ * - 触摸热区 ≥44px(胶囊 min-height 104rpx);
+ * - 录音中 = 半屏半透明小窗浮层(原型一/二轮冻结:页面不动 + 回弹入场,见文件末尾)。
  */
 
 .voicebar {
@@ -149,4 +150,219 @@
 /* 录音/识别/提取中置灰:避免中途跳走打断在途链路(原型 V1 按下态复刻) */
 .txtbtn.disabled {
   opacity: 0.55;
+}
+
+/* ============ V1 录音中浮层(冻结原型一/二轮:页面不动 + 半屏半透明小窗) ============ */
+
+/* 压暗背板:页面保持可见,焦点让给录音 */
+.recback {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.22);
+  -webkit-backdrop-filter: blur(3rpx);
+  backdrop-filter: blur(3rpx);
+}
+
+/* 小窗:悬浮于语音条上方 12px;不滚动,全部信息一次排下;
+   回弹式入场(过冲 300ms)传递「被顶起来」的按压感 */
+.recsheet {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(160rpx + env(safe-area-inset-bottom));
+  z-index: 45;
+  border-radius: 44rpx;
+  background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(28rpx) saturate(1.15);
+  backdrop-filter: blur(28rpx) saturate(1.15);
+  box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.18);
+  padding: 32rpx 32rpx 28rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18rpx;
+  text-align: center;
+  animation: recpop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.35);
+}
+
+@keyframes recpop {
+  0% {
+    transform: translateY(92rpx) scale(0.97);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(-8rpx);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.rec-title {
+  font-size: 33rpx;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.recrow {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+/* 录音麦克风圆:浅色明黄圆 + 米黄脉冲环;单色 CSS 麦克风图形(不用彩色 emoji) */
+.recmic {
+  width: 116rpx;
+  height: 116rpx;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  animation: recpulse 1.6s infinite;
+}
+
+.recmic .mic-cap {
+  width: 30rpx;
+  height: 44rpx;
+  border-radius: 15rpx;
+  background: #191919;
+}
+
+.recmic .mic-stand {
+  width: 6rpx;
+  height: 14rpx;
+  background: #191919;
+  margin-top: 6rpx;
+}
+
+.recmic .mic-base {
+  width: 40rpx;
+  height: 6rpx;
+  border-radius: 3rpx;
+  background: #191919;
+  margin-top: 6rpx;
+}
+
+@keyframes recpulse {
+  0% {
+    box-shadow: 0 0 0 20rpx var(--accent-dim);
+  }
+  70% {
+    box-shadow: 0 0 0 52rpx transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 20rpx transparent;
+  }
+}
+
+/* 波形:七根墨色竖条交错起伏(只示意在听,不是真实声纹) */
+.wave {
+  display: flex;
+  gap: 8rpx;
+  align-items: center;
+  height: 60rpx;
+}
+
+.wave .wv {
+  width: 10rpx;
+  border-radius: 6rpx;
+  background: var(--go-bg);
+  animation: wv 1s infinite ease-in-out;
+}
+
+.wave .wv:nth-child(1) { height: 24rpx; animation-delay: 0s; }
+.wave .wv:nth-child(2) { height: 48rpx; animation-delay: 0.12s; }
+.wave .wv:nth-child(3) { height: 60rpx; animation-delay: 0.24s; }
+.wave .wv:nth-child(4) { height: 40rpx; animation-delay: 0.36s; }
+.wave .wv:nth-child(5) { height: 28rpx; animation-delay: 0.48s; }
+.wave .wv:nth-child(6) { height: 52rpx; animation-delay: 0.6s; }
+.wave .wv:nth-child(7) { height: 22rpx; animation-delay: 0.72s; }
+
+@keyframes wv {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.rec-hint {
+  max-width: 540rpx;
+  font-size: 25rpx;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.rec-hint-b {
+  font-weight: 700;
+}
+
+/* 「松开,去核对」:呈示松手去向的墨底黄字 CTA(手势仍在胶囊上,这里只呈现) */
+.rec-cta {
+  width: 100%;
+  max-width: 540rpx;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 30rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.rec-cancel {
+  min-height: 80rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8rpx 16rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 6rpx;
+}
+
+/* 深色(十轮:录音相关 UI 去黄):小窗深灰半透明,麦克风圆黑灰 + 白色脉冲环 */
+@media (prefers-color-scheme: dark) {
+  .recsheet {
+    background: rgba(30, 30, 30, 0.88);
+  }
+
+  .recmic {
+    background: #2e2e2e;
+    animation-name: recpulse-dark;
+  }
+
+  .recmic .mic-cap,
+  .recmic .mic-stand,
+  .recmic .mic-base {
+    background: #f5f4f0;
+  }
+}
+
+@keyframes recpulse-dark {
+  0% {
+    box-shadow: 0 0 0 20rpx rgba(255, 255, 255, 0.06);
+  }
+  70% {
+    box-shadow: 0 0 0 52rpx transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 20rpx transparent;
+  }
 }

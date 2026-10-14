@@ -156,6 +156,9 @@
   font-weight: 750;
   font-size: 31rpx;
   user-select: none;
+  /* 录音中浮层压暗页面时,按住的按钮保持在背板之上可见(原型 V1:按下态仍可见) */
+  position: relative;
+  z-index: 41;
 }
 
 .voice-cta.pressed {

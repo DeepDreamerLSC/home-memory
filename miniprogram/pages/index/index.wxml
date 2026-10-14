@@ -43,7 +43,7 @@
 
       <!-- 页内大语音 CTA(一屏唯一强调面,按住说话;配色随 --vb-* 冻结值) -->
       <view
-        class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+        class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
         catchtouchstart="onTalkTouchStart"
         catchtouchmove="onTalkTouchMove"
         catchtouchend="onTalkTouchEnd"
@@ -60,7 +60,7 @@
           </block>
         </view>
         <view class="cta-label">
-          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,试试看' }}
+          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话,试试看' }}
         </view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
