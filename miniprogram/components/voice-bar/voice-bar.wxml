@@ -1,0 +1,34 @@
+<!--
+  常驻语音条(issue #45:语音入口全局可达)。
+  整颗胶囊 = 按住热区(热区即色块,七轮):麦克风圆点内嵌左端作图标,
+  按住/松手/上滑取消手势与文案沿用首页语音录入语义(utils/voice-entry 单例)。
+-->
+<view class="voicebar {{ kbOpen ? 'kb-hide' : '' }}">
+  <view
+    class="hold {{ pressed ? 'pressed' : '' }} {{ (voiceState === 'recording' || transcribing || extracting) && voiceState !== 'cancelPending' ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+    catchtouchstart="onHoldTouchStart"
+    catchtouchmove="onHoldTouchMove"
+    catchtouchend="onHoldTouchEnd"
+    catchtouchcancel="onHoldTouchCancel"
+  >
+    <view class="micdot">
+      <block wx:if="{{ voiceState === 'recording' }}">
+        <view class="mic-seconds">{{ recordSeconds }}s</view>
+      </block>
+      <block wx:else>
+        <view class="mic-cap"></view>
+        <view class="mic-stand"></view>
+        <view class="mic-base"></view>
+      </block>
+    </view>
+    <view class="hold-label">
+      {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '说吧,我记着呢。' : '按住说话,松开识别' }}
+    </view>
+  </view>
+  <view
+    class="txtbtn {{ voiceState !== 'idle' || transcribing || extracting ? 'disabled' : '' }}"
+    catchtap="onTextTap"
+  >
+    文字
+  </view>
+</view>

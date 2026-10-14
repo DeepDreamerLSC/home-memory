@@ -21,6 +21,18 @@ page {
   --banner-line: #ffe15a;
   --banner-manual-bg: #f4f1e6;
   --banner-manual-fg: #4c483e;
+  /* 语音条专属(九轮冻结:奶油条 + 米黄油胶囊 + 圆点挖窗) */
+  --vb-bg: #fffdf4;
+  --vb-fg: #191919;
+  --vb-line: #e8e3d6;
+  --vb-hold-bg: #f3edd9;
+  --vb-hold-fg: #191919;
+  --vb-mic-bg: #fffdf4;
+  --vb-mic-fg: #f3edd9;
+  --vb-btn-bg: transparent;
+  --vb-btn-fg: #4c483e;
+  --vb-btn-line: #ddd6c2;
+  --vb-cta-shadow: #ece6d6;
 
   background: var(--bg);
   color: var(--text);
@@ -55,11 +67,28 @@ page {
     --banner-line: #6b5b10;
     --banner-manual-bg: #262626;
     --banner-manual-fg: #a8a69e;
+    /* 语音条专属(十轮:深色去黄,黑灰组合,麦克风单色) */
+    --vb-bg: #1e1e1e;
+    --vb-fg: #f5f4f0;
+    --vb-line: #2e2e2e;
+    --vb-hold-bg: #2e2e2e;
+    --vb-hold-fg: #f5f4f0;
+    --vb-mic-bg: #1e1e1e;
+    --vb-mic-fg: #a8a69e;
+    --vb-btn-bg: transparent;
+    --vb-btn-fg: #a8a69e;
+    --vb-btn-line: #3a3a3a;
+    --vb-cta-shadow: rgba(0, 0, 0, 0.45);
   }
 }
 
 .page {
   padding-bottom: 48rpx;
+}
+
+/* 挂常驻语音条的页面:内容底部让出固定语音条高度(含底部安全区),不遮最后一条 */
+.page-with-voice-bar {
+  padding-bottom: calc(160rpx + env(safe-area-inset-bottom));
 }
 
 .card {

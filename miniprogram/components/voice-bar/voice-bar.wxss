@@ -1,0 +1,152 @@
+/*
+ * 常驻语音条(issue #45 九/十轮冻结配色):
+ * - 奶油条(--vb-bg)+ 米黄油胶囊(--vb-hold-bg,热区即色块)+ 圆点挖窗(--vb-mic-bg);
+ * - 深色黑灰组合,无任何黄色:麦克风为单色 CSS 图形(--vb-mic-fg),不用彩色 emoji;
+ * - 按压反馈:brightness .94 + scale .985 + 圆点回弹(原型二轮);
+ * - 键盘弹起自动避让(display:none);底部安全区 env(safe-area-inset-bottom);
+ * - 触摸热区 ≥44px(胶囊 min-height 104rpx)。
+ */
+
+.voicebar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  background: var(--vb-bg);
+  color: var(--vb-fg);
+  border-top: 1rpx solid var(--vb-line);
+  padding: 16rpx 20rpx;
+  /* 底部安全区:整条沉到安全区下沿之上 */
+  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+}
+
+/* 键盘弹起自动避让:让出键盘区(设计 T7) */
+.voicebar.kb-hide {
+  display: none;
+}
+
+/* 按住热区 = 整颗胶囊(热区即色块) */
+.hold {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  border-radius: 30rpx;
+  background: var(--vb-hold-bg);
+  color: var(--vb-hold-fg);
+  min-height: 104rpx;
+  padding: 12rpx 28rpx 12rpx 12rpx;
+  box-sizing: border-box;
+  font-size: 27rpx;
+  font-weight: 700;
+  text-align: left;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+/* 按压反馈(原型七轮::active 复刻) */
+.hold.pressed {
+  filter: brightness(0.94);
+  transform: scale(0.985);
+}
+
+/* 识别中/提取中:胶囊降权,按压仍可见 */
+.hold.busy {
+  opacity: 0.78;
+}
+
+/* 上滑待取消:文案即反馈,胶囊不加警示色(条内信息克制) */
+.hold.cancel {
+  opacity: 0.92;
+}
+
+.hold-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 麦克风圆点:胶囊左端内嵌,挖窗色(=条色) */
+.micdot {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  background: var(--vb-mic-bg);
+  color: var(--vb-mic-fg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+/* 麦克风图形:单色 CSS 绘制(深色为灰,无黄,十轮) */
+.mic-cap {
+  width: 20rpx;
+  height: 30rpx;
+  border-radius: 10rpx;
+  background: var(--vb-mic-fg);
+}
+
+.mic-stand {
+  width: 4rpx;
+  height: 10rpx;
+  background: var(--vb-mic-fg);
+  margin-top: 4rpx;
+}
+
+.mic-base {
+  width: 28rpx;
+  height: 4rpx;
+  border-radius: 2rpx;
+  background: var(--vb-mic-fg);
+  margin-top: 4rpx;
+}
+
+.mic-seconds {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--vb-hold-fg);
+}
+
+/* 按住时圆点回弹(原型二轮) */
+.hold.pressed .micdot {
+  animation: micpress 0.5s ease;
+}
+
+@keyframes micpress {
+  0% {
+    transform: scale(0.8);
+  }
+  55% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* 「文字」按钮:走文字确认入口(手动录入确认页) */
+.txtbtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--vb-btn-line);
+  border-radius: 22rpx;
+  background: var(--vb-btn-bg);
+  color: var(--vb-btn-fg);
+  font-size: 25rpx;
+  font-weight: 700;
+  padding: 0 28rpx;
+  height: 76rpx;
+  box-sizing: border-box;
+}
+
+/* 录音/识别/提取中置灰:避免中途跳走打断在途链路(原型 V1 按下态复刻) */
+.txtbtn.disabled {
+  opacity: 0.55;
+}
