@@ -656,9 +656,9 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
 
     <button class="fold" data-toggle="d1-edit" aria-expanded="false">编辑物品信息 <span class="chev">›</span></button>
     <div class="fold-body" id="d1-edit"><div class="inner">
-      <div class="field"><label>名称</label><input value="备用钥匙" maxlength="50"></div>
-      <div class="field"><label>位置(必填)</label><input value="书房 / 书桌 / 右边第二个抽屉" maxlength="200"></div>
-      <div class="field"><label>备注</label><textarea maxlength="200">配了一把新的,旧的还在</textarea></div>
+      <div class="field"><label>名称</label><input id="d1-edit-name" value="备用钥匙" maxlength="50"></div>
+      <div class="field"><label>位置(必填)</label><input id="d1-edit-loc" value="书房 / 书桌 / 右边第二个抽屉" maxlength="200"></div>
+      <div class="field"><label>备注</label><textarea id="d1-edit-note" maxlength="200">配了一把新的,旧的还在</textarea></div>
       <button class="cta" data-toast="模拟:保存修改(设计示意,不写数据)">保存修改</button>
       <p class="tiny" style="margin-top:9px">如果别处还留着这份的旧改动,保存前会先让你看完两版再选,不会悄悄覆盖。</p>
     </div></div>
@@ -1042,6 +1042,11 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         if(lp)lp.innerHTML=p[1].replace(/\//g,' <em>›</em> ');
         var q=document.querySelector('[data-screen="d1"] .bigcard .quote b');
         if(q&&p[2])q.textContent='「'+p[2]+'」';
+        /* 编辑表单同步为同一件东西(十二轮走查修复:不再呈现上一件的静态字段) */
+        var en=document.getElementById('d1-edit-name'),el=document.getElementById('d1-edit-loc'),enote=document.getElementById('d1-edit-note');
+        if(en)en.value=p[0];
+        if(el)el.value=p[1];
+        if(enote)enote.value='';
       }
       navTo(t.dataset.nav);
       return;
@@ -1108,11 +1113,11 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
     c1bBtn.disabled=!has;
     c1bBtn.textContent=has?'确认记住':'先补充位置';
   });
-  /* 确认回执:模拟,不写数据 */
+  /* 确认回执:模拟,不写数据(五轮删除「最近记住的」后,回执仅 toast+回首页;
+     家庭地图的信息结构=件数+1、进容器即见,原型未做计数联动,见 handoff) */
   document.querySelectorAll('[data-receipt]').forEach(function(b){
     b.addEventListener('click',function(){
       toast('模拟回执:「'+b.dataset.receipt+'」已记住(设计示意,不写任何数据)');
-      prependRecent(b.dataset.receipt);
       setTimeout(function(){navTo('h1')},900);
     });
   });
@@ -1120,19 +1125,8 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
   c2Btn.addEventListener('click',function(){
     var names=[].map.call(document.querySelectorAll('[data-c2row].sel .nm'),function(n){return n.textContent.trim().split(' ')[0]});
     toast('模拟回执:已记住 '+names.length+' 件('+names.join('、')+')(设计示意,不写任何数据)');
-    names.forEach(prependRecent);
     setTimeout(function(){navTo('h1')},1100);
   });
-  function prependRecent(name){
-    var list=document.getElementById('h1-recent');
-    var exists=[].some.call(list.querySelectorAll('.item strong'),function(s){return s.textContent.indexOf(name)===0});
-    if(exists)return;
-    var btn=document.createElement('button');
-    btn.className='item';btn.setAttribute('data-nav','d1');
-    btn.innerHTML='<span class="ico">'+name[0]+'</span><span class="info"><strong>'+name+'<span class="newpill">刚记住</span></strong><span>上次记在:本原型示意</span></span><span class="arrow">›</span>';
-    list.insertBefore(btn,list.firstChild);
-    if(list.children.length>3)list.removeChild(list.lastChild);
-  }
   /* 录音松手 → 核对(单件走 C1,多件走 C2) */
   var release=document.getElementById('v1-release');
   release.addEventListener('click',function(){
