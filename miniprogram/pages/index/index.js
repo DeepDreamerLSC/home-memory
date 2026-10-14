@@ -474,10 +474,12 @@ Page({
         const index = Number(e.currentTarget.dataset.index);
         const item = this.data.directItems[index];
         if (item) {
-            this.openItem(item);
+            // 容器条目直接记在当前层:把这条路径带给详情页(只读大卡「上次记在」);
+            // 搜索结果不知道路径,不传(详情页只用原话,不猜)
+            this.openItem(item, !this.data.isRootView ? this.currentNodePath : []);
         }
     },
-    openItem(item) {
+    openItem(item, spacePath = []) {
         const summary = {
             item_id: item.item_id,
             name: item.name,
@@ -486,8 +488,12 @@ Page({
             version: item.version,
             updated_at: item.updated_at,
         };
+        const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
+        if (spacePath.length > 0) {
+            params.push("path=" + encodeURIComponent(JSON.stringify(spacePath)));
+        }
         wx.navigateTo({
-            url: "/pages/item/item?data=" + encodeURIComponent(JSON.stringify(summary)),
+            url: "/pages/item/item?" + params.join("&"),
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },

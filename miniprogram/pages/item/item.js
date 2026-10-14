@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
+const household_scope_1 = require("../../utils/household-scope");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -9,6 +10,38 @@ function safeDecode(s) {
     }
     catch {
         return s;
+    }
+}
+/** 确认日期短文案(如 10-08,与首页一致);非法时间如实返回空串 */
+function shortDate(iso) {
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) {
+        return "";
+    }
+    const d = new Date(t);
+    const pad = (n) => (n < 10 ? "0" + n : String(n));
+    return pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+/**
+ * 解析跳转方带来的空间路径(进入时的容器层 path,JSON 字符串数组)。
+ * 只信严格结构:非数组 / 含非字符串 / 超过 6 段一律视为没有,不猜。
+ */
+function parseSpacePath(raw) {
+    if (!raw) {
+        return [];
+    }
+    try {
+        const p = JSON.parse(safeDecode(raw));
+        if (!Array.isArray(p) || p.length === 0 || p.length > 6) {
+            return [];
+        }
+        if (!p.every((seg) => typeof seg === "string" && seg.trim().length > 0)) {
+            return [];
+        }
+        return p.map((seg) => seg.trim());
+    }
+    catch {
+        return [];
     }
 }
 Page({
@@ -19,6 +52,11 @@ Page({
         note: "",
         version: 0,
         updatedAtText: "",
+        lastConfirmedText: "",
+        spacePath: [],
+        editPanelOpen: false,
+        moreOpen: false,
+        familyShared: false,
         saving: false,
         deleting: false,
         mounting: false,
@@ -32,6 +70,12 @@ Page({
     original: { name: "", location: "", note: "" },
     pendingRetry: null,
     onLoad(options) {
+        // 空间路径来自进入时的容器层(首页地图 / 空间页点开的条目);
+        // 搜索等入口没有路径就不显示,只用原话,不自造
+        this.setData({
+            spacePath: parseSpacePath(options.path),
+            familyShared: (0, household_scope_1.isHouseholdScopeShared)(),
+        });
         const rawItemId = options.item_id;
         if (rawItemId) {
             // 按 id 直接打开(生成向导的 skipped 件、结果页跳转):get 单查不受 list 分页影响
@@ -77,6 +121,10 @@ Page({
         }
         this.applySummary(summary);
     },
+    onShow() {
+        // 家庭上下文可能切换(创建/加入/退出):「分享给家人」只在共享家庭显示
+        this.setData({ familyShared: (0, household_scope_1.isHouseholdScopeShared)() });
+    },
     onNameInput(e) {
         this.setData({ name: e.detail && e.detail.value ? e.detail.value : "" });
     },
@@ -88,12 +136,17 @@ Page({
     onNoteInput(e) {
         this.setData({ note: e.detail && e.detail.value ? e.detail.value : "" });
     },
+    /** 编辑折叠:常态只读,点开才出现表单;保存成功后自动收回 */
+    onEditToggle() {
+        this.setData({ editPanelOpen: !this.data.editPanelOpen });
+    },
     applySummary(s) {
         this.original = {
             name: s.name,
             location: s.location_text,
             note: s.note,
         };
+        const short = shortDate(s.updated_at);
         this.setData({
             itemId: s.item_id,
             name: s.name,
@@ -101,6 +154,11 @@ Page({
             note: s.note,
             version: s.version,
             updatedAtText: (0, api_1.formatDateTime)(s.updated_at),
+            lastConfirmedText: short
+                ? "上次确认 " + short
+                : s.updated_at
+                    ? "更新于 " + (0, api_1.formatDateTime)(s.updated_at)
+                    : "",
         });
     },
     /** 保存修改:itemsApi update,带 expected_version */
@@ -160,6 +218,8 @@ Page({
                 version: it.version,
                 updated_at: it.updated_at,
             });
+            // 保存成功:收回编辑,回到只读答案
+            this.setData({ editPanelOpen: false });
             wx.showToast({ title: "已保存", icon: "success" });
         }
         catch (e) {
@@ -234,8 +294,34 @@ Page({
             return "error";
         }
     },
-    /** 删除:先 wx.showModal 确认 */
+    /* ---------------- 「⋯」次级菜单(编辑/整理/删除都收进这里) ---------------- */
+    onMoreTap() {
+        this.setData({ moreOpen: true });
+    },
+    onSheetClose() {
+        this.setData({ moreOpen: false });
+    },
+    /**
+     * 分享给家人(仅共享家庭显示):这里如实说明语义——共享家庭里这条记录
+     * 本来就人人可见,没有单独分享这个动作,也不假装写入。
+     */
+    onShareTap() {
+        this.setData({ moreOpen: false });
+        wx.showModal({
+            title: "分享给家人",
+            content: "这条记录已经在「我们家」的共享记录里,家里每个人打开就能看到,不用再单独分享。",
+            confirmText: "知道了",
+            showCancel: false,
+        });
+    },
+    /** 整理位置:收起菜单后走既有 parseLocation → 逐段核对 → ensurePath + linkItem */
+    onTidyTap() {
+        this.setData({ moreOpen: false });
+        void this.onMountTap();
+    },
+    /** 删除:先收起菜单,再 wx.showModal 二次确认 */
     onDeleteTap() {
+        this.setData({ moreOpen: false });
         if (this.data.saving || this.data.deleting) {
             return;
         }
@@ -298,7 +384,7 @@ Page({
         }
     },
     /**
-     * 挂到空间:parseLocation 零写库出候选分段 → 用户逐段核对(可改)→
+     * 整理位置:parseLocation 零写库出候选分段 → 用户逐段核对(可改)→
      * ensurePath + linkItem。AI 不可用时兜底为手动选位置(选择模式)。
      */
     async onMountTap() {
@@ -307,7 +393,7 @@ Page({
         }
         const text = this.data.locationText.trim();
         if (!text) {
-            wx.showToast({ title: "先填一句位置描述,再挂到空间", icon: "none" });
+            wx.showToast({ title: "这条记录还没有位置描述,先在编辑里补一句", icon: "none" });
             return;
         }
         this.setData({ mounting: true });
@@ -375,10 +461,10 @@ Page({
     openLocationPicker() {
         wx.navigateTo({
             url: "/pages/locations/locations?picker=1&title=" +
-                encodeURIComponent("把「" + (this.data.name || "这件物品") + "」挂到…"),
+                encodeURIComponent("把「" + (this.data.name || "这件物品") + "」放到哪个位置…"),
             events: {
                 pickNode: (d) => {
-                    void this.doLinkToNode(d.location_id);
+                    void this.doLinkToNode(d.location_id, d.path);
                     // 退栈统一由发起页计算(选择器页自身不再逐层退,#29 后续):
                     // 选择器页只叠在本页正上方,一次退掉全部。
                     const pages = getCurrentPages();
@@ -394,7 +480,7 @@ Page({
             },
         });
     },
-    async doLinkToNode(nodeId) {
+    async doLinkToNode(nodeId, path) {
         this.setData({ mountSaving: true });
         try {
             const res = await (0, locations_api_1.callLocationsApi)({
@@ -407,8 +493,10 @@ Page({
             this.setData({
                 version: res.item.version,
                 updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+                // 刚亲手选定的位置:大卡如实跟进(选择器回传的展示用路径)
+                spacePath: Array.isArray(path) ? path : this.data.spacePath,
             });
-            wx.showToast({ title: "已挂到空间", icon: "success" });
+            wx.showToast({ title: "已记到这个位置", icon: "success" });
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
@@ -421,7 +509,7 @@ Page({
             }
             else {
                 wx.showModal({
-                    title: "挂载失败",
+                    title: "整理失败",
                     content: (0, api_1.errorMessage)(e),
                     showCancel: false,
                 });
@@ -465,8 +553,10 @@ Page({
                 version: res.item.version,
                 updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
                 mountPanelOpen: false,
+                // 刚确认并记入的位置分段:大卡如实跟进(与 ensurePath 收到的完全一致)
+                spacePath: names,
             });
-            wx.showToast({ title: "已挂到空间", icon: "success" });
+            wx.showToast({ title: "已记到这个位置", icon: "success" });
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
@@ -490,7 +580,7 @@ Page({
             }
             else {
                 wx.showModal({
-                    title: "挂载失败",
+                    title: "整理失败",
                     content: (0, api_1.errorMessage)(e),
                     showCancel: false,
                 });
@@ -503,4 +593,5 @@ Page({
     cancelMount() {
         this.setData({ mountPanelOpen: false, mountSegments: [] });
     },
+    noop() { },
 });

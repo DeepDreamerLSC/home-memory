@@ -1,9 +1,260 @@
-/* 详情页补充样式(其余复用 app.wxss) */
+/* 详情页补充样式(其余复用 app.wxss)
+   常态=只读大卡(先答案后操作),编辑折叠、操作收进「⋯」菜单(issue #45 D1) */
+
+/* ============ 头部:物品名 + 上次确认 + 「⋯」 ============ */
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin: 24rpx 24rpx 0;
+}
+
+.detail-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.pagetitle {
+  font-size: 52rpx;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.6rpx;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.detail-meta {
+  font-size: 23rpx;
+  color: var(--text-3);
+  margin-top: 8rpx;
+}
+
+.more-inline {
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 18rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  min-height: 72rpx;
+  min-width: 72rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16rpx;
+  flex-shrink: 0;
+  margin-top: 4rpx;
+}
+
+/* ============ 只读大卡:上次记在(空间路径 + 原话常显) ============ */
+.bigcard {
+  background: var(--card);
+  border: 3rpx solid var(--line);
+  border-radius: 40rpx;
+  padding: 32rpx 30rpx;
+  margin: 24rpx;
+}
+
+.bigcard-lbl {
+  font-size: 24rpx;
+  color: var(--text-3);
+  font-weight: 700;
+  margin-bottom: 18rpx;
+}
+
+.bigcard-loc {
+  display: flex;
+  gap: 18rpx;
+  align-items: flex-start;
+}
+
+.bigcard-pin {
+  font-size: 38rpx;
+  flex: none;
+  line-height: 1.2;
+}
+
+.bigcard-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.bigcard-path {
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.bigcard-sep {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.bigcard-quote {
+  margin-top: 18rpx;
+  font-size: 23rpx;
+  color: var(--text-2);
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.bigcard-quote-sub {
+  color: var(--text-3);
+}
+
+/* ============ 编辑折叠(展开后=原有表单与保存路径) ============ */
+.fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  background: var(--card);
+  border-radius: 30rpx;
+  padding: 28rpx 26rpx;
+  min-height: 104rpx;
+  box-sizing: border-box;
+  margin: 20rpx 24rpx 0;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.fold-hover {
+  background: var(--card-inset);
+}
+
+.fold-chev {
+  font-size: 36rpx;
+  color: var(--text-3);
+  transition: transform 0.2s ease;
+}
+
+.fold-chev.up {
+  transform: rotate(90deg);
+}
+
+.fold-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+  margin: 0 24rpx;
+}
+
+.fold-body.open {
+  max-height: 2400rpx;
+}
+
+.fold-body .card {
+  margin: 16rpx 0 0;
+}
+
+.fold-note {
+  font-size: 22rpx;
+  color: var(--text-3);
+  line-height: 1.6;
+  margin-top: 16rpx;
+}
+
+/* 保存 / 确认整理:墨底黄字主 CTA(一屏唯一大面积明黄留给语音条) */
+.btn.ink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  border-radius: 30rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.btn.ink.block {
+  display: flex;
+  width: 100%;
+}
+
+/* ============ 「⋯」次级菜单:底部弹层 ============ */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: none;
+  align-items: flex-end;
+  z-index: 60;
+}
+
+.sheet-mask.open {
+  display: flex;
+}
+
+.sheet {
+  width: 100%;
+  background: var(--bg);
+  border-radius: 44rpx 44rpx 0 0;
+  padding: 32rpx 36rpx calc(44rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.sheet-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-bottom: 20rpx;
+}
+
+.sheet-act {
+  background: var(--card);
+  border-radius: 26rpx;
+  padding: 28rpx 26rpx;
+  min-height: 104rpx;
+  box-sizing: border-box;
+  margin-top: 16rpx;
+}
+
+.sheet-act-hover {
+  background: var(--card-inset);
+}
+
+.sheet-act-name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sheet-act.warn .sheet-act-name {
+  color: var(--danger);
+}
+
+.sheet-act-sub {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: var(--text-3);
+  margin-top: 6rpx;
+  line-height: 1.5;
+}
+
+.sheet-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  font-size: 26rpx;
+  color: var(--text-3);
+  margin-top: 24rpx;
+}
+
 .field:last-of-type {
   margin-bottom: 0;
 }
 
-/* 挂到空间:AI 拿不准的分段标黄(横幅语言,与「AI 草稿待确认」视觉一致) */
+/* 整理位置:AI 拿不准的分段标黄(横幅语言,与「待核对」视觉一致) */
 .input-warn {
   background: var(--banner-bg);
   border: 2rpx solid var(--banner-line);
