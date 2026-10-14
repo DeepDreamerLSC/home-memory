@@ -29,6 +29,10 @@ Page({
         isOwner: false,
         members: [],
         memberListAvailable: false,
+        profileNick: "",
+        selfAvatarTemp: "",
+        selfAvatarFileId: "",
+        profileSaving: false,
         invites: [],
         inviteListError: "",
         shareToken: "",
@@ -94,6 +98,7 @@ Page({
                             role_text: m.role === "owner" ? "创建者" : "成员",
                         })),
                     });
+                    this.applySelfProfile();
                 }
                 catch (e) {
                     this.setData({ loadError: "成员列表加载失败:" + (0, api_1.errorMessage)(e) });
@@ -217,6 +222,76 @@ Page({
     onShareTap() {
         // 实际分享内容由 onShareAppMessage 提供;此处仅作显式入口
     },
+    /** 本人资料同步到输入区(仅初值;用户编辑期间不覆盖) */
+    applySelfProfile() {
+        const self = this.data.members.filter((m) => m.is_self)[0];
+        if (!self) {
+            return;
+        }
+        this.setData({
+            profileNick: this.data.profileNick || self.nickname || "",
+            selfAvatarFileId: self.avatar_file_id || "",
+        });
+    },
+    /** 选头像(微信头像昵称填写能力:open-type=chooseAvatar,可一键用微信头像) */
+    onChooseAvatar(e) {
+        const url = e.detail && e.detail.avatarUrl;
+        if (typeof url === "string" && url.length > 0) {
+            this.setData({ selfAvatarTemp: url });
+        }
+    },
+    onProfileNickInput(e) {
+        this.setData({ profileNick: (e.detail.value || "").trim() });
+    },
+    /** 保存资料:头像临时文件先传云存储(fileID 入库),再 updateProfile */
+    async onSaveProfileTap() {
+        if (this.data.profileSaving) {
+            return;
+        }
+        const patch = {};
+        const nick = this.data.profileNick.trim();
+        if (nick !== "") {
+            patch.nickname = nick;
+        }
+        this.setData({ profileSaving: true });
+        try {
+            if (this.data.selfAvatarTemp) {
+                const up = await wx.cloud.uploadFile({
+                    cloudPath: "household-avatars/" +
+                        Date.now() +
+                        "-" +
+                        Math.floor(Math.random() * 1000000) +
+                        ".jpg",
+                    filePath: this.data.selfAvatarTemp,
+                });
+                if (up.fileID) {
+                    patch.avatar_file_id = up.fileID;
+                }
+            }
+            if (Object.keys(patch).length === 0) {
+                wx.showToast({ title: "没有要保存的资料", icon: "none" });
+                return;
+            }
+            await (0, households_api_1.updateHouseholdProfile)(patch);
+            wx.showToast({ title: "已保存", icon: "success" });
+            this.setData({ selfAvatarTemp: "" });
+            const members = await (0, households_api_1.fetchMemberList)();
+            this.setData({
+                members: members.members.map((m) => ({
+                    ...m,
+                    joined_text: (0, api_1.formatDateTime)(m.joined_at),
+                    role_text: m.role === "owner" ? "创建者" : "成员",
+                })),
+            });
+            this.applySelfProfile();
+        }
+        catch (e) {
+            wx.showModal({ title: "保存失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+        }
+        finally {
+            this.setData({ profileSaving: false });
+        }
+    },
     /** 复制邀请码(体验版兜底:分享卡片受限时,家人手动输入令牌加入) */
     onCopyInviteTap() {
         const token = this.data.shareToken;
@@ -261,6 +336,60 @@ Page({
         return invite ? invite : undefined;
     },
     /** 撤销邀请:二次确认后 inviteRevoke(立即失效);清掉页面持有的分享令牌 */
+    /** 邀请记录「管理」:弹窗分发新邀请码或撤销(安全约束:旧令牌原文不落库,
+     *  无法"再次分发同一个码"——分发即生成新邀请,旧邀请保留有效直至过期/撤销) */
+    onInviteRowTap(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const invite = this.inviteAt(index);
+        if (!invite || this.data.acting) {
+            return;
+        }
+        wx.showActionSheet({
+            itemList: ["复制新邀请码发给别人", "撤销这个邀请"],
+            success: (r) => {
+                if (r.tapIndex === 0) {
+                    void this.shareNewInviteCode();
+                }
+                else if (r.tapIndex === 1) {
+                    this.onRevokeTap(e);
+                }
+            },
+            fail: () => { },
+        });
+    },
+    /** 生成新邀请并复制邀请码(与顶部按钮同源;旧邀请不动) */
+    async shareNewInviteCode() {
+        this.setData({ acting: true });
+        try {
+            const invite = await (0, households_api_1.createInvite)();
+            this.setData({ shareToken: invite.token });
+            wx.setClipboardData({
+                data: invite.token,
+                success: () => {
+                    wx.showToast({ title: "新邀请码已复制", icon: "none", duration: 2500 });
+                },
+            });
+            const invites = await (0, households_api_1.fetchInviteList)();
+            this.setData({
+                invites: invites
+                    .filter((v) => !v.revoked && !v.expired)
+                    .map((v) => ({
+                    ...v,
+                    created_text: (0, api_1.formatDateTime)(v.created_at),
+                    expires_text: (0, api_1.formatDateTime)(v.expires_at),
+                    status_text: "有效",
+                    active: true,
+                })),
+                inviteListError: "",
+            });
+        }
+        catch (e) {
+            wx.showModal({ title: "生成邀请失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+        }
+        finally {
+            this.setData({ acting: false });
+        }
+    },
     onRevokeTap(e) {
         const index = Number(e.currentTarget.dataset.index);
         const invite = this.inviteAt(index);

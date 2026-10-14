@@ -254,6 +254,59 @@ async function setActivePointer(deps, memberKey, householdId, now) {
  * 派生值);共享家庭 → 三向验证通过后的 household_id/role/scope_revision/
  * display_name。P1-B 冷启动/前台恢复/成员变更后资格复核的依据。
  */
+/**
+ * updateProfile:设置本人在本家庭的展示资料(昵称/头像)。
+ * 微信 2022 起收回静默获取昵称头像(wx.getUserProfile 只回匿名),官方路径
+ * 是「头像昵称填写能力」——客户端 chooseAvatar 按钮 + type=nickname 输入,
+ * 用户主动设置,此处只校验与落库。只写自己的会员行(resolver 派生 member_key,
+ * 请求里带别人 member_key 一律忽略);展示性变更不递增 scope_revision
+ * (成员事件才递增,F2 写入门不受影响)。
+ */
+async function updateProfileAction(event, deps) {
+  var r = deps.resolved;
+  if (!r || r.ok !== true || r.shared !== true) {
+    return householdFail("not_shared");
+  }
+  var patch = {};
+  if (event.nickname !== undefined) {
+    if (typeof event.nickname !== "string") {
+      return fail("INVALID_INPUT", "昵称格式不正确");
+    }
+    var nick = event.nickname.trim();
+    if (nick.length > 20) {
+      return fail("INVALID_INPUT", "昵称最长 20 字");
+    }
+    // 拒绝控制字符(昵称仅展示用,不做富文本)
+    for (var i = 0; i < nick.length; i++) {
+      if (nick.charCodeAt(i) < 32) {
+        return fail("INVALID_INPUT", "昵称含不可见字符");
+      }
+    }
+    patch.nickname = nick.length > 0 ? nick : "";
+  }
+  if (event.avatar_file_id !== undefined) {
+    if (event.avatar_file_id === null || event.avatar_file_id === "") {
+      patch.avatar_file_id = "";
+    } else if (
+      typeof event.avatar_file_id !== "string" ||
+      event.avatar_file_id.length > 300 ||
+      event.avatar_file_id.indexOf("cloud://") !== 0
+    ) {
+      return fail("INVALID_INPUT", "头像地址不合法");
+    } else {
+      patch.avatar_file_id = event.avatar_file_id;
+    }
+  }
+  if (Object.keys(patch).length === 0) {
+    return fail("INVALID_INPUT", "没有要更新的资料");
+  }
+  await deps.db
+    .collection(MEMBERS_COLLECTION)
+    .where({ household_id: r.householdId, member_key: deps.memberKey })
+    .update({ data: patch });
+  return { ok: true, profile: patch };
+}
+
 async function statusAction(event, deps) {
   var r = deps.resolved;
   if (!r || r.ok !== true) {
@@ -842,6 +895,9 @@ async function memberListAction(event, deps) {
       role: r.role,
       joined_at: r.joined_at,
       invited_by: r.invited_by === undefined ? null : r.invited_by,
+      // 展示资料(用户经「头像昵称填写能力」自设;仅家庭成员互见,绝不进日志)
+      nickname: typeof r.nickname === "string" && r.nickname.length > 0 ? r.nickname : null,
+      avatar_file_id: typeof r.avatar_file_id === "string" && r.avatar_file_id.length > 0 ? r.avatar_file_id : null,
       is_self: r.member_key === deps.memberKey
     };
   });
@@ -869,7 +925,8 @@ var ACTIONS = {
   removeMember: removeMemberAction,
   dissolve: dissolveAction,
   memberList: memberListAction,
-  status: statusAction
+  status: statusAction,
+  updateProfile: updateProfileAction
 };
 
 /**

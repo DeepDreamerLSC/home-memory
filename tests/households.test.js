@@ -336,14 +336,49 @@ test("HHH-LC-3:memberList(owner)——owner 在前、is_self 标记、含摘要�
   assert.equal(list.members[1].role, "member");
   assert.equal(list.members[1].is_self, false);
   assert.equal(list.members[1].member_key, householdLib.memberKeyOf("o-member-3"));
-  var allowed = ["member_key", "role", "joined_at", "invited_by", "is_self"].sort();
-  assert.deepEqual(Object.keys(list.members[1]).sort(), allowed, "成员投影只含摘要句柄与角色,无昵称等 PII");
+  var allowed = ["member_key", "role", "joined_at", "invited_by", "is_self", "nickname", "avatar_file_id"].sort();
+  assert.deepEqual(Object.keys(list.members[1]).sort(), allowed, "成员投影键集(展示资料 nickname/avatar 为用户自设、仅家庭互见)");
 
   // 普通成员可读(真机反馈:家庭成员互见是基本感知;管理动作仍 owner)
   await refreshResolved(b, "o-member-3");
   var memberView = await hhHandler({ action: "memberList" }, b);
   assert.equal(memberView.ok, true, "普通成员应能看到成员列表");
   assert.equal(memberView.members.length, list.members.length);
+});
+
+// ---------- HHH-PRF:updateProfile(头像昵称填写能力;真机反馈:成员需可辨认) ----------
+
+test("HHH-PRF:updateProfile 只写自己的会员行;memberList 回显;输入校验;个人家庭拒绝", async function () {
+  var db = makeDb();
+  var a = await makeDeps(db, "prf-owner");
+  var created = await createFamily(a);
+  var invite = await hhHandler({ action: "inviteCreate" }, a);
+  await hhHandler({ action: "join", token: invite.invite.token }, await makeDeps(db, "prf-member"));
+
+  // 设置自己的昵称+头像(合法 cloud://)
+  var upd = await hhHandler({ action: "updateProfile", nickname: "老爸", avatar_file_id: "cloud://env.abc/avatars/x.jpg" }, a);
+  assert.equal(upd.ok, true, JSON.stringify(upd));
+  var lst = await hhHandler({ action: "memberList" }, a);
+  var self = lst.members.filter(function (m) { return m.is_self; })[0];
+  assert.equal(self.nickname, "老爸");
+  assert.equal(self.avatar_file_id, "cloud://env.abc/avatars/x.jpg");
+  var other = lst.members.filter(function (m) { return !m.is_self; })[0];
+  assert.equal(other.nickname, null, "未设置的成员资料为 null");
+  assert.equal(other.avatar_file_id, null);
+  void created;
+
+  // 昵称校验:超长(>20)/控制字符
+  assert.equal((await hhHandler({ action: "updateProfile", nickname: "一二三四五六七八九十一二三四五六七八九十一" }, a)).error, "INVALID_INPUT");
+  assert.equal((await hhHandler({ action: "updateProfile", nickname: "a\u0007b" }, a)).error, "INVALID_INPUT");
+  // 头像校验:非 cloud:// 前缀拒绝(只收本环境云存储文件,防外链注入)
+  assert.equal((await hhHandler({ action: "updateProfile", avatar_file_id: "https://evil/x.png" }, a)).error, "INVALID_INPUT");
+  // 清空昵称合法(空白 trim 后置空)
+  assert.equal((await hhHandler({ action: "updateProfile", nickname: "  " }, a)).ok, true);
+  // 空补丁拒绝
+  assert.equal((await hhHandler({ action: "updateProfile" }, a)).error, "INVALID_INPUT");
+  // 个人家庭(未共享)无会员行,householdFail 拒绝
+  var solo = await makeDeps(makeDb(), "prf-solo");
+  assert.equal((await hhHandler({ action: "updateProfile", nickname: "我" }, solo)).error !== undefined, true);
 });
 
 test("HHH-LC-4:幂等 join(已是本家庭成员 → 直接成功)+ V1 一家庭边界(别家成员拒绝 join/create)", async function () {

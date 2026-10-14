@@ -40,6 +40,7 @@ import type {
   HouseholdInviteMeta,
   HouseholdJoinResponse,
   HouseholdMemberListResponse,
+  HouseholdUpdateProfileResponse,
   HouseholdStatusResponse,
   HouseholdsApiEvent,
 } from "../types";
@@ -453,6 +454,18 @@ export async function fetchInviteInfo(token: string): Promise<HouseholdInviteInf
 }
 
 /** memberList(owner):成员清单(owner 在前、按加入时间升序)。 */
+/** 设置本人在本家庭的展示资料(头像昵称填写能力;只写自己的会员行) */
+export async function updateHouseholdProfile(
+  profile: { nickname?: string; avatar_file_id?: string },
+): Promise<HouseholdUpdateProfileResponse> {
+  const event: HouseholdsApiEvent = { action: "updateProfile", ...profile };
+  const r = await callHouseholds(event);
+  if (r.ok !== true || typeof r.profile !== "object" || r.profile === null) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  return { ok: true, profile: r.profile as { nickname?: string; avatar_file_id?: string } };
+}
+
 export async function fetchMemberList(): Promise<HouseholdMemberListResponse> {
   const r = await callHouseholds({ action: "memberList" });
   const raw = r.members;
@@ -473,6 +486,9 @@ export async function fetchMemberList(): Promise<HouseholdMemberListResponse> {
       joined_at: v.joined_at as string,
       invited_by: typeof v.invited_by === "string" ? v.invited_by : null,
       is_self: v.is_self === true,
+      nickname: typeof v.nickname === "string" && v.nickname.length > 0 ? v.nickname : null,
+      avatar_file_id:
+        typeof v.avatar_file_id === "string" && v.avatar_file_id.length > 0 ? v.avatar_file_id : null,
     }));
   return { ok: true, members };
 }

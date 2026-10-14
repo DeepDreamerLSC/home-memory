@@ -496,6 +496,9 @@ export interface HouseholdMember {
   joined_at: string;
   invited_by: string | null;
   is_self: boolean;
+  /** 展示资料(用户自设;null=未设置) */
+  nickname: string | null;
+  avatar_file_id: string | null;
 }
 
 /** inviteList 邀请元数据行(不含令牌与令牌哈希) */
@@ -553,6 +556,12 @@ export interface HouseholdMemberListResponse {
   members: HouseholdMember[];
 }
 
+/** updateProfile 响应:回显本次落库的资料片段 */
+export interface HouseholdUpdateProfileResponse {
+  ok: true;
+  profile: { nickname?: string; avatar_file_id?: string };
+}
+
 export interface HouseholdInviteListResponse {
   ok: true;
   invites: HouseholdInviteMeta[];
@@ -560,6 +569,7 @@ export interface HouseholdInviteListResponse {
 
 export type HouseholdsApiEvent =
   | { action: "status" }
+  | { action: "updateProfile"; nickname?: string; avatar_file_id?: string }
   | { action: "create"; display_name?: string }
   | { action: "inviteCreate" }
   | { action: "inviteRevoke"; invite_id: string }
