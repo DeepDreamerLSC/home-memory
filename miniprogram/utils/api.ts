@@ -57,12 +57,16 @@ export class ApiError extends Error {
   readonly code: string;
   /** OPERATION_CONFLICT 时服务端附带的已有记录,供可操作引导(如跳详情页修改) */
   readonly existing?: ItemSummary;
+  /** VERSION_CONFLICT 时服务端附带的清除栅栏标记(PR #52 R3-1):
+   * 提醒在完成后已被清除,本轮已完成、不再生成下一轮——文案区别于一般冲突 */
+  readonly cleared?: boolean;
 
-  constructor(code: string, message: string, existing?: ItemSummary) {
+  constructor(code: string, message: string, existing?: ItemSummary, cleared?: boolean) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.existing = existing;
+    this.cleared = cleared;
   }
 }
 
@@ -132,12 +136,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing 附加数据 */
+/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared 附加数据 */
 function toServerError(
   code: unknown,
   message: unknown,
   fallbacks: Record<string, string>,
   existing?: unknown,
+  cleared?: unknown,
 ): ApiError {
   const codeText =
     typeof code === "string" && code.length > 0 ? code : CLIENT_BAD_RESPONSE;
@@ -151,6 +156,7 @@ function toServerError(
     codeText,
     serverMessage || fallback || DEFAULT_ERROR_MESSAGE,
     existingSummary,
+    cleared === true,
   );
 }
 
@@ -319,7 +325,13 @@ export async function callItemsApi(
     throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
   }
   if (result.ok === false) {
-    const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing);
+    const err = toServerError(
+      result.error,
+      result.message,
+      ITEMS_API_MESSAGES,
+      result.existing,
+      result.cleared,
+    );
     notifyFamilyScopeDrift(err);
     throw err;
   }

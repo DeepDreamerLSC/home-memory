@@ -358,6 +358,14 @@ function buildReminderDoc(deps, itemId, docId, dueDate, kind, quote, now, genera
 //   remindClear 亦消费欠账。因此「无 active 且 create 欠账仍在」= 首建追加
 //   中断、可自愈;「无 active 且无欠账」= 用户已主动清除/完成,原键重放绝不
 //   自动复活,显式拒绝并引导详情页补录。
+// - clear_gen(PR #52 三轮复审 R3-1 清除栅栏):单调 tombstone——≤ 该值的
+//   轮次生命周期已被 remindClear 覆盖(含其未落地的在途延续)。remindClear
+//   的成功路径即使无 active、无欠账也必须在 slot CAS 中盖章(等值条件原子
+//   判定);周期再生的认领 CAS 把读到的 clear_gen 作为等值前置条件并拒绝
+//   「已完成轮次被栅栏覆盖」的认领——complete 置 done 与认领之间的更早
+//   窗口里发生的 clear 由此挡住迟到的认领,已成功的清除绝不复活(I3)。
+//   盖章目标永远 ≤ rev(清除只能覆盖已发行的轮次),故「某轮 active」必然
+//   意味着 clear_gen < 该轮——不会误伤正常生命周期的完成再生。
 // 行级 _id 前缀:rg_(周期再生)/rs_(补录改期)/rh_(首建与自愈)均为
 // item_id + 目标轮次的确定性派生——并发孪生撞集合 _id 唯一性后回查收敛。
 
@@ -417,6 +425,16 @@ function sameClaim(a, b) {
   return JSON.stringify(claimPatch(a)) === JSON.stringify(claimPatch(b));
 }
 
+/**
+ * slot 上的清除栅栏代际(R3-1):≤ 该值的轮次生命周期已被 remindClear 覆盖,
+ * 只增不减;0 = 从未清除。本代码创建的 slot 文档建档即带 clear_gen:0
+ * (remindClear 入口先 ensureSlot,无 slot 即意味着从未发生过清除),遗留
+ * 缺字段时按 0 兜底读。
+ */
+function slotClearGen(slot) {
+  return slot && Number.isInteger(slot.clear_gen) ? slot.clear_gen : 0;
+}
+
 async function readSlotDoc(deps, itemId) {
   var got = await reminders(deps)
     .where({ _id: slotDocId(itemId), household_id: deps.householdId })
@@ -453,6 +471,7 @@ async function ensureSlot(deps, itemId) {
       item_id: itemId,
       status: SLOT_STATUS,
       rev: max,
+      clear_gen: 0,
       created_at: now,
       updated_at: now
     },
@@ -566,13 +585,23 @@ function buildRegenDoc(deps, itemId, generation, dueDate, now) {
 }
 
 /**
- * 为周期再生认领下一轮(remindComplete 专用):条件 {rev=baseGen 且欠账净空}。
+ * 为周期再生认领下一轮(remindComplete 专用):条件 {rev=baseGen 读值 且欠账净空}。
  * 行已置 done 但 slot 还挂着「该轮的 create 欠账」(首建追加已落地、消费欠账
  * 的写入丢失/中断)时,顺带消费该陈年欠账再认领,不让它永久卡住完成。
  * 认领失败返回 null,由调用方分类(同参在途收敛 / 显式冲突)。
+ * R3-1 清除栅栏:认领前置条件把读到的 clear_gen 等值写进同一 CAS——
+ * ① 读到的栅栏已覆盖 baseGen(该轮生命周期已被 clear)→ 直接拒绝,不认领;
+ * ② 读取与认领之间发生的任何 clear 盖章都会改变 clear_gen → 等值不命中,
+ *    认领 CAS 失败。complete 置 done 与认领两步之间插入的 clear 由此被
+ * 原子挡住,迟到的认领绝不复活已清除的提醒(栅栏判定在 CAS 内,不是读后判)。
  */
 async function reserveRegenClaim(deps, itemId, baseGen, periodDays, due) {
   var slot = await ensureSlot(deps, itemId);
+  var fence = slotClearGen(slot);
+  if (fence >= baseGen) {
+    // 第 baseGen 轮及其在途延续已被清除:迟到的再生认领显式拒绝
+    return null;
+  }
   var claim = {
     kind: "regen",
     gen: slot.rev + 1,
@@ -584,12 +613,22 @@ async function reserveRegenClaim(deps, itemId, baseGen, periodDays, due) {
     rq: ""
   };
   var patch = Object.assign({ rev: claim.gen }, claimPatch(claim));
-  var ok = await casSlot(deps, itemId, { rev: slot.rev, pending_gen: 0 }, patch);
+  // 等值栅栏条件(本代码创建的 slot 必带 clear_gen;理论遗留缺字段时退化为无栅栏条件)
+  var fenceCond = Number.isInteger(slot.clear_gen) ? { clear_gen: fence } : {};
+  var ok = await casSlot(
+    deps,
+    itemId,
+    Object.assign({ rev: slot.rev, pending_gen: 0 }, fenceCond),
+    patch
+  );
   if (!ok) {
     ok = await casSlot(
       deps,
       itemId,
-      { rev: slot.rev, pending_gen: slot.rev, pending_kind: "create" },
+      Object.assign(
+        { rev: slot.rev, pending_gen: slot.rev, pending_kind: "create" },
+        fenceCond
+      ),
       patch
     );
   }
@@ -603,6 +642,58 @@ async function consumeAnyClaim(deps, itemId) {
   if (claim) {
     await casClearClaim(deps, itemId, claim);
   }
+}
+
+/**
+ * 按 clear 语义消费 slot 欠账(宽口径全消费;窄口径只消费「第 g 轮生命周期
+ * 内」的欠账——再生声明的 base_gen=g(第 g 轮的未落地延续),或目标轮恰为 g
+ * 的 create/set 认领;他人的认领不动)。幂等:已被他人消费则等值不命中跳过。
+ */
+async function consumeClaimForClear(deps, itemId, expectedGeneration) {
+  var slot = await readSlotDoc(deps, itemId);
+  var claim = readClaim(slot);
+  if (!claim) {
+    return;
+  }
+  var consume =
+    expectedGeneration === undefined ||
+    (claim.kind === "regen" && claim.baseGen === expectedGeneration) ||
+    claim.gen === expectedGeneration;
+  if (consume) {
+    await casClearClaim(deps, itemId, claim);
+  }
+}
+
+/**
+ * 清除栅栏盖章(R3-1):remindClear 的成功路径在 slot 上单调记录
+ * 「第 targetGen 轮及其在途延续已被清除」(clear_gen 只增不减)。以读到的
+ * 当前值为等值条件的 CAS 保证原子性——并发清除竞争同一 slot 状态,先盖章者
+ * 赢,后者发现已被覆盖(或带新值重试);clear_gen ≥ targetGen 即视为已覆盖
+ * (幂等)。栅栏未立绝不清除成功:极端竞争耗尽重试后如实上抛。
+ */
+async function stampClearFence(deps, itemId, targetGen) {
+  if (!Number.isInteger(targetGen) || targetGen <= 0) {
+    return; // 目标 0/非法(无生命周期可覆盖):无需栅栏
+  }
+  for (var i = 0; i < 8; i++) {
+    var slot = await readSlotDoc(deps, itemId);
+    if (!slot) {
+      // clear 入口已 ensureSlot;权威被外部移除属异常,不阻塞清除的幂等语义
+      return;
+    }
+    if (slotClearGen(slot) >= targetGen) {
+      return; // 已被更早/更高的清除覆盖
+    }
+    if (!Number.isInteger(slot.clear_gen)) {
+      // 理论遗留(本代码创建的 slot 必带 clear_gen):先按 rev 条件补 0 再竞争盖章
+      await casSlot(deps, itemId, { rev: slot.rev }, { clear_gen: 0 });
+      continue;
+    }
+    if (await casSlot(deps, itemId, { clear_gen: slot.clear_gen }, { clear_gen: targetGen })) {
+      return;
+    }
+  }
+  throw new Error("remindClear clear fence contention");
 }
 
 /** expected_generation 入参校验:可缺省(旧协议);携带须为 ≥0 的整数(0=客户端确认无 active) */
@@ -847,6 +938,7 @@ async function createItem(event, deps) {
           item_id: item._id,
           status: SLOT_STATUS,
           rev: 1,
+          clear_gen: 0,
           created_at: nowClaim,
           updated_at: nowClaim
         },
@@ -1185,7 +1277,10 @@ async function remindListItems(event, deps) {
  * 缺省服务端 UTC 当天)+ period_days 天(跨月/跨年自然进位,纯日期算术),
  * kind 固定「下次维护」(周期再生语义),quote 为空(再生提醒无原话锚点)。
  * 新轮次号一律取自 slot 单调代际权威(N1:清除后也不回退);认领/落地被并发
- * 操作抢先 → 显式 VERSION_CONFLICT,绝不插出第二条 active。再生插入失败时
+ * 操作抢先 → 显式 VERSION_CONFLICT,绝不插出第二条 active。R3-1:置 done 与
+ * 认领两步之间插入的 remindClear 会在 slot 上盖清除栅栏(clear_gen),认领
+ * CAS 的等值栅栏条件原子挡住迟到的认领 → 显式告知「已完成,不再生(已被
+ * 清除)」(cleared:true),done 不回滚。再生插入失败时
  * 如实上抛(绝不假装完成),欠账记在 slot 与 done 行(next_period_days/
  * next_due),同参数重试走治愈路径恢复(next_due 在完成时按当时基准算好,
  * 治愈不漂移)。
@@ -1290,9 +1385,21 @@ async function remindCompleteItem(event, deps) {
  * slot 上挂着「同轮同周期」的再生欠账(此前同参完成的在途/中断)→ 收敛补齐
  * (replayed);其余(他人 set/clear 抢先、权威已前移)→ 显式 VERSION_CONFLICT,
  * 客户端刷新后重试收敛,绝不插出第二条 active。
+ * R3-1 清除栅栏:完成的轮次生命周期已被 clear 覆盖 → 任何收敛/补齐都拒绝
+ * (绝不复活)。done 已发生不回滚:显式告知「已完成,不再生成(已被清除)」,
+ * 返回结构带 cleared:true 供客户端区分于一般冲突。
  */
 async function completeReserveFailure(deps, item, expectedGeneration, periodDays) {
   var slot = await ensureSlot(deps, item._id);
+  var fenceBase = expectedGeneration === undefined ? slot.rev : expectedGeneration;
+  if (slotClearGen(slot) >= fenceBase) {
+    return {
+      ok: false,
+      error: "VERSION_CONFLICT",
+      message: "这条的提醒在完成后已被清除:本轮已完成,不再生成下一轮提醒",
+      cleared: true
+    };
+  }
   var claim = readClaim(slot);
   if (
     claim &&
@@ -1418,11 +1525,13 @@ async function completeDivergence(deps, item, expectedGeneration, periodDays) {
       return fail("VERSION_CONFLICT");
     }
     // 兜底治愈(slot 欠账已被消费的存量形态):经权威重新认领下一轮再补建,
-    // 新轮次号仍取自单调权威,不与任何历史轮复用(N1)
+    // 新轮次号仍取自单调权威,不与任何历史轮复用(N1)。认领基准记该轮次号
+    // (R3-1 栅栏按该轮判定:治愈窗口内插入的 clear 会盖栅栏,重试认领被拒,
+    // 已清除的欠账绝不复活;同时与同参重试的收敛比对口径一致)
     var fallbackClaim = await reserveRegenClaim(
       deps,
       itemId,
-      slot.rev,
+      expectedGeneration,
       periodDays,
       doneRow.next_due
     );
@@ -1453,6 +1562,10 @@ async function completeDivergence(deps, item, expectedGeneration, periodDays) {
  * 清除成功同时作废 done 行的欠账再生标记与 slot 上未消费的欠账声明
  * (用户不要任何提醒,旧欠账不复活;被消费的在途认领会在落地复核时中止并
  * 补偿——「clear 在 done-未再生窗口清欠账后,在途再生复活」的竞态由此关闭)。
+ * R3-1:成功路径还在 slot CAS 中盖清除栅栏(clear_gen 单调 tombstone)——
+ * 即使无 active、无欠账也记录「第 g 轮及其在途延续已被清除」,complete 在
+ * 「置 done 之后、认领之前」更早窗口里插入的 clear 由此可挡住迟到的认领,
+ * 已成功的清除绝不复活;盖章后再补消费一次按同语义该消费的在途认领。
  */
 async function remindClearItem(event, deps) {
   if (!validItemId(event.item_id)) {
@@ -1465,19 +1578,7 @@ async function remindClearItem(event, deps) {
   // 先固化单调代际权威再删行(N1):被清掉的轮次已刻进 slot 的 rev,
   // 后续 remindSet 补录取 rev+1,generation 绝不回到 1 与旧轮复用
   var slot = await ensureSlot(deps, event.item_id);
-  var claim = readClaim(slot);
-  if (claim) {
-    // 消费欠账:宽口径全消费;窄口径只消费「第 g 轮生命周期内」的欠账——
-    // 再生声明的 base_gen=g(第 g 轮的未落地延续),或目标轮恰为 g 的
-    // create/set 认领。清除的是用户看到的那一轮及其延续,他人的认领不动。
-    var consume =
-      expectedGeneration === undefined ||
-      (claim.kind === "regen" && claim.baseGen === expectedGeneration) ||
-      claim.gen === expectedGeneration;
-    if (consume) {
-      await casClearClaim(deps, event.item_id, claim); // 已被他人消费则幂等跳过
-    }
-  }
+  await consumeClaimForClear(deps, event.item_id, expectedGeneration);
   var removed = 0;
   if (expectedGeneration !== undefined) {
     var rm = await reminders(deps)
@@ -1501,6 +1602,21 @@ async function remindClearItem(event, deps) {
   } else {
     removed = await removeActiveReminders(deps, event.item_id);
   }
+  // R3-1 清除栅栏:成功路径即使此刻无 active、无欠账(本轮已 done、尚未
+  // 认领的更早窗口),也必须在 slot CAS 中原子记录「第 g 轮及其在途延续已被
+  // 清除」——迟到的 complete 再生认领会在其认领 CAS 的等值栅栏条件上被挡住,
+  // 已成功的清除绝不复活。盖章目标永远 ≤ rev(清除只覆盖已发行的轮次),
+  // 绝不因陈旧/伪造的 expected_generation 越过权威烧毁未来轮次。
+  await stampClearFence(
+    deps,
+    event.item_id,
+    expectedGeneration === undefined
+      ? slot.rev
+      : Math.min(expectedGeneration, slot.rev)
+  );
+  // 盖章前后可能落进新的在途认领(此前读到旧 slot 的竞态):按同一语义补消费,
+  // 认领方落地复核发现易主即中止并补偿;盖章之后到来的认领则会撞上栅栏本身
+  await consumeClaimForClear(deps, event.item_id, expectedGeneration);
   await clearOwedRegen(deps, event.item_id);
   return { ok: true, cleared: removed };
 }

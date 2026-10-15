@@ -1545,6 +1545,69 @@ function deviceDeps(db, tag) {
   };
 }
 
+/**
+ * 包装 db(R3-1 precise barrier):第一笔 slot 权威读(reminders 上 where 条件
+ * _id 以 "slot_" 开头的 get)停在闸门上,其余直通。remindComplete 携带轮次的
+ * 流程在「提醒行 done CAS 已写、reserveRegenClaim 尚未执行」处碰到的第一笔
+ * slot 读正是认领入口的 ensureSlot——闸门把 complete 精确停在这个更早窗口
+ * (现有 N2 停点在认领之后的 rg_ 插入,覆盖不到这里)。
+ */
+function parkFirstSlotRead(db) {
+  var releaseGate;
+  var gate = new Promise(function (resolve) {
+    releaseGate = resolve;
+  });
+  var parked = false;
+  var wrapped = {
+    collection: function (name) {
+      var base = db.collection(name);
+      if (name !== "reminders") {
+        return base;
+      }
+      return {
+        add: function (options) {
+          return base.add(options);
+        },
+        where: function (cond) {
+          var q = base.where(cond);
+          if (
+            !parked &&
+            cond &&
+            typeof cond._id === "string" &&
+            cond._id.indexOf("slot_") === 0
+          ) {
+            parked = true;
+            return {
+              limit: function (n) {
+                return q.limit(n);
+              },
+              skip: function (n) {
+                return q.skip(n);
+              },
+              get: function () {
+                return gate.then(function () {
+                  return q.get();
+                });
+              },
+              update: function (options) {
+                return q.update(options);
+              },
+              remove: function () {
+                return q.remove();
+              }
+            };
+          }
+          return q;
+        },
+        doc: function (id) {
+          return base.doc(id);
+        }
+      };
+    }
+  };
+  return { db: wrapped, release: function () { releaseGate(); } };
+}
+
 test("B1 轮次号:remindList 行携带 generation,完成一轮后再生行轮次递增", async function () {
   var t = fresh();
   var created = await handler(
@@ -2195,6 +2258,88 @@ test("N2 deferred complete×clear(done 未再生窗口清除):clear 消费欠账
   assert.equal(late.ok, false);
   assert.equal(late.error, "NOT_FOUND", "已清后的旧轮完成按刷新收敛(旧语义)");
   assert.equal(activeReminderRows((await rawReminders(db2)).data).length, 0);
+});
+
+// ---------- PR #52 三轮复审 R3-1:complete 置 done 后、认领前被 clear 的更早窗口 ----------
+
+test("R3-1 precise-barrier:complete 置 done 后、认领前被 clear——清除栅栏原子挡住迟到认领,已清除绝不复活", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-r3-1a", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "r0")
+  );
+  var itemId = created.item.item_id;
+
+  // 第 2 步:设备 A complete(g1, 30 天)——提醒行 done CAS 已写,精确停在
+  // reserveRegenClaim 未执行处(第一笔 slot 读被闸门挡住)
+  var park = parkFirstSlotRead(db);
+  var reqA = handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 },
+    deviceDeps(park.db, "r1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); });
+  // 佐证停点精确:此刻 g1 行已 done,slot 上没有任何认领欠账
+  var midDone = (await rawReminders(db)).data.filter(function (r) { return r.status === "done"; });
+  assert.equal(midDone.length, 1, "停点时提醒行已置 done(done CAS 已完成)");
+  assert.equal(midDone[0].generation, 1);
+  var slotMid = await rawSlot(db, itemId);
+  assert.equal(slotMid.pending_gen, 0, "停点时 slot 尚无认领欠账(reserveRegenClaim 未执行)");
+
+  // 第 3 步:设备 B clear(g1)——无 active、无 claim 也成功,且必须在 slot 上留下清除栅栏
+  var resB = await handler(
+    { action: "remindClear", item_id: itemId, expected_generation: 1 },
+    deviceDeps(db, "r2")
+  );
+  assert.equal(resB.ok, true, "clear 在 done-未认领窗口成功返回(幂等)");
+  assert.equal(resB.cleared, 0);
+  assert.equal((await rawSlot(db, itemId)).clear_gen, 1, "清除栅栏已盖章:第 1 轮及其在途延续已被清除");
+
+  // 第 4 步:放行 A——迟到的认领必须被栅栏挡住:显式冲突/取消,绝不插出新 active
+  park.release();
+  var resA = await reqA;
+  assert.equal(resA.ok, false, "迟到的 complete 认领不得成功(ok 不为 true)");
+  assert.equal(resA.error, "VERSION_CONFLICT");
+  assert.equal(resA.cleared, true, "返回结构显式体现「已完成,不再生(已被清除)」");
+  assert.ok(resA.message.indexOf("已被清除") !== -1, "文案明示已被清除");
+  assert.ok(resA.message.indexOf("不再生成") !== -1, "文案明示不再生成下一轮");
+
+  var raw = await rawReminders(db);
+  assert.equal(activeReminderRows(raw.data).length, 0, "最终 active=0:已成功的清除绝不复活");
+  var doneRow = raw.data.filter(function (r) { return r.status === "done"; })[0];
+  assert.equal(doneRow.generation, 1, "已置 done 的行不回滚(完成已发生)");
+  assert.equal(doneRow.next_period_days, 0, "done 行欠账已作废");
+  var slot = await rawSlot(db, itemId);
+  assert.equal(slot.pending_gen, 0, "slot 无再生欠账");
+  assert.equal(slot.rev, 1, "认领被拒,rev 未前移");
+  assert.equal(slot.clear_gen, 1, "栅栏持续在档");
+
+  // 旧协议宽口径同一窗口(不带 expected_generation):done CAS 后停在认领前,
+  // 宽口径 clear 成功 → 放行后认领同样被栅栏拒绝,零复活
+  var db2 = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var c2 = await handler(
+    remindEvent("op-r3-1b", "药膏", "药箱", { due_date: "2026-10-20", kind: "开封后" }),
+    deviceDeps(db2, "s0")
+  );
+  var park2 = parkFirstSlotRead(db2);
+  var reqWide = handler(
+    { action: "remindComplete", item_id: c2.item.item_id, period_days: 30 },
+    deviceDeps(park2.db, "s1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); });
+  var clearedWide = await handler(
+    { action: "remindClear", item_id: c2.item.item_id },
+    deviceDeps(db2, "s2")
+  );
+  assert.equal(clearedWide.ok, true, "宽口径 clear 在 done-未认领窗口成功");
+  park2.release();
+  var resWide = await reqWide;
+  assert.equal(resWide.ok, false, "宽口径迟到的认领同样不得成功");
+  assert.equal(resWide.error, "VERSION_CONFLICT");
+  assert.equal(resWide.cleared, true, "宽口径同样显式告知「已完成,不再生(已被清除)」");
+  assert.equal(activeReminderRows((await rawReminders(db2)).data).length, 0, "宽口径最终 active=0");
+  var slot2 = await rawSlot(db2, c2.item.item_id);
+  assert.equal(slot2.pending_gen, 0, "宽口径 slot 无再生欠账");
+  assert.equal(slot2.clear_gen, 1, "宽口径栅栏按 rev 盖章");
 });
 
 test("N2 deferred set×clear(set 认领后被停,clear 消费认领):放行后补偿撤销,已清除不复活;反序 clear→set(0) 正常补录", async function () {

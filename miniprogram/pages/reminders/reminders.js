@@ -161,6 +161,16 @@ Page({
                 return;
             }
             if (code === "VERSION_CONFLICT") {
+                const cleared = err && typeof err === "object"
+                    ? err.cleared
+                    : undefined;
+                if (cleared === true) {
+                    // PR #52 R3-1:完成置 done 后、认领前提醒被家人清除——本轮已完成,
+                    // 服务端清除栅栏挡住了再生:如实告知,不再生成下一轮
+                    wx.showToast({ title: "已完成;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
+                    await this.load();
+                    return;
+                }
                 // 这一轮已被家人处理并换了新提醒(PR #52 B1):刷新看最新,绝不误伤
                 wx.showToast({ title: "这条刚被家人处理过,已刷新", icon: "none" });
                 await this.load();
