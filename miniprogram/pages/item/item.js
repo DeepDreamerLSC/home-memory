@@ -1128,7 +1128,7 @@ Page({
             wx.showToast({
                 title: this.hasRemindConflict()
                     ? "提醒冲突还没处理,先选保留哪一版"
-                    : "提醒还没存上,先保存修改,再点用完了",
+                    : "提醒还没存上,先保存修改,再点已处理",
                 icon: "none",
                 duration: 2500,
             });
@@ -1140,7 +1140,7 @@ Page({
             const outcome = await this.reloadRemindGeneration();
             if (outcome === "unknown") {
                 wx.showToast({
-                    title: "提醒还没加载好,稍后再点用完了",
+                    title: "提醒还没加载好,稍后再点已处理",
                     icon: "none",
                     duration: 2500,
                 });
@@ -1154,7 +1154,7 @@ Page({
                 const latest = this.data.expire;
                 if (!latest || this.data.remindGeneration < 0) {
                     wx.showToast({
-                        title: "提醒有变化,已刷新,确认后再点用完了",
+                        title: "提醒有变化,已刷新,确认后再点已处理",
                         icon: "none",
                         duration: 2500,
                     });
@@ -1165,9 +1165,9 @@ Page({
                         title: "提醒有变化",
                         content: "这条提醒现在是 " +
                             (0, remind_ui_1.monthDayText)(latest.dueDate) +
-                            " 到期,要按这一条完成吗?",
-                        confirmText: "按这一条完成",
-                        cancelText: "先不完成",
+                            " 到期,要按这一条处理吗?",
+                        confirmText: "按这一条处理",
+                        cancelText: "先不处理",
                         success: (r) => {
                             resolve(r.confirm === true);
                         },

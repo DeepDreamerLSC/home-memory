@@ -65,7 +65,9 @@ test("DONE-WORD:R1 行钮与 D1 保质期行钮字样「已处理」,页面无�
   assert.ok(r1.indexOf("用完了") === -1, "R1 不得再有「用完了」字样");
   assert.ok((r1.match(/<view class="r-done-face">已处理<\/view>/g) || []).length === 3, "R1 三分组行钮均为「已处理」");
   assert.ok(d1.indexOf("用完了") === -1, "D1 不得再有「用完了」字样");
-  assert.ok(d1.indexOf('class="r-done {{ remindBusy ? \x27busy\x27 : \x27\x27 }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>') !== -1, "D1 保质期行钮「已处理」");
+  // PR #56 F4-B1 在 busy 条件上扩展了 || conflictPending(冲突待选时同样禁用
+  // 行钮,失败关闭的视觉面);按钮字样断言只认「已处理」不变
+  assert.ok(d1.indexOf('class="r-done {{ remindBusy || conflictPending ? \x27busy\x27 : \x27\x27 }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>') !== -1, "D1 保质期行钮「已处理」");
   // R1 引导句与底部纪律说明同步(处理好了 = 收掉这条提醒)
   assert.ok(r1.indexOf("按时间先后;处理好了就点右边的钮。") !== -1, "R1 引导句同步");
   assert.ok(r1.indexOf("处理好了就收掉这条提醒,要下次提醒,到详情里选日子。") !== -1, "R1 纪律说明同步");
