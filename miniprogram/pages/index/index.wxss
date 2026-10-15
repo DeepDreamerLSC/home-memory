@@ -5,13 +5,13 @@
  * - 尺寸按原型 px×2=rpx(375px 画布基准),颜色只用全局 CSS 变量(app.wxss)。
  */
 
-/* ============ 品牌头部与家庭上下文入口 ============ */
+/* ============ 品牌头部与家庭上下文入口(原型 brand-row,内容边距 18px=36rpx) ============ */
 .brand {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 20rpx;
-  padding: 24rpx 32rpx 8rpx;
+  padding: 36rpx 36rpx 0;
 }
 
 .brand-main {
@@ -20,19 +20,19 @@
 }
 
 .brand-name {
-  font-size: 52rpx;
+  font-size: 42rpx;
   font-weight: 800;
   color: var(--text);
-  letter-spacing: 2rpx;
+  letter-spacing: 1rpx;
 }
 
 .brand-sub {
-  margin-top: 4rpx;
-  font-size: 26rpx;
+  margin-top: 6rpx;
+  font-size: 23rpx;
   color: var(--text-3);
 }
 
-/* 家庭上下文头:共享=「我们家」+圆点;个人=「我的家」(原型 fam-chip) */
+/* 家庭上下文头:共享=「我们家」+圆点;个人=「我的家」(原型 fam-chip,触点 ≥44px) */
 .fam-chip {
   display: flex;
   align-items: center;
@@ -41,7 +41,7 @@
   background: var(--card);
   border-radius: 999rpx;
   padding: 16rpx 26rpx;
-  min-height: 76rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
   font-size: 25rpx;
   font-weight: 700;
@@ -58,14 +58,14 @@
 }
 
 .fam-caret {
-  font-size: 20rpx;
+  font-size: 25rpx;
   color: var(--text-2);
   line-height: 1;
 }
 
 /* 未完成草稿恢复横幅 */
 .resume-banner {
-  margin: 12rpx 32rpx 0;
+  margin: 24rpx 36rpx 0;
   padding: 18rpx 24rpx;
   background: var(--banner-bg);
   border: 2rpx solid var(--banner-line);
@@ -76,7 +76,7 @@
 
 /* 刷新失败:保留旧内容,如实提示(与 locations 页同款) */
 .stale-banner {
-  margin: 16rpx 32rpx 0;
+  margin: 24rpx 36rpx 0;
   padding: 16rpx 20rpx;
   border-radius: 12rpx;
   background: var(--banner-bg);
@@ -85,9 +85,9 @@
   color: var(--text);
 }
 
-/* 中间区域统一左右边距 */
+/* 中间区域统一左右边距(原型 viewport 18px) */
 .map-area {
-  margin: 16rpx 32rpx 0;
+  margin: 0 36rpx;
 }
 
 /* ============ 通用排版(原型 small/note/tiny) ============ */
@@ -95,7 +95,7 @@
   font-size: 52rpx;
   font-weight: 800;
   color: var(--text);
-  letter-spacing: 1rpx;
+  letter-spacing: 0.6rpx;
   margin: 12rpx 0;
 }
 
@@ -229,14 +229,17 @@
   line-height: 1.5;
 }
 
-/* 「用文字记」:CTA 下的次级链接(与语音条「文字」同入口) */
+/* 「用文字记」:CTA 下的次级链接(原型 sublnk button,触点 ≥40px) */
 .cta-sublnk {
   margin-top: 20rpx;
   font-size: 25rpx;
   font-weight: 600;
   color: var(--text-2);
   text-align: center;
-  padding: 12rpx 0;
+  min-height: 80rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ============ 搜索(H0/H1/H1b 共用,原型 searchbar) ============ */
@@ -282,7 +285,7 @@
   opacity: 0.5;
 }
 
-/* ============ 搜索空态(H1b:不造假) ============ */
+/* ============ 搜索空态(H1b:不造假;原型 empty-note 12px) ============ */
 .empty-note {
   margin-top: 24rpx;
   border: 2rpx dashed var(--line);
@@ -292,7 +295,7 @@
 }
 
 .empty-note-main {
-  font-size: 26rpx;
+  font-size: 24rpx;
   color: var(--text-2);
   line-height: 1.7;
 }
@@ -335,7 +338,7 @@
 .result-row {
   display: flex;
   align-items: center;
-  padding: 20rpx 0;
+  padding: 22rpx 0;
   border-bottom: 1rpx solid var(--line);
 }
 
@@ -343,19 +346,17 @@
   border-bottom: none;
 }
 
-/* 物品首字图标:墨底黄字(浅)/白底墨字(深),随主题翻转 */
-.result-row .item-icon {
-  background: var(--go-bg);
-  color: var(--go-fg);
-}
-
+/* 收起结果:原型 morelink(13px/700,触点 44px) */
 .collapse-link {
-  margin-top: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 24rpx;
+  min-height: 88rpx;
   text-align: center;
-  font-size: 25rpx;
-  font-weight: 600;
+  font-size: 26rpx;
+  font-weight: 700;
   color: var(--text-2);
-  padding: 12rpx 0;
 }
 
 /* ============ 家庭地图:抬头 / 返回胶囊 / 「⋯」整理 ============ */
@@ -394,6 +395,11 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
+}
+
+/* 按压反馈(原型 backchip:active opacity .7) */
+.backchip-hover {
+  opacity: 0.7;
 }
 
 .more-inline {
@@ -517,14 +523,16 @@
   line-height: 1.7;
 }
 
-/* ============ X1 骨架屏(占位几何与真实格子一致,只动透明度) ============ */
+/* ============ X1 骨架屏(占位几何与真实格子一致;shimmer 扫光=原型 1.3s) ============ */
 .skel-grid {
   display: flex;
   flex-wrap: wrap;
-  margin-top: 20rpx;
+  margin-top: 18rpx;
 }
 
 .skel-tile {
+  position: relative;
+  overflow: hidden;
   width: calc(50% - 10rpx);
   margin-right: 20rpx;
   margin-bottom: 20rpx;
@@ -540,6 +548,8 @@
 }
 
 .skel-wide {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   height: 132rpx;
   border: 1rpx solid var(--line);
@@ -548,24 +558,31 @@
   box-sizing: border-box;
 }
 
-.skel-tile,
-.skel-wide {
-  animation: skel-pulse 1.2s ease-in-out infinite;
+/* 扫光带(原型 .skel:after 横向 shimmer) */
+.skel-shimmer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(90deg, transparent, var(--card-inset), transparent);
+  animation: shimmer 1.3s infinite;
+  transform: translateX(-100%);
 }
 
-@keyframes skel-pulse {
-  0%,
-  100% {
-    opacity: 1;
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
   }
-  50% {
-    opacity: 0.55;
+
+  to {
+    transform: translateX(100%);
   }
 }
 
 /* ============ X2 失败态(失败的是这次加载,不是记录没了) ============ */
 .fail-view {
-  margin-top: 96rpx;
+  margin-top: 120rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -581,6 +598,7 @@
   font-weight: 800;
   color: var(--text);
   margin-top: 16rpx;
+  text-align: center;
 }
 
 .fail-sub {

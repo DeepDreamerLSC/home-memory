@@ -23,6 +23,14 @@
   padding: 16rpx 20rpx;
   /* 底部安全区:整条沉到安全区下沿之上 */
   padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+  transition: transform 0.09s ease, box-shadow 0.09s ease, filter 0.09s ease;
+}
+
+/* 录音中整条呈按下态(原型二轮 V1 复刻:缩扁 + 变暗 + 内阴影,按住时仍可见) */
+.voicebar.pressed {
+  transform: scale(0.955) translateY(2rpx);
+  filter: brightness(0.94) saturate(1.05);
+  box-shadow: inset 0 6rpx 16rpx rgba(0, 0, 0, 0.14);
 }
 
 /* 键盘弹起自动避让:让出键盘区(设计 T7) */
@@ -330,7 +338,7 @@
   align-items: center;
   justify-content: center;
   padding: 8rpx 16rpx;
-  font-size: 25rpx;
+  font-size: 24rpx;
   font-weight: 600;
   color: var(--text-2);
   text-decoration: underline;

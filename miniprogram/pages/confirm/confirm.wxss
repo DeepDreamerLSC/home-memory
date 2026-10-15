@@ -7,7 +7,7 @@
 
 /* 标题区(替代原「AI 草稿」横幅:用户词汇) */
 .c-head {
-  margin: 24rpx;
+  margin: 24rpx 36rpx;
 }
 
 .c-title {
@@ -24,16 +24,16 @@
   line-height: 1.6;
 }
 
-/* 单件摘要卡:字段行 + 「改」 */
+/* 单件摘要卡:字段行 + 「改」(原型 .card 15px 14px + .sumrow 12px 0,直接继承全局卡片内边距) */
 .sum-card {
-  padding: 20rpx 28rpx 12rpx;
+  padding: 30rpx 28rpx;
 }
 
 .sumrow {
   display: flex;
   align-items: center;
   gap: 20rpx;
-  padding: 20rpx 0;
+  padding: 24rpx 0;
 }
 
 .sumrow.line {
@@ -70,8 +70,8 @@
   font-size: 23rpx;
   font-weight: 700;
   border-radius: 18rpx;
-  padding: 12rpx 22rpx;
-  min-height: 72rpx;
+  padding: 14rpx 22rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
 }
 
@@ -85,7 +85,7 @@
 
 /* 单件行证据/警示(常驻,不随原话折叠) */
 .sum-meta {
-  margin: 10rpx 24rpx 0;
+  margin: 10rpx 36rpx 0;
   font-size: 22rpx;
   color: var(--text-3);
 }
@@ -99,7 +99,7 @@
 }
 
 .sum-fail {
-  margin: 20rpx 24rpx 0;
+  margin: 20rpx 36rpx 0;
 }
 
 /* 单件「核对过再勾」行(默认未勾且位置已听清时出现) */
@@ -107,7 +107,7 @@
   display: flex;
   align-items: center;
   gap: 20rpx;
-  margin: 20rpx 24rpx 0;
+  margin: 20rpx 36rpx 0;
   padding: 18rpx 26rpx;
   min-height: 96rpx;
   box-sizing: border-box;
@@ -124,7 +124,7 @@
 
 /* C1b 警示框:位置没听清,显眼展开、必填才放行 */
 .warnbox {
-  margin: 24rpx;
+  margin: 24rpx 36rpx;
   background: var(--danger-bg);
   border: 3rpx solid var(--danger-shadow);
   border-radius: 26rpx;
@@ -157,7 +157,7 @@
   margin-top: 18rpx;
 }
 
-/* 原话折叠:默认折叠,警示场景初始展开 */
+/* 原话折叠:默认折叠,警示场景初始展开(原型 .fold 14px 13px;展开体=原型 note) */
 .fold {
   display: flex;
   align-items: center;
@@ -165,8 +165,8 @@
   gap: 16rpx;
   background: var(--card);
   border-radius: 30rpx;
-  padding: 26rpx;
-  margin: 20rpx 24rpx;
+  padding: 28rpx 26rpx;
+  margin: 20rpx 36rpx;
   min-height: 104rpx;
   box-sizing: border-box;
   font-size: 28rpx;
@@ -185,10 +185,10 @@
 }
 
 .fold-body {
-  margin: 0 24rpx;
+  margin: 0 36rpx;
   background: var(--card-inset);
-  border-radius: 22rpx;
-  padding: 20rpx 24rpx;
+  border-radius: 28rpx;
+  padding: 24rpx 26rpx;
 }
 
 .fold-quote {
@@ -197,14 +197,16 @@
   line-height: 1.6;
 }
 
-/* ---------- 列表式批量确认(Issue #14,C2 视觉对齐) ---------- */
+/* ---------- 列表式批量确认(Issue #14,C2 视觉对齐:原型 .batch 17px 圆角描边卡) ---------- */
 
 .batch-card {
-  padding-top: 12rpx;
+  border: 2rpx solid var(--line);
+  border-radius: 34rpx;
+  padding: 10rpx 24rpx;
 }
 
 .row {
-  padding: 20rpx 0;
+  padding: 24rpx 0;
   border-bottom: 1rpx solid var(--line);
 }
 
@@ -343,7 +345,7 @@
 }
 
 .truncated-banner {
-  margin: 0 24rpx 24rpx;
+  margin: 0 36rpx 24rpx;
   padding: 20rpx 24rpx;
   background: var(--banner-bg);
   border: 2rpx solid var(--banner-line);
@@ -353,12 +355,13 @@
   line-height: 1.5;
 }
 
-/* 确认 CTA:墨底黄字(大面积明黄只留给语音入口;本页无语音条) */
+/* 确认 CTA:墨底黄字(原型 .cta radius 15px、54px 高、margin-top 16px) */
 .cta-btn,
 .batch-btn {
   border-radius: 30rpx;
   min-height: 108rpx;
   line-height: 108rpx;
+  margin-top: 32rpx;
 }
 
 button.btn.primary.cta-btn,
@@ -376,7 +379,7 @@ button.btn.primary.batch-btn[disabled] {
 
 /* 信任句:常显 */
 .trust-line {
-  margin: 16rpx 24rpx 0;
+  margin: 16rpx 36rpx 0;
   text-align: center;
   font-size: 22rpx;
   color: var(--text-3);

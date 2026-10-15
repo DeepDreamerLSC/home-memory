@@ -1,10 +1,10 @@
 /* 我的家(空间树)页面:复用 app.wxss 的卡片/条目语言,颜色只用全局 CSS 变量 */
 
-/* 面包屑行:路径 + 后台刷新轻量指示(不整页 loading) */
+/* 面包屑行:路径 + 后台刷新轻量指示(不整页 loading);左右边距对齐全局 36rpx */
 .crumb-row {
   display: flex;
   align-items: center;
-  margin: 24rpx 32rpx 0;
+  margin: 24rpx 36rpx 0;
 }
 
 .crumb {
@@ -20,7 +20,7 @@
 
 /* 刷新失败:保留旧树,如实提示上次记录(可点按重试) */
 .stale-banner {
-  margin: 16rpx 32rpx 0;
+  margin: 24rpx 36rpx 0;
   padding: 16rpx 20rpx;
   border-radius: 12rpx;
   background: var(--banner-bg);
@@ -31,7 +31,7 @@
 
 /* 首载骨架屏:占位几何与真实条目一致(图标块 + 两行文字) */
 .skeleton .skel-crumb {
-  margin: 24rpx 32rpx 0;
+  margin: 24rpx 36rpx 0;
   width: 220rpx;
   height: 26rpx;
   border-radius: 8rpx;
