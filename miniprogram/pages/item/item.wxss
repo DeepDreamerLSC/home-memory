@@ -148,7 +148,8 @@
 }
 
 .fold-body.open {
-  max-height: 2400rpx;
+  /* 展开高度上限:表单 + 冲突面板(多字段并排)都在折叠体内,不够会被裁掉 */
+  max-height: 4000rpx;
 }
 
 .fold-body .card {
@@ -356,4 +357,104 @@
   border-radius: 50%;
   font-size: 28rpx;
   line-height: 1;
+}
+
+/* ============ 版本冲突面板(issue #6,移植自 PR #12):黄色横幅面,逐字段
+   并排「你的修改 / 最新记录」+ 显式选边;全部用主题变量,浅深两套主题通用 ============ */
+.conflict-card {
+  background: var(--banner-bg);
+  border: 2rpx solid var(--banner-line);
+}
+
+.conflict-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.conflict-desc {
+  font-size: 24rpx;
+  color: var(--text-2);
+  margin: 8rpx 0 20rpx;
+  line-height: 1.5;
+}
+
+.conflict-item {
+  background: var(--card);
+  border-radius: 16rpx;
+  padding: 20rpx;
+  margin-bottom: 16rpx;
+}
+
+.conflict-item:last-child {
+  margin-bottom: 0;
+}
+
+.conflict-item-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12rpx;
+}
+
+.conflict-row {
+  display: flex;
+}
+
+.conflict-side {
+  flex: 1;
+  min-width: 0;
+  background: var(--card-inset);
+  border-radius: 12rpx;
+  padding: 16rpx;
+}
+
+.conflict-side + .conflict-side {
+  margin-left: 16rpx;
+}
+
+.conflict-side-label {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-bottom: 4rpx;
+}
+
+.conflict-value {
+  font-size: 26rpx;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.conflict-actions {
+  display: flex;
+  margin-top: 16rpx;
+}
+
+/* 选择按钮:热区层复用全局 button.btn(面 66 内嵌深槽),选中态复用
+   button.btn.primary 的明黄强调面;两个按钮共担一行 */
+.conflict-actions button.conflict-btn {
+  flex: 1;
+  margin: 0;
+  font-size: 26rpx;
+  min-height: 76rpx;
+  padding: 5rpx 0;
+}
+
+.conflict-actions button.conflict-btn + button.conflict-btn {
+  margin-left: 16rpx;
+}
+
+.conflict-actions button.conflict-btn .btn-face {
+  min-height: 66rpx;
+  font-size: 26rpx;
+}
+
+/* 冲突未选完:保存按钮禁用(门禁可视层;onSaveTap 里还有一道双保险) */
+.btn.ink[disabled] {
+  background: transparent;
+  opacity: 1;
+}
+
+.btn.ink[disabled] .btn-face {
+  opacity: 0.38;
 }

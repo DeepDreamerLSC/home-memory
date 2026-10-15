@@ -53,6 +53,43 @@
     <text class="fold-chev {{ editPanelOpen ? 'up' : '' }}">›</text>
   </view>
   <view class="fold-body {{ editPanelOpen ? 'open' : '' }}">
+    <!-- 冲突面板(issue #6):保存或改提醒命中版本冲突后出现,逐字段并排
+         「你的修改 / 最新记录」;未选完前下方保存按钮禁用,直接在表单里改不算选择 -->
+    <view wx:if="{{ conflicts.length > 0 }}" class="card conflict-card">
+      <view class="conflict-title">这些字段与最新记录冲突</view>
+      <view class="conflict-desc">
+        别的设备也改了这些字段。逐项选择保留哪一版后才能保存;在下面表单里直接改不算选择。
+      </view>
+      <view wx:for="{{ conflicts }}" wx:key="key" class="conflict-item">
+        <view class="conflict-item-title">{{ item.label }}</view>
+        <view class="conflict-row">
+          <view class="conflict-side">
+            <view class="conflict-side-label">你的修改</view>
+            <view class="conflict-value">{{ item.localDisplay }}</view>
+          </view>
+          <view class="conflict-side">
+            <view class="conflict-side-label">最新记录</view>
+            <view class="conflict-value">{{ item.remoteDisplay }}</view>
+          </view>
+        </view>
+        <view class="conflict-actions">
+          <button
+            class="btn conflict-btn {{ item.choice === 'local' ? 'primary' : '' }}"
+            bindtap="onChooseLocal"
+            data-key="{{ item.key }}"
+          >
+            <view class="btn-face">保留我的修改</view>
+          </button>
+          <button
+            class="btn conflict-btn {{ item.choice === 'remote' ? 'primary' : '' }}"
+            bindtap="onChooseRemote"
+            data-key="{{ item.key }}"
+          >
+            <view class="btn-face">采用最新记录</view>
+          </button>
+        </view>
+      </view>
+    </view>
     <view class="card edit-card">
       <view class="field">
         <view class="label">名称</view>
@@ -113,6 +150,7 @@
       <button
         class="btn ink block"
         loading="{{ saving }}"
+        disabled="{{ conflictPending }}"
         bindtap="onSaveTap"
       >
         <view class="btn-face">保存修改</view>
