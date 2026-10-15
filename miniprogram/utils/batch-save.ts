@@ -1,3 +1,5 @@
+import type { RemindKind } from "../types";
+
 /*
  * 批量保存的行状态纯函数(确认页接线,逻辑下沉便于测试):
  * 「一次确认」只是交互上的一次操作,不是数据库原子事务——
@@ -76,6 +78,46 @@ export function shouldDefaultChecked(
   certain: boolean,
 ): boolean {
   return certain && sourceQuote !== "" && !anchorShared;
+}
+
+/** 确认页行上的提醒字段(rowReminderInput 的输入形状,纯数据便于测试) */
+export interface ReminderRowFields {
+  /** 行内提醒日期(YYYY-MM-DD;""=不带提醒——含服务端因归属不明置空的行) */
+  remindAt: string;
+  /** 提取到的提醒类别(冻结词表);行内无日期时为 "" */
+  remindKind: RemindKind | "";
+  /** 提取时的原话锚定日期:行内日期仍是这个值才随行提交 quote */
+  remindOrigin: string;
+  /** 日期在原话中的逐字子串 */
+  remindQuote: string;
+}
+
+/** 行内提醒随 create 提交的形态 */
+export interface ReminderInputOfRow {
+  due_date: string;
+  kind: RemindKind;
+  quote?: string;
+}
+
+/**
+ * C2 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
+ * 行内无日期(服务端因归属不明置空 / 用户清过) → undefined 不带提醒,
+ * 绝不写入错误归属的提醒;日期仍是原话提取值时才携带 quote
+ * (选择器改过的没有原话锚点)。
+ */
+export function rowReminderInput(
+  row: ReminderRowFields,
+): ReminderInputOfRow | undefined {
+  if (row.remindAt === "" || row.remindKind === "") {
+    return undefined;
+  }
+  return {
+    due_date: row.remindAt,
+    kind: row.remindKind,
+    ...(row.remindAt === row.remindOrigin && row.remindQuote !== ""
+      ? { quote: row.remindQuote }
+      : {}),
+  };
 }
 
 /** 单行写入(注入真实 create 或测试替身) */

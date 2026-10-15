@@ -3,6 +3,7 @@ import {
   allCheckedSaved,
   batchSummary,
   firstInvalidMsg,
+  rowReminderInput,
   runBatchSave,
   shouldDefaultChecked,
   type BatchRow,
@@ -493,19 +494,10 @@ Page<
     const finalRows = await runBatchSave(
       snapshot,
       (row) => {
-        // 行内提醒随 create 提交(可能被用户改/清过):行内还有日期才带;
-        // quote 只在日期仍是原话提取值时携带——日期选择器改过的提醒没有原话锚点
-        const reminder =
-          row.remindAt !== "" && row.remindKind !== ""
-            ? {
-                due_date: row.remindAt,
-                kind: row.remindKind,
-                quote:
-                  row.remindAt === row.remindOrigin && row.remindQuote !== ""
-                    ? row.remindQuote
-                    : undefined,
-              }
-            : undefined;
+        // 行内提醒随 create 提交(可能被用户改/清过),映射下沉 batch-save 纯函数
+        // (PR #52 B3 便于测试):行内无日期(含服务端因归属不明置空)不带提醒,
+        // 绝不写入错误归属的提醒;quote 只在日期仍是原话提取值时携带
+        const reminder = rowReminderInput(row);
         return callItemsApi({
           action: "create",
           operation_id: row.operationId,

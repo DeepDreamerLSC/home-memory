@@ -1205,22 +1205,25 @@ test("v2 提醒不影响既有行为:has_more 透传、位置锚定降级、anch
 });
 
 test("v2 handler:带提醒候选时 truncated 与 drafts 透传如常", async function () {
+  // PR #52 B3 后多件时提醒须落在该件自己的 source_quote 内:物0 的证据片段
+  // 带上日期(归属可验证),其余件的片段不含该日期(不竞争)
   const items = Array.from({ length: 5 }, (_, i) => ({
     name: "物" + i,
     location_text: "桌上",
     certain: true,
     qualifiers: [],
-    source_quote: "物" + i,
+    source_quote: i === 0 ? "物0在桌上,11月20号过期" : "物" + i,
     remind_at: i === 0 ? "2026-11-20" : null,
     remind_kind: i === 0 ? "有效期" : null,
     remind_quote: i === 0 ? "11月20号" : null,
   }));
-  const { res } = await runV2("物0物1物2物3物4在桌上,还有物5,11月20号过期", JSON.stringify({ items, has_more: true }));
+  const ORIGINAL = "物0在桌上,11月20号过期,还有物1物2物3物4也放桌上,以及物5";
+  const { res } = await runV2(ORIGINAL, JSON.stringify({ items, has_more: true }));
   assert.equal(res.ok, true);
   assert.equal(res.truncated, true, "has_more 透传不受提醒增补影响");
   assert.equal(res.drafts.length, 5);
   assert.equal(res.drafts[0].remind_at, "2026-11-20");
-  assert.equal(res.original_text, "物0物1物2物3物4在桌上,还有物5,11月20号过期");
+  assert.equal(res.original_text, ORIGINAL);
 });
 
 test("v1 零变化:模型输出多带 remind 字段也被忽略,draft 形状与旧契约完全一致", async function () {
@@ -1379,4 +1382,144 @@ test("B2 遮蔽不误伤:同 quote 里显式年份日期与独立无年份日期
     { remind_at: null, remind_kind: null, remind_quote: null },
     "显式年份段内剥出的无年份折算值必须拦截",
   );
+});
+
+// ---------- PR #52 复审 B3:日期归属限定到物品(多件保守门) ----------
+
+const B3_ORIGINAL = "滤芯在厨房,2027年11月20号要更换;钥匙在玄关。";
+
+test("B3 负例:模型把滤芯的日期赋给钥匙(source_quote=钥匙在玄关)→ 钥匙三项全 null,滤芯照常带提醒", function () {
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "滤芯",
+        location_text: "厨房",
+        certain: true,
+        qualifiers: [],
+        source_quote: "滤芯在厨房,2027年11月20号要更换",
+        remind_at: "2027-11-20",
+        remind_kind: "下次维护",
+        remind_quote: "2027年11月20号",
+      },
+      {
+        name: "钥匙",
+        location_text: "玄关",
+        certain: true,
+        qualifiers: [],
+        source_quote: "钥匙在玄关",
+        // 模型交叉配对:日期证据是整句原话的逐字子串、也真的说了这个日期,
+        // 两道既有锚定门都过——但没有单件可验证的归属证据
+        remind_at: "2027-11-20",
+        remind_kind: "下次维护",
+        remind_quote: "2027年11月20号要更换",
+      },
+    ]),
+    B3_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true, "归属判不明绝不废件");
+  // 滤芯:日期落在自己的 source_quote 内,归属可验证 → 保留
+  assert.equal(result.drafts[0].remind_at, "2027-11-20", "有专属日期归属证据的物品保留提醒");
+  assert.equal(result.drafts[0].remind_quote, "2027年11月20号");
+  // 钥匙:remind_quote 不在自己的 source_quote 内 → 三项全 null,物品照常提取
+  assert.equal(result.drafts[1].name, "钥匙");
+  assert.equal(result.drafts[1].location_text, "玄关");
+  assert.deepStrictEqual(
+    remindTrio(result.drafts[1]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "A 的日期赋给 B:归属不明不带提醒,由用户以后在详情页补",
+  );
+});
+
+test("B3 正例:A 有专属日期、B 无日期 → A 保留提醒,B 三项本就 null,互不影响", function () {
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "滤芯",
+        location_text: "厨房",
+        certain: true,
+        qualifiers: [],
+        source_quote: "滤芯在厨房,2027年11月20号要更换",
+        remind_at: "2027-11-20",
+        remind_kind: "下次维护",
+        remind_quote: "2027年11月20号",
+      },
+      {
+        name: "钥匙",
+        location_text: "玄关",
+        certain: true,
+        qualifiers: [],
+        source_quote: "钥匙在玄关",
+        remind_at: null,
+        remind_kind: null,
+        remind_quote: null,
+      },
+    ]),
+    B3_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.drafts[0].remind_at, "2027-11-20", "A 的专属日期照常保留");
+  assert.equal(result.drafts[0].remind_kind, "下次维护");
+  assert.deepStrictEqual(remindTrio(result.drafts[1]), { remind_at: null, remind_kind: null, remind_quote: null });
+});
+
+test("B3 共享锚/竞争:同一日期证据同时落在两件的 source_quote 内(整句共享)→ 两件都不自动填", function () {
+  const shared = "感冒药放药箱第一格,维生素放第二格,都是2027年11月20号到期。";
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "感冒药",
+        location_text: "药箱第一格",
+        certain: true,
+        qualifiers: [],
+        source_quote: "感冒药放药箱第一格,维生素放第二格,都是2027年11月20号到期",
+        remind_at: "2027-11-20",
+        remind_kind: "有效期",
+        remind_quote: "2027年11月20号",
+      },
+      {
+        name: "维生素",
+        location_text: "药箱第二格",
+        certain: true,
+        qualifiers: [],
+        source_quote: "感冒药放药箱第一格,维生素放第二格,都是2027年11月20号到期",
+        remind_at: "2027-11-20",
+        remind_kind: "有效期",
+        remind_quote: "2027年11月20号",
+      },
+    ]),
+    shared,
+    ANCHOR_TODAY,
+  );
+  // 日期证据同时是两件的共享锚(都在整句内):无法判明归谁,两件都不自动填,
+  // 物品照常提取,由用户以后在详情页自己补
+  assert.equal(result.drafts[0].name, "感冒药");
+  assert.equal(result.drafts[1].name, "维生素");
+  assert.deepStrictEqual(
+    remindTrio(result.drafts[0]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "共享锚:归属不明不带提醒",
+  );
+  assert.deepStrictEqual(remindTrio(result.drafts[1]), { remind_at: null, remind_kind: null, remind_quote: null });
+});
+
+test("B3 单件不受影响:一件时日期证据在整句原话中即可(不可能属于别的物品)", function () {
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "感冒药",
+        location_text: "药箱第一格",
+        certain: true,
+        qualifiers: [],
+        source_quote: "感冒药放药箱第一格",
+        remind_at: "2027-11-20",
+        remind_kind: "有效期",
+        remind_quote: "2027年11月20号",
+      },
+    ]),
+    "感冒药放药箱第一格,2027年11月20号到期。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].remind_at, "2027-11-20", "单件时归属门不启用(既有行为)");
 });

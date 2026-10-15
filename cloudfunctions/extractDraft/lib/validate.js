@@ -23,7 +23,11 @@
  *     (#36 冻结纪律:锚定失败=不带提醒,绝不废件、绝不半带)。
  *     锚定是双重的:quote 必须是原话逐字子串,且 quote 里必须真的说了
  *     remind_at 这个日期(显式年份原样、无年份按最近未来补全;模糊表述
- *     解析不出任何日期候选,折算值/无关日期对不上候选,同样三项全 null)。
+ *     解析不出任何日期候选,折算值/无关日期对不上候选,同样三项全 null;
+ *     显式年份片段遮蔽后无年份正则不得二次剥取,PR #52 B2)。
+ *   - v2:日期归属限定(PR #52 B3,多件保守门):多件时任一件的 remind_quote
+ *     还必须落在该件自己的 source_quote 内、且不与其他物品竞争该日期段,
+ *     否则该件三项全 null(物品照常提取,日期由用户在详情页自己补)。
  */
 
 const NAME_MAX = 50;
@@ -324,6 +328,37 @@ function validateDrafts(rawText, originalText, todayYmd) {
         validateReminderFields(item, normalizedOriginal, todayYmd),
       ),
     );
+  }
+  // 日期归属限定(PR #52 复审 B3,保守门,仅多件时):remind_quote 只要求在
+  // 整句原话中,模型可把 A 物品的日期赋给 B(锚定两道门都过,一键确认即错误
+  // 提醒)。多件时仅当该件有单件可验证的日期归属证据才携带提醒:remind_quote
+  // 必须落在该件自己的 source_quote 内,且不与其他物品竞争该日期段(日期证据
+  // 同时落在别的物品的证据片段里 = 共享锚/交叉,无法判明归属)。判不明 →
+  // 三项全 null,该物品照常提取,日期由用户以后在详情页自己补。单件不受影响
+  // (日期不可能属于别的物品)。
+  if (drafts.length > 1) {
+    const normalizedSources = drafts.map((d) => stripWhitespace(d.source_quote));
+    for (let i = 0; i < drafts.length; i++) {
+      const d = drafts[i];
+      if (d.remind_at === null) continue;
+      const dateQuote = stripWhitespace(d.remind_quote);
+      const own = normalizedSources[i];
+      let keep =
+        dateQuote !== "" && own !== "" && own.indexOf(dateQuote) !== -1;
+      if (keep) {
+        keep = !drafts.some(
+          (_other, j) =>
+            j !== i &&
+            normalizedSources[j] !== "" &&
+            normalizedSources[j].indexOf(dateQuote) !== -1,
+        );
+      }
+      if (!keep) {
+        d.remind_at = null;
+        d.remind_kind = null;
+        d.remind_quote = null;
+      }
+    }
   }
   // 锚定共享标记:证据片段同时含其他物品的名称(典型:模型把整句原话当 quote,
   // 多件多位置都在其中,交叉配对无法排除)——这类候选必须人工核对,

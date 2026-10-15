@@ -190,3 +190,100 @@ test("B3-C2:两件确定 + 一件没听清(原话非空)——默认勾选 2 件
   assert.equal(bs.allCheckedSaved(finalRows), true, "两件全部保存完成");
   assert.equal(finalRows[2].status, "pending", "未勾选行保持待核对(补位置后由用户明确勾选)");
 });
+
+// ---------- PR #52 复审 B3:C2 行 → create reminder 参数映射(纯函数) ----------
+
+function remindRow(overrides) {
+  return Object.assign(
+    {
+      key: "r0",
+      name: "钥匙",
+      locationText: "玄关",
+      checked: true,
+      status: "pending",
+      failMsg: "",
+      operationId: "op-r1",
+      remindAt: "",
+      remindKind: "",
+      remindOrigin: "",
+      remindQuote: "",
+      remindTouched: false,
+    },
+    overrides,
+  );
+}
+
+test("rowReminderInput:行内无日期(服务端因归属不明置空)→ undefined,一键确认绝不写入错误提醒", function () {
+  // B3 反例链路:模型把滤芯的日期赋给钥匙,服务端归属门把钥匙三项置 null →
+  // 确认页 remindAt 为 "" → 随行提交不带 reminder
+  assert.equal(bs.rowReminderInput(remindRow()), undefined);
+  assert.equal(
+    bs.rowReminderInput(remindRow({ remindAt: "", remindKind: "有效期" })),
+    undefined,
+    "类别残留而日期为空:同样不带(半态禁止)",
+  );
+});
+
+test("rowReminderInput:日期仍是原话提取值才带 quote;选择器改过的只带 due/kind", function () {
+  const extracted = bs.rowReminderInput(
+    remindRow({
+      remindAt: "2027-11-20",
+      remindKind: "下次维护",
+      remindOrigin: "2027-11-20",
+      remindQuote: "2027年11月20号",
+    }),
+  );
+  assert.deepStrictEqual(extracted, {
+    due_date: "2027-11-20",
+    kind: "下次维护",
+    quote: "2027年11月20号",
+  });
+  const picked = bs.rowReminderInput(
+    remindRow({
+      remindAt: "2027-12-01",
+      remindKind: "下次维护",
+      remindOrigin: "2027-11-20",
+      remindQuote: "2027年11月20号",
+    }),
+  );
+  assert.deepStrictEqual(picked, { due_date: "2027-12-01", kind: "下次维护" });
+});
+
+test("rowReminderInput 接线:归属置空的行经 runBatchSave 提交,create 收到的 event 不含 reminder 键", async function () {
+  // C2 一键确认的等价断言:B3 置空行 + 正常行混排,只有正常行带 reminder
+  const events = [];
+  const rows = [
+    remindRow({ key: "b3-null", name: "钥匙", operationId: "op-b3-1" }), // 归属不明置空
+    remindRow({
+      key: "b3-keep",
+      name: "滤芯",
+      locationText: "厨房",
+      remindAt: "2027-11-20",
+      remindKind: "下次维护",
+      remindOrigin: "2027-11-20",
+      remindQuote: "2027年11月20号",
+      operationId: "op-b3-2",
+    }),
+  ];
+  const finalRows = await bs.runBatchSave(
+    rows,
+    (row) => {
+      const reminder = bs.rowReminderInput(row);
+      events.push({ operationId: row.operationId, reminder });
+      return Promise.resolve();
+    },
+    () => {},
+  );
+  assert.equal(bs.allCheckedSaved(finalRows), true);
+  assert.equal(events.length, 2);
+  assert.equal(
+    events[0].reminder,
+    undefined,
+    "归属置空行:随行提交不带 reminder(不写入错误提醒)",
+  );
+  assert.deepStrictEqual(events[1].reminder, {
+    due_date: "2027-11-20",
+    kind: "下次维护",
+    quote: "2027年11月20号",
+  });
+});
