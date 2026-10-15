@@ -7,7 +7,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 20rpx;
-  margin: 24rpx 24rpx 0;
+  margin: 24rpx 36rpx 0;
 }
 
 .detail-title {
@@ -54,7 +54,7 @@
   border: 3rpx solid var(--line);
   border-radius: 40rpx;
   padding: 32rpx 30rpx;
-  margin: 24rpx;
+  margin: 24rpx 36rpx;
 }
 
 .bigcard-lbl {
@@ -92,6 +92,7 @@
 .bigcard-sep {
   color: var(--text-3);
   font-weight: 400;
+  margin: 0 6rpx;
 }
 
 .bigcard-quote {
@@ -114,7 +115,7 @@
   line-height: 1.6;
 }
 
-/* ============ 编辑折叠(展开后=原有表单与保存路径) ============ */
+/* ============ 编辑折叠(展开后=原有表单与保存路径;原型 .fold padding 14px 13px) ============ */
 .fold {
   display: flex;
   align-items: center;
@@ -125,7 +126,7 @@
   padding: 28rpx 26rpx;
   min-height: 104rpx;
   box-sizing: border-box;
-  margin: 20rpx 24rpx 0;
+  margin: 20rpx 36rpx 0;
   font-size: 28rpx;
   font-weight: 700;
   color: var(--text);
@@ -149,7 +150,7 @@
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.25s ease;
-  margin: 0 24rpx;
+  margin: 0 36rpx;
 }
 
 .fold-body.open {
