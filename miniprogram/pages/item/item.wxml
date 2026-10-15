@@ -21,7 +21,7 @@
           </block>
         </view>
         <view class="bigcard-quote">
-          你当时说的是:「{{ locationText }}」<text class="bigcard-quote-sub">——原文一直保留,整理位置时也不会被改掉。</text>
+          你当时说的是:「{{ locationText }}」
         </view>
       </view>
     </view>
@@ -82,7 +82,7 @@
       >
         保存修改
       </button>
-      <view class="fold-note">如果别处改过这份记录,保存时会先提醒你核对,不会悄悄覆盖。</view>
+      <view class="fold-note">与他处改动冲突时,保存前会先让你核对。</view>
     </view>
   </view>
 
