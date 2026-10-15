@@ -225,6 +225,13 @@ Page<
     doLinkToNode(nodeId: string, path?: string[]): Promise<void>;
     confirmMount(): Promise<void>;
     cancelMount(): void;
+    /**
+     * F4-B3:冲突未裁定时的「整理位置」写入门禁——冲突面板还在(仍有未选边
+     * 字段,或选完还没保存/收敛)且表单位置仍不同于已确认基准(original):
+     * 此时挂载会把 node 指向按未裁定文本解析的位置,服务端 location_text
+     * 仍是对方值,位置事实分裂。返回 true = 禁止发起 ensurePath/linkItem。
+     */
+    mountBlockedByConflict(): boolean;
     /** 阻止弹层蒙层下的滚动穿透 */
     noop(): void;
     /* ---------------- 提醒(#36 三阶段) ---------------- */
@@ -956,11 +963,36 @@ Page<
   },
 
   /**
+   * F4-B3:冲突未裁定时「整理位置」的写入门禁。冲突面板还在(仍有未选边
+   * 字段,或已选边但还没保存/收敛——面板只有在表单与最新基准一致时才会收起)
+   * 且表单位置仍不同于已确认基准时返回 true:此时挂载会把 location_node_id
+   * 指向按本地未裁定文本解析的位置,服务端 location_text 仍是对方值,位置
+   * 事实分裂。选边并保存(基准重置、面板收起)或位置收敛后自然放行。
+   */
+  mountBlockedByConflict(): boolean {
+    if (this.data.conflicts.length === 0 && !this.data.conflictPending) {
+      return false; // 无冲突态:普通编辑照旧可整理(既有行为)
+    }
+    return this.data.locationText.trim() !== this.original.location;
+  },
+
+  /**
    * 整理位置:parseLocation 零写库出候选分段 → 用户逐段核对(可改)→
    * ensurePath + linkItem。AI 不可用时兜底为手动选位置(选择模式)。
    */
   async onMountTap() {
     if (this.data.saving || this.data.deleting || this.data.mounting) {
+      return;
+    }
+    if (this.mountBlockedByConflict()) {
+      // F4-B3(架构复审阻断):冲突未裁定且待提交位置仍异于已确认基准时,
+      // 挂载会按本地未裁定文本建/指节点,而服务端 location_text 仍是对方值
+      // ——位置事实分裂。先逐项选边并保存,再整理位置
+      wx.showToast({
+        title: "位置冲突还没处理,先选保留哪一版并保存,再整理位置",
+        icon: "none",
+        duration: 2500,
+      });
       return;
     }
     const text = this.data.locationText.trim();
@@ -1055,6 +1087,16 @@ Page<
   },
 
   async doLinkToNode(nodeId, path) {
+    if (this.mountBlockedByConflict()) {
+      // F4-B3:选择器是异步回传,面板在选位置的这段时间里可能已弹出冲突——
+      // 写入前再守一次门,与入口同一口径(先选边保存,再整理位置)
+      wx.showToast({
+        title: "位置冲突还没处理,先选保留哪一版并保存,再整理位置",
+        icon: "none",
+        duration: 2500,
+      });
+      return;
+    }
     this.setData({ mountSaving: true });
     try {
       const res = await callLocationsApi({
@@ -1112,6 +1154,16 @@ Page<
   /** 确认候选分段:ensurePath(用户确认后的唯一建节点入口)→ linkItem(版本条件更新) */
   async confirmMount() {
     if (this.data.mountSaving) {
+      return;
+    }
+    if (this.mountBlockedByConflict()) {
+      // F4-B3:候选面板是冲突前解析好的,确认时状态可能已变(异步写入前守门);
+      // 冲突未裁定且位置异于基准时禁止 ensurePath/linkItem,先选边保存
+      wx.showToast({
+        title: "位置冲突还没处理,先选保留哪一版并保存,再整理位置",
+        icon: "none",
+        duration: 2500,
+      });
       return;
     }
     const names = this.data.mountSegments
