@@ -61,6 +61,12 @@
   font-size: 26rpx;
   color: var(--text-2);
   text-align: center;
+  /* Fix 1(#36 真机反馈):次级文字链热区 ≥88rpx + flex 居中 + line-height:1 */
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 /* 手输邀请码 */

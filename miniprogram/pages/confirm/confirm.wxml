@@ -42,7 +42,7 @@
         loading="{{ saving }}"
         bindtap="onSaveTap"
       >
-        保存
+        <view class="btn-face">保存</view>
       </button>
     </view>
     <view class="trust-line">你确认后,我才会真正记住。</view>
@@ -61,7 +61,7 @@
         <view class="sumrow line">
           <view class="k">物品</view>
           <view class="v">{{ rows[0].name || '还没写名称' }}</view>
-          <view class="sum-edit" data-field="name" bindtap="onToggleEdit">改</view>
+          <view class="sum-edit" data-field="name" bindtap="onToggleEdit"><view class="sum-edit-face">改</view></view>
         </view>
         <view wx:if="{{ editingName }}" class="field sum-field">
           <input
@@ -79,7 +79,7 @@
           <view class="sumrow {{ rows[0].remindAt || rows[0].remindTouched ? 'line' : '' }}">
             <view class="k">位置</view>
             <view class="v {{ rows[0].locationText ? '' : 'warn' }}">{{ rows[0].locationText || '还没写位置' }}</view>
-            <view class="sum-edit" data-field="location" bindtap="onToggleEdit">改</view>
+            <view class="sum-edit" data-field="location" bindtap="onToggleEdit"><view class="sum-edit-face">改</view></view>
           </view>
           <view wx:if="{{ editingLocation }}" class="field sum-field">
             <input
@@ -104,7 +104,7 @@
             disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
             bindchange="onRemindDateChange"
           >
-            <view class="sum-edit">选日期</view>
+            <view class="sum-edit"><view class="sum-edit-face">选日期</view></view>
           </picker>
           <view
             wx:if="{{ rows[0].remindAt }}"
@@ -122,6 +122,9 @@
 
       <!-- 纪律句(#36):只在提醒行存在时显示;日期只来自原话或日期选择器 -->
       <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sum-meta remind-note">时间只来自你说的话;没说清就不带提醒,不猜日期。</view>
+
+      <!-- 时间没换算(0.6.0 真机反馈 Fix 4):原话有时间表述但没换成日期——纯提示,不是换算 -->
+      <view wx:if="{{ rows[0].remindVagueQuote }}" class="sum-meta vague-note">时间没换算:『{{ rows[0].remindVagueQuote }}』——说具体日期,或以后在详情里选日子</view>
 
       <!-- C1b:位置没听清的警示框(常驻展开,不藏进折叠) -->
       <view wx:if="{{ !rows[0].certain }}" class="warnbox">
@@ -220,6 +223,8 @@
         </view>
         <!-- 提醒角标(#36):原话里明确说了日期的行在副文下小字标出;不参与勾选逻辑 -->
         <view wx:if="{{ item.remindAt }}" class="remind-badge">{{ item.remindBadgeText }}</view>
+        <!-- 时间没换算小灰标(0.6.0 真机反馈 Fix 4):纯提示,不是换算 -->
+        <view wx:if="{{ item.remindVagueQuote }}" class="vague-badge">时间没换算</view>
         <view wx:if="{{ !item.certain && !item.checked && item.status !== 'saved' }}" class="row-warn-line">没听清放在哪儿;补上位置再勾选。</view>
 
         <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>
@@ -239,7 +244,7 @@
         disabled="{{ checkedCount === 0 }}"
         bindtap="onSaveBatchTap"
       >
-        确认保存 {{ checkedCount }} 件
+        <view class="btn-face">确认保存 {{ checkedCount }} 件</view>
       </button>
     </view>
 
@@ -251,7 +256,7 @@
         disabled="{{ checkedCount === 0 }}"
         bindtap="onSaveBatchTap"
       >
-        {{ !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}
+        <view class="btn-face">{{ !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}</view>
       </button>
     </block>
 

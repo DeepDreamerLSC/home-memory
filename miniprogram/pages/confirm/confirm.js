@@ -83,6 +83,7 @@ Page({
                 remindQuote: d.remind_quote ?? "",
                 remindTouched: false,
                 remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
+                remindVagueQuote: d.remind_vague_quote ?? "",
             };
         });
         // 恢复上次未完成的行状态:沿用原 operation_id(幂等恢复,不重复建档),
@@ -338,6 +339,8 @@ Page({
             "rows[0].remindAt": value,
             "rows[0].remindTouched": true,
             "rows[0].remindBadgeText": remindBadgeText(value),
+            // 用户选了明确日期:时间没换算的提示随之收起(与服务端互斥口径一致)
+            "rows[0].remindVagueQuote": "",
         });
         this.persistRows();
     },
@@ -383,14 +386,18 @@ Page({
         const finalRows = await (0, batch_save_1.runBatchSave)(snapshot, (row) => {
             // 行内提醒随 create 提交(可能被用户改/清过),映射下沉 batch-save 纯函数
             // (PR #52 B3 便于测试):行内无日期(含服务端因归属不明置空)不带提醒,
-            // 绝不写入错误归属的提醒;quote 只在日期仍是原话提取值时携带
+            // 绝不写入错误归属的提醒;quote 只在日期仍是原话提取值时携带。
+            // vague(时间没换算标记,Fix 4)同理下沉:无日期且带标记才随行提交,
+            // 存到 item 只为详情页展示,不产生任何提醒
             const reminder = (0, batch_save_1.rowReminderInput)(row);
+            const vagueQuote = (0, batch_save_1.rowVagueQuoteInput)(row);
             return (0, api_1.callItemsApi)({
                 action: "create",
                 operation_id: row.operationId,
                 name: row.name.trim(),
                 location_text: row.locationText.trim(),
                 ...(reminder ? { reminder } : {}),
+                ...(vagueQuote !== undefined ? { remind_vague_quote: vagueQuote } : {}),
             }).then(() => undefined);
         }, (row, error) => {
             const index = this.data.rows.findIndex((r) => r.key === row.key);

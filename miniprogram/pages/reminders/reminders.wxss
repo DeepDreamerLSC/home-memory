@@ -12,9 +12,9 @@
   margin-top: 8rpx;
 }
 
-/* X1 骨架(原型 .skel 70px) */
+/* X1 骨架(原型 .skel 70px;Fix 1 压扁:70px→52px,与真实行高一致) */
 .r-skel {
-  height: 140rpx;
+  height: 104rpx;
   background: var(--card);
   border: 1rpx solid var(--line);
   border-radius: 30rpx;
@@ -50,23 +50,8 @@
   margin-top: 32rpx;
 }
 
-/* 墨底主 CTA(再试一次) */
-.btn.ink {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 88rpx;
-  border-radius: 30rpx;
-  background: var(--go-bg);
-  color: var(--go-fg);
-  font-size: 30rpx;
-  font-weight: 800;
-}
-
-.btn.ink.block {
-  display: flex;
-  width: 100%;
-}
+/* 墨底主 CTA(再试一次):视觉/热区分层样式统一收在 app.wxss
+   (.btn.ink + .btn-face,#36 真机反馈 Fix 1) */
 
 /* 空态(原型 .empty-note) */
 .empty-note {
@@ -107,13 +92,13 @@
   display: flex;
   align-items: center;
   gap: 22rpx;
-  padding: 22rpx 20rpx;
+  padding: 16rpx 20rpx;
   background: var(--card);
   border: 1rpx solid var(--line);
   border-radius: 30rpx;
   color: var(--text);
   margin-top: 16rpx;
-  min-height: 140rpx;
+  min-height: 104rpx;
   box-sizing: border-box;
 }
 
@@ -145,25 +130,8 @@
   color: var(--text-2);
 }
 
-/* 「用完了」(原型 .r1-done;触点 ≥88rpx) */
-.r-done {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1rpx solid var(--line);
-  background: var(--card);
-  color: var(--text-2);
-  border-radius: 20rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-  min-height: 88rpx;
-  padding: 0 20rpx;
-}
-
-.r-done.busy {
-  opacity: 0.5;
-}
+/* 「用完了」(原型 .r1-done):视觉/热区分层样式统一收在 app.wxss
+   (.r-done + .r-done-face,#36 真机反馈 Fix 1:热区 88 = 面 66) */
 
 /* 底部纪律说明(原型 .note) */
 .note {

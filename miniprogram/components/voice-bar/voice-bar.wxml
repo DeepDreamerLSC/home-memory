@@ -40,24 +40,26 @@
     catchtouchend="onHoldTouchEnd"
     catchtouchcancel="onHoldTouchCancel"
   >
-    <view class="micdot">
-      <block wx:if="{{ voiceState === 'recording' }}">
-        <view class="mic-seconds">{{ recordSeconds }}s</view>
-      </block>
-      <block wx:else>
-        <view class="mic-cap"></view>
-        <view class="mic-stand"></view>
-        <view class="mic-base"></view>
-      </block>
-    </view>
-    <view class="hold-label">
-      {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话' }}
+    <view class="hold-face">
+      <view class="micdot">
+        <block wx:if="{{ voiceState === 'recording' }}">
+          <view class="mic-seconds">{{ recordSeconds }}s</view>
+        </block>
+        <block wx:else>
+          <view class="mic-cap"></view>
+          <view class="mic-stand"></view>
+          <view class="mic-base"></view>
+        </block>
+      </view>
+      <view class="hold-label">
+        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话' }}
+      </view>
     </view>
   </view>
   <view
     class="txtbtn {{ voiceState !== 'idle' || transcribing || extracting ? 'disabled' : '' }}"
     catchtap="onTextTap"
   >
-    文字
+    <view class="txtbtn-face">文字</view>
   </view>
 </view>

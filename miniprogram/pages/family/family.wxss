@@ -99,16 +99,18 @@
   font-size: 24rpx;
 }
 
-/* 取消链接(照首页 mode-link 口径,该类定义在首页 wxss,此处页面级补齐;原型 sublnk 12.5px) */
+/* 取消链接(照首页 mode-link 口径,该类定义在首页 wxss,此处页面级补齐;原型 sublnk 12.5px)
+   (Fix 1:次级文字链热区抬到 ≥88rpx,line-height:1 居中) */
 .mode-link {
   margin-top: 20rpx;
   font-size: 25rpx;
   color: var(--text-2);
   text-align: center;
-  min-height: 80rpx;
+  min-height: 88rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
 }
 
 /* 头像昵称资料卡 */

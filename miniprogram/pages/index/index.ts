@@ -37,6 +37,29 @@ type DisplayRoom = {
   countText: string;
 };
 
+/** 「尚未归类」明细行(#36 真机反馈 Fix 3:首字块 + 名称 + 原话位置 + 灰标) */
+type DisplayUnmounted = {
+  item_id: string;
+  name: string;
+  locationText: string;
+  initial: string;
+};
+
+/** list 响应根层的未挂物品投影 → 渲染行(缺字段/旧服务端响应一律空数组) */
+function toUnmountedRows(
+  rows: Array<{ item_id: string; name: string; location_text: string }> | undefined,
+): DisplayUnmounted[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  return rows.map((r) => ({
+    item_id: r.item_id,
+    name: r.name,
+    locationText: r.location_text,
+    initial: r.name.length > 0 ? r.name[0] : "?",
+  }));
+}
+
 /** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用) */
 type DisplayItem = ItemSummary & { updated_at_short: string };
 
@@ -111,6 +134,13 @@ Page<
     directItems: DisplayItem[];
     /** 未归位物品数(仅根层通栏格;>0 才显示,只显计数) */
     unmountedCount: number;
+    /**
+     * 「尚未归类」明细视图(#36 0.6.0 真机反馈 Fix 3):通栏格可点入的
+     * 容器视图式列表(行 = 首字块+名称+原话位置+灰标「位置待核实」,
+     * 行点进物品详情;返回胶囊退家里)。未挂明细跟随 locations 缓存口径。
+     */
+    unmountedView: boolean;
+    unmountedItems: DisplayUnmounted[];
     /** 结构操作进行中(改名/移动/合并),防止并发重复提交 */
     acting: boolean;
     /** H0 大语音 CTA 的语音状态(状态机在 utils/voice-entry 单例) */
@@ -164,6 +194,10 @@ Page<
     renderMap(res: ListLocationsResponse): void;
     onRetryTap(): void;
     onRoomTap(e: WechatMiniprogram.CustomEvent): void;
+    /** 「尚未归类」通栏格:点入未挂物品明细视图(Fix 3) */
+    onUnmountedTap(): void;
+    /** 明细行点击:按 item_id 进物品详情(原话位置在那里核对/整理) */
+    onUnmountedRowTap(e: WechatMiniprogram.CustomEvent): void;
     onBackTap(): void;
     onDirectItemTap(e: WechatMiniprogram.CustomEvent): void;
     openItem(item: DisplayItem, spacePath?: string[]): void;
@@ -216,6 +250,8 @@ Page<
     rooms: [],
     directItems: [],
     unmountedCount: 0,
+    unmountedView: false,
+    unmountedItems: [] as DisplayUnmounted[],
     acting: false,
     voiceState: "idle",
     transcribing: false,
@@ -485,6 +521,8 @@ Page<
         rooms: [],
         directItems: [],
         unmountedCount: 0,
+        unmountedView: false,
+        unmountedItems: [],
         mapTitle: "家里有什么",
         backLabel: "",
         isRootView: true,
@@ -559,6 +597,8 @@ Page<
           rooms: [],
           directItems: [],
           unmountedCount: 0,
+          unmountedView: false,
+          unmountedItems: [],
           mapTitle: "家里有什么",
           backLabel: "",
           isRootView: true,
@@ -630,19 +670,29 @@ Page<
       this.setData({ queried: false, queryKeyword: "", queryResults: [], queryError: "" });
     }
     this.lastFirstUse = firstUse;
+    // 停在「尚未归类」明细视图时(Fix 3):后台刷新只更新数据,抬头/返回胶囊
+    // 仍保持该视图的文案,不被根层标题顶掉
+    const inUnmountedView = this.data.unmountedView;
     this.setData({
       firstUse,
-      mapTitle: isRoot ? "家里有什么" : res.node.name + "里有什么",
-      backLabel: isRoot
-        ? ""
-        : res.node.path.length >= 2
-          ? res.node.path[res.node.path.length - 2]
-          : "家里",
+      mapTitle: inUnmountedView
+        ? "尚未归类 · " + res.unmounted_count + " 件待核实"
+        : isRoot
+          ? "家里有什么"
+          : res.node.name + "里有什么",
+      backLabel: inUnmountedView
+        ? "家里"
+        : isRoot
+          ? ""
+          : res.node.path.length >= 2
+            ? res.node.path[res.node.path.length - 2]
+            : "家里",
       isRootView: isRoot,
       containerName: isRoot ? "" : res.node.name,
       rooms,
       directItems: toDisplayItems(res.items),
       unmountedCount: res.unmounted_count,
+      unmountedItems: isRoot ? toUnmountedRows(res.unmounted_items) : this.data.unmountedItems,
     });
   },
 
@@ -672,13 +722,67 @@ Page<
       rooms: [],
       directItems: [],
       unmountedCount: 0,
+      unmountedView: false,
     });
     void this.loadMapLayer();
   },
 
-  /** 返回胶囊:逐层退回(栈内上一层 id 是钻入时记下的,不靠推测) */
+  /**
+   * 「尚未归类」通栏格点入(#36 0.6.0 真机反馈 Fix 3):容器视图式整页切换——
+   * 抬头「尚未归类 · N 件待核实」、返回胶囊「‹ 家里」;行 = 首字块 + 名称 +
+   * 原话位置 + 灰标「位置待核实」。明细来自根层 list 响应投影(跟随现有
+   * locations 缓存失效规则);旧缓存没有明细时强制刷新一次,不给空列表。
+   */
+  onUnmountedTap() {
+    if (this.data.acting) {
+      return;
+    }
+    if (this.data.unmountedCount <= 0) {
+      return;
+    }
+    const staleCache =
+      this.data.unmountedItems.length === 0 && this.data.unmountedCount > 0;
+    this.renderedCurrentView = false;
+    this.setData({
+      unmountedView: true,
+      mapTitle: "尚未归类 · " + this.data.unmountedCount + " 件待核实",
+      backLabel: "家里",
+      rooms: [],
+      directItems: [],
+    });
+    void this.loadMapLayer(staleCache);
+  },
+
+  /** 明细行点击:按 item_id 进物品详情(原话在那里核对,整理位置也在那里) */
+  onUnmountedRowTap(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const row = this.data.unmountedItems[index];
+    if (!row) {
+      return;
+    }
+    wx.navigateTo({
+      url: "/pages/item/item?item_id=" + encodeURIComponent(row.item_id),
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** 返回胶囊:逐层退回(栈内上一层 id 是钻入时记下的,不靠推测);「尚未归类」视图退回家里 */
   onBackTap() {
     if (this.data.acting) {
+      return;
+    }
+    if (this.data.unmountedView) {
+      this.renderedCurrentView = false;
+      this.setData({
+        unmountedView: false,
+        mapTitle: "家里有什么",
+        backLabel: "",
+        rooms: [],
+        directItems: [],
+      });
+      void this.loadMapLayer();
       return;
     }
     this.viewStack.pop();

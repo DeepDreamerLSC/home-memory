@@ -5,7 +5,7 @@
       <view class="pagetitle">{{ name }}</view>
       <view wx:if="{{ lastConfirmedText }}" class="detail-meta">{{ lastConfirmedText }}</view>
     </view>
-    <view class="more-inline" bindtap="onMoreTap">⋯</view>
+    <view class="more-inline" bindtap="onMoreTap"><view class="more-inline-face">⋯</view></view>
   </view>
 
   <!-- 只读大卡:空间路径(知道时)+ 原话常显 +「可能已移动」提示(D1 P0 三组成) -->
@@ -23,6 +23,11 @@
         <view class="bigcard-quote">
           你当时说的是:「{{ locationText }}」
         </view>
+        <!-- 时间没换算留痕(0.6.0 真机反馈 Fix 4):录入时说了时间但没换成日期;
+             纯展示不产生提醒,有到期行在屏时不重复提示 -->
+        <view wx:if="{{ vagueQuote && !expire }}" class="bigcard-quote vague-quote">
+          当时提到时间:『{{ vagueQuote }}』(没换算成日期)
+        </view>
       </view>
     </view>
     <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
@@ -34,7 +39,7 @@
       <view class="expire-t">{{ expire.mainText }}</view>
       <view class="expire-sub">到了那天,它会出现在「快到期」里</view>
     </view>
-    <view class="r-done {{ remindBusy ? 'busy' : '' }}" bindtap="onExpireDoneTap">用完了</view>
+    <view class="r-done {{ remindBusy ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">用完了</view></view>
   </view>
 
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
@@ -89,7 +94,7 @@
               <text class="field-chev">›</text>
             </view>
           </picker>
-          <view wx:if="{{ remindAt }}" class="clearx" bindtap="onRemindFieldClear">✕</view>
+          <view wx:if="{{ remindAt }}" class="clearx" bindtap="onRemindFieldClear"><view class="clearx-face">✕</view></view>
         </view>
       </view>
       <view class="field">
@@ -110,7 +115,7 @@
         loading="{{ saving }}"
         bindtap="onSaveTap"
       >
-        保存修改
+        <view class="btn-face">保存修改</view>
       </button>
       <view class="fold-note">与他处改动冲突时,保存前会先让你核对。</view>
     </view>
@@ -141,14 +146,14 @@
         与已有的「{{ item.hintName }}」同名,确认后直接用那个位置
       </view>
     </view>
-    <button
-      class="btn ink block"
-      loading="{{ mountSaving }}"
-      bindtap="confirmMount"
-    >
-      确认放这里
-    </button>
-    <button class="btn block" bindtap="cancelMount">取消</button>
+      <button
+        class="btn ink block"
+        loading="{{ mountSaving }}"
+        bindtap="confirmMount"
+      >
+        <view class="btn-face">确认放这里</view>
+      </button>
+      <button class="btn block" bindtap="cancelMount"><view class="btn-face">取消</view></button>
   </view>
 </view>
 

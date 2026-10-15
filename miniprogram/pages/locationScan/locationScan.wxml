@@ -7,8 +7,8 @@
   <!-- 扫描失败 -->
   <view wx:elif="{{ phase === 'error' }}" class="card">
     <view class="error-text">{{ scanError }}</view>
-    <button class="btn primary block" bindtap="onRetryScan">重试扫描</button>
-    <button class="btn block" bindtap="onManualBuild">先手动建房间</button>
+    <button class="btn primary block" bindtap="onRetryScan"><view class="btn-face">重试扫描</view></button>
+    <button class="btn block" bindtap="onManualBuild"><view class="btn-face">先手动建房间</view></button>
   </view>
 
   <!-- 没有未归位物品 -->
@@ -16,7 +16,7 @@
     <view class="empty-text">
       全部已归位,没有需要生成的空间。记了新东西再来,这里会自动接着整理。
     </view>
-    <button class="btn block" bindtap="onDone">回到我的家</button>
+    <button class="btn block" bindtap="onDone"><view class="btn-face">回到我的家</view></button>
   </view>
 
   <!-- 提交中 -->
@@ -116,9 +116,9 @@
 
     <view class="card">
       <button class="btn primary block" bindtap="onSubmitTap">
-        {{ pendingRetry ? '重试提交(接着完成剩余的)' : '确认入库' }}
+        <view class="btn-face">{{ pendingRetry ? '重试提交(接着完成剩余的)' : '确认入库' }}</view>
       </button>
-      <button class="btn block" bindtap="onDone">先不提交,返回</button>
+      <button class="btn block" bindtap="onDone"><view class="btn-face">先不提交,返回</view></button>
     </view>
   </block>
 
@@ -141,7 +141,7 @@
       </view>
     </view>
     <view class="card">
-      <button class="btn primary block" bindtap="onDone">完成</button>
+      <button class="btn primary block" bindtap="onDone"><view class="btn-face">完成</view></button>
     </view>
   </block>
 </view>

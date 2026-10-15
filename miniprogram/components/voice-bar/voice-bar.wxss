@@ -1,10 +1,13 @@
 /*
- * 常驻语音条(issue #45 九/十轮冻结配色):
- * - 奶油条(--vb-bg)+ 米黄油胶囊(--vb-hold-bg,热区即色块)+ 圆点挖窗(--vb-mic-bg);
+ * 常驻语音条(issue #45 九/十轮冻结配色;#36 0.6.0 真机反馈 Fix 1 压扁):
+ * - 奶油条(--vb-bg)+ 米黄油胶囊(--vb-hold-bg)+ 圆点挖窗(--vb-mic-bg);
  * - 深色黑灰组合,无任何黄色:麦克风为单色 CSS 图形(--vb-mic-fg),不用彩色 emoji;
  * - 按压反馈:brightness .94 + scale .985 + 圆点回弹(原型二轮);
  * - 键盘弹起自动避让(display:none);底部安全区 env(safe-area-inset-bottom);
- * - 触摸热区 ≥44px(胶囊 min-height 104rpx);
+ * - 文字垂直居中根因修复:胶囊文本 line-height:1 + flex 居中
+ *   (CJK 字形贴基线排布,行盒下半是拉丁降部留白,行高 1.6 时视觉重心偏上);
+ * - 视觉/热区分层:胶囊视觉 78(原 104 × 0.75),整颗热区 88rpx(44px)不缩——
+ *   .hold 为透明热区层,.hold-face 为视觉面(先例:首页 search-go-hit);
  * - 录音中 = 半屏半透明小窗浮层(原型一/二轮冻结:页面不动 + 回弹入场,见文件末尾)。
  */
 
@@ -20,9 +23,9 @@
   background: var(--vb-bg);
   color: var(--vb-fg);
   border-top: 1rpx solid var(--vb-line);
-  padding: 16rpx 20rpx;
-  /* 底部安全区:整条沉到安全区下沿之上 */
-  padding-bottom: calc(16rpx + env(safe-area-inset-bottom));
+  padding: 12rpx 20rpx;
+  /* 底部安全区:整条沉到安全区下沿之上(压扁后整条 = 12+88+12 = 112rpx) */
+  padding-bottom: calc(12rpx + env(safe-area-inset-bottom));
   transition: transform 0.09s ease, box-shadow 0.09s ease, filter 0.09s ease;
 }
 
@@ -38,8 +41,21 @@
   display: none;
 }
 
-/* 按住热区 = 整颗胶囊(热区即色块) */
+/* 按住热区 = 整颗胶囊(透明热区层:88 = 面 78 + 透明上下 5) */
 .hold {
+  flex: 1;
+  min-width: 0;
+  min-height: 88rpx;
+  padding: 5rpx 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+/* 视觉面:米黄油胶囊本体(热区即视觉面外扩的透明层) */
+.hold-face {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -48,28 +64,29 @@
   border-radius: 30rpx;
   background: var(--vb-hold-bg);
   color: var(--vb-hold-fg);
-  min-height: 104rpx;
-  padding: 12rpx 28rpx 12rpx 12rpx;
+  min-height: 78rpx;
+  padding: 0 28rpx 0 12rpx;
   box-sizing: border-box;
   font-size: 27rpx;
   font-weight: 700;
   text-align: left;
+  line-height: 1;
   transition: filter 0.12s ease, transform 0.12s ease;
 }
 
 /* 按压反馈(原型七轮::active 复刻) */
-.hold.pressed {
+.hold.pressed .hold-face {
   filter: brightness(0.94);
   transform: scale(0.985);
 }
 
 /* 识别中/提取中:胶囊降权,按压仍可见 */
-.hold.busy {
+.hold.busy .hold-face {
   opacity: 0.78;
 }
 
 /* 上滑待取消:文案即反馈,胶囊不加警示色(条内信息克制) */
-.hold.cancel {
+.hold.cancel .hold-face {
   opacity: 0.92;
 }
 
@@ -78,10 +95,10 @@
   min-width: 0;
 }
 
-/* 麦克风圆点:胶囊左端内嵌,挖窗色(=条色) */
+/* 麦克风圆点:胶囊左端内嵌,挖窗色(=条色;Fix 1:80→60 同比例) */
 .micdot {
-  width: 80rpx;
-  height: 80rpx;
+  width: 60rpx;
+  height: 60rpx;
   border-radius: 50%;
   background: var(--vb-mic-bg);
   color: var(--vb-mic-fg);
@@ -94,31 +111,32 @@
 
 /* 麦克风图形:单色 CSS 绘制(深色为灰,无黄,十轮) */
 .mic-cap {
-  width: 20rpx;
-  height: 30rpx;
-  border-radius: 10rpx;
+  width: 15rpx;
+  height: 22rpx;
+  border-radius: 8rpx;
   background: var(--vb-mic-fg);
 }
 
 .mic-stand {
-  width: 4rpx;
-  height: 10rpx;
+  width: 3rpx;
+  height: 8rpx;
   background: var(--vb-mic-fg);
-  margin-top: 4rpx;
+  margin-top: 3rpx;
 }
 
 .mic-base {
-  width: 28rpx;
-  height: 4rpx;
+  width: 21rpx;
+  height: 3rpx;
   border-radius: 2rpx;
   background: var(--vb-mic-fg);
-  margin-top: 4rpx;
+  margin-top: 3rpx;
 }
 
 .mic-seconds {
-  font-size: 26rpx;
+  font-size: 22rpx;
   font-weight: 700;
   color: var(--vb-hold-fg);
+  line-height: 1;
 }
 
 /* 按住时圆点回弹(原型二轮) */
@@ -130,17 +148,30 @@
   0% {
     transform: scale(0.8);
   }
+
   55% {
     transform: scale(1.12);
   }
+
   100% {
     transform: scale(1);
   }
 }
 
-/* 「文字」按钮:走文字确认入口(手动录入确认页) */
+/* 「文字」按钮:走文字确认入口(手动录入确认页)
+   (Fix 1:热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11) */
 .txtbtn {
   flex: none;
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  background: transparent;
+}
+
+.txtbtn-face {
+  height: 66rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -151,8 +182,7 @@
   font-size: 25rpx;
   font-weight: 700;
   padding: 0 28rpx;
-  height: 88rpx;
-  box-sizing: border-box;
+  line-height: 1;
 }
 
 /* 录音/识别/提取中置灰:避免中途跳走打断在途链路(原型 V1 按下态复刻) */
@@ -175,13 +205,13 @@
   backdrop-filter: blur(3rpx);
 }
 
-/* 小窗:悬浮于语音条上方 12px;不滚动,全部信息一次排下;
-   回弹式入场(过冲 300ms)传递「被顶起来」的按压感 */
+/* 小窗:悬浮于语音条上方(压扁后整条 112rpx,窗底 = 112 + 20 间隙 = 132rpx,对齐不破);
+   不滚动,全部信息一次排下;回弹式入场(过冲 300ms)传递「被顶起来」的按压感 */
 .recsheet {
   position: fixed;
   left: 24rpx;
   right: 24rpx;
-  bottom: calc(160rpx + env(safe-area-inset-bottom));
+  bottom: calc(132rpx + env(safe-area-inset-bottom));
   z-index: 45;
   border-radius: 44rpx;
   background: rgba(255, 255, 255, 0.88);
@@ -202,10 +232,12 @@
     transform: translateY(92rpx) scale(0.97);
     opacity: 0;
   }
+
   60% {
     transform: translateY(-8rpx);
     opacity: 1;
   }
+
   100% {
     transform: translateY(0) scale(1);
     opacity: 1;
@@ -264,9 +296,11 @@
   0% {
     box-shadow: 0 0 0 20rpx var(--accent-dim);
   }
+
   70% {
     box-shadow: 0 0 0 52rpx transparent;
   }
+
   100% {
     box-shadow: 0 0 0 20rpx transparent;
   }
@@ -300,6 +334,7 @@
   100% {
     transform: scaleY(0.55);
   }
+
   50% {
     transform: scaleY(1);
   }
@@ -316,11 +351,12 @@
   font-weight: 700;
 }
 
-/* 「松开,去核对」:呈示松手去向的墨底黄字 CTA(手势仍在胶囊上,这里只呈现) */
+/* 「松开,去核对」:呈示松手去向的墨底黄字 CTA(手势仍在胶囊上,这里只呈现,
+   非触摸目标:视觉 66(原 88 × 0.75),无热区要求) */
 .rec-cta {
   width: 100%;
   max-width: 540rpx;
-  min-height: 88rpx;
+  min-height: 66rpx;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -330,19 +366,21 @@
   color: var(--go-fg);
   font-size: 30rpx;
   font-weight: 800;
+  line-height: 1;
 }
 
 .rec-cancel {
-  min-height: 80rpx;
+  min-height: 60rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8rpx 16rpx;
+  padding: 0 16rpx;
   font-size: 24rpx;
   font-weight: 600;
   color: var(--text-2);
   text-decoration: underline;
   text-underline-offset: 6rpx;
+  line-height: 1;
 }
 
 /* 深色(十轮:录音相关 UI 去黄):小窗深灰半透明,麦克风圆黑灰 + 白色脉冲环 */
@@ -367,9 +405,11 @@
   0% {
     box-shadow: 0 0 0 20rpx rgba(255, 255, 255, 0.06);
   }
+
   70% {
     box-shadow: 0 0 0 52rpx transparent;
   }
+
   100% {
     box-shadow: 0 0 0 20rpx transparent;
   }

@@ -18,7 +18,7 @@
         bindinput="onManualTokenInput"
       />
       <button class="btn primary block" loading="{{ joining }}" bindtap="onManualSubmitTap">
-        下一步
+        <view class="btn-face">下一步</view>
       </button>
       <view class="mode-link" bindtap="onCloseTap">返回</view>
     </view>
@@ -37,7 +37,7 @@
       </view>
 
       <button class="btn primary block" loading="{{ joining }}" bindtap="onJoinTap">
-        确认加入
+        <view class="btn-face">确认加入</view>
       </button>
       <view class="mode-link" bindtap="onCloseTap">暂不加入</view>
     </view>
@@ -51,7 +51,7 @@
     <view class="trial-note">
       提示:邀请可能已过期、被撤销或家庭已解散;体验版阶段,需先被添加为体验成员。
     </view>
-    <button class="btn block" bindtap="onManualRetryTap">重新输入邀请码</button>
+    <button class="btn block" bindtap="onManualRetryTap"><view class="btn-face">重新输入邀请码</view></button>
     <view class="mode-link" bindtap="onCloseTap">关闭</view>
   </view>
 </view>

@@ -448,7 +448,22 @@ async function compensateUnmount(deps, victims, updateIdOf) {
  * list:树浏览(纯读 + 根层惰性建 home 根)。
  * 返回 parent(或 home 根)的直接子节点与直接挂载物品;item_count 为整棵子树计数;
  * unmounted_count = 未删且未挂载(缺失/null/悬挂)物品数;dangling_mounts 为其中悬挂件数。
+ * 根层(#36 0.6.0 真机反馈 Fix 3)另附 unmounted_items 投影(item_id/name/
+ * location_text,上限 50 条按 updated_at 倒序):录了「感冒药在主卧的柜子上」
+ * 但位置树还没有这些节点时,首页「尚未归类」必须看得见、点得进去。投影不带
+ * note/version 等其余字段,日志不记明细(与既有日志纪律一致)。
  */
+var UNMOUNTED_ITEMS_MAX = 50;
+
+/** 未挂载物品的根层投影:只给点进详情所需的最小字段 */
+function projectUnmountedItem(doc) {
+  return {
+    item_id: doc._id,
+    name: doc.name,
+    location_text: doc.location_text
+  };
+}
+
 async function listAction(event, deps) {
   var parentId = event.parent_id;
   if (parentId !== undefined && !isString(parentId)) {
@@ -463,6 +478,7 @@ async function listAction(event, deps) {
       return fail("NOT_FOUND");
     }
   }
+  var isRoot = isHomeRoot(parent);
 
   var nodes = await fetchHouseholdNodes(deps);
   var items = await fetchActiveItems(deps);
@@ -479,6 +495,7 @@ async function listAction(event, deps) {
 
   var mountedHere = [];
   var unmounted = 0;
+  var unmountedDocs = [];
   var byId = tree.indexById(nodes);
   for (var k = 0; k < items.length; k++) {
     var it = items[k];
@@ -488,9 +505,17 @@ async function listAction(event, deps) {
     }
     if (at === undefined || at === null || at === "" || !byId[at]) {
       unmounted += 1; // 统一口径:缺失、null 或指向不存在的节点都算未挂载
+      if (isRoot) {
+        unmountedDocs.push(it);
+      }
     }
   }
   mountedHere.sort(byUpdatedDesc);
+  // 先按 updated_at 倒序、再截断到上限、最后投影:留下的必是最近的 50 件
+  unmountedDocs.sort(byUpdatedDesc);
+  var unmountedItems = unmountedDocs
+    .slice(0, UNMOUNTED_ITEMS_MAX)
+    .map(projectUnmountedItem);
 
   // household_id(issue #34 P0):服务端解析的当前家庭(sha256 派生或共享家庭 id,
   // 非 PII),供客户端捕获家庭作用域;共享家庭另带 scope_revision(issue #34 P1-A,
@@ -504,6 +529,9 @@ async function listAction(event, deps) {
     unmounted_count: unmounted,
     dangling_mounts: stats.dangling
   };
+  if (isRoot) {
+    res.unmounted_items = unmountedItems;
+  }
   if (deps.householdShared === true) {
     res.scope_revision = deps.scopeRevision;
   }

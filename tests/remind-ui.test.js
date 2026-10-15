@@ -32,3 +32,44 @@ test("pickerDateProblem:今天可设(与 picker start=今天 两端一致),昨�
   assert.equal(ui.pickerDateProblem("2036-10-13", now), "最多记十年内", "超 10 年拒绝(3650 天护栏)");
   assert.equal(ui.pickerDateProblem("2027-01-01", now), "");
 });
+
+// ---------- #36 0.6.0 真机反馈 Fix 2:「用完了」去掉固定周期选项 ----------
+
+test("askUseUp:只剩一次二次确认——确认 true / 取消 false,不再弹 7/30/90 天选项", async function () {
+  var modals = [];
+  var sheets = [];
+  globalThis.wx = {
+    showModal: function (o) {
+      modals.push(o);
+      o.success({ confirm: true });
+    },
+    showActionSheet: function (o) {
+      sheets.push(o);
+      o.success({ tapIndex: 0 });
+    },
+  };
+  var confirmed = await ui.askUseUp("感冒药");
+  assert.equal(confirmed, true, "确认后直接放行");
+  assert.equal(modals.length, 1, "只弹一次确认框");
+  assert.equal(sheets.length, 0, "不再弹固定周期选项(用户裁定:下次提醒自己到详情里选日子)");
+  assert.equal(modals[0].confirmText, "用完了");
+  assert.ok(modals[0].content.indexOf("感冒药") !== -1, "文案点名物品");
+
+  modals.length = 0;
+  globalThis.wx.showModal = function (o) {
+    modals.push(o);
+    o.success({ confirm: false });
+  };
+  var cancelled = await ui.askUseUp("感冒药");
+  assert.equal(cancelled, false, "取消不动、不写");
+  assert.equal(modals.length, 1);
+
+  // 空名兜底
+  modals.length = 0;
+  globalThis.wx.showModal = function (o) {
+    modals.push(o);
+    o.success({ confirm: true });
+  };
+  await ui.askUseUp("");
+  assert.ok(modals[0].content.indexOf("这件东西") !== -1, "空名兜底「这件东西」");
+});

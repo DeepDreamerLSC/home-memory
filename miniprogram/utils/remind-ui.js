@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PERIOD_DAYS_MAX = void 0;
-exports.isPeriodicKind = isPeriodicKind;
 exports.localTodayYmd = localTodayYmd;
 exports.daysUntilLocal = daysUntilLocal;
 exports.pickerDateProblem = pickerDateProblem;
@@ -12,12 +11,8 @@ exports.countDue = countDue;
 exports.dueBannerText = dueBannerText;
 exports.askUseUp = askUseUp;
 const DAY_MS = 86400000;
-/** 周期再生的天数上限(与服务端 REMIND_PERIOD_MAX 同源,超出即拒绝) */
+/** 周期再生的天数上限(与服务端 REMIND_PERIOD_MAX 同源;item 页改期护栏用) */
 exports.PERIOD_DAYS_MAX = 3650;
-/** 周期物品判定:kind=下次维护(维护类周期语义;再生提醒也固定这个 kind) */
-function isPeriodicKind(kind) {
-    return kind === "下次维护";
-}
 function pad(n) {
     return n < 10 ? "0" + n : String(n);
 }
@@ -121,22 +116,14 @@ function dueBannerText(counts) {
     }
     return parts.join(",");
 }
-/** 周期选项(「用完了」后问下次时间用;天数口径与服务端再生规则一致) */
-const PERIOD_CHOICES = [
-    { label: "7 天后", days: 7 },
-    { label: "30 天后", days: 30 },
-    { label: "90 天后", days: 90 },
-    { label: "半年后", days: 180 },
-    { label: "一年后", days: 365 },
-];
 /**
- * 「用完了」两步确认(R1 行上与详情页保质期行共用):
- * 1) 先确认(绝不一点就收掉提醒);
- * 2) 周期物品(kind=下次维护)再问下次时间——选项式周期(原生 action sheet,
- *    无自由文本,不违背日期纪律);「不定下次时间」= 收掉后不再生。
- * 用户任一步取消 → null,页面不动、不写任何数据。
+ * 「用完了」的确认交互(#36 0.6.0 真机反馈 Fix 2,用户裁定):
+ * 完成后不再弹 7/30/90 天等固定周期选项——下次提醒时间由用户自己到详情页
+ * 的日期选择器里选日子(服务端 period_days 参数与再生逻辑保留,API 兼容,
+ * 客户端不再传)。这里只做一次二次确认(绝不一点就收掉提醒),确认后返回 true;
+ * 取消返回 false,页面不动、不写任何数据。
  */
-function askUseUp(name, kind) {
+function askUseUp(name) {
     const label = name || "这件东西";
     return new Promise((resolve) => {
         wx.showModal({
@@ -145,28 +132,9 @@ function askUseUp(name, kind) {
             confirmText: "用完了",
             cancelText: "取消",
             success: (r) => {
-                if (!r.confirm) {
-                    resolve(null);
-                    return;
-                }
-                if (!isPeriodicKind(kind)) {
-                    resolve({ periodDays: null });
-                    return;
-                }
-                wx.showActionSheet({
-                    alertText: "「" + label + "」下次什么时候到期?",
-                    itemList: PERIOD_CHOICES.map((c) => c.label).concat(["不定下次时间"]),
-                    success: (a) => {
-                        const choice = PERIOD_CHOICES[a.tapIndex];
-                        resolve(choice ? { periodDays: choice.days } : { periodDays: null });
-                    },
-                    fail: () => {
-                        // 收起选项 = 整个流程取消(要「不定下次」有明确那一项),不写任何数据
-                        resolve(null);
-                    },
-                });
+                resolve(r.confirm === true);
             },
-            fail: () => resolve(null),
+            fail: () => resolve(false),
         });
     });
 }

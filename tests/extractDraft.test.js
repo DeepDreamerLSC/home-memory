@@ -1523,3 +1523,147 @@ test("B3 单件不受影响:一件时日期证据在整句原话中即可(不可
   assert.equal(result.drafts.length, 1);
   assert.equal(result.drafts[0].remind_at, "2027-11-20", "单件时归属门不启用(既有行为)");
 });
+
+// ---------- #36 0.6.0 真机反馈 Fix 4:remind_vague_quote(时间没换算透明化) ----------
+// 这是透明化修复,不是换算:「半年后」绝不换算成任何日期,只把「说了时间但
+// 没换算」的原话子串如实标出来,用户不再被静默丢弃。
+
+var VAGUE_ORIGINAL = "净水器的备用滤芯放在厨房水槽下面的柜子里,半年后提醒我换。";
+
+test("v2 vague 正例:原话有模糊时间、提醒三项 null → remind_vague_quote 逐字保留(不换算)", async function () {
+  var { res } = await runV2(VAGUE_ORIGINAL, rawItems([
+    {
+      name: "净水器备用滤芯",
+      location_text: "厨房水槽下面的柜子里",
+      certain: true,
+      qualifiers: [],
+      source_quote: "净水器的备用滤芯放在厨房水槽下面的柜子里",
+      remind_at: null,
+      remind_kind: null,
+      remind_quote: null,
+      remind_vague_quote: "半年后",
+    },
+  ]));
+  assert.equal(res.ok, true);
+  assert.deepStrictEqual(remindTrio(res.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null }, "绝不换算成日期");
+  assert.equal(res.drafts[0].remind_vague_quote, "半年后", "时间没换算的原话子串如实保留");
+});
+
+test("v2 vague 互斥:同件带明确日期(remind_at 三项)→ vague 一律 null", function () {
+  var result = validateDrafts(
+    rawItems([Object.assign({}, ANCHOR_BASE, {
+      remind_at: "2026-11-20",
+      remind_kind: "有效期",
+      remind_quote: "11月20号",
+      remind_vague_quote: "半年后", // 模型不该给:明确日期优先
+    })]),
+    ANCHOR_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.drafts[0].remind_at, "2026-11-20", "明确日期照常保留");
+  assert.equal(result.drafts[0].remind_vague_quote, null, "明确日期与 vague 互斥");
+});
+
+test("v2 vague 反例:无时间词(模型自觉不给)/子串校验失败/无时间词的子串 → 一律 null,不废件", function () {
+  // 无时间词:模型自觉输出 null → 原样透传
+  var none = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关", remind_vague_quote: null }]),
+    "钥匙在玄关",
+    ANCHOR_TODAY,
+  );
+  assert.equal(none.drafts[0].remind_vague_quote, null);
+  assert.equal(none.drafts[0].name, "钥匙");
+
+  // 子串校验失败:编了一个原话里没有的时间说法 → 置 null
+  var fabricated = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关", remind_vague_quote: "三个月后" }]),
+    "钥匙在玄关",
+    ANCHOR_TODAY,
+  );
+  assert.equal(fabricated.drafts[0].remind_vague_quote, null, "非原话子串必须置 null");
+  assert.equal(fabricated.drafts[0].name, "钥匙", "锚定失败不废件");
+
+  // 是原话子串但没有时间词 → 不是时间表述,置 null
+  var notTime = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关", remind_vague_quote: "玄关" }]),
+    "钥匙在玄关",
+    ANCHOR_TODAY,
+  );
+  assert.equal(notTime.drafts[0].remind_vague_quote, null, "无时间词的子串不算时间表述");
+
+  // 非字符串 / 超长 → null
+  var badType = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关", remind_vague_quote: 42 }]),
+    "钥匙在玄关",
+    ANCHOR_TODAY,
+  );
+  assert.equal(badType.drafts[0].remind_vague_quote, null);
+  var tooLong = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关", remind_vague_quote: "半年后" + "的".repeat(200) }]),
+    "钥匙在玄关",
+    ANCHOR_TODAY,
+  );
+  assert.equal(tooLong.drafts[0].remind_vague_quote, null, "超长一律 null");
+});
+
+test("v2 vague 词形:下个月/快过期了/大概冬天/到2027年3月 等时间词形态都认(只是标记,不换算)", function () {
+  var probes = [
+    { text: "下个月要换净水器滤芯,滤芯在厨房抽屉里。", quote: "下个月" },
+    { text: "洗洁精快过期了,放在水槽下面的柜子里。", quote: "快过期了" },
+    { text: "猫粮大概冬天之前要买新的,放玄关柜子下层。", quote: "大概冬天" },
+    { text: "扫地机器人的保修卡在书房文件盒第二层,保修到2027年3月。", quote: "到2027年3月" },
+  ];
+  for (var i = 0; i < probes.length; i++) {
+    var p = probes[i];
+    var result = validateDrafts(
+      rawItems([{ name: "物品", location_text: "某处", certain: true, qualifiers: [], source_quote: p.text, remind_vague_quote: p.quote }]),
+      p.text,
+      ANCHOR_TODAY,
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.drafts[0].remind_vague_quote, p.quote, "「" + p.quote + "」应保留");
+    assert.equal(result.drafts[0].remind_at, null, "同时绝不换算成日期");
+  }
+});
+
+test("v2 vague 纪律:prompt 新增透明标记规则,但第 7 条不猜日期纪律一字不改", async function () {
+  var { prompt } = await runV2(VAGUE_ORIGINAL, rawItems([
+    { name: "净水器备用滤芯", location_text: "厨房水槽下面的柜子里", certain: true, qualifiers: [], source_quote: "净水器的备用滤芯放在厨房水槽下面的柜子里", remind_at: null, remind_kind: null, remind_quote: null, remind_vague_quote: "半年后" },
+  ]));
+  // 新规则在册:只标记、绝不换算、与明确日期互斥
+  assert.ok(prompt.indexOf("remind_vague_quote") !== -1, "prompt 应定义 remind_vague_quote");
+  assert.ok(prompt.indexOf("只标记,绝不换算") !== -1, "必须写明只标记不换算");
+  assert.ok(prompt.indexOf("没提到任何时间") !== -1, "没时间则 null");
+  // 既有纪律原样在册(一字不改的反向验证:关键句逐字仍在;反例句逐字在册
+  // 由既有「v2 prompt 纪律」测试覆盖,此处不重复)
+  assert.ok(prompt.indexOf("一律 remind_at=null、remind_kind=null、remind_quote=null") !== -1);
+  assert.ok(prompt.indexOf("禁止根据物品名称猜任何日期、保质期或周期") !== -1);
+  // v1 零变化:v1 prompt 不出现 vague 字段
+  var v1calls = [];
+  await handler({ text: "钥匙在玄关" }, {
+    logger() {},
+    callLLM(p) { v1calls.push(p); return Promise.resolve(JSON.stringify({ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [] })); },
+  });
+  assert.ok(v1calls[0].indexOf("remind_vague_quote") === -1, "v1 prompt 不得出现 vague 字段");
+});
+
+test("v2 vague 对抗:模型把模糊时间折算成日期 → 日期被硬门拦下;vague 按最终 remind_at 判定保留(透明化)", async function () {
+  var { res } = await runV2(VAGUE_ORIGINAL, rawItems([
+    {
+      name: "净水器备用滤芯",
+      location_text: "厨房水槽下面的柜子里",
+      certain: true,
+      qualifiers: [],
+      source_quote: "净水器的备用滤芯放在厨房水槽下面的柜子里",
+      remind_at: "2027-04-15", // 模型违规折算
+      remind_kind: "下次维护",
+      remind_quote: "半年后",
+      remind_vague_quote: "半年后",
+    },
+  ]));
+  assert.equal(res.ok, true, "不废件");
+  assert.deepStrictEqual(remindTrio(res.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null }, "折算日期必须被拦下");
+  // 互斥按最终 remind_at 判定:折算被拦后提醒三项为 null,原话确实说了时间——
+  // vague 如实保留,用户看到「时间没换算:『半年后』」而不是静默丢弃
+  assert.equal(res.drafts[0].remind_vague_quote, "半年后", "拦下折算后透明标记如实保留");
+});

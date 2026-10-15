@@ -61,6 +61,13 @@ export interface DraftWithQuote extends Draft {
   remind_at?: string | null;
   remind_kind?: RemindKind | null;
   remind_quote?: string | null;
+  /**
+   * 时间没换算的透明标记(0.6.0 真机反馈 Fix 4):原话中检测到时间表述但
+   * 未换算的逐字子串(如「半年后」「下个月」),仅在 remind_at=null 且确有
+   * 时间词时由服务端给出(子串校验失败置 null)。客户端只透传与展示,
+   * 绝不换算任何相对日期——「自动换算」是产品决策,不在修复范围。
+   */
+  remind_vague_quote?: string | null;
 }
 
 /** 提醒类别(issue #36 冻结词表,与 extractDraft v2 的 remind_kind 同源) */
@@ -113,6 +120,12 @@ export type ItemsApiEvent =
       note?: string;
       /** 可选提醒(issue #36):随物品同建;不带 = 无提醒 */
       reminder?: ReminderInput;
+      /**
+       * 可选「说了时间但没换算」的原话子串(0.6.0 真机反馈 Fix 4):存到
+       * item 仅供详情页展示,不产生任何提醒;与 reminder 互斥(带 reminder 时
+       * 服务端忽略)。服务端校验宽松(非空短文本即可)。
+       */
+      remind_vague_quote?: string;
     } & ScopeWriteBinding)
   | ({
       action: "update";
@@ -522,6 +535,16 @@ export interface ListLocationsResponse {
   /** 未删除且未挂载(缺失/null/悬挂)物品数 */
   unmounted_count: number;
   dangling_mounts: number;
+  /**
+   * 未挂载物品明细投影(#36 0.6.0 真机反馈 Fix 3,仅根层响应携带):
+   * item_id/name/location_text 三字段,上限 50 条按 updated_at 倒序——
+   * 首页「尚未归类」点进去看得见录了什么;缓存口径跟随 list 响应整体失效规则。
+   */
+  unmounted_items?: Array<{
+    item_id: string;
+    name: string;
+    location_text: string;
+  }>;
 }
 
 export interface EnsurePathResponse {

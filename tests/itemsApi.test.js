@@ -2747,3 +2747,84 @@ test("complete_date 窗口边界:月初/年末自然日进位不误拒(09-30、1
   assert.equal(r2.ok, true, "年末前一天(12-31)在窗口内,不因跨年误拒");
   assert.equal(r2.reminder.due_date, "2027-01-07");
 });
+
+// ---------- #36 0.6.0 真机反馈 Fix 4:create 可选 remind_vague_quote(存储只为详情展示) ----------
+
+test("create 增可选 remind_vague_quote:存到 item 文档,get 投影携带;query/list 投影不变", async function () {
+  var t = fresh();
+  var created = await handler({
+    action: "create",
+    operation_id: "op-vague-1",
+    name: "净水器备用滤芯",
+    location_text: "厨房水槽下面的柜子里",
+    remind_vague_quote: "半年后",
+  }, t.deps);
+  assert.equal(created.ok, true);
+  var raw = (await t.db.collection("items").where({ _id: created.item.item_id }).get()).data[0];
+  assert.equal(raw.remind_vague_quote, "半年后", "vague 存入 items 文档");
+
+  // get(详情)投影携带;create 响应投影保持旧形状(不带 vague)
+  assert.equal("remind_vague_quote" in created.item, false, "create 响应投影不带 vague(旧形状)");
+  var got = await handler({ action: "get", item_id: created.item.item_id }, t.deps);
+  assert.equal(got.ok, true);
+  assert.equal(got.item.remind_vague_quote, "半年后", "get 投影携带 vague 供详情展示");
+
+  // query/list 投影零变化(不带该字段)
+  var queried = await handler({ action: "query", q: "滤芯" }, t.deps);
+  assert.equal(queried.items[0].remind_vague_quote, undefined, "query 投影不带 vague");
+  var listed = await handler({ action: "list" }, t.deps);
+  assert.equal(listed.items[0].remind_vague_quote, undefined, "list 投影不带 vague");
+
+  // 旧数据(文档无该字段)get 兜底空串
+  await t.db.collection("items").add({
+    data: {
+      _id: "it_legacy", household_id: HOUSEHOLD_A, name: "旧物", name_norm: "旧物",
+      location_text: "柜子", note: "", version: 1, deleted: false,
+      operation_id: "op-legacy", created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z",
+    },
+  });
+  var legacy = await handler({ action: "get", item_id: "it_legacy" }, t.deps);
+  assert.equal(legacy.item.remind_vague_quote, "", "旧文档缺字段按空串兜底");
+});
+
+test("create 的 vague 与 reminder 互斥;非法 vague(非字符串/空/超长)按未携带处理,不报错", async function () {
+  var t = fresh();
+  // 带 reminder(明确日期)→ vague 被忽略,存空串
+  var withReminder = await handler({
+    action: "create",
+    operation_id: "op-vague-2",
+    name: "感冒药",
+    location_text: "药箱第一格",
+    reminder: { due_date: "2026-11-20", kind: "有效期", quote: "11月20号" },
+    remind_vague_quote: "半年后",
+  }, t.deps);
+  assert.equal(withReminder.ok, true);
+  var raw2 = (await t.db.collection("items").where({ _id: withReminder.item.item_id }).get()).data[0];
+  assert.equal(raw2.remind_vague_quote, "", "明确日期与 vague 互斥:存空串");
+
+  // 非法形态一律按未携带(宽松校验,不 INVALID_INPUT)
+  var bads = [42, "", "   ", "长".repeat(201)];
+  for (var i = 0; i < bads.length; i++) {
+    var res = await handler({
+      action: "create",
+      operation_id: "op-vague-bad-" + i,
+      name: "物品" + i,
+      location_text: "桌上",
+      remind_vague_quote: bads[i],
+    }, t.deps);
+    assert.equal(res.ok, true, "非法 vague 不报错:" + JSON.stringify(bads[i]));
+    var rawBad = (await t.db.collection("items").where({ _id: res.item.item_id }).get()).data[0];
+    assert.equal(rawBad.remind_vague_quote, "", "非法 vague 存空串:" + JSON.stringify(bads[i]));
+  }
+
+  // 去首尾空白后存值;不带 vague 的 create 存空串(文档字段恒在)
+  var trimmed = await handler({
+    action: "create", operation_id: "op-vague-3", name: "抹布", location_text: "洗碗池边上", remind_vague_quote: "  半年后  ",
+  }, t.deps);
+  var raw3 = (await t.db.collection("items").where({ _id: trimmed.item.item_id }).get()).data[0];
+  assert.equal(raw3.remind_vague_quote, "半年后", "首尾空白规范化");
+
+  var plain = await handler({ action: "create", operation_id: "op-vague-4", name: "钥匙", location_text: "玄关" }, t.deps);
+  var raw4 = (await t.db.collection("items").where({ _id: plain.item.item_id }).get()).data[0];
+  assert.equal(raw4.remind_vague_quote, "", "不带 vague 存空串");
+});

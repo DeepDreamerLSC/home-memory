@@ -2645,3 +2645,78 @@ test("TS-SCAN2:同义组同父终检——跨父不建组(卧室/桌上 vs 书�
     ["桌上", "桌子"]
   );
 });
+
+// ---------- #36 0.6.0 真机反馈 Fix 3:根层 list 的 unmounted_items 投影 ----------
+
+test("TS-LST-UM:根层 list 附 unmounted_items 投影(未挂/悬挂/缺失都算;挂载件不在内;子层不带该字段)", async function () {
+  var t = fresh();
+  // 树:书房(有抽屉)+ 客厅;三件物品:一件挂进抽屉、一件从未挂载、一件悬挂
+  var tree = await ensurePath(t.deps, ["书房", "抽屉"]);
+  await ensurePath(t.deps, ["客厅"]);
+
+  var mounted = await createItem(t.deps, "op-um-1", "充电宝", "书房抽屉里");
+  await locHandler(
+    { action: "linkItem", item_id: mounted.item.item_id, node_id: tree.nodes[1].location_id, expected_version: 1, update_id: "u-um-1" },
+    t.deps
+  );
+  // 悬挂件:挂到不存在的节点(绕过 handler 注入,模拟并发残余)
+  var dangling = await seedItem(t.db, HOUSEHOLD_A, "it-dangling", "感冒药", "主卧的柜子上", "2026-10-14T01:00:00.000Z", { location_node_id: "lc_ghost" });
+  // 未挂件:录了「感冒冲剂在主卧的柜子上」但树里没有主卧——必须看得见
+  await createItem(t.deps, "op-um-2", "感冒冲剂", "主卧的柜子上");
+  // 另一家庭的未挂件:不得泄入 A 家庭投影(fail-closed 口径由 household 条件保证)
+  var b = fresh(HOUSEHOLD_B);
+  await createItem(b.deps, "op-um-b", "别人家的药", "别人家柜子");
+
+  var rootList = await locHandler({ action: "list" }, t.deps);
+  assert.equal(rootList.ok, true);
+  assert.equal(rootList.unmounted_count, 2, "悬挂感冒药 + 未挂感冒冲剂");
+  assert.ok(Array.isArray(rootList.unmounted_items), "根层响应应携带 unmounted_items 数组");
+  assert.equal(rootList.unmounted_items.length, 2);
+  var ids = rootList.unmounted_items.map(function (r) { return r.item_id; });
+  var names = rootList.unmounted_items.map(function (r) { return r.name; });
+  assert.ok(ids.indexOf(mounted.item.item_id) === -1, "已挂载的充电宝不在未挂明细里");
+  assert.ok(names.indexOf("别人家的药") === -1, "另一家庭的物品不得泄入");
+  rootList.unmounted_items.forEach(function (row) {
+    // 投影只有三字段:点进详情所需的最小集合,不带 note/version 等其余字段
+    assert.deepEqual(Object.keys(row).sort(), ["item_id", "location_text", "name"]);
+    assert.equal(typeof row.item_id, "string");
+    assert.equal(typeof row.name, "string");
+    assert.equal(typeof row.location_text, "string");
+  });
+  // 悬挂件与未挂件都在,原话位置如实带回
+  var byName = {};
+  rootList.unmounted_items.forEach(function (r) { byName[r.name] = r; });
+  assert.equal(byName["感冒药"].location_text, "主卧的柜子上");
+  assert.equal(byName["感冒冲剂"].location_text, "主卧的柜子上");
+
+  // 子层 list 不带 unmounted_items 字段(投影只挂在根层)
+  var studyList = await locHandler({ action: "list", parent_id: tree.nodes[0].location_id }, t.deps);
+  assert.equal(studyList.ok, true);
+  assert.equal("unmounted_items" in studyList, false, "子层响应不带 unmounted_items");
+  assert.equal(studyList.unmounted_count, 2, "计数口径不变(全家庭未挂数)");
+});
+
+test("TS-LST-UM:unmounted_items 按 updated_at 倒序且上限 50 条(超出的老件如实截断)", async function () {
+  var t = fresh();
+  // 55 件未挂物品:创建顺序老→新(makeDeps 时钟单调递增,updated_at 严格递增)
+  for (var i = 0; i < 55; i++) {
+    var pad = i < 10 ? "0" + i : String(i);
+    await createItem(t.deps, "op-um-cap-" + pad, "备药" + pad, "第" + pad + "格");
+  }
+  var rootList = await locHandler({ action: "list" }, t.deps);
+  assert.equal(rootList.ok, true);
+  assert.equal(rootList.unmounted_count, 55, "计数如实报全量");
+  assert.equal(rootList.unmounted_items.length, 50, "投影上限 50 条");
+  assert.equal(rootList.unmounted_items[0].name, "备药54", "最新的在最前(updated_at 倒序)");
+  assert.equal(rootList.unmounted_items[49].name, "备药05", "最老的 5 件(00-04)被截断");
+  var names = rootList.unmounted_items.map(function (r) { return r.name; });
+  assert.ok(names.indexOf("备药00") === -1, "超出上限的老件不在投影里");
+});
+
+test("TS-LST-UM:旧服务端窗口外无未挂件时根层投影为空数组(unmounted_count=0)", async function () {
+  var t = fresh();
+  var rootList = await locHandler({ action: "list" }, t.deps);
+  assert.equal(rootList.ok, true);
+  assert.equal(rootList.unmounted_count, 0);
+  assert.deepEqual(rootList.unmounted_items, []);
+});
