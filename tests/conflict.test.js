@@ -23,6 +23,7 @@ var chosenValue = conflict.chosenValue;
 var buildUpdateChanges = conflict.buildUpdateChanges;
 var conflictUnresolved = conflict.conflictUnresolved;
 var resolveRemindChoice = conflict.resolveRemindChoice;
+var carryUnresolved = conflict.carryUnresolved;
 
 var ROOT = path.join(__dirname, "..");
 
@@ -414,4 +415,108 @@ test("新页面结构接线:冲突面板在编辑折叠内,保存禁用与双保
   assert.ok(js.indexOf("refreshForConflict") !== -1, "四字段冲突刷新入口在册");
   assert.ok(js.indexOf('action: "remindSet"') !== -1 && js.indexOf('action: "remindClear"') !== -1, "提醒补写复用既有提醒路径");
   assert.ok(js.indexOf("expected_generation") !== -1, "提醒补写携带轮次号(并发写仍走服务端检查)");
+});
+
+/* ---------------- 复核修复:未选边冲突跨刷新保留 + 整理位置不再绕开门禁 ---------------- */
+
+test("carryUnresolved:未选边的冲突字段跨刷新保留,门禁不随面板消失", function () {
+  // 上一轮:名称冲突(你的修改=钥匙串 / 最新记录=备用钥匙),用户还没选边;
+  // 本轮冲突刷新后基准已对齐远端(备用钥匙),名称退化成「仅本机修改」不被重判
+  var previous = [
+    { key: "name", label: "名称", localValue: "钥匙串", remoteValue: "备用钥匙", choice: null }
+  ];
+  var carried = carryUnresolved(
+    previous,
+    [],
+    values("钥匙串", "位置A", "备注N", ""),
+    values("备用钥匙", "位置A", "备注N", "")
+  );
+  assert.deepEqual(
+    carried,
+    [{ key: "name", label: "名称", localValue: "钥匙串", remoteValue: "备用钥匙" }],
+    "远端没变、用户没选:条目按两版现值保留"
+  );
+  // 若不保留,该字段会以新基准算出 {name: 钥匙串} 静默提交覆盖对方——门禁必须仍在:
+  assert.equal(
+    conflictUnresolved(carried.map(function (c) { return { key: c.key, choice: null }; })),
+    true,
+    "保留的条目未选边:保存仍被禁"
+  );
+  // 远端又改了一版:条目按最新两版现值重建(你的修改不变,最新记录换成新值)
+  var carriedNew = carryUnresolved(
+    previous,
+    [],
+    values("钥匙串", "位置A", "备注N", ""),
+    values("第三版名称", "位置A", "备注N", "")
+  );
+  assert.deepEqual(
+    carriedNew.map(function (c) { return c.remoteValue; }),
+    ["第三版名称"],
+    "跨刷新保留时最新记录取远端现值"
+  );
+});
+
+test("carryUnresolved:已选边不保留、两版一致出面板、本轮重判不重复", function () {
+  var previous = [
+    { key: "name", label: "名称", localValue: "钥匙串", remoteValue: "备用钥匙", choice: "local" },
+    { key: "remind", label: "提醒", localValue: "", remoteValue: "2026-11-01", choice: null },
+    { key: "note", label: "备注", localValue: "新备注", remoteValue: "挂玄关", choice: null }
+  ];
+  // 已选边(名称):按普通编辑对待,不回面板;用户值成为待提交修改而非待裁决
+  var out = carryUnresolved(
+    previous,
+    [],
+    values("钥匙串", "位置A", "新备注", ""),
+    values("备用钥匙", "位置A", "挂玄关", "2026-11-01")
+  );
+  assert.deepEqual(
+    out.map(function (c) { return c.key; }),
+    ["remind", "note"],
+    "已选边的名称不保留,未选边的提醒/备注保留"
+  );
+  // 两版已一致(对方把提醒改成了用户选的日子,备注改成了相同值):自然出面板
+  var converged = carryUnresolved(
+    previous,
+    [],
+    values("钥匙串", "位置A", "新备注", ""),
+    values("备用钥匙", "位置A", "挂玄关", "")
+  );
+  assert.deepEqual(
+    converged.map(function (c) { return c.key; }),
+    ["note"],
+    "提醒两版一致:无需裁决,不再回面板"
+  );
+  // 本轮已重判为冲突的字段沿用新条目,不与旧条目重复
+  var fresh = [
+    { key: "note", label: "备注", localValue: "新备注", remoteValue: "挂玄关" }
+  ];
+  var deduped = carryUnresolved(
+    previous,
+    fresh,
+    values("钥匙串", "位置A", "新备注", ""),
+    values("备用钥匙", "位置A", "挂玄关", "")
+  );
+  assert.deepEqual(
+    deduped.map(function (c) { return c.key; }),
+    [],
+    "提醒两版一致、备注已重判:无重复条目"
+  );
+});
+
+test("复核修复接线:整理位置冲突接入选边门禁,静默清面板路径已移除", function () {
+  var js = read("pages/item/item.js");
+  // 整理位置两个入口的 VERSION_CONFLICT 分支接入四字段冲突刷新;
+  // 旧的「静默三方合并 + 顺手清空冲突面板」刷新整体移除,不再留下绕开门禁的路径
+  assert.ok(js.indexOf("refreshLatest") === -1, "静默合并并清空面板的旧刷新已移除");
+  var pickerEntry = js.slice(js.indexOf("doLinkToNode"), js.indexOf("confirmMount"));
+  var confirmEntry = js.slice(js.indexOf("confirmMount"), js.indexOf("cancelMount"));
+  assert.ok(pickerEntry.indexOf("refreshForConflict") !== -1, "选择器入口(doLinkToNode)冲突分支接入冲突刷新");
+  assert.ok(confirmEntry.indexOf("refreshForConflict") !== -1, "候选分段入口(confirmMount)冲突分支接入冲突刷新");
+  assert.ok(js.indexOf("carryUnresolved") !== -1, "未选边冲突跨刷新保留已接线");
+  // 提醒远端不可得:基准不向表单值对齐(remindRemoteUnknown 标记)、如实提示、
+  // 回页不再清掉待补写的提醒选择
+  assert.ok(js.indexOf("remindRemoteUnknown") !== -1, "提醒远端不可得有显式标记");
+  assert.ok(js.indexOf("提醒没存上,你的选择已保留") !== -1, "远端不可得时如实说没存上(不说已刷新)");
+  var onShow = js.slice(js.indexOf("onShow"), js.indexOf("onNameInput"));
+  assert.ok(onShow.indexOf("pendingRemindWrite") !== -1, "有待补写的提醒选择时回页不刷新提醒行");
 });

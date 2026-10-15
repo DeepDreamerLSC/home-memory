@@ -24,6 +24,7 @@ import {
 } from "../../utils/remind-ui";
 import {
   buildUpdateChanges,
+  carryUnresolved,
   chosenValue,
   conflictUnresolved,
   mergeLatest,
@@ -212,7 +213,6 @@ Page<
     onTidyTap(): void;
     onDeleteTap(): void;
     confirmDelete(): Promise<void>;
-    refreshLatest(): Promise<RefreshResult>;
     applySummary(s: ItemSummary): void;
     goBack(): void;
     /** 按 item_id 直接打开(get 单查;生成向导的 skipped 件跳转用) */
@@ -705,57 +705,14 @@ Page<
   },
 
   /**
-   * 拉取最新内容(get 按 id 单查,不受 list 分页截断影响)。
-   * 只对齐版本号/更新时间/基准内容,不覆盖表单里用户未保存的编辑。
-   */
-  async refreshLatest(): Promise<RefreshResult> {
-    try {
-      const res = await callItemsApi({ action: "get", item_id: this.data.itemId });
-      // 字段级三方合并:用户真正编辑过的字段(与刷新前基准不同)保留用户的未提交编辑;
-      // 未编辑的字段采纳服务端最新值(可能来自另一设备),避免下次保存把别处的新改动连带覆盖。
-      const prev = this.original;
-      const mergedName =
-        this.data.name.trim() !== prev.name ? this.data.name : res.item.name;
-      const mergedLocation =
-        this.data.locationText.trim() !== prev.location
-          ? this.data.locationText
-          : res.item.location_text;
-      const mergedNote =
-        this.data.note.trim() !== prev.note ? this.data.note : res.item.note;
-      this.original = {
-        name: res.item.name,
-        location: res.item.location_text,
-        note: res.item.note,
-      };
-      this.setData({
-        name: mergedName,
-        locationText: mergedLocation,
-        note: mergedNote,
-        version: res.item.version,
-        updatedAtText: formatDateTime(res.item.updated_at),
-        // 整理位置等路径重新对齐基准后,冲突面板的前提(旧基准)已失效:
-        // 文本按既有静默三方合并收敛,面板收起(表单里未落库的提醒由下次保存补写)
-        conflicts: [],
-        conflictPending: false,
-      });
-      return "refreshed";
-    } catch (e) {
-      wx.showModal({
-        title: "刷新失败",
-        content: errorMessage(e),
-        showCancel: false,
-      });
-      return "error";
-    }
-  },
-
-  /**
-   * 冲突态入口(issue #6,四字段版):保存(update)或改提醒(remindSet/remindClear)
-   * 命中 VERSION_CONFLICT 后,拉服务端最新物品 + 最新提醒,对名称/位置/备注/提醒
-   * 逐字段三方比较——
+   * 冲突态入口(issue #6,四字段版):保存(update)、改提醒(remindSet/remindClear)
+   * 或整理位置(linkItem)命中 VERSION_CONFLICT 后,拉服务端最新物品 + 最新提醒,
+   * 对名称/位置/备注/提醒逐字段三方比较——
    * - 非冲突字段:静默三方合并(用户改过保留用户值,否则采纳服务端值),既有语义;
    * - 冲突字段(双方都改且互不相同):进入冲突态,编辑折叠内并排两版值,
-   *   逐项显式选择后才能再次保存,绝不静默覆盖。
+   *   逐项显式选择后才能再次保存,绝不静默覆盖;
+   * - 上一轮未选边的冲突字段跨刷新保留(carryUnresolved):基准对齐远端后,
+   *   它们会退化成「仅本机修改」被静默合并,面板与门禁不能就此消失。
    * 提醒行拉取失败或家庭在途切换时不猜远端:该字段本轮不参与比较、基准维持
    * 原值,用户待写的提醒选择留在表单等下次保存补写(见函数内注释)。
    */
@@ -784,23 +741,53 @@ Page<
     // 服务端轮次门禁会再次拦下、重新进流程
     this.remindRemoteUnknown = row === undefined;
     const remoteRemind = row === undefined ? this.remindOriginal : row ? row.due_date : "";
+    const localValues = {
+      name: this.data.name.trim(),
+      location: this.data.locationText.trim(),
+      note: this.data.note.trim(),
+      remind: this.data.remindAt,
+    };
+    const remoteValues = {
+      // note 兜底为空串:早期写入的旧文档可能缺该字段,原样透传 undefined
+      // 会让冲突比较与表单 .trim() 拿到非字符串(服务端投影已兜底,这里双保险)
+      name: item.name,
+      location: item.location_text,
+      note: item.note || "",
+      remind: remoteRemind,
+    };
     const outcome = mergeLatest(
       { ...this.original, remind: this.remindOriginal },
-      {
-        name: this.data.name.trim(),
-        location: this.data.locationText.trim(),
-        note: this.data.note.trim(),
-        remind: this.data.remindAt,
-      },
-      {
-        // note 兜底为空串:早期写入的旧文档可能缺该字段,原样透传 undefined
-        // 会让冲突比较与表单 .trim() 拿到非字符串(服务端投影已兜底,这里双保险)
-        name: item.name,
-        location: item.location_text,
-        note: item.note || "",
-        remind: remoteRemind,
-      },
+      localValues,
+      remoteValues,
     );
+    // 上一轮未选边的冲突字段跨刷新保留:基准已对齐远端,这些字段本轮会退化成
+    // 「仅本机修改」被静默合并——面板一收、门禁即失守,对方的修改就被无声覆盖
+    const carried = carryUnresolved(
+      this.data.conflicts,
+      outcome.conflicts,
+      localValues,
+      remoteValues,
+    );
+    if (row === undefined) {
+      // 提醒远端不可得时无从重判:上一轮未选边的提醒条目原样保留
+      // (仅把「你的修改」同步为表单现值),门禁不撤
+      const prevRemind = this.data.conflicts.find(
+        (c) => c.key === "remind" && c.choice === null
+      );
+      if (
+        prevRemind &&
+        !outcome.conflicts.some((c) => c.key === "remind") &&
+        !carried.some((c) => c.key === "remind")
+      ) {
+        carried.push({
+          key: "remind",
+          label: prevRemind.label,
+          localValue: localValues.remind,
+          remoteValue: prevRemind.remoteValue,
+        });
+      }
+    }
+    const entries = outcome.conflicts.concat(carried);
     this.original = {
       name: item.name,
       location: item.location_text,
@@ -811,7 +798,7 @@ Page<
       this.remindOriginal = remoteRemind;
     }
     this.remoteRemindKind = row ? row.kind : "下次维护";
-    const hasConflicts = outcome.conflicts.length > 0;
+    const hasConflicts = entries.length > 0;
     const shown = outcome.merged.remind;
     const remindPatch: Record<string, unknown> =
       row === undefined
@@ -837,7 +824,7 @@ Page<
       note: outcome.merged.note,
       version: item.version,
       updatedAtText: formatDateTime(item.updated_at),
-      conflicts: outcome.conflicts.map((c) => ({
+      conflicts: entries.map((c) => ({
         ...c,
         choice: null,
         localDisplay: conflictDisplayText(c.key, c.localValue),
@@ -1065,12 +1052,30 @@ Page<
       wx.showToast({ title: "已记到这个位置", icon: "success" });
     } catch (e) {
       if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
-        wx.showToast({
-          title: "内容已被修改,已更新版本号,请重试",
-          icon: "none",
-          duration: 2500,
-        });
-        await this.refreshLatest();
+        // 物品被并发修改:与保存冲突同一口径走四字段冲突刷新——双方都改且不同
+        // 的字段进冲突面板显式选边(未选完前保存被门禁拦住,上一轮未选边的
+        // 条目也保留),绝不静默覆盖;无冲突字段维持三方合并,对齐版本后重试整理
+        const result = await this.refreshForConflict();
+        if (result === "notfound") {
+          wx.showModal({
+            title: "记录不存在",
+            content: "没有找到这条记录,可能已被删除。",
+            showCancel: false,
+            success: () => {
+              this.goBack();
+            },
+          });
+          return;
+        }
+        if (result === "refreshed") {
+          wx.showToast({
+            title: this.data.conflictPending
+              ? "部分字段与最新记录冲突,请逐项选择保留哪一版"
+              : "内容已被修改,已更新版本号,请重试",
+            icon: "none",
+            duration: 2500,
+          });
+        }
       } else {
         wx.showModal({
           title: "整理失败",
@@ -1123,13 +1128,9 @@ Page<
       wx.showToast({ title: "已记到这个位置", icon: "success" });
     } catch (e) {
       if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
-        // 物品被并发修改:走既有刷新逻辑对齐版本(保留未保存编辑),由用户检查后重试
-        wx.showToast({
-          title: "内容已被修改,已更新版本号,请重试",
-          icon: "none",
-          duration: 2500,
-        });
-        const result = await this.refreshLatest();
+        // 物品被并发修改:与保存冲突同一口径走四字段冲突刷新(冲突面板/门禁
+        // 语义同 doLinkToNode 分支),无冲突字段三方合并对齐版本后重试整理
+        const result = await this.refreshForConflict();
         if (result === "notfound") {
           wx.showModal({
             title: "记录不存在",
@@ -1138,6 +1139,14 @@ Page<
             success: () => {
               this.goBack();
             },
+          });
+        } else if (result === "refreshed") {
+          wx.showToast({
+            title: this.data.conflictPending
+              ? "部分字段与最新记录冲突,请逐项选择保留哪一版"
+              : "内容已被修改,已更新版本号,请重试",
+            icon: "none",
+            duration: 2500,
           });
         }
       } else {

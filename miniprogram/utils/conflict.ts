@@ -65,6 +65,50 @@ function norm(value: string): string {
 }
 
 /**
+ * 刷新后重判冲突时,把上一轮「未选边」的字段留在面板里。
+ *
+ * 背景:冲突刷新会把基准对齐到远端;此后再次触发冲突刷新(保存 / 改提醒 /
+ * 整理位置)时,这些字段会退化成「仅本机修改」而被三方合并静默保留——
+ * 面板一收、门禁即失守,用户还没选过,对方的修改就会被无声覆盖。
+ * 规则:未选边且本轮未重判为冲突的字段,只要当前表单值与最新远端值仍不一致,
+ * 就以两版现值重建冲突条目;已选边的字段不保留(用户已明确表态,按普通编辑
+ * 对待);两版值已一致(对方改成了相同值)的字段自然出面板,无需裁决。
+ *
+ * @param previous 上一轮面板条目(带 choice;choice=null 表示未选边)
+ * @param fresh 本轮 mergeLatest 新判出的冲突字段(已在面板里,无需保留旧条目)
+ * @param current 当前表单值(local,应与 mergeLatest 的 local 同口径)
+ * @param remote 最新远端值(与 mergeLatest 的 remote 同口径;提醒远端不可得的
+ *   场景由调用方单独保留原条目,不走本函数)
+ */
+export function carryUnresolved(
+  previous: Array<ConflictField & { choice: ConflictChoice | null }>,
+  fresh: ConflictField[],
+  current: FieldValues,
+  remote: FieldValues
+): ConflictField[] {
+  const carried: ConflictField[] = [];
+  for (const entry of previous) {
+    if (entry.choice !== null) {
+      continue; // 已显式选边:不再是待裁决冲突
+    }
+    if (fresh.some((c) => c.key === entry.key)) {
+      continue; // 本轮已重判为冲突:沿用新判出的两版值
+    }
+    const localNow = norm(current[entry.key]);
+    const remoteNow = norm(remote[entry.key]);
+    if (localNow !== remoteNow) {
+      carried.push({
+        key: entry.key,
+        label: FIELD_LABELS[entry.key],
+        localValue: localNow,
+        remoteValue: remoteNow,
+      });
+    }
+  }
+  return carried;
+}
+
+/**
  * 对 base(进页/上次对齐时的基准)、local(用户当前输入)、remote(服务端最新)
  * 逐字段比较。传入的值应已按保存口径 trim(base/remote 为服务端原文;
  * remind 为日期串,空串 = 不带提醒)。
