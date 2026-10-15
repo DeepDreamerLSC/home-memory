@@ -766,3 +766,505 @@ test("v2 锚定共享:专属片段(只含本件名)→ anchor_shared=false,可�
   assert.equal(result.drafts[0].anchor_shared, false);
   assert.equal(result.drafts[1].anchor_shared, false);
 });
+
+// ---------- v2 保质期/提醒候选(issue #36:日期只来自原话,逐字锚定,模糊一律不带) ----------
+
+// 固定「今天」= 2026-10-15(与语料金标基准日 2026-10-13 同期),无年份日期按它补全。
+const FIXED_TODAY = () => new Date(2026, 9, 15);
+
+/*
+ * 金标正例 8 句:前 4 句取自 scripts/experiments/reminder-spike/corpus.jsonl 里
+ * 原话明说日精度到期日的全部 4 句(c09/c10/c11/c20);后 4 句为同风格补充句
+ * (D0 原型教句「感冒药…11月20号到期」见 issue45-handoff 十五轮记录),
+ * 补足 有效期/开封后/下次维护 三类与「多件仅一件带日期」场景。
+ */
+const REMIND_GOLD = [
+  {
+    id: "c09-corpus",
+    text: "10月20号之前要还图书馆的书,放玄关的置物篮里。",
+    replyItems: [
+      { name: "图书馆的书", location_text: "玄关的置物篮里", certain: true, qualifiers: [], source_quote: "10月20号之前要还图书馆的书,放玄关的置物篮里", remind_at: "2026-10-20", remind_kind: "下次维护", remind_quote: "10月20号" },
+    ],
+    expect: [{ remind_at: "2026-10-20", remind_kind: "下次维护", remind_quote: "10月20号" }],
+  },
+  {
+    id: "c10-corpus",
+    text: "11月15号给爸妈寄冬衣,羽绒服在主卧衣帽间的行李箱里。",
+    replyItems: [
+      { name: "羽绒服", location_text: "主卧衣帽间的行李箱里", certain: true, qualifiers: [], source_quote: "羽绒服在主卧衣帽间的行李箱里", remind_at: "2026-11-15", remind_kind: "下次维护", remind_quote: "11月15号" },
+    ],
+    expect: [{ remind_at: "2026-11-15", remind_kind: "下次维护", remind_quote: "11月15号" }],
+  },
+  {
+    id: "c11-corpus",
+    text: "房租11月30号要续,合同放在书房文件盒里。",
+    replyItems: [
+      { name: "租房合同", location_text: "书房文件盒里", certain: true, qualifiers: [], source_quote: "合同放在书房文件盒里", remind_at: "2026-11-30", remind_kind: "下次维护", remind_quote: "11月30号" },
+    ],
+    expect: [{ remind_at: "2026-11-30", remind_kind: "下次维护", remind_quote: "11月30号" }],
+  },
+  {
+    id: "c20-corpus",
+    text: "投影仪的购机发票在客厅电视柜抽屉里,2027年6月30号保修到期。",
+    replyItems: [
+      { name: "投影仪购机发票", location_text: "客厅电视柜抽屉里", certain: true, qualifiers: [], source_quote: "投影仪的购机发票在客厅电视柜抽屉里,2027年6月30号保修到期", remind_at: "2027-06-30", remind_kind: "有效期", remind_quote: "2027年6月30号" },
+    ],
+    expect: [{ remind_at: "2027-06-30", remind_kind: "有效期", remind_quote: "2027年6月30号" }],
+  },
+  {
+    id: "d0-teach",
+    text: "感冒药放药箱第一格,11月20号到期。",
+    replyItems: [
+      { name: "感冒药", location_text: "药箱第一格", certain: true, qualifiers: [], source_quote: "感冒药放药箱第一格,11月20号到期", remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+    ],
+    expect: [{ remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" }],
+  },
+  {
+    id: "after-open",
+    text: "婴幼儿米粉开封了,11月30号之前要吃完,放厨房吊柜里。",
+    replyItems: [
+      { name: "婴幼儿米粉", location_text: "厨房吊柜里", certain: true, qualifiers: [], source_quote: "婴幼儿米粉开封了,11月30号之前要吃完", remind_at: "2026-11-30", remind_kind: "开封后", remind_quote: "11月30号" },
+    ],
+    expect: [{ remind_at: "2026-11-30", remind_kind: "开封后", remind_quote: "11月30号" }],
+  },
+  {
+    id: "next-maintenance",
+    text: "咖啡机的除垢提醒是2027年1月10号,咖啡机在餐边柜上。",
+    replyItems: [
+      { name: "咖啡机", location_text: "餐边柜上", certain: true, qualifiers: [], source_quote: "咖啡机的除垢提醒是2027年1月10号,咖啡机在餐边柜上", remind_at: "2027-01-10", remind_kind: "下次维护", remind_quote: "2027年1月10号" },
+    ],
+    expect: [{ remind_at: "2027-01-10", remind_kind: "下次维护", remind_quote: "2027年1月10号" }],
+  },
+  {
+    id: "multi-one-dated",
+    text: "牛奶放冰箱门架上,11月20号过期,抹布在洗碗池边上。",
+    replyItems: [
+      { name: "牛奶", location_text: "冰箱门架上", certain: true, qualifiers: [], source_quote: "牛奶放冰箱门架上,11月20号过期", remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+      { name: "抹布", location_text: "洗碗池边上", certain: true, qualifiers: [], source_quote: "抹布在洗碗池边上" },
+    ],
+    expect: [
+      { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+      { remind_at: null, remind_kind: null, remind_quote: null },
+    ],
+  },
+];
+
+function remindTrio(draft) {
+  return { remind_at: draft.remind_at, remind_kind: draft.remind_kind, remind_quote: draft.remind_quote };
+}
+
+async function runV2(text, reply, opts) {
+  opts = opts || {};
+  const calls = [];
+  const res = await handler({ text, protocol: 2 }, {
+    logger: opts.logger || function () {},
+    today: opts.today || FIXED_TODAY,
+    callLLM(prompt) {
+      calls.push(prompt);
+      return Promise.resolve(reply);
+    },
+  });
+  return { res, prompt: calls[0], calls };
+}
+
+test("v2 提醒金标:原话明说绝对日期 → remind 三项逐句符合金标(prompt 附【今天】)", async function () {
+  for (const gold of REMIND_GOLD) {
+    const { res, prompt } = await runV2(gold.text, rawItems(gold.replyItems));
+    assert.equal(res.ok, true, gold.id + " 应成功");
+    assert.equal(res.drafts.length, gold.expect.length, gold.id + " 件数不符");
+    for (let i = 0; i < gold.expect.length; i++) {
+      assert.deepStrictEqual(
+        remindTrio(res.drafts[i]),
+        gold.expect[i],
+        gold.id + " 第 " + (i + 1) + " 件提醒候选应为 " + JSON.stringify(gold.expect[i]),
+      );
+    }
+    assert.ok(prompt.includes("【今天】2026-10-15"), gold.id + " v2 prompt 应附今天日期供无年份日期补全");
+    assert.ok(prompt.includes(gold.text), gold.id + " prompt 应包含用户原话");
+  }
+});
+
+test("v2 提醒金标:类别为中文枚举 有效期/开封后/下次维护,quote 是原话逐字子串", async function () {
+  for (const gold of REMIND_GOLD) {
+    const { res } = await runV2(gold.text, rawItems(gold.replyItems));
+    for (const draft of res.drafts) {
+      if (draft.remind_at === null) continue;
+      assert.ok(["有效期", "开封后", "下次维护"].includes(draft.remind_kind), gold.id + " 类别越界:" + draft.remind_kind);
+      assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(draft.remind_at), gold.id + " 日期应为 YYYY-MM-DD:" + draft.remind_at);
+      assert.ok(gold.text.indexOf(draft.remind_quote) !== -1, gold.id + " 日期证据必须是原话逐字子串:" + draft.remind_quote);
+    }
+  }
+});
+
+// 反例:模糊/相对/月精度/需换算 —— 一律三项全 null(日期由用户在确认页自己选)。
+// folded = 模型违反纪律时最可能折算出的日期(对抗值):反例测试必须真实喂给
+// mock 模型,验证服务端硬门(quote↔remind_at 对应锚定)把它们拦下来置 null,
+// 而不是只测「模型自觉输出 null」的透传(那样删掉校验逻辑测试也照样绿)。
+const REMIND_NEGATIVE = [
+  {
+    id: "vague-下个月",
+    text: "下个月要换净水器滤芯,滤芯在厨房抽屉里。",
+    quote: "下个月",
+    folded: "2026-11-15",
+  },
+  {
+    id: "vague-快过期了(c27 近义)",
+    text: "洗洁精快过期了,好像才用了一半,放在水槽下面的柜子里。",
+    quote: "快过期了",
+    folded: "2026-10-22",
+  },
+  {
+    id: "vague-大概冬天",
+    text: "猫粮大概冬天之前要买新的,放玄关柜子下层。",
+    quote: "大概冬天",
+    folded: "2026-12-15",
+  },
+  {
+    id: "vague-差不多半年(c27)",
+    text: "防晒霜差不多半年就该换了,在化妆包里。",
+    quote: "差不多半年",
+    folded: "2027-04-15",
+  },
+  {
+    id: "relative-下周三类(c08 下周五)",
+    text: "跟同事借的书下周五要还,书在床头柜第一格。",
+    quote: "下周五",
+    folded: "2026-10-23",
+  },
+  {
+    id: "relative-半年后(c01)",
+    text: "净水器的备用滤芯放在厨房水槽下面的柜子里,半年后提醒我换。",
+    quote: "半年后",
+    folded: "2027-04-15",
+  },
+  {
+    id: "recurring-每三个月(c05)",
+    text: "空气净化器的滤网在客厅电视柜第二层,每三个月换一次。",
+    quote: "每三个月",
+    folded: "2027-01-15",
+  },
+  {
+    id: "month-precision(c18 保修到2027年3月)",
+    text: "扫地机器人的保修卡在书房文件盒第二层,保修到2027年3月。",
+    quote: "到2027年3月",
+    folded: "2027-03-15",
+  },
+  {
+    id: "production-conversion(c15 生产日期+保质期)",
+    text: "这箱常温奶的生产日期是10月5号,保质期六个月,放阳台储物架上。",
+    quote: "10月5号",
+    folded: "2027-04-05",
+  },
+  {
+    id: "after-open-no-date(c12 开封后三个月)",
+    text: "婴儿配方奶粉开封后一个月内要吃完,现在放餐边柜第二层。",
+    quote: "开封后一个月内",
+    folded: "2026-11-15",
+  },
+];
+
+test("v2 提醒反例(对抗):模糊/相对/月精度/需换算折算成日期也穿透不了服务端硬门 → 三项全 null,物品照常提取不废件", async function () {
+  for (const neg of REMIND_NEGATIVE) {
+    const item = {
+      name: "物品",
+      location_text: "某处",
+      certain: true,
+      qualifiers: [],
+      source_quote: neg.text,
+      remind_at: neg.folded, // 模型违反纪律折算出的日期
+      remind_kind: "下次维护",
+      remind_quote: neg.quote, // 模糊表述的原话逐字子串(逐字锚定本可通过)
+    };
+    const { res } = await runV2(neg.text, rawItems([item]));
+    assert.equal(res.ok, true, neg.id + " 拦下提醒也必须成功");
+    assert.equal(res.drafts[0].name, "物品", neg.id + " 物品照常提取不废件");
+    assert.deepStrictEqual(
+      remindTrio(res.drafts[0]),
+      { remind_at: null, remind_kind: null, remind_quote: null },
+      neg.id + "「" + neg.quote + "」折算成 " + neg.folded + " 绝不能穿透服务端",
+    );
+  }
+});
+
+test("v2 提醒反例(自觉):模型按纪律输出三项 null → 原样透传不带提醒", async function () {
+  const neg = REMIND_NEGATIVE[0];
+  const { res } = await runV2(
+    neg.text,
+    rawItems([{ name: "物品", location_text: "某处", certain: true, qualifiers: [], source_quote: neg.text, remind_at: null, remind_kind: null, remind_quote: null }]),
+  );
+  assert.equal(res.ok, true);
+  assert.deepStrictEqual(remindTrio(res.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null });
+});
+
+test("v2 prompt 纪律:模糊/相对/月精度/换算反例逐字在册,无年份按最近未来补全", async function () {
+  const { prompt } = await runV2("感冒药放药箱第一格,11月20号到期。", rawItems([
+    { name: "感冒药", location_text: "药箱第一格", certain: true, qualifiers: [], source_quote: "感冒药放药箱第一格", remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+  ]));
+  for (const banned of [
+    "下个月",
+    "快过期了",
+    "大概冬天",
+    "差不多半年",
+    "下周三",
+    "半年后",
+    "每三个月",
+    "保修到2027年3月",
+    "生产日期是10月5号保质期六个月",
+    "开封后三个月",
+  ]) {
+    assert.ok(prompt.includes(banned), "prompt 纪律必须逐字点名反例:" + banned);
+  }
+  assert.ok(prompt.includes("只接受原话里明确说了的绝对日期"), "必须写明唯一日期来源");
+  assert.ok(prompt.includes("按【今天】补全为最近的未来日期"), "无年份日期必须写明补全规则");
+  assert.ok(prompt.includes("禁止根据物品名称猜任何日期"), "必须禁止按物品名猜周期");
+  for (const kind of ["有效期", "开封后", "下次维护"]) {
+    assert.ok(prompt.includes(kind), "prompt 应定义类别:" + kind);
+  }
+  // 既有 v2 契约零变化:拆分/证据/限定语规则原样保留。
+  for (const kept of ["最多 5 件", "has_more", "source_quote", "qualifiers", "禁止改写或拼接原文"]) {
+    assert.ok(prompt.includes(kept), "v2 既有规则不得被提醒增补挤掉:" + kept);
+  }
+});
+
+// ---------- v2 提醒服务端硬门:锚定/格式失败置 null,绝不废件 ----------
+
+const ANCHOR_ORIGINAL = "感冒药放药箱第一格,11月20号到期。";
+// 直调 validateDrafts 的固定「今天」(与 runV2 的 FIXED_TODAY 同一天):
+// 对应锚定里无年份日期按它补全最近未来,直调用例据此保持确定性。
+const ANCHOR_TODAY = "2026-10-15";
+const ANCHOR_BASE = {
+  name: "感冒药",
+  location_text: "药箱第一格",
+  certain: true,
+  qualifiers: [],
+  source_quote: "感冒药放药箱第一格",
+};
+
+test("v2 提醒锚定:quote 改写原话(非逐字子串)→ 三项置 null,物品与位置原样保留", function () {
+  const result = validateDrafts(
+    rawItems([Object.assign({}, ANCHOR_BASE, {
+      remind_at: "2026-11-20",
+      remind_kind: "有效期",
+      remind_quote: "十一月二十号到期", // 模型把数字改写成了汉字,不再是逐字子串
+    })]),
+    ANCHOR_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true, "锚定失败绝不废件");
+  assert.equal(result.drafts[0].name, "感冒药");
+  assert.equal(result.drafts[0].location_text, "药箱第一格");
+  assert.equal(result.drafts[0].certain, true);
+  assert.deepStrictEqual(remindTrio(result.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null });
+});
+
+test("v2 提醒对应锚定:quote 是原话子串但没说这个日期(折算值/无关日期)→ 三项全 null", function () {
+  const probes = [
+    {
+      label: "模糊表述折算成日期(quote=下个月)",
+      original: "下个月要换净水器滤芯,滤芯在厨房抽屉里。",
+      fields: { remind_at: "2026-11-15", remind_kind: "下次维护", remind_quote: "下个月" },
+    },
+    {
+      label: "quote 里的日期与 remind_at 无关",
+      fields: { remind_at: "2030-01-01", remind_kind: "有效期", remind_quote: "11月20号" },
+    },
+    {
+      label: "无年份日期折去已过的今年(应补全为明年)",
+      fields: { remind_at: "2026-06-30", remind_kind: "有效期", remind_quote: "6月30号" },
+    },
+    {
+      label: "月精度折算成月中(quote=到2027年3月)",
+      original: "扫地机器人的保修卡在书房文件盒第二层,保修到2027年3月。",
+      fields: { remind_at: "2027-03-15", remind_kind: "有效期", remind_quote: "到2027年3月" },
+    },
+    {
+      label: "中文数字日期解析不出候选(锚定失败=不带)",
+      original: "感冒药放药箱,十一月二十号到期。",
+      fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "十一月二十号到期" },
+    },
+  ];
+  for (const p of probes) {
+    const result = validateDrafts(
+      rawItems([Object.assign({}, ANCHOR_BASE, p.fields)]),
+      p.original || ANCHOR_ORIGINAL,
+      ANCHOR_TODAY,
+    );
+    assert.equal(result.ok, true, p.label + " 不废件");
+    assert.deepStrictEqual(
+      remindTrio(result.drafts[0]),
+      { remind_at: null, remind_kind: null, remind_quote: null },
+      p.label + " 应三项全 null",
+    );
+  }
+});
+
+test("v2 提醒对应锚定:quote 里真的说了这个日期(显式年份/无年份补全/ISO/带上下文)→ 保留", function () {
+  const probes = [
+    { label: "无年份,今年未来", original: "感冒药放药箱第一格,11月20号到期。", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "无年份,带日期后缀上下文", original: "感冒药放药箱第一格,11月20号到期。", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号到期" } },
+    { label: "显式年份", original: "投影仪的购机发票在客厅电视柜抽屉里,2027年6月30号保修到期。", fields: { remind_at: "2027-06-30", remind_kind: "有效期", remind_quote: "2027年6月30号" } },
+    { label: "无年份,今年已过补全明年", original: "图书馆的书10月5号之前要还,放玄关的置物篮里。", fields: { remind_at: "2027-10-05", remind_kind: "下次维护", remind_quote: "10月5号" } },
+    { label: "ISO 形态", original: "签证 2026-11-20 到期,放书房抽屉里。", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "2026-11-20" } },
+  ];
+  for (const p of probes) {
+    const result = validateDrafts(
+      rawItems([Object.assign({}, ANCHOR_BASE, p.fields)]),
+      p.original,
+      ANCHOR_TODAY,
+    );
+    assert.equal(result.ok, true, p.label);
+    assert.equal(result.drafts[0].remind_at, p.fields.remind_at, p.label + " 应保留");
+    assert.equal(result.drafts[0].remind_quote, p.fields.remind_quote);
+  }
+});
+
+test("v2 提醒硬门:格式/日历/类别/缺项各种违规一律三项全 null(不废件)", function () {
+  const bad = [
+    { label: "日期 11 月 32 日", fields: { remind_at: "2026-11-32", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "2 月 30 日不存在", fields: { remind_at: "2026-02-30", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "月份 13", fields: { remind_at: "2026-13-01", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "斜杠格式", fields: { remind_at: "2026/11/20", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "纯数字串", fields: { remind_at: "20261120", remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "非字符串(数字)", fields: { remind_at: 20261120, remind_kind: "有效期", remind_quote: "11月20号" } },
+    { label: "类别越界", fields: { remind_at: "2026-11-20", remind_kind: "到期", remind_quote: "11月20号" } },
+    { label: "类别缺失", fields: { remind_at: "2026-11-20", remind_quote: "11月20号" } },
+    { label: "quote 缺失", fields: { remind_at: "2026-11-20", remind_kind: "有效期" } },
+    { label: "quote 空串", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "" } },
+    { label: "quote 超长 201 字", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "号".repeat(201) } },
+    { label: "quote 编造(原话没有)", fields: { remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "12月31号到期" } },
+  ];
+  for (const c of bad) {
+    const result = validateDrafts(rawItems([Object.assign({}, ANCHOR_BASE, c.fields)]), ANCHOR_ORIGINAL, ANCHOR_TODAY);
+    assert.equal(result.ok, true, c.label + " 不废件");
+    assert.deepStrictEqual(
+      remindTrio(result.drafts[0]),
+      { remind_at: null, remind_kind: null, remind_quote: null },
+      c.label + " 应三项全 null",
+    );
+    assert.equal(result.drafts[0].name, "感冒药", c.label + " 物品保留");
+  }
+});
+
+test("v2 提醒半态禁止:有日期无类别、有类别无日期、只带 quote —— 一律整体不带", function () {
+  const half = [
+    { label: "只有日期", fields: { remind_at: "2026-11-20" } },
+    { label: "只有类别", fields: { remind_kind: "有效期" } },
+    { label: "只有 quote", fields: { remind_quote: "11月20号" } },
+    { label: "日期 null + 类别 + quote", fields: { remind_at: null, remind_kind: "有效期", remind_quote: "11月20号" } },
+  ];
+  for (const c of half) {
+    const result = validateDrafts(rawItems([Object.assign({}, ANCHOR_BASE, c.fields)]), ANCHOR_ORIGINAL, ANCHOR_TODAY);
+    assert.equal(result.ok, true, c.label);
+    assert.deepStrictEqual(remindTrio(result.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null }, c.label);
+  }
+});
+
+test("v2 提醒合法细节:日期去首尾空白、quote 取原话逐字串(去空白比对口径同 source_quote)", function () {
+  const result = validateDrafts(
+    rawItems([Object.assign({}, ANCHOR_BASE, {
+      remind_at: " 2026-11-20 ",
+      remind_kind: "有效期",
+      remind_quote: "11月20号",
+    })]),
+    ANCHOR_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.drafts[0].remind_at, "2026-11-20", "首尾空白应被规范化");
+  assert.equal(result.drafts[0].remind_quote, "11月20号");
+});
+
+// ---------- v2 既有行为零变化 + v1 零变化 ----------
+
+test("v2 提醒不影响既有行为:has_more 透传、位置锚定降级、anchor_shared 照常计算", function () {
+  // 位置交叉配对被降级的同时,合法提醒候选保留(两条防线互不干扰)。
+  const result = validateDrafts(
+    rawItems([
+      { name: "牛奶", location_text: "洗碗池边上", certain: true, qualifiers: [], source_quote: "牛奶放冰箱门架上,11月20号过期", remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+      { name: "抹布", location_text: "洗碗池边上", certain: true, qualifiers: [], source_quote: "抹布在洗碗池边上" },
+    ]),
+    "牛奶放冰箱门架上,11月20号过期,抹布在洗碗池边上",
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.truncated, false);
+  assert.equal(result.drafts[0].certain, false, "位置配错仍必须降级(提醒增补不放松位置防线)");
+  assert.equal(result.drafts[0].location_text, "");
+  assert.equal(result.drafts[0].remind_at, "2026-11-20", "位置降级不牵连合法提醒候选");
+  assert.equal(result.drafts[0].remind_kind, "有效期");
+
+  // 整句 quote 含他件名称 → anchor_shared 照常置真。
+  const shared = validateDrafts(
+    rawItems([
+      { name: "牛奶", location_text: "冰箱门架上", certain: true, qualifiers: [], source_quote: "牛奶放冰箱门架上,11月20号过期,抹布在洗碗池边上", remind_at: "2026-11-20", remind_kind: "有效期", remind_quote: "11月20号" },
+      { name: "抹布", location_text: "洗碗池边上", certain: true, qualifiers: [], source_quote: "牛奶放冰箱门架上,11月20号过期,抹布在洗碗池边上" },
+    ]),
+    "牛奶放冰箱门架上,11月20号过期,抹布在洗碗池边上",
+    ANCHOR_TODAY,
+  );
+  assert.equal(shared.drafts[0].anchor_shared, true, "anchor_shared 行为不变");
+  assert.equal(shared.drafts[1].anchor_shared, true);
+});
+
+test("v2 handler:带提醒候选时 truncated 与 drafts 透传如常", async function () {
+  const items = Array.from({ length: 5 }, (_, i) => ({
+    name: "物" + i,
+    location_text: "桌上",
+    certain: true,
+    qualifiers: [],
+    source_quote: "物" + i,
+    remind_at: i === 0 ? "2026-11-20" : null,
+    remind_kind: i === 0 ? "有效期" : null,
+    remind_quote: i === 0 ? "11月20号" : null,
+  }));
+  const { res } = await runV2("物0物1物2物3物4在桌上,还有物5,11月20号过期", JSON.stringify({ items, has_more: true }));
+  assert.equal(res.ok, true);
+  assert.equal(res.truncated, true, "has_more 透传不受提醒增补影响");
+  assert.equal(res.drafts.length, 5);
+  assert.equal(res.drafts[0].remind_at, "2026-11-20");
+  assert.equal(res.original_text, "物0物1物2物3物4在桌上,还有物5,11月20号过期");
+});
+
+test("v1 零变化:模型输出多带 remind 字段也被忽略,draft 形状与旧契约完全一致", async function () {
+  const raw = JSON.stringify({
+    name: "感冒药",
+    location_text: "药箱",
+    certain: true,
+    qualifiers: [],
+    needs_split: false,
+    remind_at: "2026-11-20",
+    remind_kind: "有效期",
+    remind_quote: "11月20号",
+  });
+  const res = validateDraft(raw, "感冒药放药箱,11月20号到期。");
+  assert.equal(res.ok, true);
+  assert.deepStrictEqual(res.draft, { name: "感冒药", location_text: "药箱", certain: true, qualifiers: [] }, "v1 draft 不得出现 remind 字段");
+
+  // handler 全链路:v1 prompt 不附【今天】、不谈提醒;响应 draft 无 remind 键。
+  const calls = [];
+  const res2 = await handler({ text: "感冒药放药箱,11月20号到期。" }, {
+    logger() {},
+    callLLM(prompt) {
+      calls.push(prompt);
+      return Promise.resolve(raw);
+    },
+  });
+  assert.equal(res2.ok, true);
+  assert.deepStrictEqual(res2.draft, { name: "感冒药", location_text: "药箱", certain: true, qualifiers: [] });
+  assert.ok(!calls[0].includes("【今天】"), "v1 prompt 必须逐字节不变(不注入今天)");
+  assert.ok(!calls[0].includes("remind"), "v1 prompt 不得出现提醒字段");
+});
+
+test("v2 今天注入:缺 deps.today 用真实日期,非法值兜底当前日期,prompt 恒有合法 YYYY-MM-DD", async function () {
+  const reply = rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关" }]);
+  const mk = (deps) => handler({ text: "钥匙在玄关", protocol: 2 }, Object.assign({ logger() {} }, deps, {
+    callLLM(prompt) {
+      calls.push(prompt);
+      return Promise.resolve(reply);
+    },
+  }));
+  let calls = [];
+  await mk({});
+  assert.ok(/【今天】\d{4}-\d{2}-\d{2}/.test(calls[0]), "缺省注入真实今天");
+  calls = [];
+  await mk({ today: () => "不是日期" });
+  assert.ok(/【今天】\d{4}-\d{2}-\d{2}/.test(calls[0]), "非法 today 兜底为当前日期");
+});
