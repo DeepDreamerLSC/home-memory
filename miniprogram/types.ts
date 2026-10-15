@@ -68,6 +68,15 @@ export interface DraftWithQuote extends Draft {
    * 绝不换算任何相对日期——「自动换算」是产品决策,不在修复范围。
    */
   remind_vague_quote?: string | null;
+  /**
+   * 「放进」路径预览(issue #45 十七轮,#18 红线语义升级):仅 certain=true
+   * 且位置能明确分层时服务端才给出(如「主卧的柜子上」→ ["主卧","柜子上"],
+   * 每段逐字取自原话)。**这是预览不是写入**——用户在确认卡看过完整路径、
+   * 点「确认记住」后才由 locations.ensureAndLink 建路径并挂上,绝不静默建
+   * 路径;certain=false 一律 null(照旧先进「尚未归类」)。客户端只透传与
+   * 展示,不拆层、不猜。
+   */
+  mount_path?: string[] | null;
 }
 
 /** 提醒类别(issue #36 冻结词表,与 extractDraft v2 的 remind_kind 同源) */
@@ -504,7 +513,9 @@ export type LocationsApiEvent =
       expected_version: number;
       update_id: string;
     } & ScopeWriteBinding)
-  | { action: "parseLocation"; text: string }
+  | {
+      action: "parseLocation"; text: string;
+    }
   | { action: "scanHousehold" }
   | ({
       action: "applyScan";
@@ -518,6 +529,23 @@ export type LocationsApiEvent =
         expected_version: number;
         path: string[];
       }>;
+    } & ScopeWriteBinding)
+  | ({
+      /**
+       * 确认卡「放进」的一次性落地(issue #45 十七轮,#18 红线语义升级):
+       * 建缺失路径 + 挂上一件完成。路径已在确认卡明示、用户点确认 = 已确认,
+       * 服务端不再拦;绝不静默建路径。
+       */
+      action: "ensureAndLink";
+      item_id: string;
+      /** 确认卡明示过的最终路径(1-6 段,每段 1-30 字,首段=房间/大区域) */
+      path: string[];
+      /** create 返回的物品版本(挂靠按 linkItem 同款版本条件更新) */
+      expected_version: number;
+      /** 同一次逻辑挂载的标识(uuid):失败重试同内容复用,服务端据此识别重放 */
+      update_id: string;
+      /** 缺省 manual;确认卡路径来自原话拆层时用 parse */
+      created_from?: "scan" | "parse" | "manual";
     } & ScopeWriteBinding);
 
 /* ---------------- locations 响应 ---------------- */
@@ -586,6 +614,19 @@ export interface LinkItemResponse {
   replayed?: boolean;
 }
 
+/** ensureAndLink 响应(issue #45 十七轮):路径就位(或本来已挂同一路径),物品挂上 */
+export interface EnsureAndLinkResponse {
+  ok: true;
+  /** true = 已挂同一路径(重复确认/响应丢失重试的幂等收敛点),version 未再 +1 */
+  already: boolean;
+  /** true = 同 update_id 的重放收敛 */
+  replayed?: boolean;
+  item: { item_id: string; version: number; updated_at: string };
+  path: string[];
+  created: boolean[];
+  location_ids: string[];
+}
+
 export interface ParseLocationResponse {
   ok: true;
   parse: ParseResult;
@@ -611,7 +652,8 @@ export type LocationsApiOkResponse =
   | LinkItemResponse
   | ParseLocationResponse
   | ScanHouseholdResponse
-  | ApplyScanResponse;
+  | ApplyScanResponse
+  | EnsureAndLinkResponse;
 
 export type LocationsApiResponse = LocationsApiOkResponse | LocationsApiErrorResponse;
 
@@ -701,6 +743,21 @@ export interface HouseholdInviteListResponse {
   invites: HouseholdInviteMeta[];
 }
 
+/**
+ * switch 响应(issue #45 十七轮切换家庭):新家庭 status 摘要(与 status 同口径)。
+ * already=true 表示本就在目标家庭(幂等);display_name 个人家庭为 null。
+ */
+export interface HouseholdSwitchResponse {
+  ok: true;
+  target: "personal" | "shared";
+  already: boolean;
+  household_id: string;
+  shared: boolean;
+  role: HouseholdRole | null;
+  scope_revision: number | null;
+  display_name: string | null;
+}
+
 export type HouseholdsApiEvent =
   | { action: "status" }
   | { action: "updateProfile"; nickname?: string; avatar_file_id?: string }
@@ -713,4 +770,5 @@ export type HouseholdsApiEvent =
   | { action: "leave" }
   | { action: "removeMember"; member_key: string }
   | { action: "dissolve" }
-  | { action: "memberList" };
+  | { action: "memberList" }
+  | { action: "switch"; target: "personal" | "shared" };

@@ -38,6 +38,7 @@ import {
   scopeWriteMarkers,
 } from "./household-scope";
 import { notifyFamilyScopeDrift } from "./households-api";
+import { draftMountPathPreview } from "./batch-save";
 
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
@@ -433,6 +434,13 @@ export async function callExtractDraft(
         anchor_shared: (d as { anchor_shared?: boolean }).anchor_shared === true,
         // 提醒候选三项(issue #36):透传服务端已锚定的原话日期,残缺/非法整体置 null
         ...parseRemindTriple(d as Record<string, unknown>),
+        // 「放进」路径预览(issue #45 十七轮):仅 certain 且形状合法才透传,
+        // 否则 null(certain=false 一律 null = 确认卡不显示「放进」行,
+        // 照旧先进「尚未归类」;绝不静默建路径)
+        mount_path: (() => {
+          const preview = draftMountPathPreview(d as Record<string, unknown>);
+          return preview.length > 0 ? preview : null;
+        })(),
       })),
       original_text: result.original_text,
       truncated: result.truncated === true,

@@ -357,6 +357,37 @@
   line-height: 1.5;
 }
 
+/* C2「将放入」副文(十七轮):certain 行的挂靠预览 + 同款「换」入口;
+   模糊行无此行(=确认后先进「尚未归类」)。换=透明热区 ≥88rpx(与 .sum-edit 同口径) */
+.row-mount {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 6rpx;
+}
+
+.row-mount-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.row-mount-swap {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  padding: 0 10rpx;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  line-height: 1;
+}
+
 .st {
   font-size: 24rpx;
 }

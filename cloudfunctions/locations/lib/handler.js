@@ -4,7 +4,8 @@
  * locations 纯函数 handler(docs/design/location-tree.md §5)。
  * handler(event, deps):身份只来自 deps.householdId,绝不从 event 读取任何身份字段;
  * deps = { db, now(), genId(), digest(s), householdId, logger, callLLM?(仅 LLM action 需要) }。
- * - db 类 action:list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan;
+ * - db 类 action:list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan/
+ *   ensureAndLink(十七轮「放进」:建缺失路径 + 挂靠一次完成);
  * - LLM 类 action(parseLocation/scanHousehold)在 lib/parse.js,这里 lazy require 避免循环依赖;
  * - 对 items 的一切挂载写入(§6.4)都是版本条件更新:同一版本计数器、同一
  *   last_update_id/last_update_fingerprint 回写、同 itemsApi.update 三重条件重放识别,
@@ -1121,6 +1122,119 @@ async function applyScanAction(event, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// action:ensureAndLink(十七轮「放进」:确认卡明示路径、用户确认后的一次性提交)
+// ---------------------------------------------------------------------------
+
+/**
+ * ensureAndLink:入参 { item_id, path(≥1 段,首段=房间/大区域,1-6 段每段 1-30 码点),
+ * expected_version(正整数), update_id(非空 ≤64,失败重试同内容复用),
+ * created_from?("scan"|"parse"|"manual",缺省 manual) }。
+ * 流程:先查物品(跨家庭/已删 → NOT_FOUND,零写入——路径节点一个都不建)→
+ * ensurePath 建缺失路径(用户已在确认卡看过完整路径 = 已确认,服务端不再拦;
+ * 全系统唯一建节点入口复用,路径幂等)→ linkItem 同款版本条件更新挂上。
+ * 幂等:重复同路径 = 成功(already:true,version 不再 +1);响应丢失重试按
+ * 「已挂目标节点」收敛。挂靠失败绝不删物品(物品已在,失败如实返回,客户端
+ * 提示先放「尚未归类」);绝不静默改挂到别处(不在目标上 → VERSION_CONFLICT)。
+ * 共享名称合并建议不在此做(整理位置入口另行裁决)。
+ */
+async function ensureAndLinkAction(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  if (!validPositiveVersion(event.expected_version) || !validUpdateId(event.update_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var segments = cleanPathSegments(event.path);
+  if (segments === null) {
+    return fail("INVALID_INPUT");
+  }
+  var createdFrom = event.created_from === undefined ? "manual" : event.created_from;
+  if (CREATED_FROM_VALUES.indexOf(createdFrom) === -1 || createdFrom === "bootstrap") {
+    return fail("INVALID_INPUT");
+  }
+  // 先查物品(当前家庭):不存在/已删/跨家庭 → NOT_FOUND,且零路径写入
+  var item = await itemsCol(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!item.data || item.data.length === 0) {
+    return fail("NOT_FOUND");
+  }
+  var current = item.data[0];
+
+  // 建缺失路径(用户已在确认卡确认过完整路径;并发 E11000 回查复用,绝不双建)
+  var ensured = await ensurePathSegments(deps, segments, createdFrom);
+  var targetId = ensured.nodes[ensured.nodes.length - 1]._id;
+  var base = {
+    path: segments,
+    created: ensured.created,
+    location_ids: ensured.nodes.map(function (n) {
+      return n._id;
+    })
+  };
+
+  // 幂等:已挂同一路径 → 成功(重复点「确认记住」/响应丢失后的重试收敛点)
+  if (current.location_node_id === targetId) {
+    return Object.assign(
+      {
+        ok: true,
+        already: true,
+        item: { item_id: current._id, version: current.version, updated_at: current.updated_at }
+      },
+      base
+    );
+  }
+
+  // linkItem 同构:以客户端声明的 expected_version 条件更新(同一版本链,
+  // 绝不以「读到的当前 version」放行并发过期写入)
+  var res = await conditionalMountUpdate(
+    deps,
+    {
+      _id: event.item_id,
+      version: event.expected_version,
+      location_node_id: current.location_node_id
+    },
+    targetId,
+    event.update_id,
+    "link"
+  );
+  if (res.updated >= 1) {
+    var after = await itemsCol(deps)
+      .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+      .get();
+    var fresh = after.data[0];
+    return Object.assign(
+      {
+        ok: true,
+        already: false,
+        item: { item_id: fresh._id, version: fresh.version, updated_at: fresh.updated_at }
+      },
+      base
+    );
+  }
+  // 0 命中回查:已挂目标(幂等)/已被并发改动(冲突)/已删(不存在)三态分流;
+  // 物品本身绝不被本 action 删除——挂靠失败如实返回,物品原样保留
+  var cur = await itemsCol(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!cur.data || cur.data.length === 0) {
+    return fail("NOT_FOUND");
+  }
+  var doc = cur.data[0];
+  if (doc.location_node_id === targetId) {
+    return Object.assign(
+      {
+        ok: true,
+        already: true,
+        replayed: true,
+        item: { item_id: doc._id, version: doc.version, updated_at: doc.updated_at }
+      },
+      base
+    );
+  }
+  return fail("VERSION_CONFLICT");
+}
+
+// ---------------------------------------------------------------------------
 // 路由与日志(§2/§3)
 // ---------------------------------------------------------------------------
 
@@ -1133,7 +1247,8 @@ var DB_ACTIONS = {
   delete: deleteAction,
   linkItem: linkItemAction,
   unlinkItem: unlinkItemAction,
-  applyScan: applyScanAction
+  applyScan: applyScanAction,
+  ensureAndLink: ensureAndLinkAction
 };
 
 /**
@@ -1157,7 +1272,8 @@ var WRITE_DB_ACTIONS = {
   delete: true,
   linkItem: true,
   unlinkItem: true,
-  applyScan: true
+  applyScan: true,
+  ensureAndLink: true
 };
 
 var LLM_ACTIONS = { parseLocation: true, scanHousehold: true };

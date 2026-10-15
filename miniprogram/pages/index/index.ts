@@ -16,7 +16,9 @@ import {
   isScopeGenerationCurrent,
   isScopeVerified,
 } from "../../utils/household-scope";
-import { ensureScopeVerified } from "../../utils/households-api";
+import { ensureScopeVerified, switchFamily } from "../../utils/households-api";
+import { famSwitchSheetOptions } from "../../utils/fam-switch";
+import type { FamSwitchOption } from "../../utils/fam-switch";
 import { callLocationsApi } from "../../utils/locations-api";
 import {
   captureCacheGeneration,
@@ -151,6 +153,12 @@ Page<
     partialText: string;
     /** 手指按住 H0 大 CTA(按压反馈) */
     ctaPressed: boolean;
+    /** 切换家庭三选弹层(十七轮 B 线):共享态点 fam-chip 打开 */
+    famSheetVisible: boolean;
+    /** 弹层三行(打开时现拼:当前家庭带 ✓ 与「当前」标记) */
+    famSheetOptions: FamSwitchOption[];
+    /** 切换进行中(防重复提交;期间弹层不可关、不可再选) */
+    switchingFamily: boolean;
   },
   {
     onLoad(options: Record<string, string | undefined>): void;
@@ -221,8 +229,17 @@ Page<
       excludePath: string,
       onPick: (nodeId: string) => void,
     ): void;
-    /** 「我们家/我的家」入口:进家庭管理页 */
+    /** 「我们家/我的家」入口:共享态=三选弹层;个人态照旧直接进家庭管理页 */
     onFamilyTap(): void;
+    /** 三选弹层:关闭(蒙层/取消;切换进行中不可关) */
+    onFamSheetClose(): void;
+    onFamSheetCloseTap(): void;
+    /** 三选弹层:选行(我的家 / 我们家 / 家庭管理页);当前家庭只提示不切 */
+    onFamSheetPick(e: WechatMiniprogram.CustomEvent): void;
+    /** 执行切换:households.switch → 成功后按新家庭整页刷新(骨架屏过渡) */
+    doFamilySwitch(target: "personal" | "shared"): Promise<void>;
+    /** 弹层体点击不冒泡关层 */
+    noop(): void;
     /** 到期横幅:拉计数、上屏与清空(#36;失败静默) */
     refreshDueBanner(): Promise<void>;
     onDueBannerTap(): void;
@@ -259,6 +276,9 @@ Page<
     recordSeconds: 0,
     partialText: "",
     ctaPressed: false,
+    famSheetVisible: false,
+    famSheetOptions: [] as FamSwitchOption[],
+    switchingFamily: false,
   },
 
   voiceEntry: null,
@@ -1056,14 +1076,122 @@ Page<
     });
   },
 
-  /** 家庭管理页入口(创建/邀请/成员/退出/解散;issue #34 P1-B) */
+  /**
+   * 「我们家/我的家」入口(十七轮 B 线):
+   * - 个人家庭态:照旧直接进家庭管理页(要共享去那里创建/加入);
+   * - 共享态:打开三选弹层(我的家 / 我们家·家庭名 / 家庭管理页);
+   * - 加载态(X1)不切换:骨架屏期间不拿弹层换家,避免旧家庭数据冒充(§6);
+   * - 切换进行中不重复打开。
+   */
   onFamilyTap() {
-    wx.navigateTo({
-      url: "/pages/family/family",
-      fail: () => {
-        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
-      },
+    if (this.data.switchingFamily) {
+      return;
+    }
+    if (this.data.mapLoading) {
+      wx.showToast({ title: "正在加载,稍等一下再切换家庭", icon: "none" });
+      return;
+    }
+    if (!isHouseholdScopeShared()) {
+      wx.navigateTo({
+        url: "/pages/family/family",
+        fail: () => {
+          wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+        },
+      });
+      return;
+    }
+    this.setData({
+      famSheetVisible: true,
+      famSheetOptions: famSwitchSheetOptions(),
     });
+  },
+
+  /** 三选弹层关闭(蒙层点击/取消;切换进行中不可中途关) */
+  onFamSheetClose() {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    this.setData({ famSheetVisible: false });
+  },
+
+  onFamSheetCloseTap() {
+    this.onFamSheetClose();
+  },
+
+  noop() {},
+
+  /**
+   * 三选弹层选行:
+   * - 家庭管理页:关层进 F1(创建/邀请/成员/退出/解散都在那里);
+   * - 当前家庭:只提示「已在当前家庭」,不发起切换;
+   * - 另一个家:执行 households.switch(只是换当前家庭指针,数据各归各家)。
+   */
+  onFamSheetPick(e) {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    const key = String((e.currentTarget.dataset || {}).key || "");
+    if (key === "admin") {
+      this.setData({ famSheetVisible: false });
+      wx.navigateTo({
+        url: "/pages/family/family",
+        fail: () => {
+          wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+        },
+      });
+      return;
+    }
+    if (key !== "mine" && key !== "shared") {
+      return;
+    }
+    const option = this.data.famSheetOptions.find((o) => o.key === key);
+    if (!option) {
+      return;
+    }
+    if (option.current) {
+      this.setData({ famSheetVisible: false });
+      wx.showToast({ title: "已在当前家庭", icon: "none" });
+      return;
+    }
+    void this.doFamilySwitch(key === "mine" ? "personal" : "shared");
+  },
+
+  /**
+   * 执行切换家庭(十七轮 B 线;#34 合同不弱化):
+   * - households.switch 只更新服务端当前家庭指针;成功后 switchFamily 内部
+   *   走既有捕获链(作用域代数递增 + 位置树缓存清空 + 家庭名/自资料按新家
+   *   重置,再补一次 status 刷新自资料),不另起任何缓存体系;
+   * - 成功后本页整页刷新:家庭上下文头(我们家/我的家)、地图(经 loadMapLayer
+   *   入口守卫先清屏给骨架屏,绝不先显示上一家数据,含搜索结果与快到期横幅)、
+   *   未完成批次横幅(按新家庭的作用域键读,旧家草稿互不可达)——与 onShow
+   *   同一条刷新链;失败如实提示,作用域未动、屏上内容保持当前家庭(不半切)。
+   */
+  async doFamilySwitch(target) {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    this.setData({ switchingFamily: true });
+    try {
+      const res = await switchFamily(target);
+      this.setData({ famSheetVisible: false });
+      const name = res.shared && res.display_name ? res.display_name : "";
+      wx.showToast({
+        title: res.shared ? "已切到「我们家 · " + name + "」" : "已切到「我的家」",
+        icon: "none",
+        duration: 2000,
+      });
+      // 与 onShow 同链刷新:上下文头 → 地图(先骨架屏再按新家重载)→ 未完成批次 → 快到期
+      this.refreshFamilyChip();
+      this.setData({ resumeSession: this.currentResumeSession() });
+      void this.loadMapLayer();
+      void this.refreshDueBanner();
+    } catch (e) {
+      // 失败不切:服务端文案如实提示;作用域/屏上内容都是当前家庭,保持不动
+      this.setData({ famSheetVisible: false });
+      wx.showModal({ title: "切换失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ switchingFamily: false });
+    }
   },
 
   /**

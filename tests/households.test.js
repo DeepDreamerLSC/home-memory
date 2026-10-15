@@ -14,7 +14,10 @@
  * - HHH-LOG:日志只落 action/error/ms/count 计量字段,无 openid/member_key/
  *   裸令牌/令牌哈希/家庭名/household_id(照 TS-LOG 模式);
  * - HHH-GLUE:index.js 胶水层真实加载(stub wx-server-sdk):UNAUTHORIZED /
- *   个人与共享 status / 真实 genToken 令牌强度与哈希落库。
+ *   个人与共享 status / 真实 genToken 令牌强度与哈希落库;
+ * - HHH-SW(issue #45 十七轮):switch 切换家庭——personal 永远可回 / shared 须在册
+ *   且未解散 / 指针唯一原子、scope_revision 不递增 / 被移除与解散后不可再切共享 /
+ *   日志零敏感 / 真实入口解析收口。
  * 零网络、零外部依赖;绝不 require wx-server-sdk。
  */
 
@@ -954,4 +957,165 @@ test("HHH-GLUE-2:真实入口全链 create → inviteCreate(真实 crypto 令牌
   assert.equal(st.role, "member");
   assert.equal(st.display_name, "胶水之家");
   assert.equal(st.household_id, created.household_id);
+});
+
+// ---------- HHH-SW:switch 切换家庭(issue #45 十七轮;#34 合同不弱化) ----------
+// 只更新 active 指针 + 客户端作用域刷新:不迁移数据、不递增 scope_revision;
+// personal 永远可回;shared 须在册且未解散;被移除/解散后不可再切共享。
+
+test("HHH-SW-1:个人用户——switch personal 永远可回且幂等;switch shared 无在册家庭 NOT_FOUND;target 非法 INVALID_INPUT", async function () {
+  var db = makeDb();
+  var a = await makeDeps(db, "o-sw-single");
+
+  var toPersonal = await hhHandler({ action: "switch", target: "personal" }, a);
+  assert.equal(toPersonal.ok, true, JSON.stringify(toPersonal));
+  assert.equal(toPersonal.already, true, "本就在个人家庭:幂等成功");
+  assert.equal(toPersonal.shared, false);
+  assert.equal(toPersonal.household_id, householdLib.personalHouseholdId("o-sw-single"), "status 摘要给个人家庭 id");
+  assert.equal(toPersonal.role, null);
+  assert.equal(toPersonal.scope_revision, null);
+  assert.equal(toPersonal.display_name, null);
+
+  var toShared = await hhHandler({ action: "switch", target: "shared" }, a);
+  assert.equal(toShared.ok, false, "从未加入共享家庭");
+  assert.equal(toShared.error, "NOT_FOUND", "无在册家庭明确拒绝,不猜");
+  assert.equal(toShared.message, "你还没有加入共享家庭");
+
+  var badTarget = await hhHandler({ action: "switch", target: "别的" }, a);
+  assert.equal(badTarget.error, "INVALID_INPUT");
+  var noTarget = await hhHandler({ action: "switch" }, a);
+  assert.equal(noTarget.error, "INVALID_INPUT");
+});
+
+test("HHH-SW-2:owner 来回切换——指针唯一且原子、解析域跟随、scope_revision 不递增、重复切幂等", async function () {
+  var db = makeDb();
+  var entries = [];
+  var logger = { log: function (e) { entries.push(e); } };
+  var a = await makeDeps(db, "o-sw-owner", { logger: logger });
+  var created = await createFamily(a, "山腰的家");
+  var hid = created.household_id;
+
+  // 共享 → 个人:撤指针,此后解析确定性回个人家庭
+  var toPersonal = await hhHandler({ action: "switch", target: "personal" }, a);
+  assert.equal(toPersonal.ok, true, JSON.stringify(toPersonal));
+  assert.equal(toPersonal.already, false);
+  assert.equal(toPersonal.shared, false);
+  assert.equal(toPersonal.household_id, householdLib.personalHouseholdId("o-sw-owner"));
+  var pointers = (await rawDocs(db, "active_household")).data.filter(function (r) {
+    return r.member_key === householdLib.memberKeyOf("o-sw-owner");
+  });
+  assert.equal(pointers.length, 0, "指针行已删除(active 指针唯一)");
+  var resolvedPersonal = await householdLib.resolveActiveHousehold(db, "o-sw-owner");
+  assert.equal(resolvedPersonal.ok, true);
+  assert.equal(resolvedPersonal.shared, false, "itemsApi/locations 解析域跟随指针回个人家庭");
+
+  // 个人 → 共享:在册且未解散 → 指针恢复,修订号不递增(切换不是成员变更事件)
+  var backShared = await hhHandler({ action: "switch", target: "shared" }, a);
+  assert.equal(backShared.ok, true, JSON.stringify(backShared));
+  assert.equal(backShared.already, false);
+  assert.equal(backShared.shared, true);
+  assert.equal(backShared.household_id, hid);
+  assert.equal(backShared.role, "owner");
+  assert.equal(backShared.display_name, "山腰的家");
+  assert.equal(backShared.scope_revision, created.scope_revision, "switch 不递增 scope_revision(#34 合同)");
+  var pointers2 = (await rawDocs(db, "active_household")).data.filter(function (r) {
+    return r.member_key === householdLib.memberKeyOf("o-sw-owner");
+  });
+  assert.equal(pointers2.length, 1, "指针唯一(单行,不双写)");
+  assert.equal(pointers2[0].household_id, hid);
+  var resolvedShared = await householdLib.resolveActiveHousehold(db, "o-sw-owner");
+  assert.equal(resolvedShared.ok, true);
+  assert.equal(resolvedShared.householdId, hid, "解析域跟随指针回共享家庭");
+
+  // 重复切同一个家庭:幂等
+  var again = await hhHandler({ action: "switch", target: "shared" }, a);
+  assert.equal(again.ok, true);
+  assert.equal(again.already, true, "已在目标家庭:幂等成功");
+  var pointers3 = (await rawDocs(db, "active_household")).data.filter(function (r) {
+    return r.member_key === householdLib.memberKeyOf("o-sw-owner");
+  });
+  assert.equal(pointers3.length, 1, "幂等路径不产生第二行指针");
+
+  // 家庭数据零迁移:共享域 items 原地不动,个人域未被触碰(数据不搬家)
+  var hhItems = (await rawDocs(db, "items")).data.filter(function (r) {
+    return r.household_id === hid;
+  });
+  assert.equal(hhItems.length, 0, "切换不复制/不迁移任何家庭数据");
+
+  // 日志零敏感:switch 只落白名单计量字段
+  var dump = JSON.stringify(entries);
+  assert.equal(dump.indexOf("o-sw-owner"), -1, "日志不得出现 openid");
+  assert.equal(dump.indexOf(householdLib.memberKeyOf("o-sw-owner")), -1, "日志不得出现 member_key");
+  assert.equal(dump.indexOf("山腰的家"), -1, "日志不得出现家庭名");
+  assert.equal(dump.indexOf(hid), -1, "日志不得出现 household_id");
+  for (var i = 0; i < entries.length; i++) {
+    var keys = Object.keys(entries[i]);
+    for (var k = 0; k < keys.length; k++) {
+      assert.ok(
+        ["action", "error", "ms", "count"].indexOf(keys[k]) !== -1,
+        "switch 日志出现越界字段:" + keys[k]
+      );
+    }
+  }
+});
+
+test("HHH-SW-3:成员被移除后不可再切共享(在册已失)——switch shared NOT_FOUND,解析保持个人家庭", async function () {
+  var db = makeDb();
+  var a = await makeDeps(db, "o-sw-owner2");
+  var b = await makeDeps(db, "o-sw-member2");
+  var created = await createFamily(a, "被移除之家");
+  var hid = created.household_id;
+  var invite = await hhHandler({ action: "inviteCreate" }, a);
+  var joined = await hhHandler({ action: "join", token: invite.invite.token }, b);
+  assert.equal(joined.ok, true, JSON.stringify(joined));
+  await refreshResolved(b, "o-sw-member2");
+
+  // 成员先切回个人,再切回共享:资格在册,来回自由
+  var toPersonal = await hhHandler({ action: "switch", target: "personal" }, b);
+  assert.equal(toPersonal.ok, true);
+  var backShared = await hhHandler({ action: "switch", target: "shared" }, b);
+  assert.equal(backShared.ok, true, JSON.stringify(backShared));
+  assert.equal(backShared.household_id, hid);
+
+  // owner 移除成员(指针被重置回个人家庭)→ 在册已失,不可再切共享
+  await refreshResolved(a, "o-sw-owner2");
+  var memberRows = (await rawDocs(db, "household_members")).data.filter(function (r) {
+    return r.member_key === householdLib.memberKeyOf("o-sw-member2");
+  });
+  var removed = await hhHandler({ action: "removeMember", member_key: memberRows[0].member_key }, a);
+  assert.equal(removed.ok, true, JSON.stringify(removed));
+  var denied = await hhHandler({ action: "switch", target: "shared" }, b);
+  assert.equal(denied.ok, false, "被移除后不可切共享");
+  assert.equal(denied.error, "NOT_FOUND");
+  var afterRemove = await householdLib.resolveActiveHousehold(db, "o-sw-member2");
+  assert.equal(afterRemove.shared, false, "解析保持个人家庭,共享域不可再进入");
+});
+
+test("HHH-SW-4:家庭解散后不可切共享(未解散门);owner 解散后指针已在个人家庭", async function () {
+  var db = makeDb();
+  var a = await makeDeps(db, "o-sw-dissolve");
+  var created = await createFamily(a, "解散之家");
+  var hid = created.household_id;
+  var dissolved = await hhHandler({ action: "dissolve" }, a);
+  assert.equal(dissolved.ok, true, JSON.stringify(dissolved));
+
+  var denied = await hhHandler({ action: "switch", target: "shared" }, a);
+  assert.equal(denied.ok, false, "已解散家庭的会员行是封存记录,不可切换进入");
+  assert.equal(denied.error, "NOT_FOUND");
+  var resolved = await householdLib.resolveActiveHousehold(db, "o-sw-dissolve");
+  assert.equal(resolved.shared, false, "解散后指针已在个人家庭");
+});
+
+test("HHH-SW-GLUE:真实入口 switch——A create 后 B(A)切个人/切共享经 index.js 解析收口", async function () {
+  var db = makeDb();
+  var entry = loadCloudFunction(path.join(ROOT, "cloudfunctions", "households", "index.js"), makeHouseholdsStub("o-glue-sw", db));
+  var created = await entry.main({ action: "create", display_name: "胶水切换之家" });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  var toPersonal = await entry.main({ action: "switch", target: "personal" });
+  assert.equal(toPersonal.ok, true, JSON.stringify(toPersonal));
+  assert.equal(toPersonal.shared, false);
+  var backShared = await entry.main({ action: "switch", target: "shared" });
+  assert.equal(backShared.ok, true, JSON.stringify(backShared));
+  assert.equal(backShared.shared, true);
+  assert.equal(backShared.household_id, created.household_id);
 });

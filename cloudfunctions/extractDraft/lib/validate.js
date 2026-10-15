@@ -32,6 +32,9 @@
  *     未换算的逐字子串;仅在 remind_at=null 且确有时间词时给出,子串/时间词
  *     校验失败置 null;明确日期与 vague 互斥。这是透明化,不是换算——
  *     任何相对/模糊日期都绝不换算成具体日子(不猜日期纪律一字不改)。
+ *   - v2:mount_path(十七轮,#18 红线语义升级)=「放进」路径预览,仅 certain=true
+ *     且位置分层明确时给出;纯方位段并入前段(既有分段逻辑)、首段纯方位/错序/
+ *     编造/形状非法一律 null 不猜;v1 draft 与 remind/vague 字段零回归。
  */
 
 const NAME_MAX = 50;
@@ -43,6 +46,16 @@ const ITEMS_MAX = 5;
 const REMIND_QUOTE_MAX = 200;
 const REMIND_KINDS = ["有效期", "开封后", "下次维护"];
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/* 「放进」路径预览(十七轮,#18 红线):段数/段长与 locations 节点同限 */
+const MOUNT_PATH_MAX_SEGMENTS = 6;
+const MOUNT_SEGMENT_MAX = 30;
+/* 纯方位词闭集:与 locations/lib/parse.js PURE_LOCATIVES 同款规则——「上」「左边」
+ * 这类词单独成段无语义。非首段的纯方位段并入前一实体段(既有分段逻辑:方位词
+ * 不另立层级);首段即纯方位 → 整体 null 不猜(方位词不能当房间/大区域)。 */
+const PURE_LOCATIVES = [
+  "上面", "下面", "里面", "上边", "下边", "里边", "左边", "右边",
+  "左侧", "右侧", "中间", "旁边", "附近", "上方", "下方", "上", "下", "里", "内", "中",
+];
 /* 模糊时间表述的宽松时间词形(#36 0.6.0 真机反馈 Fix 4):remind_vague_quote
  * 至少要含一个时间词才可信(「半年后」「下个月」「大概冬天」「快过期了」全覆盖);
  * 这只是防滥用的形状门,主门仍是「原话逐字子串」锚定。 */
@@ -232,6 +245,73 @@ function validateVagueQuote(item, reminderFields, normalizedOriginal) {
 }
 
 /*
+ * 「放进」路径预览 mount_path(十七轮,#18 红线语义升级的服务端投影):
+ * 仅当该件 certain=true(位置锚定校验之后的最终判定)且位置能明确分层时,
+ * 把位置拆成从大到小的路径段(如「主卧的柜子上」→ ["主卧","柜子上"]),
+ * 供确认卡「放进」行明示将放入的路径。这是预览不是写入——真正建路径要等
+ * 用户点「确认记住」后由 locations.ensureAndLink 落地,绝不静默建路径。
+ * 服务端硬门(任一失败整体置 null,绝不猜、绝不废件):
+ * - certain !== true 或位置为空 → null(certain=false 一律先进未归类);
+ * - 模型未给 / null → null;非数组 / 空数组 / 超 6 段 → null;
+ * - 段非字符串 / 去空白为空 / 超 30 码点(与 locations 节点名同限)→ null;
+ * - 非首段纯方位词(「上面」「左边」)并入前一实体段(既有分段逻辑:方位词
+ *   不另立层级);首段即纯方位 → null(方位词不能当房间,不猜);
+ * - 有序不重叠锚定(去空白比对,同 source_quote 口径):每段必须按顺序逐字
+ *   出现在该件自己的 location_text 内——错序 / 编造 / 拼接一律 null。
+ */
+function validateMountPath(item, draft) {
+  if (draft.certain !== true || draft.location_text === "") {
+    return null;
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(item, "mount_path") ||
+    item.mount_path === null ||
+    item.mount_path === undefined
+  ) {
+    return null;
+  }
+  if (!Array.isArray(item.mount_path)) {
+    return null;
+  }
+  if (item.mount_path.length < 1 || item.mount_path.length > MOUNT_PATH_MAX_SEGMENTS) {
+    return null;
+  }
+  var cleaned = [];
+  for (var i = 0; i < item.mount_path.length; i++) {
+    var seg = item.mount_path[i];
+    if (typeof seg !== "string") {
+      return null;
+    }
+    var trimmed = seg.trim();
+    if (codePointLength(trimmed) < 1 || codePointLength(trimmed) > MOUNT_SEGMENT_MAX) {
+      return null;
+    }
+    if (PURE_LOCATIVES.indexOf(stripWhitespace(trimmed)) !== -1) {
+      if (cleaned.length === 0) {
+        return null; // 首段即纯方位:方位词不能当房间/大区域,整体不猜
+      }
+      continue; // 并入前一实体段(既有分段逻辑),方位词不另立层级
+    }
+    cleaned.push(trimmed);
+  }
+  if (cleaned.length < 1) {
+    return null;
+  }
+  // 有序不重叠锚定:每段按顺序逐字出现在该件 location_text 内(游标只前进)
+  var anchor = stripWhitespace(draft.location_text);
+  var cursor = 0;
+  for (var k = 0; k < cleaned.length; k++) {
+    var norm = stripWhitespace(cleaned[k]);
+    var pos = anchor.indexOf(norm, cursor);
+    if (pos === -1) {
+      return null; // 错序或编造:不猜
+    }
+    cursor = pos + norm.length;
+  }
+  return cleaned;
+}
+
+/*
  * 单件草稿的字段校验与修正(v1/v2 共用):
  * 返回 { ok:true, draft } 或 { ok:false, error:"AI_UNAVAILABLE" }。
  */
@@ -377,6 +457,9 @@ function validateDrafts(rawText, originalText, todayYmd) {
             reminderFields,
             normalizedOriginal,
           ),
+          // 「放进」路径预览(十七轮):用降级后的最终 draft 判定——位置锚定
+          // 校验把该件降为 certain=false 时路径一律 null;与提醒字段互不影响
+          mount_path: validateMountPath(item, draft),
         },
       ),
     );

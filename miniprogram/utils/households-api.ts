@@ -43,6 +43,7 @@ import type {
   HouseholdMemberListResponse,
   HouseholdUpdateProfileResponse,
   HouseholdStatusResponse,
+  HouseholdSwitchResponse,
   HouseholdsApiEvent,
 } from "../types";
 
@@ -399,6 +400,65 @@ export async function dissolveFamily(): Promise<void> {
   } catch (e) {
     // dissolve 已成功;刷新失败由服务端硬门 + 漂移刷新兜底
   }
+}
+
+/**
+ * switch(十七轮切换家庭,#34 合同不弱化):只让服务端更新当前家庭指针,
+ * 绝不迁移数据、不另起缓存体系。成功后:
+ * - 响应携带新家庭 status 摘要,经既有 captureAndInvalidate 捕获新作用域
+ *   (id 变化 → 显式 clearLocationsCache 接入失效代数 + 作用域代数递增,
+ *   家庭名/自资料按新家重置);
+ * - 再追加一次 fetchHouseholdStatus 走既有链刷新家庭名与自资料(switch
+ *   响应不带自资料);刷新失败不改变「已切换」事实——作用域已按 switch
+ *   响应捕获,服务端硬门与下次 status 兜底,绝不回滚指针。
+ * 失败原样抛出(服务端中文文案),调用方如实提示、屏上内容不动(不半切)。
+ */
+export async function switchFamily(
+  target: "personal" | "shared",
+): Promise<HouseholdSwitchResponse> {
+  const r = await callHouseholds({ action: "switch", target });
+  if (
+    typeof r.household_id !== "string" ||
+    (r.shared !== true && r.shared !== false)
+  ) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (r.shared === true) {
+    if (
+      (r.role !== "owner" && r.role !== "member") ||
+      typeof r.scope_revision !== "number" ||
+      !Number.isInteger(r.scope_revision) ||
+      r.scope_revision < 1
+    ) {
+      throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+  } else if (
+    (r.role !== null && r.role !== undefined) ||
+    (r.scope_revision !== null && r.scope_revision !== undefined)
+  ) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  captureAndInvalidate(
+    r.household_id,
+    r.shared,
+    r.scope_revision,
+    typeof r.display_name === "string" ? r.display_name : null,
+  );
+  try {
+    await fetchHouseholdStatus();
+  } catch (e) {
+    // switch 已成功;自资料刷新失败不回滚(服务端硬门 + 下次 status 兜底)
+  }
+  return {
+    ok: true,
+    target,
+    already: r.already === true,
+    household_id: r.household_id,
+    shared: r.shared === true,
+    role: r.role === "owner" || r.role === "member" ? r.role : null,
+    scope_revision: typeof r.scope_revision === "number" ? r.scope_revision : null,
+    display_name: typeof r.display_name === "string" ? r.display_name : null,
+  };
 }
 
 /* ---------------- 邀请与成员(owner 独管/持令牌者) ---------------- */

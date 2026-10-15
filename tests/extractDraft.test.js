@@ -1667,3 +1667,189 @@ test("v2 vague 对抗:模型把模糊时间折算成日期 → 日期被硬门�
   // vague 如实保留,用户看到「时间没换算:『半年后』」而不是静默丢弃
   assert.equal(res.drafts[0].remind_vague_quote, "半年后", "拦下折算后透明标记如实保留");
 });
+
+// ---------- 十七轮「放进」路径预览 mount_path(#18 红线语义升级) ----------
+// 仅 certain=true 且位置分层明确时逐字投影;模糊/错序/编造/纯方位首段一律 null 不猜;
+// v1 与 remind/vague 字段零回归。这是预览不是写入——建路径要等用户确认后
+// 由 locations.ensureAndLink 落地(绝不静默建路径)。
+
+test("v2 mount_path 正例:位置明确分层 → 路径逐字投影(主卧/柜子上);单层位置给单段数组", async function () {
+  var { res } = await runV2("降压药放在主卧的柜子上。", rawItems([
+    { name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上"] },
+  ]));
+  assert.equal(res.ok, true);
+  assert.deepStrictEqual(res.drafts[0].mount_path, ["主卧", "柜子上"], "明确分层的路径如实投影");
+
+  var single = validateDrafts(
+    rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙放玄关", mount_path: ["玄关"] }]),
+    "钥匙放玄关",
+    ANCHOR_TODAY,
+  );
+  assert.deepStrictEqual(single.drafts[0].mount_path, ["玄关"], "单层位置给单段数组(确认卡能明示「放进玄关」)");
+});
+
+test("v2 mount_path 正例:多件时逐件独立投影,一件模糊不带不影响另一件", function () {
+  var result = validateDrafts(
+    rawItems([
+      { name: "感冒药", location_text: "药箱第一格", certain: true, qualifiers: [], source_quote: "感冒药放药箱第一格", mount_path: ["药箱", "第一格"] },
+      { name: "充电线", location_text: "", certain: false, qualifiers: [], source_quote: "充电线不知道放哪了", mount_path: null },
+    ]),
+    "感冒药放药箱第一格,充电线不知道放哪了。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true);
+  assert.deepStrictEqual(result.drafts[0].mount_path, ["药箱", "第一格"], "确定件照常带路径");
+  assert.equal(result.drafts[1].mount_path, null, "不确定件一律 null(先进未归类)");
+});
+
+test("v2 mount_path 反例:certain=false 时模型违规给了路径 → 强制 null", function () {
+  var result = validateDrafts(
+    rawItems([
+      { name: "充电线", location_text: "", certain: false, qualifiers: [], source_quote: "充电线好像在桌上", mount_path: ["桌子"] },
+    ]),
+    "充电线好像在桌上。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].certain, false);
+  assert.equal(result.drafts[0].mount_path, null, "certain=false 一律不挂路径(红线:先进未归类)");
+});
+
+test("v2 mount_path 反例:模糊说法不猜——「某个柜子」整段照 location_text 才可能通过,拆层必被锚定拦下", function () {
+  // 模型对模糊位置自觉给 null:透传
+  var honest = validateDrafts(
+    rawItems([{ name: "扳手", location_text: "某个柜子里", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: null }]),
+    "扳手在某个柜子里。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(honest.drafts[0].mount_path, null, "模型不给 → null");
+  assert.equal(honest.drafts[0].location_text, "某个柜子里", "位置本身照常保留");
+
+  // 模型把模糊位置硬拆成编造层(「柜子」在、「里」也在,但「卧室」是编的)→ 锚定拦下
+  var guessed = validateDrafts(
+    rawItems([{ name: "扳手", location_text: "某个柜子里", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: ["卧室", "柜子"] }]),
+    "扳手在某个柜子里。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(guessed.drafts[0].mount_path, null, "段不在该件 location_text 内 → null 不猜");
+  assert.equal(guessed.drafts[0].name, "扳手", "路径置 null 不废件");
+});
+
+test("v2 mount_path 反例:错序 / 编造 / 拼接段一律 null(有序不重叠锚定)", function () {
+  // 错序:段都在位置文本里,但顺序与原文不一致
+  var reversed = validateDrafts(
+    rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["柜子上", "主卧"] }]),
+    "降压药放在主卧的柜子上。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(reversed.drafts[0].mount_path, null, "错序必须拦下(游标只前进)");
+
+  // 拼接:把两段拼成一个不存在的名字
+  var joined = validateDrafts(
+    rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上", "主卧柜子上"] }]),
+    "降压药放在主卧的柜子上。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(joined.drafts[0].mount_path, null, "拼接段锚定失败 → null");
+});
+
+test("v2 mount_path 反例:形状非法(非数组/空数组/超 6 段/非字符串段/空段/超 30 码点段)→ null 不废件", function () {
+  var cases = [
+    { label: "非数组", mount_path: "主卧" },
+    { label: "空数组", mount_path: [] },
+    { label: "超 6 段", mount_path: ["a", "b", "c", "d", "e", "f", "g"] },
+    { label: "非字符串段", mount_path: ["主卧", 42] },
+    { label: "空白段", mount_path: ["主卧", "   "] },
+    { label: "超 30 码点段", mount_path: ["主卧", "柜".repeat(31)] },
+  ];
+  for (var i = 0; i < cases.length; i++) {
+    var c = cases[i];
+    var result = validateDrafts(
+      rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: c.mount_path }]),
+      "降压药放在主卧的柜子上。",
+      ANCHOR_TODAY,
+    );
+    assert.equal(result.ok, true, c.label + ":不废件");
+    assert.equal(result.drafts[0].mount_path, null, c.label + ":一律 null");
+  }
+});
+
+test("v2 mount_path 方位词:非首段纯方位并入前段(既有分段逻辑);首段即纯方位 → 整体 null 不猜", function () {
+  // 「书房书桌上面」:模型给出纯方位段「上面」→ 并入前段,路径为 书房/书桌
+  var merged = validateDrafts(
+    rawItems([{ name: "台灯", location_text: "书房书桌上面", certain: true, qualifiers: [], source_quote: "台灯在书房书桌上面", mount_path: ["书房", "书桌", "上面"] }]),
+    "台灯在书房书桌上面。",
+    ANCHOR_TODAY,
+  );
+  assert.deepStrictEqual(merged.drafts[0].mount_path, ["书房", "书桌"], "纯方位段不另立层级(方位词不单独成段)");
+
+  // 首段即纯方位:方位词不能当房间/大区域 → 整体不猜
+  var locativeRoot = validateDrafts(
+    rawItems([{ name: "台灯", location_text: "上面一层", certain: true, qualifiers: [], source_quote: "台灯在上面一层", mount_path: ["上面", "一层"] }]),
+    "台灯在上面一层。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(locativeRoot.drafts[0].mount_path, null, "首段纯方位 → null(拿不准不给路径)");
+  assert.equal(locativeRoot.drafts[0].location_text, "上面一层", "位置原文照常保留");
+});
+
+test("v2 mount_path 零回归:与提醒三项/vague 并存互不影响;certain 降级时路径随位置一起清空", function () {
+  // 同件带明确日期 + 路径:两组字段互不干扰
+  var both = validateDrafts(
+    rawItems([Object.assign({}, ANCHOR_BASE, {
+      mount_path: ["药箱", "第一格"],
+      remind_at: "2026-11-20",
+      remind_kind: "有效期",
+      remind_quote: "11月20号",
+    })]),
+    ANCHOR_ORIGINAL,
+    ANCHOR_TODAY,
+  );
+  assert.equal(both.drafts[0].remind_at, "2026-11-20", "提醒三项照常");
+  assert.deepStrictEqual(both.drafts[0].mount_path, ["药箱", "第一格"], "路径照常");
+
+  // 位置锚定校验把该件降级(位置不在证据片段内)→ 位置清空,certain=false,路径一并 null
+  var downgraded = validateDrafts(
+    rawItems([
+      { name: "钥匙", location_text: "火星", certain: true, qualifiers: [], source_quote: "钥匙放玄关", mount_path: ["火星"] },
+    ]),
+    "钥匙放玄关。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(downgraded.drafts[0].certain, false, "位置锚定失败按不肯定处理(既有契约)");
+  assert.equal(downgraded.drafts[0].mount_path, null, "降级后路径一律 null");
+});
+
+test("v2 mount_path 零回归:v1 响应不带 mount_path(模型多给的字段被忽略)", async function () {
+  var res = await handler({ text: "降压药放在主卧的柜子上" }, {
+    logger() {},
+    callLLM() {
+      return Promise.resolve(JSON.stringify({
+        name: "降压药",
+        location_text: "主卧的柜子上",
+        certain: true,
+        qualifiers: [],
+        mount_path: ["主卧", "柜子上"], // v1 模型多给:必须被忽略
+      }));
+    },
+  });
+  assert.equal(res.ok, true);
+  assert.deepStrictEqual(
+    res.draft,
+    { name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [] },
+    "v1 draft 形状零变化(不出现 mount_path)",
+  );
+});
+
+test("v2 mount_path 纪律:prompt 定义该字段与「绝不猜测」规则;第 7 条不猜日期纪律原样在册", async function () {
+  var { prompt } = await runV2("降压药放在主卧的柜子上。", rawItems([
+    { name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上"] },
+  ]));
+  assert.ok(prompt.indexOf("mount_path") !== -1, "prompt 应定义 mount_path");
+  assert.ok(prompt.indexOf("绝不猜测、绝不编造层次") !== -1, "必须写明分层不猜");
+  assert.ok(prompt.indexOf("certain 为 false 的物品 mount_path 必须为 null") !== -1, "必须写明不确定不给路径");
+  assert.ok(prompt.indexOf("纯方位词不能单独成一层") !== -1, "必须写明方位词不单独成层");
+  // 既有 v2 契约零变化(既有纪律句逐字在册)
+  assert.ok(prompt.indexOf("一律 remind_at=null、remind_kind=null、remind_quote=null") !== -1, "第 7 条不猜日期纪律一字不改");
+  assert.ok(prompt.indexOf("禁止改写或拼接原文") !== -1, "证据规则不得被挤掉");
+});

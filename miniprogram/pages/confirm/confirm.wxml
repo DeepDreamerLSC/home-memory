@@ -93,6 +93,18 @@
               bindinput="onRowLocationInput"
             />
           </view>
+          <!-- 「放进」行(十七轮,#18 红线语义升级):AI 确定时明示将放入的路径,
+               「换」=从家里已有位置里逐层选;点「确认记住」才建路径并放进去;
+               mount_path 为空不显示该行(certain=false 照旧先进「尚未归类」),绝不静默建路径 -->
+          <view wx:if="{{ rows[0].mountPathText }}" class="sumrow {{ rows[0].remindAt || rows[0].remindTouched ? 'line' : '' }}">
+            <view class="k">放进</view>
+            <view class="v">{{ rows[0].mountPathText }}</view>
+            <view
+              class="sum-edit"
+              data-index="0"
+              bindtap="onMountSwapTap"
+            ><view class="sum-edit-face">换</view></view>
+          </view>
         </block>
         <!-- 提醒行(#36):原话里明确说了日期才显示;改=日期选择器弹层,✕=连日期一起清除(灰显「不提醒」);没提取到不催 -->
         <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sumrow">
@@ -221,6 +233,16 @@
             bindinput="onRowLocationInput"
           />
         </view>
+        <!-- 「将放入」副文(十七轮):certain 行明示挂靠预览,「换」=同款选位置;
+             模糊行无副文(=确认后先进「尚未归类」),绝不静默建路径 -->
+        <view wx:if="{{ item.mountPathText }}" class="row-mount">
+          <text class="row-mount-text">将放入:{{ item.mountPathText }}</text>
+          <text
+            class="row-mount-swap"
+            data-index="{{ index }}"
+            catchtap="onMountSwapTap"
+          >换</text>
+        </view>
         <!-- 提醒角标(#36):原话里明确说了日期的行在副文下小字标出;不参与勾选逻辑 -->
         <view wx:if="{{ item.remindAt }}" class="remind-badge">{{ item.remindBadgeText }}</view>
         <!-- 时间没换算小灰标(0.6.0 真机反馈 Fix 4):纯提示,不是换算 -->
@@ -260,6 +282,7 @@
       </button>
     </block>
 
-    <view class="trust-line">你确认后,我才会真正记住。</view>
+    <!-- 信任句:有「放进」预览时明示路径也还没放(十七轮);其余场景沿用 -->
+    <view class="trust-line">{{ rows.length === 1 && rows[0].mountPathText ? '点「确认记住」之前,什么都不会保存;「放进」的位置也还没放。' : '你确认后,我才会真正记住。' }}</view>
   </block>
 </view>
