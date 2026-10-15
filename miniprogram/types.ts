@@ -130,14 +130,19 @@ export type ItemsApiEvent =
   | { action: "list"; limit?: number }
   | (
       {
-        /** 到期用完了(issue #36):把该 item 全部 active 提醒收掉;period_days>0 时按周期再生下次 */
+        /** 到期用完了(issue #36):把该 item 的到期提醒收掉;period_days>0 时按周期再生下次 */
         action: "remindComplete";
         item_id: string;
-        /** 周期天数(0-3650 整数;缺省/0=不再生);服务端以「完成日(UTC)+ period_days」算下次日期 */
+        /**
+         * 提醒轮次号(PR #52 B1):remindList 行返回的 generation,服务端只完成
+         * 用户实际看到的那一轮(条件更新);缺省=旧协议宽口径
+         */
+        expected_generation?: number;
+        /** 周期天数(0-3650 整数;缺省/0=不再生);下次日期=完成基准日 + period_days */
         period_days?: number;
       } & ScopeWriteBinding
     )
-  | ({ action: "remindClear"; item_id: string } & ScopeWriteBinding)
+  | ({ action: "remindClear"; item_id: string; expected_generation?: number } & ScopeWriteBinding)
   | (
       {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
@@ -147,6 +152,11 @@ export type ItemsApiEvent =
         due_date: string;
         /** 提醒类别(缺省「下次维护」;携带须在冻结词表 有效期/开封后/下次维护 内) */
         kind?: RemindKind;
+        /**
+         * 提醒轮次号(PR #52 B1):页面所见轮次(0=页面确认无提醒,补录);
+         * 与服务端不符 → VERSION_CONFLICT,绝不静默覆盖他人后来更新的提醒
+         */
+        expected_generation?: number;
       } & ScopeWriteBinding
     )
   | { action: "remindList" };
@@ -198,6 +208,11 @@ export interface RemindRow {
   /** YYYY-MM-DD(真实日历日) */
   due_date: string;
   kind: RemindKind;
+  /**
+   * 提醒轮次号(PR #52 B1,同一物品内单调递增):写操作 expected_generation
+   * 的前置条件来源;旧云函数窗口可能缺省(此时客户端不携带轮次号,走旧协议)
+   */
+  generation?: number;
 }
 
 export interface RemindListResponse {

@@ -72,6 +72,7 @@ Page({
                 location_text: r.location_text,
                 due_date: r.due_date,
                 kind: r.kind,
+                generation: r.generation,
                 initial: r.name.length > 0 ? r.name[0] : "?",
                 pillText: pill.text,
             });
@@ -114,6 +115,8 @@ Page({
     /**
      * 「用完了」:先确认,再调 remindComplete;周期物品(下次维护)问下次
      * 周期并再生。完成后刷新列表(收掉的消失、再生的按新日期归组)。
+     * 请求携带行上的提醒轮次号(PR #52 B1):服务端只完成用户看到的那一轮,
+     * 这轮已被家人处理过 → VERSION_CONFLICT,如实刷新(绝不误伤新一轮)。
      */
     async onDoneTap(e) {
         if (this.data.completing) {
@@ -132,6 +135,7 @@ Page({
             const res = await (0, api_1.callItemsApi)({
                 action: "remindComplete",
                 item_id: row.item_id,
+                ...(row.generation !== undefined ? { expected_generation: row.generation } : {}),
                 ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
             });
             if (decision.periodDays !== null && res.reminder) {
@@ -147,11 +151,16 @@ Page({
             await this.load();
         }
         catch (err) {
-            if (err &&
-                typeof err === "object" &&
-                err.code === "NOT_FOUND") {
+            const code = err && typeof err === "object" ? err.code : undefined;
+            if (code === "NOT_FOUND") {
                 // 别处刚处理过(重复完成):刷新收敛,不报吓人的错
                 wx.showToast({ title: "这条刚处理过,已刷新", icon: "none" });
+                await this.load();
+                return;
+            }
+            if (code === "VERSION_CONFLICT") {
+                // 这一轮已被家人处理并换了新提醒(PR #52 B1):刷新看最新,绝不误伤
+                wx.showToast({ title: "这条刚被家人处理过,已刷新", icon: "none" });
                 await this.load();
                 return;
             }

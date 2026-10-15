@@ -242,12 +242,13 @@ function reminders(deps) {
   return deps.db.collection(REMINDERS_COLLECTION);
 }
 
-function buildReminderDoc(deps, itemId, dueDate, kind, quote, now) {
+function buildReminderDoc(deps, itemId, dueDate, kind, quote, now, generation) {
   return {
     _id: "rd_" + deps.genId(),
     household_id: deps.householdId,
     item_id: itemId,
     status: "active",
+    generation: generation,
     due_date: dueDate,
     kind: kind,
     quote: quote,
@@ -256,10 +257,92 @@ function buildReminderDoc(deps, itemId, dueDate, kind, quote, now) {
 }
 
 /**
+ * 提醒轮次号(PR #52 复审 B1):同一 item 内单调递增、绝不重置,
+ * 标识「用户看到的那一轮 active 提醒」。写操作携带 remindList 行的
+ * generation 做条件更新(CAS):旧页/并发请求命中不了新一轮,绝不误伤。
+ */
+async function nextGeneration(deps, itemId) {
+  var rows = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId })
+    .get();
+  var data = (rows && rows.data) || [];
+  var max = 0;
+  for (var i = 0; i < data.length; i++) {
+    var g = data[i].generation;
+    if (Number.isInteger(g) && g > max) {
+      max = g;
+    }
+  }
+  return max + 1;
+}
+
+/**
+ * 周期再生行的确定性 _id(item + 目标轮次唯一):并发下两个请求对同一轮
+ * 再生只会插成同一 _id,第二个插入被集合 _id 唯一性拒绝(E11000 同款),
+ * 捕获后回查收敛——「每 item 至多一条 active、同一轮至多再生一次」由此保证,
+ * 不依赖先查后插的窄窗口。
+ */
+function regenReminderId(itemId, generation) {
+  return "rg_" + itemId + "_g" + generation;
+}
+
+function buildRegenDoc(deps, itemId, generation, dueDate, now) {
+  return {
+    _id: regenReminderId(itemId, generation),
+    household_id: deps.householdId,
+    item_id: itemId,
+    status: "active",
+    generation: generation,
+    due_date: dueDate,
+    kind: "下次维护",
+    quote: "",
+    created_at: now
+  };
+}
+
+/** expected_generation 入参校验:可缺省(旧协议);携带须为 ≥0 的整数(0=客户端确认无 active) */
+function validExpectedGeneration(event) {
+  var v = event.expected_generation;
+  if (v === undefined || v === null) {
+    return undefined;
+  }
+  if (!Number.isInteger(v) || v < 0) {
+    return "INVALID";
+  }
+  return v;
+}
+
+/**
+ * 作废该 item 全部 done 行上的「欠账再生」标记(next_period_days/next_due):
+ * 用户已显式改设/清除提醒,历史欠账不再可被治愈复活(防旧欠账日后冒出新提醒)。
+ */
+async function clearOwedRegen(deps, itemId) {
+  var rows = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, status: "done" })
+    .get();
+  var data = (rows && rows.data) || [];
+  for (var i = 0; i < data.length; i++) {
+    if (data[i].next_period_days > 0) {
+      await reminders(deps)
+        .where({ _id: data[i]._id })
+        .update({ data: { next_period_days: 0, next_due: "" } });
+    }
+  }
+}
+
+/**
  * 收敛式补建:该 item 无 active 提醒时才补一条。
  * 场景:首次 create 已建 item 但 reminder 追加写入中断(无跨文档事务),
  * 客户端原键原内容重试命中 duplicated 分支——在这里自愈补上,不丢用户
  * 已确认的提醒,也不重复补第二条(已有 active 时原样返回)。
+ */
+/**
+ * 收敛式补建:该 item 无 active 提醒时才补一条。
+ * 场景:首次 create 已建 item 但 reminder 追加写入中断(无跨文档事务),
+ * 客户端原键原内容重试命中 duplicated 分支——在这里自愈补上,不丢用户
+ * 已确认的提醒,也不重复补第二条(已有 active 时原样返回)。
+ * 补建行 _id 确定性派生(item + 目标轮次):并发重试的双补建只落一条,
+ * 第二笔被 _id 唯一性拒绝后回查收敛(同一 create 请求的同一意图)。
  */
 async function ensureActiveReminder(deps, itemId, reminder) {
   var existing = await reminders(deps)
@@ -268,8 +351,30 @@ async function ensureActiveReminder(deps, itemId, reminder) {
   if (existing.data && existing.data.length > 0) {
     return existing.data[0];
   }
-  var doc = buildReminderDoc(deps, itemId, reminder.due_date, reminder.kind, reminder.quote, deps.now());
-  await reminders(deps).add({ data: doc });
+  var doc = buildReminderDoc(
+    deps,
+    itemId,
+    reminder.due_date,
+    reminder.kind,
+    reminder.quote,
+    deps.now(),
+    await nextGeneration(deps, itemId)
+  );
+  doc._id = "rh_" + itemId + "_g" + doc.generation;
+  try {
+    await reminders(deps).add({ data: doc });
+  } catch (e) {
+    if (!isDuplicateKeyError(e)) {
+      throw e;
+    }
+    var twin = await reminders(deps)
+      .where({ household_id: deps.householdId, item_id: itemId, status: "active" })
+      .get();
+    if (twin.data && twin.data.length > 0) {
+      return twin.data[0];
+    }
+    throw e;
+  }
   return doc;
 }
 
@@ -304,14 +409,15 @@ async function fetchActiveReminders(deps) {
   throw new Error("reminders query exceeded " + MAX_PAGES * PAGE_SIZE + " documents");
 }
 
-/** remindList 行投影:物品名/位置文本/due/kind/item_id,不带 quote 与内部字段 */
+/** remindList 行投影:物品名/位置文本/due/kind/item_id/generation,不带 quote 与内部字段 */
 function remindRow(doc, item) {
   return {
     item_id: doc.item_id,
     name: item.name,
     location_text: item.location_text,
     due_date: doc.due_date,
-    kind: doc.kind
+    kind: doc.kind,
+    generation: doc.generation
   };
 }
 
@@ -402,7 +508,15 @@ async function createItem(event, deps) {
     // item 文档由本次新建,直接追加提醒文档(无跨文档事务:
     // 追加失败整体上抛,客户端原键重试走 duplicated 分支收敛自愈)
     await reminders(deps).add({
-      data: buildReminderDoc(deps, item._id, reminder.due_date, reminder.kind, reminder.quote, deps.now())
+      data: buildReminderDoc(
+        deps,
+        item._id,
+        reminder.due_date,
+        reminder.kind,
+        reminder.quote,
+        deps.now(),
+        1
+      )
     });
   }
   return { ok: true, item: project(item), duplicated: false };
@@ -695,16 +809,30 @@ async function remindListItems(event, deps) {
 }
 
 /**
- * remindComplete:入参 { action:"remindComplete", item_id, period_days? }。
+ * remindComplete:入参 { action:"remindComplete", item_id, expected_generation?,
+ * period_days?, complete_date? }。
  * period_days 缺省或 0 表示不周期再生;携带则须为 0-3650 的整数,否则 INVALID_INPUT。
+ * expected_generation(PR #52 B1):remindList 行返回的提醒轮次号,携带时服务端
+ * 只完成「用户实际看到的那一轮」——条件更新命中 0 条即本轮已非该轮:
+ * 他轮仍在 → VERSION_CONFLICT(绝不误伤新一轮);本轮已完成且已再生、请求与
+ * 当时一致 → 幂等收敛成功;本轮已完成但再生曾失败(done 行欠账标记)→ 治愈
+ * 补建后如实成功。缺省 = 旧协议宽口径(该 item 全部 active 置 done),行为不变。
  * 物品必须存在且属于当前家庭且未删(否则 NOT_FOUND);该 item 无 active 提醒也
  * NOT_FOUND(已完成的重复完成按刷新列表收敛,绝不静默复活)。
- * 将该 item 全部 active 提醒置 done 并记 completed_at;period_days>0 时再生一条
- * 新 active 提醒:due_date = 完成日(服务端当天,UTC 日期)+ period_days 天,
+ * 将命中的 active 提醒置 done 并记 completed_at;period_days>0 时再生一条新
+ * active 提醒:due_date = 完成基准日 + period_days 天(跨月/跨年自然进位),
  * kind 固定「下次维护」(周期再生语义),quote 为空(再生提醒无原话锚点)。
+ * 再生行的 _id 由 (item, 下一轮次) 确定性派生:并发双写只插成一条,第二笔被
+ * _id 唯一性拒绝后回查收敛——并发/重试/中断后「每 item 至多一条 active、
+ * 同一轮至多完成与再生一次」。再生插入失败时如实上抛(绝不假装完成),done 行
+ * 携带 next_period_days/next_due 欠账标记,同参数重试走治愈路径恢复。
  */
 async function remindCompleteItem(event, deps) {
   if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var expectedGeneration = validExpectedGeneration(event);
+  if (expectedGeneration === "INVALID") {
     return fail("INVALID_INPUT");
   }
   var periodDays = 0;
@@ -726,54 +854,213 @@ async function remindCompleteItem(event, deps) {
   }
   var item = got.data[0];
 
-  var actives = await reminders(deps)
-    .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
-    .get();
-  var rows = (actives && actives.data) || [];
-  if (rows.length === 0) {
-    return fail("NOT_FOUND");
+  var now = deps.now();
+  var regenDue = null;
+  if (periodDays > 0) {
+    regenDue = addDays(now.slice(0, 10), periodDays);
+  }
+  // 条件更新(CAS):带轮次号时只命中「用户看到的那一轮」;
+  // 命中 0 条 → 本轮已非该轮,交由 divergence 裁定(冲突/收敛/治愈),绝不误伤
+  var cond = { household_id: deps.householdId, item_id: event.item_id, status: "active" };
+  if (expectedGeneration !== undefined) {
+    cond.generation = expectedGeneration;
+  }
+  var upd = await reminders(deps).where(cond).update({
+    data: {
+      status: "done",
+      completed_at: now,
+      next_period_days: periodDays,
+      next_due: regenDue === null ? "" : regenDue
+    }
+  });
+  var updated = (upd && upd.stats && upd.stats.updated) || 0;
+  if (updated === 0) {
+    if (expectedGeneration === undefined) {
+      // 旧协议:无 active 即 NOT_FOUND(既有语义,刷新收敛)
+      return fail("NOT_FOUND");
+    }
+    return completeDivergence(deps, item, expectedGeneration, periodDays);
   }
 
-  var now = deps.now();
-  await reminders(deps)
-    .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
-    .update({ data: { status: "done", completed_at: now } });
   if (periodDays > 0) {
-    var newDue = addDays(now.slice(0, 10), periodDays);
-    var doc = buildReminderDoc(deps, event.item_id, newDue, "下次维护", "", now);
-    await reminders(deps).add({ data: doc });
-    return { ok: true, reminder: remindRow(doc, item) };
+    var newGen;
+    if (expectedGeneration !== undefined) {
+      newGen = expectedGeneration + 1;
+    } else {
+      // 旧协议:以本次刚置 done 的行(completed_at 唯一)推下一轮次
+      var justDone = await reminders(deps)
+        .where({
+          household_id: deps.householdId,
+          item_id: event.item_id,
+          status: "done",
+          completed_at: now
+        })
+        .get();
+      var doneData = (justDone && justDone.data) || [];
+      var maxGen = 0;
+      for (var i = 0; i < doneData.length; i++) {
+        if (Number.isInteger(doneData[i].generation) && doneData[i].generation > maxGen) {
+          maxGen = doneData[i].generation;
+        }
+      }
+      newGen = maxGen + 1;
+    }
+    return regenOrConverge(deps, item, newGen, regenDue, now);
   }
   return { ok: true };
 }
 
 /**
- * remindClear:入参 { action:"remindClear", item_id }。
+ * 条件更新命中 0 条后的裁定(仅 expected_generation 携带时):
+ * ① 已有更新的一轮 active(他人完成了本轮并再生/改设):请求与该轮完成时的
+ *    周期一致 → 幂等收敛成功(replayed);否则 VERSION_CONFLICT,绝不误伤;
+ * ② 无 active 且该轮 done 行带欠账标记(再生插入曾失败)→ 治愈补建(同参数),
+ *    这是「再生失败」的恢复路径;无欠账 → NOT_FOUND(刷新收敛,旧语义)。
+ */
+async function completeDivergence(deps, item, expectedGeneration, periodDays) {
+  var itemId = item._id;
+  var actives = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, status: "active" })
+    .get();
+  var activeRows = (actives && actives.data) || [];
+  var doneRes = await reminders(deps)
+    .where({
+      household_id: deps.householdId,
+      item_id: itemId,
+      generation: expectedGeneration,
+      status: "done"
+    })
+    .get();
+  var doneRow = (doneRes.data || [])[0];
+
+  if (activeRows.length > 0) {
+    // 收敛豁免:下一轮恰为该轮的周期再生行,且与本次请求的周期一致
+    if (
+      doneRow &&
+      periodDays > 0 &&
+      doneRow.next_period_days === periodDays
+    ) {
+      for (var i = 0; i < activeRows.length; i++) {
+        if (activeRows[i].generation === expectedGeneration + 1) {
+          return { ok: true, reminder: remindRow(activeRows[i], item), replayed: true };
+        }
+      }
+    }
+    return fail("VERSION_CONFLICT");
+  }
+
+  if (!doneRow) {
+    return fail("NOT_FOUND");
+  }
+  if (Number.isInteger(doneRow.next_period_days) && doneRow.next_period_days > 0) {
+    if (doneRow.next_period_days !== periodDays) {
+      // 同一轮但请求周期与当时不同:显式冲突,绝不猜
+      return fail("VERSION_CONFLICT");
+    }
+    // 治愈:按当时的欠账标记(due 已记录,不随治愈时间漂移)补建再生行
+    return regenOrConverge(deps, item, expectedGeneration + 1, doneRow.next_due, deps.now());
+  }
+  return fail("NOT_FOUND");
+}
+
+/**
+ * 插入周期再生行(确定性 _id):并发孪生已插成同一 _id 时捕获重复键错误后
+ * 回查收敛成功;其他插入失败如实上抛(done 行欠账标记仍在,同参重试可治愈)。
+ */
+async function regenOrConverge(deps, item, newGen, dueDate, now) {
+  var doc = buildRegenDoc(deps, item._id, newGen, dueDate, now);
+  try {
+    await reminders(deps).add({ data: doc });
+    return { ok: true, reminder: remindRow(doc, item) };
+  } catch (e) {
+    if (!isDuplicateKeyError(e)) {
+      // 再生失败:绝不假装完成——如实上抛,欠账标记留给重试治愈
+      throw e;
+    }
+    var twin = await reminders(deps)
+      .where({
+        household_id: deps.householdId,
+        item_id: item._id,
+        status: "active",
+        generation: newGen
+      })
+      .get();
+    if (twin.data && twin.data.length > 0) {
+      return { ok: true, reminder: remindRow(twin.data[0], item), replayed: true };
+    }
+    throw e;
+  }
+}
+
+/**
+ * remindClear:入参 { action:"remindClear", item_id, expected_generation? }。
  * 硬删除该 item 的全部 active 提醒(done 历史保留);天然幂等,
  * 无可清时 cleared:0 也是成功。物品删除(delete)的级联清理同款。
+ * expected_generation(PR #52 B1):携带时只清「用户看到的那一轮」——
+ * 命中 0 条且仍有 active(他人后来更新)→ VERSION_CONFLICT,绝不静默删掉
+ * 别人的新提醒;命中 0 条且确无 active → 幂等成功(cleared:0)。
+ * 清除成功同时作废 done 行的欠账再生标记(用户不要任何提醒,旧欠账不复活)。
  */
 async function remindClearItem(event, deps) {
   if (!validItemId(event.item_id)) {
     return fail("INVALID_INPUT");
   }
-  var removed = await removeActiveReminders(deps, event.item_id);
+  var expectedGeneration = validExpectedGeneration(event);
+  if (expectedGeneration === "INVALID") {
+    return fail("INVALID_INPUT");
+  }
+  var removed = 0;
+  if (expectedGeneration !== undefined) {
+    var rm = await reminders(deps)
+      .where({
+        household_id: deps.householdId,
+        item_id: event.item_id,
+        status: "active",
+        generation: expectedGeneration
+      })
+      .remove();
+    removed = (rm && rm.stats && rm.stats.removed) || 0;
+    if (removed === 0) {
+      var actives = await reminders(deps)
+        .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
+        .get();
+      if (actives.data && actives.data.length > 0) {
+        return fail("VERSION_CONFLICT");
+      }
+      // 早已清空:幂等成功
+    }
+  } else {
+    removed = await removeActiveReminders(deps, event.item_id);
+  }
+  await clearOwedRegen(deps, event.item_id);
   return { ok: true, cleared: removed };
 }
 
 /**
- * remindSet:入参 { action:"remindSet", item_id, due_date, kind?, quote? }。
+ * remindSet:入参 { action:"remindSet", item_id, due_date, kind?, quote?,
+ * expected_generation? }。
  * 为已有物品把提醒设为用户所选的日子(日期选择器来源,#36 两个合法日期来源之一):
  * AI 没提取出日期或用户清过的物品,在这里补录提醒,不必删掉重建。
  * 物品必须存在、属当前家庭且未删(否则 NOT_FOUND);due_date 严格 YYYY-MM-DD
  * 真实日历日(服务端只验格式绝不猜语义,口径同 create 的 reminder 入参);
  * kind 缺省「下次维护」(用户选日子的通用语义),携带须在冻结词表内;
  * quote 可缺省(选择器来源本无原话锚点);非法一律 INVALID_INPUT 且零写入。
- * 替换语义:先清该 item 全部 active 提醒(remindClear 同款硬删)再建一条新
- * active——「每 item 至多一条 active」不变形,重复对同一物品设不同日子不堆积。
+ * expected_generation(PR #52 B1):remindList 行的轮次号;0=客户端确认当前
+ * 无提醒(补录)。携带时按轮次条件替换——0 时若已有 active、或 n>0 时命中
+ * 不了第 n 轮(他人后来更新过)→ VERSION_CONFLICT,刷新后重选,绝不静默
+ * 覆盖别人的新提醒。缺省 = 旧协议宽口径替换,行为不变。
+ * 替换语义:先清该 item 命中的 active 提醒(remindClear 同款硬删)再建一条新
+ * active,新行轮次 = 该 item 历史最大轮次 + 1(单调递增绝不重置,旧页的
+ * expected_generation 永远命中不了新行)——「每 item 至多一条 active」不变形,
+ * 重复对同一物品设不同日子不堆积;成功后作废历史欠账再生标记。
  * 返回 { ok:true, reminder(remindList 行投影) }。
  */
 async function remindSetItem(event, deps) {
   if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var expectedGeneration = validExpectedGeneration(event);
+  if (expectedGeneration === "INVALID") {
     return fail("INVALID_INPUT");
   }
   var kind = event.kind === undefined || event.kind === null ? "下次维护" : event.kind;
@@ -788,9 +1075,60 @@ async function remindSetItem(event, deps) {
     return fail("NOT_FOUND");
   }
   var item = got.data[0];
-  await removeActiveReminders(deps, event.item_id);
-  var doc = buildReminderDoc(deps, event.item_id, reminder.due_date, reminder.kind, reminder.quote, deps.now());
-  await reminders(deps).add({ data: doc });
+
+  // 轮次号先于任何删除计算:被替换的 active 行的轮次也计入历史最大值,
+  // 新行轮次严格递增绝不重置(旧页的 expected_generation 永远命中不了新行)
+  var gen = await nextGeneration(deps, event.item_id);
+
+  if (expectedGeneration === undefined) {
+    // 旧协议:无条件替换(既有语义)
+    await removeActiveReminders(deps, event.item_id);
+  } else if (expectedGeneration === 0) {
+    // 补录:页面确认无提醒,若他人已立新提醒 → 显式冲突
+    var actives = await reminders(deps)
+      .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
+      .get();
+    if (actives.data && actives.data.length > 0) {
+      return fail("VERSION_CONFLICT");
+    }
+  } else {
+    // 改期:只替换「用户看到的那一轮」,命中不了 → 他人已更新,绝不静默覆盖
+    var rm = await reminders(deps)
+      .where({
+        household_id: deps.householdId,
+        item_id: event.item_id,
+        status: "active",
+        generation: expectedGeneration
+      })
+      .remove();
+    var removed = (rm && rm.stats && rm.stats.removed) || 0;
+    if (removed === 0) {
+      return fail("VERSION_CONFLICT");
+    }
+  }
+
+  // 确定性 _id(item + 目标轮次唯一):并发同轮补录第二笔被 _id 唯一性拒绝,
+  // 捕获后按显式冲突处理(他人已立提醒,刷新后重选),绝不插出第二条 active
+  var doc = buildReminderDoc(
+    deps,
+    event.item_id,
+    reminder.due_date,
+    reminder.kind,
+    reminder.quote,
+    deps.now(),
+    gen
+  );
+  doc._id = "rs_" + event.item_id + "_g" + gen;
+  try {
+    await reminders(deps).add({ data: doc });
+  } catch (e) {
+    if (!isDuplicateKeyError(e)) {
+      throw e;
+    }
+    return fail("VERSION_CONFLICT");
+  }
+  // 新提醒已立:历史欠账再生标记一并作废(防旧欠账日后被治愈复活)
+  await clearOwedRegen(deps, event.item_id);
   return { ok: true, reminder: remindRow(doc, item) };
 }
 

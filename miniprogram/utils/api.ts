@@ -235,7 +235,8 @@ function validateItemsOkResponse(
       }
       break;
     case "remindList":
-      // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示
+      // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
+      // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确
       if (
         !Array.isArray(r.reminders) ||
         !r.reminders.every(
@@ -244,7 +245,8 @@ function validateItemsOkResponse(
             typeof row.item_id === "string" &&
             typeof row.name === "string" &&
             typeof row.location_text === "string" &&
-            typeof row.due_date === "string",
+            typeof row.due_date === "string" &&
+            (row.generation === undefined || typeof row.generation === "number"),
         )
       ) {
         throw bad();

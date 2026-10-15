@@ -119,6 +119,11 @@ Page<
     expire: { mainText: string; dueDate: string; kind: string } | null;
     /** 编辑折叠「提醒」字段的当前日期(YYYY-MM-DD;""=不带提醒) */
     remindAt: string;
+    /**
+     * 页面所见提醒轮次号(PR #52 B1):-1=未知(未加载/旧服务端缺 generation,
+     * 请求不携带轮次号走旧协议);0=已确认无提醒(补录语义);≥1=所见轮次
+     */
+    remindGeneration: number;
     /** 今天(YYYY-MM-DD):编辑提醒的日期选择器下限 */
     today: string;
     /** 提醒操作执行中(用完了/改日期/清除;防并发重复提交) */
@@ -195,6 +200,7 @@ Page<
     mountSaving: false,
     expire: null as { mainText: string; dueDate: string; kind: string } | null,
     remindAt: "",
+    remindGeneration: -1,
     today: todayYmd(),
     remindBusy: false,
   },
@@ -765,7 +771,7 @@ Page<
       if (!isScopeGenerationCurrent(scopeGen)) {
         // 在途期间家庭已切换(含响应揭示的漂移):旧家庭的保质期行立即收起,
         // 不显示旧家庭数据;下次 onShow 会按新作用域重拉
-        this.setData({ expire: null, remindAt: "" });
+        this.setData({ expire: null, remindAt: "", remindGeneration: -1 });
         return;
       }
       this.applyReminderRow(
@@ -778,7 +784,8 @@ Page<
 
   applyReminderRow(row: RemindRow | null) {
     if (row === null) {
-      this.setData({ expire: null, remindAt: "" });
+      // 已确认这件当前无提醒:轮次号记 0(补录语义的 expected_generation)
+      this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
       return;
     }
     this.setData({
@@ -788,10 +795,12 @@ Page<
         kind: row.kind,
       },
       remindAt: row.due_date,
+      remindGeneration:
+        typeof row.generation === "number" ? row.generation : -1,
     });
   },
 
-  /** 保质期行「用完了」:先确认(周期物品问下次周期),再 remindComplete */
+  /** 保质期行「用完了」:先确认(周期物品问下次周期),再 remindComplete(带所见轮次号) */
   async onExpireDoneTap() {
     if (this.data.remindBusy) {
       return;
@@ -809,6 +818,9 @@ Page<
       const res = await callItemsApi({
         action: "remindComplete",
         item_id: this.data.itemId,
+        ...(this.data.remindGeneration >= 1
+          ? { expected_generation: this.data.remindGeneration }
+          : {}),
         ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
       });
       if (decision.periodDays !== null && res.reminder) {
@@ -819,10 +831,16 @@ Page<
           duration: 2500,
         });
       } else {
-        this.setData({ expire: null, remindAt: "" });
+        this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
         wx.showToast({ title: "已用完", icon: "success" });
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
+        // 这轮已被家人处理并换了新提醒(PR #52 B1):刷新看最新,绝不误伤
+        wx.showToast({ title: "这条刚被家人处理过,已刷新", icon: "none" });
+        await this.refreshReminderRow();
+        return;
+      }
       wx.showModal({
         title: "没办成",
         content: errorMessage(e),
@@ -838,6 +856,8 @@ Page<
    * 没有提醒的物品在这里补录,有提醒的在这里改期——都走 remindSet,把提醒
    * 设为所选的日子(服务端替换该物品的提醒,不堆积)。picker 回填必为合法
    * YYYY-MM-DD,异常值不写;今天及更早、超 10 年的日子如实拒绝。
+   * 请求携带页面所见轮次号(PR #52 B1):这一轮已被家人换过 → VERSION_CONFLICT,
+   * 刷新后重选,绝不静默覆盖别人的新提醒(0=页面确认无提醒的补录)。
    */
   async onRemindDateChange(e) {
     if (this.data.remindBusy) {
@@ -866,6 +886,9 @@ Page<
         action: "remindSet",
         item_id: this.data.itemId,
         due_date: value,
+        ...(this.data.remindGeneration >= 0
+          ? { expected_generation: this.data.remindGeneration }
+          : {}),
       });
       if (res.reminder) {
         this.applyReminderRow(res.reminder);
@@ -880,6 +903,15 @@ Page<
         await this.refreshReminderRow();
       }
     } catch (e) {
+      if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
+        wx.showToast({
+          title: hadReminder ? "这条提醒刚被家人改过,已刷新" : "这条刚带上提醒,已刷新",
+          icon: "none",
+          duration: 2500,
+        });
+        await this.refreshReminderRow();
+        return;
+      }
       wx.showModal({
         title: hadReminder ? "提醒没改成" : "提醒没带上",
         content: errorMessage(e),
@@ -890,17 +922,29 @@ Page<
     }
   },
 
-  /** 编辑折叠「提醒」✕:连日期一起清除(remindClear);日期唯一作用就是出现在「快到期」,没有「存日期但不提醒」 */
+  /** 编辑折叠「提醒」✕:连日期一起清除(remindClear,带所见轮次号);日期唯一作用就是出现在「快到期」,没有「存日期但不提醒」 */
   async onRemindFieldClear() {
     if (this.data.remindBusy || !this.data.remindAt) {
       return;
     }
     this.setData({ remindBusy: true });
     try {
-      await callItemsApi({ action: "remindClear", item_id: this.data.itemId });
-      this.setData({ expire: null, remindAt: "" });
+      await callItemsApi({
+        action: "remindClear",
+        item_id: this.data.itemId,
+        ...(this.data.remindGeneration >= 1
+          ? { expected_generation: this.data.remindGeneration }
+          : {}),
+      });
+      this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
       wx.showToast({ title: "已不带提醒", icon: "none" });
     } catch (e) {
+      if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
+        // 这一轮已被家人处理过:刷新看最新,绝不静默删掉别人的新提醒
+        wx.showToast({ title: "这条提醒刚被家人改过,已刷新", icon: "none", duration: 2500 });
+        await this.refreshReminderRow();
+        return;
+      }
       wx.showModal({
         title: "没改成",
         content: errorMessage(e),
