@@ -104,7 +104,7 @@
       <!-- C1b:位置没听清的警示框(常驻展开,不藏进折叠) -->
       <view wx:if="{{ !rows[0].certain }}" class="warnbox">
         <view class="wtitle">⚠ 位置没听清,放在哪儿?</view>
-        <view class="whint">不确定的位置不猜、也不先存;补上才能确认。</view>
+        <view class="whint">补上位置才能确认。</view>
         <input
           class="winput"
           placeholder="例:客厅电视柜第二格"

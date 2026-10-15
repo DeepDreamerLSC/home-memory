@@ -36,10 +36,6 @@
   <block wx:if="{{ firstUse && !queried }}">
     <view class="map-area">
       <view class="pagetitle">先让我记住一件东西</view>
-      <view class="lead">下次找不到,就不用满屋翻啦。</view>
-      <view class="note">
-        <view class="note-text">比如说:「备用钥匙放在书房抽屉里」</view>
-      </view>
 
       <!-- 页内大语音 CTA(一屏唯一强调面,按住说话;配色随 --vb-* 冻结值) -->
       <view
@@ -85,11 +81,6 @@
         </view>
       </view>
       <!-- 空搜索不造假:结果就地展开(H1b 同款空态,搜完自动切到结果视图) -->
-
-      <view class="note">
-        <view class="note-title">首件完成后</view>
-        <view class="note-text">真的记住第一件后,这里会变成家里的地图——每个房间一格,点进去整页就是房间里的东西。</view>
-      </view>
     </view>
   </block>
 
@@ -121,7 +112,6 @@
           <view class="section-label">找到 {{ queryResults.length }} 件</view>
           <view wx:if="{{ queryResults.length === 0 }}" class="empty-note">
             <view class="empty-note-main">没记住过「{{ queryKeyword }}」。要不要现在记一件?</view>
-            <view class="empty-note-sub">搜索不会编造不存在的记录。</view>
             <view class="btn ink block empty-note-btn" bindtap="onTextRecordTap">记一件</view>
           </view>
           <view wx:else class="result-card">
@@ -141,7 +131,7 @@
             </view>
           </view>
         </block>
-        <view class="collapse-link" bindtap="onCollapseResultsTap">{{ firstUse ? '收起' : '收起,回家里地图' }}</view>
+        <view class="collapse-link" bindtap="onCollapseResultsTap">收起</view>
       </block>
 
       <!-- X1 加载骨架屏:当前层无内容,不拿旧数据冒充 -->
@@ -159,7 +149,7 @@
         <view class="fail-view">
           <view class="fail-ico">⚠️</view>
           <view class="fail-title">网络好像断了</view>
-          <view class="fail-sub">刚才没加载出来。已确认记住的记录不受影响,联网后照常能找。</view>
+          <view class="fail-sub">已记住的记录不受影响,联网后照常能找</view>
           <view class="btn ink block fail-btn" bindtap="onRetryTap">再试一次</view>
         </view>
       </block>
@@ -188,13 +178,13 @@
             <view class="rico">?</view>
             <view class="wide-main">
               <view class="rname">尚未归类</view>
-              <view class="rcount">{{ unmountedCount }} 件位置待核实——不硬塞进房间</view>
+              <view class="rcount">{{ unmountedCount }} 件待核实</view>
             </view>
           </view>
         </view>
 
         <view wx:if="{{ rooms.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">
-          这里还没有更细的位置。点右上「⋯」改名、移动或合并,或记东西时把位置说清楚。
+          这里还是空的;点右上「⋯」可整理
         </view>
 
         <!-- 容器内:直接记录在这个位置的条目(点开看它上次放在哪儿) -->
@@ -217,11 +207,6 @@
             </view>
           </view>
         </block>
-
-        <view wx:if="{{ isRootView }}" class="note">
-          <view class="note-title">点进去就是它的全部</view>
-          <view class="note-text">点一个房间(或家具),这页整个换成里面的东西,抬头也跟着变成「某某房间里有什么」;再点东西,看它上次放在哪儿。每一层都只列核对确认过的记录,没确认完的草稿不进来、不计数。</view>
-        </view>
       </block>
     </view>
   </block>

@@ -334,8 +334,6 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
     </div>
 
     <h1 class="pagetitle">先让我记住一件东西</h1>
-    <p class="small">下次找不到,就不用满屋翻啦。</p>
-    <div class="note" style="margin-top:8px"><p>比如说:「备用钥匙放在书房抽屉里」</p></div>
 
     <button class="voice-cta" data-nav="v1" data-origin="h0">
       <span aria-hidden="true" style="font-size:30px;line-height:1">🎙</span>
@@ -353,7 +351,6 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
       还没有记住的东西——先记一件,下次就能直接找到了。<br>搜索不会编造不存在的记录。
     </div>
 
-    <div class="note"><strong>首件完成后</strong><p>真的记住第一件后,这里会变成家里的地图——每个房间一格,点进去整页就是房间里的东西;同时提示「现在试着找找它」,马上体验一次可信检索。</p></div>
   </section>
 
   <!-- ================= H1 首页·有数据态 = 家庭地图(T2;用户反馈四轮:整页进入,抬头随容器变) ================= -->
@@ -406,7 +403,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
           <span class="rico" aria-hidden="true">?</span>
           <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0">
             <span class="rname">尚未归类</span>
-            <span class="rcount">2 件位置待核实——不硬塞进房间</span>
+            <span class="rcount">2 件待核实</span>
           </span>
           <span class="chev" aria-hidden="true">›</span>
         </button>
@@ -510,8 +507,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <span class="info"><strong>说明书</strong><span>上次记在:书桌 / 抽屉一</span></span>
         <span class="arrow">›</span>
       </button>
-      <div class="note"><strong>原文一直保留</strong><p>整理空间(改名/移动/合并)不会改写你确认时说的原话。</p></div>
-    </div>
+          </div>
 
     <!-- 视图=卧室 -->
     <div id="h1v-bedroom" style="display:none">
@@ -584,8 +580,6 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <span class="arrow">›</span>
       </button>
     </div>
-
-    <div class="note"><strong>点进去就是它的全部</strong><p>点一个房间(或家具),这页整个换成里面的东西,抬头也跟着变成「某某房间里有什么」;再点东西,看它上次放在哪儿。每一层都只列核对确认过的记录,没确认完的草稿不进来、不计数。</p></div>
   </section>
 
   <!-- ================= H1b 搜索结果态(T2) ================= -->
@@ -631,7 +625,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <span class="pin">📍</span>
         <div>
           <div class="path">书房 <em>›</em> 书桌 <em>›</em> 右边第二个抽屉</div>
-          <div class="quote">你当时说的是:「书房书桌右边第二个抽屉」——原文一直保留,整理空间时也不会被改掉。</div>
+          <div class="quote">你当时说的是:「书房书桌右边第二个抽屉」。</div>
         </div>
       </div>
       <div class="tiny" style="margin-top:9px">这是上次记录的位置,东西可能已经移动。</div>
@@ -886,7 +880,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
   <section class="screen" data-screen="x2">
     <div class="failico">⚠️</div>
     <h1 class="pagetitle" style="text-align:center">网络好像断了</h1>
-    <p class="small" style="text-align:center">刚才没加载出来。已确认记住的记录不受影响,联网后照常能找。</p>
+    <p class="small" style="text-align:center">已记住的记录不受影响,联网后照常能找。</p>
     <button class="cta" data-toast="模拟:重试成功,回到首页(示意)">再试一次</button>
     <div class="note"><strong>失败要说清两件事</strong><p>失败的是「这次加载」,不是「你的记录没了」;重试可恢复,不诱导重复录入。</p></div>
   </section>
