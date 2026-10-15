@@ -1,0 +1,130 @@
+<view class="page page-with-voice-bar">
+  <view class="r-head">
+    <view class="pagetitle">快到期的东西</view>
+    <view class="lead">按时间先后;用完了就点右边的钮。</view>
+  </view>
+
+  <!-- X1 加载骨架:不拿旧数据冒充 -->
+  <block wx:if="{{ loading }}">
+    <view class="r-skel"></view>
+    <view class="r-skel"></view>
+    <view class="r-skel"></view>
+  </block>
+
+  <!-- X2 失败态:失败的是这次加载,可重试 -->
+  <block wx:elif="{{ errorText }}">
+    <view class="fail-view">
+      <view class="fail-ico">⚠️</view>
+      <view class="fail-title">网络好像断了</view>
+      <view class="fail-sub">已记住的记录不受影响,联网后照常能找</view>
+      <view class="btn ink block fail-btn" bindtap="onRetryTap">再试一次</view>
+    </view>
+  </block>
+
+  <!-- 空态:照原型,顺手教一句 -->
+  <block wx:elif="{{ !overdue.length && !soon.length && !later.length }}">
+    <view class="empty-note">
+      <view class="empty-note-main">还没记过会过期的时间。</view>
+      <view class="empty-note-sub">下次记东西时顺口带上,比如:「感冒药放药箱,11 月 20 号过期」。</view>
+    </view>
+  </block>
+
+  <!-- 三分组:已过期 / 这几天 / 再往后 -->
+  <block wx:else>
+    <block wx:if="{{ overdue.length }}">
+      <view class="section-label">已过期</view>
+      <view class="r-list">
+        <view
+          wx:for="{{ overdue }}"
+          wx:key="item_id"
+          class="r-row"
+          hover-class="r-row-hover"
+          hover-stay-time="80"
+          data-group="over"
+          data-index="{{ index }}"
+          bindtap="onRowTap"
+        >
+          <view class="item-icon">{{ item.initial }}</view>
+          <view class="item-main">
+            <view class="item-name">{{ item.name }}</view>
+            <view class="item-location">{{ item.location_text }}</view>
+          </view>
+          <view class="duepill over">{{ item.pillText }}</view>
+          <view
+            class="r-done {{ completing ? 'busy' : '' }}"
+            data-group="over"
+            data-index="{{ index }}"
+            catchtap="onDoneTap"
+          >用完了</view>
+        </view>
+      </view>
+    </block>
+
+    <block wx:if="{{ soon.length }}">
+      <view class="section-label">这几天</view>
+      <view class="r-list">
+        <view
+          wx:for="{{ soon }}"
+          wx:key="item_id"
+          class="r-row"
+          hover-class="r-row-hover"
+          hover-stay-time="80"
+          data-group="soon"
+          data-index="{{ index }}"
+          bindtap="onRowTap"
+        >
+          <view class="item-icon">{{ item.initial }}</view>
+          <view class="item-main">
+            <view class="item-name">{{ item.name }}</view>
+            <view class="item-location">{{ item.location_text }}</view>
+          </view>
+          <view class="duepill soon">{{ item.pillText }}</view>
+          <view
+            class="r-done {{ completing ? 'busy' : '' }}"
+            data-group="soon"
+            data-index="{{ index }}"
+            catchtap="onDoneTap"
+          >用完了</view>
+        </view>
+      </view>
+    </block>
+
+    <block wx:if="{{ later.length }}">
+      <view class="section-label">再往后</view>
+      <view class="r-list">
+        <view
+          wx:for="{{ later }}"
+          wx:key="item_id"
+          class="r-row"
+          hover-class="r-row-hover"
+          hover-stay-time="80"
+          data-group="later"
+          data-index="{{ index }}"
+          bindtap="onRowTap"
+        >
+          <view class="item-icon">{{ item.initial }}</view>
+          <view class="item-main">
+            <view class="item-name">{{ item.name }}</view>
+            <view class="item-location">{{ item.location_text }}</view>
+          </view>
+          <view class="duepill later">{{ item.pillText }}</view>
+          <view
+            class="r-done {{ completing ? 'busy' : '' }}"
+            data-group="later"
+            data-index="{{ index }}"
+            catchtap="onDoneTap"
+          >用完了</view>
+        </view>
+      </view>
+    </block>
+
+    <!-- 纪律说明(#36):时间只来自原话,不猜日期;无推送承诺 -->
+    <view class="note">
+      <view class="note-title">时间只来自原话</view>
+      <view class="note-text">到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。点「用完了」的周期物品,会问你要不要定下次时间。</view>
+    </view>
+  </block>
+</view>
+
+<!-- 常驻语音条(issue #45 全局可达;R1 也不例外) -->
+<voice-bar />

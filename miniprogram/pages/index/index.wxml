@@ -156,6 +156,17 @@
 
       <!-- H1 家庭地图:根层=房间格子两列;点格子整页切入容器视图 -->
       <block wx:else>
+        <!-- 到期横幅(#36):仅家里层、有过期/临期才显示;点进「快到期的东西」 -->
+        <view
+          wx:if="{{ isRootView && dueBanner }}"
+          class="due-banner"
+          hover-class="due-banner-hover"
+          hover-stay-time="80"
+          bindtap="onDueBannerTap"
+        >
+          <view class="due-banner-text">⏰ {{ dueBanner.text }}</view>
+          <view class="due-banner-arrow">›</view>
+        </view>
         <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
 
         <view class="roomgrid">

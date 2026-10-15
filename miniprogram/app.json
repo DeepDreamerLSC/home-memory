@@ -6,7 +6,8 @@
     "pages/locations/locations",
     "pages/locationScan/locationScan",
     "pages/family/family",
-    "pages/join-family/join-family"
+    "pages/join-family/join-family",
+    "pages/reminders/reminders"
   ],
   "window": {
     "navigationBarTitleText": "我靠东西呢",

@@ -60,6 +60,45 @@
   color: var(--danger);
 }
 
+/* ---------- 提醒行(#36 十五轮修订):改=日期选择器弹层,✕=连日期一起清除 ---------- */
+
+/* 清除后的灰显「不提醒」:降级为次要文案,行仍在(可再选日期) */
+.sumrow .v.muted {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+/* 行右侧「✕」清除:44px 高热区,仅在有日期时渲染 */
+.remind-clear {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx;
+  min-height: 88rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+/* 纪律句(#36):只在提醒行存在时显示,原话折叠区之外常驻 */
+.sum-meta.remind-note {
+  margin-top: 14rpx;
+}
+
+/* C2 行副文下的小角标:有原话日期的行标出(如「11-20 到期」),不参与勾选逻辑 */
+.remind-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--card-inset);
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+}
+
 .sum-edit {
   flex: none;
   display: flex;

@@ -28,6 +28,15 @@
     <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
   </view>
 
+  <!-- 保质期行(#36):有 active 提醒才显示;到了那天出现在「快到期」里,不做任何推送承诺 -->
+  <view wx:if="{{ expire }}" class="expire-row">
+    <view class="expire-main">
+      <view class="expire-t">{{ expire.mainText }}</view>
+      <view class="expire-sub">到了那天,它会出现在「快到期」里</view>
+    </view>
+    <view class="r-done {{ remindBusy ? 'busy' : '' }}" bindtap="onExpireDoneTap">用完了</view>
+  </view>
+
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
   <view
     class="fold {{ editPanelOpen ? 'open' : '' }}"
@@ -61,6 +70,27 @@
           maxlength="200"
           bindinput="onLocationInput"
         />
+      </view>
+      <!-- 提醒字段(#36):无条件渲染——没有提醒的物品在这里补录,有提醒的在这里改;
+           改=日期选择器弹层(唯一手动日期来源),✕=连日期一起清除 -->
+      <view class="field">
+        <view class="label">提醒</view>
+        <view class="remind-field">
+          <picker
+            mode="date"
+            value="{{ remindAt || today }}"
+            start="{{ today }}"
+            disabled="{{ remindBusy }}"
+            bindchange="onRemindDateChange"
+          >
+            <view class="field-btn">
+              <text wx:if="{{ remindAt }}" class="field-val">{{ remindAt }} 到期</text>
+              <text wx:else class="field-ph">选一个日子;留空=不带提醒</text>
+              <text class="field-chev">›</text>
+            </view>
+          </picker>
+          <view wx:if="{{ remindAt }}" class="clearx" bindtap="onRemindFieldClear">✕</view>
+        </view>
       </view>
       <view class="field">
         <view class="label">备注</view>

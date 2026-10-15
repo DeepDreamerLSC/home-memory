@@ -1,16 +1,11 @@
 "use strict";
-/*
- * 批量保存的行状态纯函数(确认页接线,逻辑下沉便于测试):
- * 「一次确认」只是交互上的一次操作,不是数据库原子事务——
- * 每行独立走 create 幂等(行内固定 operation_id),失败可单行重试,
- * 已保存的行不再提交。
- */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.rowsToSave = rowsToSave;
 exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
 exports.batchSummary = batchSummary;
 exports.shouldDefaultChecked = shouldDefaultChecked;
+exports.rowReminderInput = rowReminderInput;
 exports.runBatchSave = runBatchSave;
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
 function rowsToSave(rows) {
@@ -59,6 +54,24 @@ function batchSummary(rows) {
  */
 function shouldDefaultChecked(sourceQuote, anchorShared, certain) {
     return certain && sourceQuote !== "" && !anchorShared;
+}
+/**
+ * C2 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
+ * 行内无日期(服务端因归属不明置空 / 用户清过) → undefined 不带提醒,
+ * 绝不写入错误归属的提醒;日期仍是原话提取值时才携带 quote
+ * (选择器改过的没有原话锚点)。
+ */
+function rowReminderInput(row) {
+    if (row.remindAt === "" || row.remindKind === "") {
+        return undefined;
+    }
+    return {
+        due_date: row.remindAt,
+        kind: row.remindKind,
+        ...(row.remindAt === row.remindOrigin && row.remindQuote !== ""
+            ? { quote: row.remindQuote }
+            : {}),
+    };
 }
 /**
  * 逐行保存编排(在传入快照的拷贝上推进,绝不引用调用方可变状态):

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const voice_entry_1 = require("../../utils/voice-entry");
 const draft_session_1 = require("../../utils/draft-session");
+const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
 const households_api_1 = require("../../utils/households-api");
 const locations_api_1 = require("../../utils/locations-api");
@@ -39,6 +40,7 @@ Page({
         queryResults: [],
         queryError: "",
         resumeSession: null,
+        dueBanner: null,
         familyShared: false,
         firstUse: false,
         mapLoading: true,
@@ -101,6 +103,8 @@ Page({
         void (0, households_api_1.ensureScopeVerified)().then(() => {
             this.setData({ resumeSession: this.currentResumeSession() });
         });
+        // 到期横幅(#36):同样资格复核后拉取;失败静默,不影响地图
+        void this.refreshDueBanner();
     },
     onHide() {
         if (this.voiceEntry !== null) {
@@ -310,6 +314,8 @@ Page({
                 queryKeyword: "",
                 queryResults: [],
                 queryError: "",
+                // 到期横幅随作用域一起清(#36):不把旧家庭的到期数带到新家庭
+                dueBanner: null,
             });
         }
         const nodeId = this.viewStack.length > 0
@@ -380,6 +386,8 @@ Page({
                     queryKeyword: "",
                     queryResults: [],
                     queryError: "",
+                    // 到期横幅随作用域一起清(#36):不把旧家庭的到期数带到新家庭
+                    dueBanner: null,
                 });
                 void this.loadMapLayer(false, false);
                 return;
@@ -741,6 +749,45 @@ Page({
     onFamilyTap() {
         wx.navigateTo({
             url: "/pages/family/family",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    /**
+     * 到期横幅(#36 三阶段):remindList 有 active 且(已过期或 7 天内)时上屏
+     * 「⏰ N 件已过期,M 件这几天到期」。横幅属增强:加载失败静默隐藏、
+     * 绝不影响地图;家庭切换(作用域代数变化)后在途响应不上屏。
+     * 展示前先经 households 资格复核(硬门 C),不显示旧家庭数据。
+     */
+    async refreshDueBanner() {
+        await (0, households_api_1.ensureScopeVerified)();
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
+        try {
+            const res = await (0, api_1.callItemsApi)({ action: "remindList" });
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return; // 在途期间家庭已切换:旧家庭的到期数不上屏
+            }
+            const counts = (0, remind_ui_1.countDue)(res.reminders);
+            if (counts.overdue === 0 && counts.soon === 0) {
+                this.setData({ dueBanner: null });
+                return;
+            }
+            this.setData({
+                dueBanner: { ...counts, text: (0, remind_ui_1.dueBannerText)(counts) },
+            });
+        }
+        catch (e) {
+            // 失败静默:横幅不显示,地图照常
+            if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                this.setData({ dueBanner: null });
+            }
+        }
+    },
+    /** 点横幅:进「快到期的东西」(R1) */
+    onDueBannerTap() {
+        wx.navigateTo({
+            url: "/pages/reminders/reminders",
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },

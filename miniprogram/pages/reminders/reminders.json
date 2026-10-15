@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "快到期的东西",
+  "usingComponents": {
+    "voice-bar": "/components/voice-bar/voice-bar"
+  }
+}

@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations` 与 `item_location_history` 三个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history` 与 `reminders` 四个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -30,7 +30,7 @@ miniprogram/             小程序端(TypeScript,strict)
   pages/locations        我的家:空间树逐层浏览 + 节点管理 + 位置选择模式
   pages/locationScan     生成空间树向导:候选树确认 → 一次 applyScan 入库
 cloudfunctions/
-  itemsApi/              items 集合的 create/update/delete/query/list
+  itemsApi/              items 集合的 create/update/delete/get/query/list + reminders 提醒实体(issue #36)
     index.js             薄适配层(wx-server-sdk 胶水,可信家庭解析,注入写硬门上下文)
     lib/handler.js       纯函数业务逻辑(依赖注入,可离线测试)
     lib/normalize.js     名称归一化(NFC/全角转半角/小写/去空白/去标点)
@@ -105,7 +105,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations` 与 `item_location_history`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history` 与 `reminders`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -141,6 +141,12 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 > - `household_invites` → 索引管理 → 添加索引:字段 `token_hash`(升序),勾选「**唯一**」;另建议加 `household_id`(升序)普通索引(邀请列表查询性能,非唯一)。
 
 作用(issue #34):itemsApi 与 locations 每次请求先按 `member_key = sha256(OPENID)` 查 `active_household`——无记录则回退原有个人家庭(单人用户零感知);有记录则做三向验证(active 指针 → `household_members` 会员行 → `households` 未解散),孤儿指针、已解散家庭或任何查询异常一律失败关闭(HOUSEHOLD_UNAVAILABLE),绝不把任一家庭的数据错写进另一个家庭。P1-A 起新增 `households` 云函数写入这四个集合(创建共享家庭/邀请/加入/退出/移除/解散);邀请库中只存 `sha256(令牌)`,裸令牌绝不落库。单人用户不触发共享家庭路径,`households` 集合只在有活跃共享指针时才被查询,晚建不影响单人使用,但启用家庭共享前必须建齐。
+
+**⑥ reminders 提醒实体集合(issue #36 二阶段)**:
+
+> 按上文创建集合并把权限并入 ③(「所有用户不可读不可写」)即可;**无需建任何索引**。
+
+该集合是独立提醒实体(itemsApi 的 `create` 可选 reminder 参数写入、`remindList`/`remindComplete`/`remindClear`/`remindSet` 读写):每条 active 提醒内部关联一个 item,物品删除时其 active 提醒级联硬删,done 历史行保留;集合内另有每物品一条 `slot_` 前缀的生命周期权威文档(status 固定 "slot",单调轮次权威 rev + 跨操作欠账声明,与提醒行的 active/done 查询天然隔离)。「每 item 至多一条 active、轮次单调绝不重用、清除不复活」由 slot 条件更新(CAS)+ 行级轮次条件更新 + 确定性 _id 三层维持(并发/多设备交错下成立),数据库层无唯一索引。**需要重新部署 `itemsApi` 云函数后这些 action 才存在**(部署方式见步骤 6)。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
