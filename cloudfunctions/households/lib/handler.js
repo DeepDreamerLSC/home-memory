@@ -31,7 +31,11 @@
  *   - memberList(owner):成员清单(member_key 为服务端派生摘要句柄,供
  *     removeMember 寻址;系统不存昵称等 PII);
  *   - status:当前活跃家庭概要(household_id/role/scope_revision/shared/
- *     display_name),P1-B 启动/恢复资格复核的依据。
+ *     display_name),P1-B 启动/恢复资格复核的依据;
+ *   - switch(十七轮切换家庭,#34 合同不弱化):target="personal" 永远可回
+ *     (撤指针行,解析确定性回个人家庭);target="shared" 需在册且未解散;
+ *     只做 active 指针的单行原子切换(不迁移数据、不递增 scope_revision),
+ *     返回新家庭 status 摘要供客户端整页刷新作用域。
  *
  * 纪律:
  *   - 失败关闭:任何元数据查询/写入异常 → HOUSEHOLD_UNAVAILABLE 明确终止,
@@ -886,6 +890,142 @@ async function dissolveAction(event, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// action:switch(十七轮切换家庭)
+// ---------------------------------------------------------------------------
+
+/**
+ * 个人家庭 household_id 从 member_key 派生(与 lib/household.js
+ * personalHouseholdId 同款存量算法:"hh_" + sha256(openid) 前 32 位;
+ * memberKey 即 sha256(openid) 全文,故等价于 "hh_" + memberKey 前 32 位)。
+ */
+function personalHouseholdIdOf(memberKey) {
+  return "hh_" + memberKey.slice(0, 32);
+}
+
+/**
+ * 指针单行原子切换(读 → 条件更新 → 复核收敛):
+ * - 无行 → 插入(唯一索引冲突 = 并发切换,回读复核下一轮判定);
+ * - 已指向目标 → 幂等(already:true);
+ * - 指向别处 → where 旧值条件更新(0 命中 = 并发已改,重读复核重试)。
+ * active_household 唯一索引 (member_key) 保证任一时刻指针唯一(active 指针唯一,
+ * #34 合同不弱化——switch 只更新这行指针,不另起炉灶、不迁移任何家庭数据)。
+ */
+async function switchActivePointer(deps, memberKey, householdId, now) {
+  for (var attempt = 0; attempt < BUMP_RETRIES; attempt++) {
+    var rows = await fetchAll(deps, ACTIVE_COLLECTION, { member_key: memberKey });
+    if (rows.length > 1) {
+      return { failed: true, result: householdFail("active_not_unique") };
+    }
+    if (rows.length === 0) {
+      try {
+        await activeCol(deps).add({
+          data: { member_key: memberKey, household_id: householdId, updated_at: now }
+        });
+        return { already: false };
+      } catch (e) {
+        if (!isDuplicateKeyError(e)) {
+          throw e;
+        }
+        continue; // 并发插入:回读复核(下一轮按指向判定)
+      }
+    }
+    if (rows[0].household_id === householdId) {
+      return { already: true };
+    }
+    var res = await activeCol(deps)
+      .where({ member_key: memberKey, household_id: rows[0].household_id })
+      .update({ data: { household_id: householdId, updated_at: now } });
+    if (res && res.stats && res.stats.updated >= 1) {
+      return { already: false };
+    }
+    // 0 命中:并发交错已改指针 → 重读复核
+  }
+  return { failed: true, result: householdFail("switch_contention") };
+}
+
+/**
+ * switch:切换当前家庭(issue #45 十七轮 B 线;#34 合同不弱化——只更新 active
+ * 指针 + 客户端作用域刷新,不另起流程、不迁移数据、不递增 scope_revision)。
+ * - target:"personal":永远可回;删除本成员的 active 指针行,之后一切解析
+ *   确定性回个人家庭(无行 = 已在个人家庭,幂等成功);
+ * - target:"shared":必须在册(存在未解散共享家庭的会员行)且未解散;无在册
+ *   家庭(被移除/已退出/从未加入)→ NOT_FOUND;会员行在而家庭元数据缺/字段
+ *   非法 → 失败关闭;多个未解散在册家庭(数据模型容量外的异常态)→ 失败关闭;
+ * - 返回新家庭 status 摘要(household_id/shared/role/scope_revision/display_name,
+ *   与 status action 同口径),客户端据此整页刷新作用域数据。
+ */
+async function switchAction(event, deps) {
+  if (event.target !== "personal" && event.target !== "shared") {
+    return fail("INVALID_INPUT", "target 只能是 personal 或 shared");
+  }
+  var memberKey = deps.memberKey;
+
+  if (event.target === "personal") {
+    var rows = await fetchAll(deps, ACTIVE_COLLECTION, { member_key: memberKey });
+    if (rows.length > 1) {
+      return householdFail("active_not_unique");
+    }
+    var alreadyPersonal = rows.length === 0;
+    if (rows.length === 1) {
+      await activeCol(deps).where({ member_key: memberKey }).remove();
+    }
+    return {
+      ok: true,
+      target: "personal",
+      already: alreadyPersonal,
+      household_id: personalHouseholdIdOf(memberKey),
+      shared: false,
+      role: null,
+      scope_revision: null,
+      display_name: null
+    };
+  }
+
+  // target === "shared":校验在册且未解散的共享家庭
+  var memberships = await fetchAll(deps, MEMBERS_COLLECTION, { member_key: memberKey });
+  var candidates = [];
+  for (var i = 0; i < memberships.length; i++) {
+    var hh = await getHouseholdDoc(deps, memberships[i].household_id);
+    if (!hh) {
+      // 会员行在、家庭元数据缺:不一致态 → 失败关闭(绝不当作可切换或不可切换猜)
+      return householdFail("household_doc_missing");
+    }
+    if (hh.dissolved === true) {
+      continue; // 已解散(软封存)的会员行是封存记录,不可切换进入
+    }
+    if (hh.dissolved !== false || !Number.isInteger(hh.scope_revision)) {
+      return householdFail("household_invalid_state");
+    }
+    candidates.push({ membership: memberships[i], household: hh });
+  }
+  if (candidates.length === 0) {
+    return fail("NOT_FOUND", "你还没有加入共享家庭");
+  }
+  if (candidates.length > 1) {
+    // V1 产品边界是一人一个未解散共享家庭;多行属数据模型容量外的异常态 → 失败关闭
+    return householdFail("multiple_memberships");
+  }
+  var entry = candidates[0];
+  var householdId = entry.membership.household_id;
+  var switched = await switchActivePointer(deps, memberKey, householdId, deps.now());
+  if (switched.failed) {
+    return switched.result;
+  }
+  return {
+    ok: true,
+    target: "shared",
+    already: switched.already,
+    household_id: householdId,
+    shared: true,
+    role: entry.membership.role,
+    scope_revision: entry.household.scope_revision,
+    display_name: isString(entry.household.display_name)
+      ? entry.household.display_name
+      : DISPLAY_NAME_DEFAULT
+  };
+}
+
+// ---------------------------------------------------------------------------
 // action:memberList(owner)
 // ---------------------------------------------------------------------------
 
@@ -937,7 +1077,8 @@ var ACTIONS = {
   dissolve: dissolveAction,
   memberList: memberListAction,
   status: statusAction,
-  updateProfile: updateProfileAction
+  updateProfile: updateProfileAction,
+  switch: switchAction
 };
 
 /**

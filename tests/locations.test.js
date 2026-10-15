@@ -5,7 +5,9 @@
  * 覆盖 16 个必测点:TS-ISO/TS-EP/TS-NC1/TS-NC2/TS-MG/TS-DL/TS-LK1/TS-LK2/TS-LK3/
  * TS-AS/TS-SCAN/TS-RN/TS-MV/TS-LST/TS-INV/TS-LOG/TS-SRC,外加 index.js 胶水层加载测试;
  * issue #30 PR A 增补:TS-ROOT(根节点五动作按 parent_id 判定)与
- * TS-MG3(merge 纯结构规则:带子树跨深度拒绝、叶子跨深度允许)。
+ * TS-MG3(merge 纯结构规则:带子树跨深度拒绝、叶子跨深度允许);
+ * issue #45 十七轮增补:TS-EAL(ensureAndLink「放进」:建路径+挂靠一次完成,
+ * 幂等、挂靠失败不删物品、跨家庭拒绝、共享家庭双 marker 硬门照常)。
  * 与 itemsApi 在同一 memoryDb 上交叉驱动(单一版本链验证);LLM 全部 mock 注入,
  * 零外部依赖、零网络;绝不 require wx-server-sdk(胶水测试用 stub 替身加载)。
  */
@@ -2719,4 +2721,206 @@ test("TS-LST-UM:旧服务端窗口外无未挂件时根层投影为空数组(unm
   assert.equal(rootList.ok, true);
   assert.equal(rootList.unmounted_count, 0);
   assert.deepEqual(rootList.unmounted_items, []);
+});
+
+// ---------- TS-EAL:ensureAndLink(issue #45 十七轮「放进」,#18 红线语义升级) ----------
+// 确认卡明示将放入的路径、用户点「确认记住」后的一次调用:建缺失路径 + 挂靠;
+// 幂等(重复同路径=成功);挂靠失败不删物品;共享家庭照常双 marker 硬门。
+
+test("TS-EAL-1:首次建路径并挂上(version+1,同一版本链);重复同路径幂等成功且 version 不再 +1", async function () {
+  var t = fresh();
+  var created = await createItem(t.deps, "op-eal-1", "降压药", "主卧的柜子上");
+  assert.equal(created.item.version, 1);
+
+  // 首次:主卧/柜子上都不存在 → 两段都新建,物品挂到末段
+  var first = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-1" },
+    t.deps
+  );
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.already, false);
+  assert.deepEqual(first.created, [true, true], "两段路径都是本次新建");
+  assert.deepEqual(first.path, ["主卧", "柜子上"]);
+  assert.equal(first.location_ids.length, 2);
+  assert.equal(first.item.version, 2, "挂靠走同一版本链:version+1");
+  var raw = (await rawDocs(t.db, "items"))[0];
+  assert.equal(raw.location_node_id, first.location_ids[1], "挂在末段节点上");
+  assert.equal(raw.deleted, false);
+  assert.equal(raw.last_update_id, "eal-1");
+  // 树形状:home 根下多了主卧,主卧下多了柜子上
+  var nodes = await rawDocs(t.db, "locations");
+  var byName = {};
+  nodes.forEach(function (n) { byName[n.name] = n; });
+  assert.ok(byName["主卧"], "主卧节点已建");
+  assert.ok(byName["柜子上"], "柜子上节点已建");
+  assert.equal(byName["柜子上"].parent_id, byName["主卧"]._id);
+  assert.equal(byName["主卧"].parent_id, byName["我的家"]._id);
+  assert.deepEqual(byName["柜子上"].path, ["主卧", "柜子上"]);
+
+  // 重复同路径(响应丢失后客户端按原 expected_version=1 重试)= 幂等成功
+  var retry = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-1-retry" },
+    t.deps
+  );
+  assert.equal(retry.ok, true, JSON.stringify(retry));
+  assert.equal(retry.already, true, "重复同路径 = 成功");
+  assert.deepEqual(retry.created, [false, false], "路径已存在不再新建");
+  assert.equal(retry.item.version, 2, "幂等路径 version 不再 +1");
+  var rawAfter = (await rawDocs(t.db, "items"))[0];
+  assert.equal(rawAfter.version, 2);
+  assert.equal(rawAfter.location_node_id, first.location_ids[1]);
+  // 节点数不变(不双建)
+  var nodesAfter = (await rawDocs(t.db, "locations")).length;
+  assert.equal(nodesAfter, nodes.length, "幂等重试不双建节点");
+});
+
+test("TS-EAL-2:部分路径已存在只补缺失段;已挂别处的物品换路径照常条件更新", async function () {
+  var t = fresh();
+  await ensurePath(t.deps, ["客厅"]);
+  var created = await createItem(t.deps, "op-eal-2", "充电宝", "客厅电视柜第一格");
+
+  var res = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["客厅", "电视柜"], expected_version: 1, update_id: "eal-2" },
+    t.deps
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.deepEqual(res.created, [false, true], "客厅已存在只补电视柜");
+  assert.equal(res.item.version, 2);
+
+  // 换路径:先挂书房/桌子,再 ensureAndLink 换到客厅/电视柜(带当前版本)
+  var study = await ensurePath(t.deps, ["书房", "桌子"]);
+  var linked = await locHandler(
+    { action: "linkItem", item_id: created.item.item_id, node_id: study.nodes[1].location_id, expected_version: 2, update_id: "eal-2-move" },
+    t.deps
+  );
+  assert.equal(linked.ok, true);
+  var moved = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["客厅", "电视柜"], expected_version: 3, update_id: "eal-2-back" },
+    t.deps
+  );
+  assert.equal(moved.ok, true, JSON.stringify(moved));
+  assert.equal(moved.already, false);
+  assert.equal(moved.item.version, 4);
+  var raw = (await rawDocs(t.db, "items"))[0];
+  assert.equal(raw.location_node_id, res.location_ids[1], "换路径挂到新末段");
+});
+
+test("TS-EAL-3:挂靠失败不删物品——版本过期 VERSION_CONFLICT 时物品原样保留;物品不存在 NOT_FOUND 且零路径写入", async function () {
+  var t = fresh();
+  var created = await createItem(t.deps, "op-eal-3", "护照", "书房抽屉");
+  var study = await ensurePath(t.deps, ["书房", "抽屉"]);
+  var linked = await locHandler(
+    { action: "linkItem", item_id: created.item.item_id, node_id: study.nodes[1].location_id, expected_version: 1, update_id: "eal-3-a" },
+    t.deps
+  );
+  assert.equal(linked.ok, true);
+
+  // itemsApi.update 推进版本 → ensureAndLink 携带过期 expected_version → 冲突
+  var upd = await itemsHandler(
+    { action: "update", item_id: created.item.item_id, expected_version: 2, update_id: "eal-3-b", note: "补一句" },
+    t.deps
+  );
+  assert.equal(upd.ok, true);
+  var conflict = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 2, update_id: "eal-3-c" },
+    t.deps
+  );
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.error, "VERSION_CONFLICT", "挂靠失败如实返回冲突");
+  var raw = (await rawDocs(t.db, "items"))[0];
+  assert.equal(raw.deleted, false, "物品绝不被删除");
+  assert.equal(raw.version, 3, "版本不被失败请求推进");
+  assert.equal(raw.location_node_id, study.nodes[1].location_id, "原挂载原样保留,绝不静默改挂别处");
+  assert.equal(raw.note, "补一句", "物品内容不受影响");
+
+  // 物品不存在:NOT_FOUND,且路径节点一个都不建(零写入)
+  var nodesBefore = (await rawDocs(t.db, "locations")).length;
+  var ghost = await locHandler(
+    { action: "ensureAndLink", item_id: "it_404", path: ["阳台", "花架"], expected_version: 1, update_id: "eal-3-d" },
+    t.deps
+  );
+  assert.equal(ghost.error, "NOT_FOUND");
+  var nodesAfterGhost = (await rawDocs(t.db, "locations")).length;
+  assert.equal(nodesAfterGhost, nodesBefore, "查无物品时零路径写入");
+});
+
+test("TS-EAL-4:跨家庭拒绝——B 对 A 的物品 ensureAndLink → NOT_FOUND 且零路径写入(同库双家庭)", async function () {
+  var db = freshDb();
+  var depsA = makeDeps(db, HOUSEHOLD_A);
+  var depsB = makeDeps(db, HOUSEHOLD_B);
+  var created = await createItem(depsA, "op-eal-4", "A 家药", "主卧的柜子上");
+  var nodesBefore = (await rawDocs(db, "locations")).length;
+
+  var res = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-4-b" },
+    depsB
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "NOT_FOUND", "跨家庭物品按查无处理");
+  assert.equal((await rawDocs(db, "locations")).length, nodesBefore, "B 家庭树零路径写入(节点一个不建)");
+  var rawA = (await rawDocs(db, "items"))[0];
+  assert.equal(rawA.location_node_id, undefined, "A 的物品挂载不被 B 触碰");
+});
+
+test("TS-EAL-5:共享家庭双 marker 硬门照常——缺/错 marker 零写入,带对放行", async function () {
+  var t = fresh();
+  var SHARED = "hh_f_shared_eal";
+  var deps = makeDeps(t.db, SHARED);
+  deps.householdShared = true;
+  deps.scopeRevision = 4;
+  // 共享域建物品本身也要过 F2 硬门(itemsApi 同款;带对 marker)
+  var created = await itemsHandler(
+    {
+      action: "create",
+      operation_id: "op-eal-5",
+      name: "共享药",
+      location_text: "主卧的柜子上",
+      expected_household_id: SHARED,
+      expected_scope_revision: 4
+    },
+    deps
+  );
+  assert.equal(created.ok, true, JSON.stringify(created));
+
+  // 共享家庭缺 marker → FAMILY_SWITCHED,零写入
+  var noMarker = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-5-a" },
+    deps
+  );
+  assert.equal(noMarker.error, "FAMILY_SWITCHED");
+  // household_id 对、revision 旧 → FAMILY_STALE_SCOPE,零写入
+  var stale = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-5-b", expected_household_id: SHARED, expected_scope_revision: 3 },
+    deps
+  );
+  assert.equal(stale.error, "FAMILY_STALE_SCOPE");
+  assert.equal((await rawDocs(t.db, "locations")).length, 0, "硬门拦截时路径零写入");
+  var rawBlocked = (await rawDocs(t.db, "items"))[0];
+  assert.equal(rawBlocked.version, 1, "硬门拦截时物品零改动");
+
+  // 双 marker 一致 → 放行(与 ensurePath/linkItem 同一门)
+  var ok = await locHandler(
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧", "柜子上"], expected_version: 1, update_id: "eal-5-c", expected_household_id: SHARED, expected_scope_revision: 4 },
+    deps
+  );
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.item.version, 2);
+});
+
+test("TS-EAL-6:参数校验——缺 item_id/空路径/超 6 段/非法 created_from/非法版本与 update_id → INVALID_INPUT", async function () {
+  var t = fresh();
+  var created = await createItem(t.deps, "op-eal-6", "扳手", "工具箱");
+  var bads = [
+    { action: "ensureAndLink", path: ["主卧"], expected_version: 1, update_id: "x" },
+    { action: "ensureAndLink", item_id: created.item.item_id, path: [], expected_version: 1, update_id: "x" },
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["a", "b", "c", "d", "e", "f", "g"], expected_version: 1, update_id: "x" },
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧"], expected_version: 1, update_id: "x", created_from: "bootstrap" },
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧"], expected_version: 0, update_id: "x" },
+    { action: "ensureAndLink", item_id: created.item.item_id, path: ["主卧"], expected_version: 1, update_id: "" },
+  ];
+  for (var i = 0; i < bads.length; i++) {
+    var res = await locHandler(bads[i], t.deps);
+    assert.equal(res.error, "INVALID_INPUT", "第 " + (i + 1) + " 项应 INVALID_INPUT");
+  }
+  assert.equal((await rawDocs(t.db, "locations")).length, 0, "参数校验失败零写入");
 });

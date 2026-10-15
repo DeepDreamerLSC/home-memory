@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
+const locations_api_1 = require("../../utils/locations-api");
 const batch_save_1 = require("../../utils/batch-save");
 const draft_session_1 = require("../../utils/draft-session");
 /** 本地日期 → YYYY-MM-DD( picker mode=date 的 value 形态) */
@@ -62,6 +63,9 @@ Page({
             // 提醒候选三项(#36):只透传服务端已锚定的原话绝对日期;
             // 没提取到日期 remindAt 为空串,提醒行整行不显示(不催)
             const remindAt = d.remind_at ?? "";
+            // 「放进」路径预览(十七轮):仅 certain 且形状合法才透传,否则空数组
+            // = 不显示「放进」行(certain=false 照旧先进「尚未归类」,绝不静默建路径)
+            const mountPath = (0, batch_save_1.draftMountPathPreview)(d);
             return {
                 key: "row-" + i,
                 name: d.name,
@@ -84,14 +88,22 @@ Page({
                 remindTouched: false,
                 remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
                 remindVagueQuote: d.remind_vague_quote ?? "",
+                mountPath,
+                mountPathText: mountPath.join(" / "),
+                mountUpdateId: (0, api_1.uuid)(),
             };
         });
         // 恢复上次未完成的行状态:沿用原 operation_id(幂等恢复,不重复建档),
-        // 已保存行保持 saved 不再提交;提醒日期以会话回写值为准(用户可能改/清过),
-        // 旧版本会话缺省该字段时回落草稿提取值
+        // 已保存行保持 saved 不再提交;提醒日期与「放进」路径以会话回写值为准
+        // (用户可能改/清/换过),旧版本会话缺省该字段时回落草稿提取值
         if (payload.rows && payload.rows.length === rows.length) {
             payload.rows.forEach((saved, i) => {
                 const remindAt = typeof saved.remindAt === "string" ? saved.remindAt : rows[i].remindAt;
+                // 「放进」路径:回写过就用回写值——含空数组(用户改位置文本清掉的,
+                // 绝不回生草稿预览的旧路径);旧版本会话缺省该字段才回落草稿预览
+                const mountPath = Array.isArray(saved.mountPath)
+                    ? saved.mountPath
+                    : rows[i].mountPath;
                 rows[i] = {
                     ...rows[i],
                     name: saved.name,
@@ -103,6 +115,8 @@ Page({
                     remindAt,
                     remindTouched: saved.remindTouched === true || rows[i].remindTouched,
                     remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
+                    mountPath,
+                    mountPathText: mountPath.join(" / "),
                 };
             });
         }
@@ -147,6 +161,8 @@ Page({
             // 行内提醒可能被用户改/清过,一并回写(恢复时覆盖草稿提取值)
             remindAt: r.remindAt,
             remindTouched: r.remindTouched,
+            // 「放进」路径可能被用户「换」过,一并回写(恢复时覆盖草稿预览)
+            mountPath: r.mountPath,
         }));
         (0, draft_session_1.updateDraftSessionRows)(this.sid, rows);
     },
@@ -277,7 +293,23 @@ Page({
                 return;
             }
         }
-        this.setData({ ["rows[" + index + "].locationText"]: value });
+        // 「放进」口径(十七轮评审,#18 红线边角):用户改了位置文本 = 否认原路径
+        // (无论原路径是 AI 拆的还是「换」选的),预览随之失效——清空回「先进
+        // 尚未归类」口径(与 §2.5 手补自由文本不自动上地图一致),绝不把物品挂进
+        // 与刚编辑文本背离的旧路径;要放具体位置,保存后到详情里整理。
+        const mountStale = row.mountPath.length > 0 && value !== row.locationText;
+        const patch = {
+            ["rows[" + index + "].locationText"]: value,
+        };
+        if (mountStale) {
+            patch["rows[" + index + "].mountPath"] = [];
+            patch["rows[" + index + "].mountPathText"] = "";
+        }
+        this.setData(patch);
+        if (mountStale) {
+            // 清了路径必须立刻回写会话:进程回收后恢复不得回生草稿预览的旧路径
+            this.persistRows();
+        }
     },
     onRowToggle(e) {
         const index = Number(e.currentTarget.dataset.index);
@@ -364,9 +396,57 @@ Page({
         this.persistRows();
     },
     /**
+     * 「放进」行「换」(十七轮):复用 locations 页既有的选位置弹层(picker 模式,
+     * EventChannel pickNode 回传;与 D1「放进具体位置」同款)。选定后把该行的
+     * 「放进」路径替换为所选(只信严格结构,异常回传不写);退栈统一由发起页
+     * 一次退掉本页上方全部选择器层(#29 后续,与 item 页同款)。整批提交中冻结。
+     */
+    onMountSwapTap(e) {
+        if (this.data.batchSaving) {
+            return; // 整批提交中冻结:本轮写入的就是本轮开始时看到的
+        }
+        const index = Number(e.currentTarget.dataset.index);
+        const row = this.data.rows[index];
+        if (!row || !row.certain || row.status === "saving" || row.status === "saved") {
+            return; // 没有该行的件不进选位置(certain=false 照旧先进「尚未归类」)
+        }
+        wx.navigateTo({
+            url: "/pages/locations/locations?picker=1&title=" +
+                encodeURIComponent("放进哪儿"),
+            events: {
+                pickNode: (d) => {
+                    const picked = (0, batch_save_1.mountPathFromPick)(d);
+                    if (picked.length === 0) {
+                        return; // 异常回传:不写,原路径保持
+                    }
+                    this.setData({
+                        ["rows[" + index + "].mountPath"]: picked,
+                        ["rows[" + index + "].mountPathText"]: picked.join(" / "),
+                    });
+                    this.persistRows();
+                    const pages = getCurrentPages();
+                    const idx = pages.indexOf(this);
+                    const delta = pages.length - 1 - idx;
+                    if (idx !== -1 && delta > 0) {
+                        wx.navigateBack({ delta, fail: () => { } });
+                    }
+                },
+            },
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    /**
      * 批量保存:提交瞬间对整页行做不可变快照,快照里的名称/位置/幂等键即本轮写入内容
      * (UI 冻结之外的第二道防线);逐行 create 由 runBatchSave 编排,行内固定
      * operation_id,失败行重试沿用原键。「一次确认」不是数据库原子事务——逐行如实反馈。
+     *
+     * 「放进」挂靠(十七轮,#18 红线语义升级)逐件独立跟在 create 后:行内带
+     * 最终路径才调 locations.ensureAndLink(路径已在确认卡明示 = 用户确认过);
+     * 挂靠失败绝不回滚已保存物品——行仍是「已记住」,计数后统一如实提示
+     * 「已记住,位置还没归位,稍后在详情整理」(该件照旧在「尚未归类」)。
+     * itemsApi create 请求结构不变,挂靠编排全在客户端。
      */
     async onSaveBatchTap() {
         if (this.data.batchSaving) {
@@ -383,22 +463,39 @@ Page({
             return;
         }
         this.setData({ batchSaving: true });
+        let mountFailed = 0;
         const finalRows = await (0, batch_save_1.runBatchSave)(snapshot, (row) => {
             // 行内提醒随 create 提交(可能被用户改/清过),映射下沉 batch-save 纯函数
             // (PR #52 B3 便于测试):行内无日期(含服务端因归属不明置空)不带提醒,
             // 绝不写入错误归属的提醒;quote 只在日期仍是原话提取值时携带。
             // vague(时间没换算标记,Fix 4)同理下沉:无日期且带标记才随行提交,
             // 存到 item 只为详情页展示,不产生任何提醒
-            const reminder = (0, batch_save_1.rowReminderInput)(row);
-            const vagueQuote = (0, batch_save_1.rowVagueQuoteInput)(row);
-            return (0, api_1.callItemsApi)({
-                action: "create",
-                operation_id: row.operationId,
-                name: row.name.trim(),
-                location_text: row.locationText.trim(),
-                ...(reminder ? { reminder } : {}),
-                ...(vagueQuote !== undefined ? { remind_vague_quote: vagueQuote } : {}),
-            }).then(() => undefined);
+            return (0, batch_save_1.saveRowWithMount)(row, (r) => {
+                const reminder = (0, batch_save_1.rowReminderInput)(r);
+                const vagueQuote = (0, batch_save_1.rowVagueQuoteInput)(r);
+                return (0, api_1.callItemsApi)({
+                    action: "create",
+                    operation_id: r.operationId,
+                    name: r.name.trim(),
+                    location_text: r.locationText.trim(),
+                    ...(reminder ? { reminder } : {}),
+                    ...(vagueQuote !== undefined ? { remind_vague_quote: vagueQuote } : {}),
+                }).then((res) => res.item);
+            }, (args) => 
+            // 「放进」落地:建缺失路径 + 挂上一件完成(路径段逐字来自确认卡
+            // 明示过的原话拆层,来源记 parse)
+            (0, locations_api_1.callLocationsApi)({
+                action: "ensureAndLink",
+                item_id: args.item_id,
+                path: args.path,
+                expected_version: args.expected_version,
+                update_id: args.update_id,
+                created_from: "parse",
+            }).then(() => undefined)).then((outcome) => {
+                if (outcome.mountFailed) {
+                    mountFailed += 1;
+                }
+            });
         }, (row, error) => {
             const index = this.data.rows.findIndex((r) => r.key === row.key);
             if (index === -1) {
@@ -422,6 +519,16 @@ Page({
         this.setData({ batchSaving: false });
         const summary = (0, batch_save_1.batchSummary)(finalRows);
         if ((0, batch_save_1.allCheckedSaved)(finalRows)) {
+            if (mountFailed > 0) {
+                // 物品已保存、挂靠没成(网络/冲突/跨家庭):绝不回滚,如实告知去向——
+                // 先在「尚未归类」,稍后到详情里放进具体位置;留在本页让用户看到行状态
+                wx.showToast({
+                    title: "已记住,位置还没归位,稍后在详情整理",
+                    icon: "none",
+                    duration: 2500,
+                });
+                return;
+            }
             wx.showToast({ title: "记住了,下次问我。", icon: "success" });
             setTimeout(() => {
                 this.backToHome();

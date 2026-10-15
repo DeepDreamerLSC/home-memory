@@ -34,6 +34,13 @@ export interface DraftSessionRowState {
   remindAt?: string;
   /** 用户动过提醒行(清除后行仍显示灰显「不提醒」),恢复时保持 */
   remindTouched?: boolean;
+  /**
+   * 「放进」行当前路径(issue #45 十七轮):用户可能经选位置「换」过,也可能
+   * 因改位置文本被清成空数组(确认页 onRowLocationInput)——空数组同样是
+   * 回写过的有效值,恢复时不回落草稿预览(否则旧路径回生);缺省(旧版本
+   * 会话)才回落草稿预览值(无预览 = 空数组)。
+   */
+  mountPath?: string[];
 }
 
 export interface DraftSessionPayload {

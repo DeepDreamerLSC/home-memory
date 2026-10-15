@@ -27,6 +27,7 @@ import { notifyFamilyScopeDrift } from "./households-api";
 import type {
   ApplyScanResponse,
   DeleteLocationResponse,
+  EnsureAndLinkResponse,
   EnsurePathResponse,
   LinkItemResponse,
   ListLocationsResponse,
@@ -203,6 +204,20 @@ function validateLocationsOkResponse(
         throw bad();
       }
       break;
+    case "ensureAndLink":
+      // 十七轮「放进」:already/item.version/path/created/location_ids 逐项校验,
+      // 结构不符按异常响应处理(挂靠是否成功绝不含糊)
+      if (
+        typeof r.already !== "boolean" ||
+        !isRecord(r.item) ||
+        typeof r.item.version !== "number" ||
+        !Array.isArray(r.path) ||
+        !Array.isArray(r.created) ||
+        !Array.isArray(r.location_ids)
+      ) {
+        throw bad();
+      }
+      break;
     case "parseLocation":
       if (
         !isRecord(r.parse) ||
@@ -260,6 +275,7 @@ const LOCATIONS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "linkItem",
   "unlinkItem",
   "applyScan",
+  "ensureAndLink",
 ]);
 
 export function callLocationsApi(
@@ -286,6 +302,9 @@ export function callLocationsApi(
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "unlinkItem" }>,
 ): Promise<LinkItemResponse>;
+export function callLocationsApi(
+  event: Extract<LocationsApiEvent, { action: "ensureAndLink" }>,
+): Promise<EnsureAndLinkResponse>;
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "parseLocation" }>,
 ): Promise<ParseLocationResponse>;

@@ -37,6 +37,9 @@ const SYSTEM_PROMPT = [
  * 提醒候选三项(remind_at/remind_kind/remind_quote)沿用 #36 冻结日期纪律:
  * 只接受原话里明确说了的绝对日期(至少有月和日),逐字锚定;模糊/相对/月精度/
  * 需换算的一律 null(日期由用户在确认页自己选);不存在「存日期但不提醒」模式。
+ * mount_path(十七轮,#18 红线语义升级):「放进」路径预览——仅 certain=true 且
+ * 分层明确时逐字投影(服务端硬门见 lib/validate.js validateMountPath);
+ * 这是预览不是写入,用户点「确认记住」才由 locations.ensureAndLink 建路径挂上。
  */
 const SYSTEM_PROMPT_V2 = [
   "你是家庭物品位置提取器。用户会用一句话描述一件或多件物品及其位置,你只负责提取,不负责回答或闲聊。",
@@ -49,9 +52,10 @@ const SYSTEM_PROMPT_V2 = [
   "6. 用户在这句话里明确说出了绝对日期(至少有「月」和「日」,如「11月20号过期」「2027年6月30号保修到期」)时,为对应物品给出提醒候选三项:remind_at 规范化为 YYYY-MM-DD;remind_kind ∈ 有效期(保质期/有效期/保修到期)/开封后(已开封,要在该日期前用完或吃完)/下次维护(下次要处理这件事的日子,如更换、清洗、归还、续约、寄出);remind_quote 为该日期在原话中的逐字子串(如「11月20号」)。用户没说年份时,按【今天】补全为最近的未来日期(今年的该月该日已过则用下一年)。",
   "7. 日期纪律(违反即不带提醒,物品与位置仍照常提取):只接受原话里明确说了的绝对日期。「下个月」「快过期了」「大概冬天」「差不多半年」等模糊表达,「下周三」「半年后」「每三个月」等相对表达,只说到月份的(如「保修到2027年3月」——日没说,由用户自己选),以及「生产日期是10月5号保质期六个月」「开封后三个月」这类要换算的(到期日不在原话),一律 remind_at=null、remind_kind=null、remind_quote=null。禁止根据物品名称猜任何日期、保质期或周期。",
   "8. 时间没换算的透明标记(只标记,绝不换算):用户在这句话里提到了时间、但按第 7 条不该换算成日期时(模糊/相对/月精度/需换算),把该时间表述在原话中的逐字子串放进对应物品的 remind_vague_quote(如「半年后」「下个月」「快过期了」)。没提到任何时间、或该件已按第 6 条给出 remind_at 三项时,remind_vague_quote 为 null。remind_vague_quote 不是日期、也绝不会被换算成日期——它只是把「用户说了时间、但系统没换算」如实标出来。",
+  "9. 放进路径预览 mount_path:当某件的位置 certain 为 true、且能明确拆成「从大到小」的层级时,把每一层的名字逐字取自该件的 location_text、按原文顺序放进该件的 mount_path 数组(字符串数组,1-6 段,每段不超过 30 字,首段是房间或大区域;位置只有一层时就是单段数组,如「玄关」→ [\"玄关\"];多层如「主卧的柜子上」→ [\"主卧\",\"柜子上\"])。「上」「左边」这类纯方位词不能单独成一层,并入前一层实体即可。层级拆不明确、位置含「某个」「大概」等模糊说法、层次关系不清时,mount_path 为 null——绝不猜测、绝不编造层次,拿不准就给 null。certain 为 false 的物品 mount_path 必须为 null。",
   "只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:",
-  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…", "remind_at": "2026-11-20", "remind_kind": "有效期", "remind_quote": "11月20号", "remind_vague_quote": null } ], "has_more": false }',
-  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字;has_more 为布尔;remind_at 形如 YYYY-MM-DD 或 null,与 remind_kind、remind_quote 同时出现或同时为 null(没有提醒时三项均为 null);remind_kind 只能是 有效期/开封后/下次维护 之一或 null;remind_quote 不超过 200 字,必须是原话逐字子串;remind_vague_quote 不超过 200 字,必须是原话里时间表述的逐字子串,只在 remind_at 为 null 且确有时间表述时给出,否则为 null。",
+  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…", "remind_at": "2026-11-20", "remind_kind": "有效期", "remind_quote": "11月20号", "remind_vague_quote": null, "mount_path": ["主卧", "柜子上"] } ], "has_more": false }',
+  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字;has_more 为布尔;remind_at 形如 YYYY-MM-DD 或 null,与 remind_kind、remind_quote 同时出现或同时为 null(没有提醒时三项均为 null);remind_kind 只能是 有效期/开封后/下次维护 之一或 null;remind_quote 不超过 200 字,必须是原话逐字子串;remind_vague_quote 不超过 200 字,必须是原话里时间表述的逐字子串,只在 remind_at 为 null 且确有时间表述时给出,否则为 null;mount_path 为字符串数组(1-6 段,每段 1-30 字、逐字取自该件 location_text、按原文顺序、首段为房间或大区域)或 null(certain 为 false、分层不明确或模糊时必须为 null)。",
 ].join("\n");
 
 const TODAY_MARKER = "【今天】";

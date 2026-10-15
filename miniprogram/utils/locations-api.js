@@ -148,6 +148,18 @@ function validateLocationsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "ensureAndLink":
+            // 十七轮「放进」:already/item.version/path/created/location_ids 逐项校验,
+            // 结构不符按异常响应处理(挂靠是否成功绝不含糊)
+            if (typeof r.already !== "boolean" ||
+                !isRecord(r.item) ||
+                typeof r.item.version !== "number" ||
+                !Array.isArray(r.path) ||
+                !Array.isArray(r.created) ||
+                !Array.isArray(r.location_ids)) {
+                throw bad();
+            }
+            break;
         case "parseLocation":
             if (!isRecord(r.parse) ||
                 !Array.isArray(r.parse.segments) ||
@@ -197,6 +209,7 @@ const LOCATIONS_MUTATING_ACTIONS = new Set([
     "linkItem",
     "unlinkItem",
     "applyScan",
+    "ensureAndLink",
 ]);
 async function callLocationsApi(event) {
     // F2 客户端半边(issue #34 P1-B):写类 action 自动附

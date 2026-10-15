@@ -10,6 +10,7 @@ exports.errorMessage = errorMessage;
 const locations_cache_1 = require("./locations-cache");
 const household_scope_1 = require("./household-scope");
 const households_api_1 = require("./households-api");
+const batch_save_1 = require("./batch-save");
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 /** itemsApi 为薄适配层,正常应在数秒内返回 */
@@ -277,6 +278,13 @@ async function callExtractDraft(text, opts) {
                 anchor_shared: d.anchor_shared === true,
                 // 提醒候选三项(issue #36):透传服务端已锚定的原话日期,残缺/非法整体置 null
                 ...parseRemindTriple(d),
+                // 「放进」路径预览(issue #45 十七轮):仅 certain 且形状合法才透传,
+                // 否则 null(certain=false 一律 null = 确认卡不显示「放进」行,
+                // 照旧先进「尚未归类」;绝不静默建路径)
+                mount_path: (() => {
+                    const preview = (0, batch_save_1.draftMountPathPreview)(d);
+                    return preview.length > 0 ? preview : null;
+                })(),
             })),
             original_text: result.original_text,
             truncated: result.truncated === true,

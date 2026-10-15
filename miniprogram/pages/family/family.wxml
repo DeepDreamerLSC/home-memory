@@ -12,12 +12,19 @@
   <block wx:elif="{{ !shared }}">
     <view class="card">
       <view class="card-title">当前家庭</view>
-      <view class="item-row">
+      <view
+        class="item-row fam-switch-row"
+        hover-class="fam-switch-hover"
+        hover-stay-time="60"
+        bindtap="onFamSwitchTap"
+      >
         <view class="item-icon">家</view>
         <view class="item-main">
-          <view class="item-name">个人家庭</view>
+          <view class="item-name">我的家</view>
+          <view class="item-location">当前家庭 · 点开可切换</view>
           <view class="item-location">仅自己可见,你的物品都记在这里</view>
         </view>
+        <view class="fam-switch-chev">›</view>
       </view>
     </view>
 
@@ -73,12 +80,19 @@
   <block wx:else>
     <view class="card">
       <view class="card-title">当前家庭</view>
-      <view class="item-row">
+      <view
+        class="item-row fam-switch-row"
+        hover-class="fam-switch-hover"
+        hover-stay-time="60"
+        bindtap="onFamSwitchTap"
+      >
         <view class="item-icon">{{ displayName[0] || '家' }}</view>
         <view class="item-main">
-          <view class="item-name">{{ displayName || '我的家' }}</view>
+          <view class="item-name">我们家 · {{ displayName || '我的家' }}</view>
+          <view class="item-location">当前家庭 · 点开可切换</view>
           <view class="item-location">你是{{ role }} · 全员都能看到这个家庭的物品与位置</view>
         </view>
+        <view class="fam-switch-chev">›</view>
       </view>
       <view wx:if="{{ loadError }}" class="error-text">{{ loadError }}</view>
     </view>
@@ -186,6 +200,27 @@
       </view>
     </view>
   </block>
+</view>
+
+<!-- 切换家庭三选弹层(十七轮 B 线):顶部当前家庭行点开,与首页 fam-chip 同款;
+     在这里切换成功后回到首页地图,按新家庭刷新 -->
+<view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-title">切换家庭</view>
+    <view
+      wx:for="{{ famSheetOptions }}"
+      wx:key="key"
+      class="sheet-act {{ switchingFamily ? 'disabled' : '' }}"
+      hover-class="{{ switchingFamily ? 'none' : 'sheet-act-hover' }}"
+      hover-stay-time="60"
+      data-key="{{ item.key }}"
+      bindtap="onFamSheetPick"
+    >
+      <view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view>
+      <view class="sheet-act-sub">{{ item.sub }}</view>
+    </view>
+    <view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view>
+  </view>
 </view>
 
 <!-- 常驻语音条:按住说话记一件(issue #45 全局可达) -->

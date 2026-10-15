@@ -258,5 +258,26 @@
   </block>
 </view>
 
+<!-- 切换家庭三选弹层(十七轮 B 线):共享态点 fam-chip 打开;
+     我的家 / 我们家·家庭名(✓ 当前)/ 家庭管理页;切换=只改当前看哪个家 -->
+<view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-title">切换家庭</view>
+    <view
+      wx:for="{{ famSheetOptions }}"
+      wx:key="key"
+      class="sheet-act {{ switchingFamily ? 'disabled' : '' }}"
+      hover-class="{{ switchingFamily ? 'none' : 'sheet-act-hover' }}"
+      hover-stay-time="60"
+      data-key="{{ item.key }}"
+      bindtap="onFamSheetPick"
+    >
+      <view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view>
+      <view class="sheet-act-sub">{{ item.sub }}</view>
+    </view>
+    <view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view>
+  </view>
+</view>
+
 <!-- 常驻语音条(issue #45 全局可达:首页全部状态) -->
 <voice-bar />

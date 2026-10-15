@@ -7,6 +7,9 @@ exports.batchSummary = batchSummary;
 exports.shouldDefaultChecked = shouldDefaultChecked;
 exports.rowVagueQuoteInput = rowVagueQuoteInput;
 exports.rowReminderInput = rowReminderInput;
+exports.draftMountPathPreview = draftMountPathPreview;
+exports.mountPathFromPick = mountPathFromPick;
+exports.saveRowWithMount = saveRowWithMount;
 exports.runBatchSave = runBatchSave;
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
 function rowsToSave(rows) {
@@ -68,7 +71,7 @@ function rowVagueQuoteInput(row) {
     return row.remindVagueQuote;
 }
 /**
- * C2 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
+ * 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
  * 行内无日期(服务端因归属不明置空 / 用户清过) → undefined 不带提醒,
  * 绝不写入错误归属的提醒;日期仍是原话提取值时才携带 quote
  * (选择器改过的没有原话锚点)。
@@ -84,6 +87,70 @@ function rowReminderInput(row) {
             ? { quote: row.remindQuote }
             : {}),
     };
+}
+/** 与 locations 节点名同限:1-6 段,每段去空白 1-30 码点 */
+const MOUNT_PATH_MAX_SEGMENTS = 6;
+const MOUNT_SEGMENT_MAX_CODEPOINTS = 30;
+function codePointLength(s) {
+    return Array.from(s).length;
+}
+/** 路径段形状复核(纯函数):非数组/超限/含空段或超长段一律不通过,不猜 */
+function isValidPathSegments(path) {
+    if (!Array.isArray(path) || path.length < 1 || path.length > MOUNT_PATH_MAX_SEGMENTS) {
+        return false;
+    }
+    return path.every((seg) => typeof seg === "string" &&
+        codePointLength(seg.trim()) >= 1 &&
+        codePointLength(seg.trim()) <= MOUNT_SEGMENT_MAX_CODEPOINTS);
+}
+/**
+ * 草稿 → 「放进」路径预览(纯函数):仅 certain=true 且形状合法才透传,
+ * 否则空数组(=确认卡不显示「放进」行,照旧先进「尚未归类」)。
+ * 服务端已硬门(certain=false 强制 mount_path null),这里是客户端第二道
+ * 门——certain=false 即使带路径也一律丢弃,绝不猜、绝不静默挂。
+ */
+function draftMountPathPreview(d) {
+    if (d.certain !== true || !isValidPathSegments(d.mount_path)) {
+        return [];
+    }
+    return d.mount_path.map((seg) => seg.trim());
+}
+/**
+ * locations 选择器回传 → 替换路径(纯函数):只信严格结构
+ * (数组、1-6 段、每段非空 ≤30 码点),异常回传返回空数组不写。
+ */
+function mountPathFromPick(p) {
+    if (!isValidPathSegments(p.path)) {
+        return [];
+    }
+    return p.path.map((seg) => seg.trim());
+}
+/**
+ * 单件保存编排(确认卡「确认记住」的落地,#18 红线语义升级):
+ * create 成功后,行内带最终「放进」路径才调 ensureAndLink 建路径并挂上
+ * (路径已在确认卡明示、用户点确认 = 已确认)。挂靠失败(网络/版本冲突/
+ * 跨家庭)绝不回滚已保存物品——物品保留,如实返回 mountFailed 由调用方
+ * 提示「先在尚未归类,稍后详情整理」;create 失败原样抛出(行 failed,
+ * 原键重试)。批量件各自独立走本编排,一件挂靠失败不影响其余件。
+ */
+async function saveRowWithMount(row, create, link) {
+    const item = await create(row);
+    if (row.mountPath.length === 0) {
+        return { mountFailed: false };
+    }
+    try {
+        await link({
+            item_id: item.item_id,
+            expected_version: item.version,
+            path: row.mountPath,
+            update_id: row.mountUpdateId,
+        });
+        return { mountFailed: false };
+    }
+    catch {
+        // 物品已记住:不回滚、不重试、不抛错(行仍是 saved),如实交由调用方提示
+        return { mountFailed: true };
+    }
 }
 /**
  * 逐行保存编排(在传入快照的拷贝上推进,绝不引用调用方可变状态):

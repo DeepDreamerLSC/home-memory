@@ -164,3 +164,101 @@
   font-size: 26rpx;
   flex-shrink: 0;
 }
+
+/* ============ 顶部当前家庭行:点开可切换(十七轮 B 线;原型 F1 rowbtn) ============ */
+.fam-switch-row {
+  cursor: pointer;
+}
+
+.fam-switch-hover {
+  background: var(--card-inset);
+  border-radius: 14rpx;
+}
+
+.fam-switch-chev {
+  font-size: 34rpx;
+  color: var(--text-3);
+  line-height: 1;
+  align-self: center;
+  flex-shrink: 0;
+  margin-left: 12rpx;
+}
+
+/* ============ 切换家庭三选弹层(与首页/item 弹层同款样式) ============ */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: none;
+  align-items: flex-end;
+  z-index: 60;
+}
+
+.sheet-mask.open {
+  display: flex;
+}
+
+.sheet {
+  width: 100%;
+  background: var(--bg);
+  border-radius: 44rpx 44rpx 0 0;
+  padding: 32rpx 36rpx calc(44rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.sheet-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-bottom: 20rpx;
+}
+
+/* 弹层动作行(Fix 1 口径:热区=元素 ≥88rpx,纵向 flex 居中) */
+.sheet-act {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--card);
+  border-radius: 26rpx;
+  padding: 22rpx 26rpx;
+  min-height: 88rpx;
+  box-sizing: border-box;
+  margin-top: 16rpx;
+}
+
+.sheet-act-hover {
+  background: var(--card-inset);
+}
+
+.sheet-act.disabled {
+  opacity: 0.55;
+}
+
+.sheet-act-name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.sheet-act-sub {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: var(--text-3);
+  margin-top: 6rpx;
+  line-height: 1.3;
+}
+
+.sheet-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  font-size: 26rpx;
+  color: var(--text-3);
+  margin-top: 24rpx;
+  line-height: 1;
+}

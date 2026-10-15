@@ -26,7 +26,10 @@ import {
   leaveFamily,
   removeFamilyMember,
   revokeInvite,
+  switchFamily,
 } from "../../utils/households-api";
+import { famSwitchSheetOptions } from "../../utils/fam-switch";
+import type { FamSwitchOption } from "../../utils/fam-switch";
 import type {
   HouseholdInviteMeta,
   HouseholdMember,
@@ -68,6 +71,12 @@ Page<
     createAck: boolean;
     createBusy: boolean;
     acting: boolean;
+    /** 切换家庭三选弹层(十七轮 B 线):顶部当前家庭行点开 */
+    famSheetVisible: boolean;
+    /** 弹层三行(打开时现拼:当前家庭带 ✓ 与「当前」标记) */
+    famSheetOptions: FamSwitchOption[];
+    /** 切换进行中(防重复提交;期间弹层不可关、不可再选) */
+    switchingFamily: boolean;
   },
   {
     onLoad(): void;
@@ -75,6 +84,13 @@ Page<
     onPullDownRefresh(): Promise<void>;
     refresh(): Promise<void>;
     onHomeTreeTap(): void;
+    /** 顶部当前家庭行:点开三选弹层(与首页 fam-chip 同款,十七轮) */
+    onFamSwitchTap(): void;
+    onFamSheetClose(): void;
+    onFamSheetCloseTap(): void;
+    onFamSheetPick(e: WechatMiniprogram.CustomEvent): void;
+    doFamilySwitch(target: "personal" | "shared"): Promise<void>;
+    noop(): void;
     /* 创建共享家庭 */
     onStartCreateTap(): void;
     onCancelCreateTap(): void;
@@ -121,6 +137,9 @@ Page<
     createAck: false,
     createBusy: false,
     acting: false,
+    famSheetVisible: false,
+    famSheetOptions: [] as FamSwitchOption[],
+    switchingFamily: false,
   },
 
   onLoad() {
@@ -216,6 +235,94 @@ Page<
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },
     });
+  },
+
+  /* ---------------- 切换家庭(十七轮 B 线:顶部当前家庭行,与首页同款弹层) ---------------- */
+
+  /** 顶部当前家庭行:点开三选弹层(我的家 / 我们家·家庭名 / 家庭管理页) */
+  onFamSwitchTap() {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    this.setData({
+      famSheetVisible: true,
+      famSheetOptions: famSwitchSheetOptions(),
+    });
+  },
+
+  onFamSheetClose() {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    this.setData({ famSheetVisible: false });
+  },
+
+  onFamSheetCloseTap() {
+    this.onFamSheetClose();
+  },
+
+  noop() {},
+
+  /**
+   * 三选弹层选行:本页已在家庭管理页,「家庭管理页」行只关层;
+   * 当前家庭只提示;另一个家执行 households.switch。
+   */
+  onFamSheetPick(e) {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    const key = String((e.currentTarget.dataset || {}).key || "");
+    if (key === "admin") {
+      this.setData({ famSheetVisible: false });
+      return;
+    }
+    if (key !== "mine" && key !== "shared") {
+      return;
+    }
+    const option = this.data.famSheetOptions.find((o) => o.key === key);
+    if (!option) {
+      return;
+    }
+    if (option.current) {
+      this.setData({ famSheetVisible: false });
+      wx.showToast({ title: "已在当前家庭", icon: "none" });
+      return;
+    }
+    void this.doFamilySwitch(key === "mine" ? "personal" : "shared");
+  },
+
+  /**
+   * 执行切换(#34 合同不弱化:只更新当前家庭指针 + 客户端作用域刷新):
+   * 成功后回到首页地图——首页 onShow 经既有 fetchHouseholdStatus/
+   * captureAndInvalidate 链与切家清屏逻辑按新家庭整页刷新(骨架屏过渡,
+   * 不拿上一家数据冒充);失败如实提示,本页保持当前家庭不动。
+   */
+  async doFamilySwitch(target) {
+    if (this.data.switchingFamily) {
+      return;
+    }
+    this.setData({ switchingFamily: true });
+    try {
+      const res = await switchFamily(target);
+      this.setData({ famSheetVisible: false });
+      const name = res.shared && res.display_name ? res.display_name : "";
+      wx.showToast({
+        title: res.shared ? "已切到「我们家 · " + name + "」" : "已切到「我的家」",
+        icon: "none",
+        duration: 2000,
+      });
+      // 回首页地图(十七轮:在 F1 切换后回 H1 按新家庭刷新;onShow 走既有刷新链)
+      wx.navigateBack({
+        fail: () => {
+          wx.reLaunch({ url: "/pages/index/index", fail: () => {} });
+        },
+      });
+    } catch (e) {
+      this.setData({ famSheetVisible: false });
+      wx.showModal({ title: "切换失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ switchingFamily: false });
+    }
   },
 
   /* ---------------- 创建共享家庭(单人态) ---------------- */
