@@ -9,8 +9,19 @@ import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
 } from "../../utils/locations-api";
-import { isHouseholdScopeShared } from "../../utils/household-scope";
-import type { ItemSummary } from "../../types";
+import {
+  captureScopeGeneration,
+  isHouseholdScopeShared,
+  isScopeGenerationCurrent,
+} from "../../utils/household-scope";
+import {
+  PERIOD_DAYS_MAX,
+  askUseUp,
+  expireMainText,
+  monthDayText,
+  utcDaysFromToday,
+} from "../../utils/remind-ui";
+import type { ItemSummary, RemindRow } from "../../types";
 
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s: string): string {
@@ -30,6 +41,14 @@ function shortDate(iso: string): string {
   const d = new Date(t);
   const pad = (n: number): string => (n < 10 ? "0" + n : String(n));
   return pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+/** 本地日期 → YYYY-MM-DD(picker mode=date 的 value 形态与下限) */
+function todayYmd(now: Date = new Date()): string {
+  const pad = (n: number): string => (n < 10 ? "0" + n : String(n));
+  return (
+    now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate())
+  );
 }
 
 /**
@@ -93,6 +112,17 @@ Page<
     mountOrderViolation: boolean;
     /** 确认整理执行中(ensurePath + linkItem) */
     mountSaving: boolean;
+    /**
+     * 保质期行(#36):这件有 active 提醒才显示(mainText=有效期+相对天数,
+     * kind=用完了时判断是否问下次周期);null=无 active 提醒,整行不渲染
+     */
+    expire: { mainText: string; dueDate: string; kind: string } | null;
+    /** 编辑折叠「提醒」字段的当前日期(YYYY-MM-DD;""=不带提醒) */
+    remindAt: string;
+    /** 今天(YYYY-MM-DD):编辑提醒的日期选择器下限 */
+    today: string;
+    /** 提醒操作执行中(用完了/改日期/清除;防并发重复提交) */
+    remindBusy: boolean;
   },
   {
     original: { name: string; location: string; note: string };
@@ -132,6 +162,15 @@ Page<
     cancelMount(): void;
     /** 阻止弹层蒙层下的滚动穿透 */
     noop(): void;
+    /* ---------------- 提醒(#36 三阶段) ---------------- */
+    refreshReminderRow(): Promise<void>;
+    applyReminderRow(row: RemindRow | null): void;
+    /** 保质期行「用完了」:确认(周期物品问下次)后 remindComplete */
+    onExpireDoneTap(): Promise<void>;
+    /** 编辑折叠「提醒」:picker mode=date 选日子 → remindSet 设提醒(无则补录,有则改期) */
+    onRemindDateChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): Promise<void>;
+    /** 编辑折叠「提醒」:✕ 连日期一起清除(remindClear;不存在存日期但不提醒) */
+    onRemindFieldClear(): Promise<void>;
   }
 >({
   data: {
@@ -154,6 +193,10 @@ Page<
     mountNeedConfirm: false,
     mountOrderViolation: false,
     mountSaving: false,
+    expire: null as { mainText: string; dueDate: string; kind: string } | null,
+    remindAt: "",
+    today: todayYmd(),
+    remindBusy: false,
   },
 
   /** 最近一次加载到的内容,用于判断是否有修改 */
@@ -221,6 +264,8 @@ Page<
   onShow() {
     // 家庭上下文可能切换(创建/加入/退出):「分享给家人」只在共享家庭显示
     this.setData({ familyShared: isHouseholdScopeShared() });
+    // 保质期行(#36):进页/回页时按服务端提醒刷新;加载失败静默不显示(增强露出)
+    void this.refreshReminderRow();
   },
 
   onNameInput(e) {
@@ -704,6 +749,166 @@ Page<
 
   cancelMount() {
     this.setData({ mountPanelOpen: false, mountSegments: [] });
+  },
+
+  /* ---------------- 提醒的查看与处理(#36 三阶段) ---------------- */
+
+  /**
+   * 拉当前家庭 active 提醒,取这件的那一行上屏。行数据来自服务端(资格
+   * 复核后);家庭切换(作用域代数变化)后旧家庭响应不上屏。加载失败
+   * 静默隐藏保质期行(增强露出,不影响详情主体)。
+   */
+  async refreshReminderRow() {
+    const scopeGen = captureScopeGeneration();
+    try {
+      const res = await callItemsApi({ action: "remindList" });
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        // 在途期间家庭已切换(含响应揭示的漂移):旧家庭的保质期行立即收起,
+        // 不显示旧家庭数据;下次 onShow 会按新作用域重拉
+        this.setData({ expire: null, remindAt: "" });
+        return;
+      }
+      this.applyReminderRow(
+        res.reminders.find((r) => r.item_id === this.data.itemId) || null,
+      );
+    } catch (e) {
+      // 静默:不显示保质期行,详情页其余内容照常
+    }
+  },
+
+  applyReminderRow(row: RemindRow | null) {
+    if (row === null) {
+      this.setData({ expire: null, remindAt: "" });
+      return;
+    }
+    this.setData({
+      expire: {
+        mainText: expireMainText(row.due_date),
+        dueDate: row.due_date,
+        kind: row.kind,
+      },
+      remindAt: row.due_date,
+    });
+  },
+
+  /** 保质期行「用完了」:先确认(周期物品问下次周期),再 remindComplete */
+  async onExpireDoneTap() {
+    if (this.data.remindBusy) {
+      return;
+    }
+    const expire = this.data.expire;
+    if (!expire) {
+      return;
+    }
+    const decision = await askUseUp(this.data.name, expire.kind);
+    if (decision === null) {
+      return; // 用户取消:不动、不写
+    }
+    this.setData({ remindBusy: true });
+    try {
+      const res = await callItemsApi({
+        action: "remindComplete",
+        item_id: this.data.itemId,
+        ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
+      });
+      if (decision.periodDays !== null && res.reminder) {
+        this.applyReminderRow(res.reminder);
+        wx.showToast({
+          title: "已用完;下次 " + monthDayText(res.reminder.due_date) + " 到期",
+          icon: "none",
+          duration: 2500,
+        });
+      } else {
+        this.setData({ expire: null, remindAt: "" });
+        wx.showToast({ title: "已用完", icon: "success" });
+      }
+    } catch (e) {
+      wx.showModal({
+        title: "没办成",
+        content: errorMessage(e),
+        showCancel: false,
+      });
+    } finally {
+      this.setData({ remindBusy: false });
+    }
+  },
+
+  /**
+   * 编辑折叠「提醒」选日子(#36:picker mode=date 弹层,唯一手动日期来源):
+   * 没有提醒的物品在这里补录,有提醒的在这里改期——都走 remindSet,把提醒
+   * 设为所选的日子(服务端替换该物品的提醒,不堆积)。picker 回填必为合法
+   * YYYY-MM-DD,异常值不写;今天及更早、超 10 年的日子如实拒绝。
+   */
+  async onRemindDateChange(e) {
+    if (this.data.remindBusy) {
+      return;
+    }
+    const value = e.detail && typeof e.detail.value === "string" ? e.detail.value : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return; // picker 形状异常:不写
+    }
+    if (value === this.data.remindAt) {
+      return; // 没变
+    }
+    const days = utcDaysFromToday(value);
+    if (days < 1) {
+      wx.showToast({ title: "选一个往后的日子", icon: "none" });
+      return;
+    }
+    if (days > PERIOD_DAYS_MAX) {
+      wx.showToast({ title: "最多记十年内", icon: "none" });
+      return;
+    }
+    const hadReminder = this.data.remindAt !== "";
+    this.setData({ remindBusy: true });
+    try {
+      const res = await callItemsApi({
+        action: "remindSet",
+        item_id: this.data.itemId,
+        due_date: value,
+      });
+      if (res.reminder) {
+        this.applyReminderRow(res.reminder);
+        wx.showToast({
+          title: hadReminder
+            ? "提醒已改到 " + monthDayText(res.reminder.due_date)
+            : "已带上提醒:" + monthDayText(res.reminder.due_date) + " 到期",
+          icon: "none",
+        });
+      } else {
+        // 不应发生(remindSet 必回所设行):回查一次,如实收敛
+        await this.refreshReminderRow();
+      }
+    } catch (e) {
+      wx.showModal({
+        title: hadReminder ? "提醒没改成" : "提醒没带上",
+        content: errorMessage(e),
+        showCancel: false,
+      });
+    } finally {
+      this.setData({ remindBusy: false });
+    }
+  },
+
+  /** 编辑折叠「提醒」✕:连日期一起清除(remindClear);日期唯一作用就是出现在「快到期」,没有「存日期但不提醒」 */
+  async onRemindFieldClear() {
+    if (this.data.remindBusy || !this.data.remindAt) {
+      return;
+    }
+    this.setData({ remindBusy: true });
+    try {
+      await callItemsApi({ action: "remindClear", item_id: this.data.itemId });
+      this.setData({ expire: null, remindAt: "" });
+      wx.showToast({ title: "已不带提醒", icon: "none" });
+    } catch (e) {
+      wx.showModal({
+        title: "没改成",
+        content: errorMessage(e),
+        showCancel: false,
+      });
+    } finally {
+      this.setData({ remindBusy: false });
+    }
   },
 
   noop() {},

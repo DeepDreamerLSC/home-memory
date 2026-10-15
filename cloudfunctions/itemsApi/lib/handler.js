@@ -4,12 +4,18 @@
  * itemsApi 纯函数 handler(docs/API_CONTRACT.md「itemsApi 协议」)。
  * handler(event, deps):身份只来自 deps.householdId,绝不从 event 读取任何身份字段;
  * 依赖注入以便离线测试。校验失败绝不写入;查询与列表永远过滤 deleted 为 false。
+ * 提醒实体(issue #36 二阶段):独立 reminders 集合,绝不把提醒字段堆到 items
+ * 文档上;create 增可选 reminder 参数,新增 remindList/remindComplete/remindClear/
+ * remindSet 四个 action(remindSet:为已有物品把提醒设为所选日子——AI 没提取出
+ * 日期或用户清过的物品也能补录,不必删掉重建)。家庭推导(#34 fail-closed)与
+ * 共享家庭写硬门(双 marker)口径与 items 完全一致,不另起炉灶。
  */
 
 var normalizeName = require("./normalize").normalizeName;
 var checkWriteScopeBinding = require("./household").checkWriteScopeBinding;
 
 var COLLECTION = "items";
+var REMINDERS_COLLECTION = "reminders";
 var NAME_MAX = 50;
 var LOCATION_MAX = 200;
 var NOTE_MAX = 200;
@@ -22,6 +28,13 @@ var LIST_MAX = 50;
 var PAGE_SIZE = 100;
 // 护栏:超过 100 页(1 万条)视为异常,如实抛错绝不静默截断(PR1 家庭规模远小于此)。
 var MAX_PAGES = 100;
+// 提醒类别(#36 冻结词表,与 extractDraft v2 的 remind_kind 同源)
+var REMIND_KINDS = ["有效期", "开封后", "下次维护"];
+// 提醒原话锚点上限(码点,与 extractDraft 的 quote 口径一致)
+var REMIND_QUOTE_MAX = 200;
+// 周期再生的天数护栏:0-3650(10 年),防误传巨值生成荒谬日期
+var REMIND_PERIOD_MAX = 3650;
+var REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 var ERROR_MESSAGES = {
   INVALID_INPUT: "输入不合法,请检查后重试",
@@ -147,6 +160,161 @@ function byUpdatedDesc(a, b) {
   return a.updated_at < b.updated_at ? 1 : -1;
 }
 
+// ---------- 提醒实体(issue #36 二阶段:独立 reminders 集合) ----------
+
+function codePointLength(s) {
+  return Array.from(s).length;
+}
+
+/**
+ * 严格日期校验:YYYY-MM-DD 且为真实日历日(2026-02-30、无补零、斜杠分隔一律非法)。
+ * #36 日期纪律:提醒日期只有「原话明确绝对日期(客户端已锚定)」与「用户日期
+ * 选择器」两个来源,服务端无从也绝不判断语义,但格式必须严格,绝不放宽。
+ */
+function isValidDueDate(v) {
+  if (!isString(v)) {
+    return false;
+  }
+  var s = v.trim();
+  if (!REMIND_DATE_RE.test(s)) {
+    return false;
+  }
+  var year = Number(s.slice(0, 4));
+  var month = Number(s.slice(5, 7));
+  var day = Number(s.slice(8, 10));
+  if (month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+  var leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  var daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
+/**
+ * 校验 create 的可选 reminder 入参 { due_date, kind, quote? }。
+ * 返回 null(未带提醒)/ "INVALID"(非法,调用方返回 INVALID_INPUT 且零写入)/
+ * { due_date, kind, quote }(规范化后)。
+ * quote 的「原话逐字子串」这条在服务端放宽:锚定由客户端在确认页完成,
+ * create 时服务端没有原话可比对;日期选择器来源的提醒本就没有 quote。
+ * 只做类型与长度校验;due_date 与 kind 必须严格。
+ */
+function parseReminderInput(reminder) {
+  if (reminder === undefined || reminder === null) {
+    return null;
+  }
+  if (typeof reminder !== "object" || Array.isArray(reminder)) {
+    return "INVALID";
+  }
+  if (!isValidDueDate(reminder.due_date)) {
+    return "INVALID";
+  }
+  if (REMIND_KINDS.indexOf(reminder.kind) === -1) {
+    return "INVALID";
+  }
+  var quote = "";
+  if (reminder.quote !== undefined && reminder.quote !== null) {
+    if (!isString(reminder.quote)) {
+      return "INVALID";
+    }
+    quote = reminder.quote.trim();
+    if (codePointLength(quote) > REMIND_QUOTE_MAX) {
+      return "INVALID";
+    }
+  }
+  return { due_date: reminder.due_date.trim(), kind: reminder.kind, quote: quote };
+}
+
+/** 完成日+周期(UTC 日历日算术,跨月/跨年自然进位):"2026-10-31" + 1 → "2026-11-01" */
+function addDays(dueDate, days) {
+  var t = Date.UTC(
+    Number(dueDate.slice(0, 4)),
+    Number(dueDate.slice(5, 7)) - 1,
+    Number(dueDate.slice(8, 10))
+  );
+  var dt = new Date(t + days * 86400000);
+  var pad = function (n) {
+    return n < 10 ? "0" + n : String(n);
+  };
+  return dt.getUTCFullYear() + "-" + pad(dt.getUTCMonth() + 1) + "-" + pad(dt.getUTCDate());
+}
+
+function reminders(deps) {
+  return deps.db.collection(REMINDERS_COLLECTION);
+}
+
+function buildReminderDoc(deps, itemId, dueDate, kind, quote, now) {
+  return {
+    _id: "rd_" + deps.genId(),
+    household_id: deps.householdId,
+    item_id: itemId,
+    status: "active",
+    due_date: dueDate,
+    kind: kind,
+    quote: quote,
+    created_at: now
+  };
+}
+
+/**
+ * 收敛式补建:该 item 无 active 提醒时才补一条。
+ * 场景:首次 create 已建 item 但 reminder 追加写入中断(无跨文档事务),
+ * 客户端原键原内容重试命中 duplicated 分支——在这里自愈补上,不丢用户
+ * 已确认的提醒,也不重复补第二条(已有 active 时原样返回)。
+ */
+async function ensureActiveReminder(deps, itemId, reminder) {
+  var existing = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, status: "active" })
+    .get();
+  if (existing.data && existing.data.length > 0) {
+    return existing.data[0];
+  }
+  var doc = buildReminderDoc(deps, itemId, reminder.due_date, reminder.kind, reminder.quote, deps.now());
+  await reminders(deps).add({ data: doc });
+  return doc;
+}
+
+/** 硬删除某 item 的全部 active 提醒(done 历史保留);remindClear 与物品删除级联共用 */
+async function removeActiveReminders(deps, itemId) {
+  var res = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, status: "active" })
+    .remove();
+  return (res && res.stats && res.stats.removed) || 0;
+}
+
+/**
+ * 拉取当前家庭全部 active 提醒(分页拉全量,口径同 fetchActiveItems:
+ * CloudBase 云函数端 get() 单次最多 100 条,超出护栏页数如实抛错)。
+ */
+async function fetchActiveReminders(deps) {
+  var out = [];
+  for (var page = 0; page < MAX_PAGES; page++) {
+    var res = await reminders(deps)
+      .where({ household_id: deps.householdId, status: "active" })
+      .skip(out.length)
+      .limit(PAGE_SIZE)
+      .get();
+    var batch = (res && res.data) || [];
+    for (var i = 0; i < batch.length; i++) {
+      out.push(batch[i]);
+    }
+    if (batch.length < PAGE_SIZE) {
+      return out;
+    }
+  }
+  throw new Error("reminders query exceeded " + MAX_PAGES * PAGE_SIZE + " documents");
+}
+
+/** remindList 行投影:物品名/位置文本/due/kind/item_id,不带 quote 与内部字段 */
+function remindRow(doc, item) {
+  return {
+    item_id: doc.item_id,
+    name: item.name,
+    location_text: item.location_text,
+    due_date: doc.due_date,
+    kind: doc.kind
+  };
+}
+
 /**
  * create:入参 { action, operation_id, name, location_text, note? }
  * 幂等:(household_id, operation_id) 已有则返回已有文档并 duplicated:true。
@@ -168,6 +336,11 @@ async function createItem(event, deps) {
   if (note === null) {
     return fail("INVALID_INPUT");
   }
+  // 可选提醒(issue #36):校验在任何查询/写入之前,非法则 item 与 reminder 均零写入
+  var reminder = parseReminderInput(event.reminder);
+  if (reminder === "INVALID") {
+    return fail("INVALID_INPUT");
+  }
 
   // 幂等只对「同键同内容」成立:命中未删除的同键记录时,
   // 内容一致 → duplicated:true 稳定返回;内容不同 → OPERATION_CONFLICT(绝不静默吞掉用户的修改)。
@@ -177,6 +350,11 @@ async function createItem(event, deps) {
   if (existing.data && existing.data.length > 0) {
     var doc = existing.data[0];
     if (sameCreateContent(doc, name, locationText, note)) {
+      if (reminder) {
+        // 响应丢失后的原键重试:首建可能已建 item 但 reminder 追加中断,
+        // 这里收敛补建(已有 active 则不重复),绝不丢用户已确认的提醒
+        await ensureActiveReminder(deps, doc._id, reminder);
+      }
       return { ok: true, item: project(doc), duplicated: true };
     }
     return operationConflict(doc);
@@ -210,12 +388,22 @@ async function createItem(event, deps) {
     if (after.data && after.data.length > 0) {
       var raced = after.data[0];
       if (!raced.deleted && sameCreateContent(raced, name, locationText, note)) {
+        if (reminder) {
+          await ensureActiveReminder(deps, raced._id, reminder);
+        }
         return { ok: true, item: project(raced), duplicated: true };
       }
       return operationConflict(raced);
     }
     // 回查不到属于异常场景:按原始错误上抛,绝不假装成功。
     throw e;
+  }
+  if (reminder) {
+    // item 文档由本次新建,直接追加提醒文档(无跨文档事务:
+    // 追加失败整体上抛,客户端原键重试走 duplicated 分支收敛自愈)
+    await reminders(deps).add({
+      data: buildReminderDoc(deps, item._id, reminder.due_date, reminder.kind, reminder.quote, deps.now())
+    });
   }
   return { ok: true, item: project(item), duplicated: false };
 }
@@ -325,6 +513,9 @@ async function deleteItem(event, deps) {
     .update({ data: { deleted: true, name: "", name_norm: "", location_text: "", note: "" } });
   var updated = (res && res.stats && res.stats.updated) || 0;
   if (updated >= 1) {
+    // 级联(issue #36):物品删除后其 active 提醒一并硬删(done 历史保留),
+    // remindList 不再出现该物品;绝不让提醒指向已删物品
+    await removeActiveReminders(deps, event.item_id);
     return { ok: true };
   }
   return fail("NOT_FOUND");
@@ -457,32 +648,192 @@ async function getItem(event, deps) {
   return fail("NOT_FOUND");
 }
 
+/**
+ * remindList:入参 { action:"remindList" }(只读,不参与写硬门校验)。
+ * 当前家庭全部 active 提醒按 due_date 升序(同日按 created_at、再按 _id,
+ * 确定性排序);行投影 { item_id, name, location_text, due_date, kind }。
+ * 物品已删/跨家庭的悬挂行读侧容忍跳过(级联应保证不出现,出现即悬挂,
+ * 同 locations 挂载的读侧容忍口径)。响应携带 household_id(共享家庭另带
+ * scope_revision)——口径同 list:客户端 remindComplete/remindClear 写请求
+ * 双 marker 的捕获来源。日志只记计数,绝不记物品名与日期明细。
+ */
+async function remindListItems(event, deps) {
+  var docs = await fetchActiveReminders(deps);
+  docs.sort(function (a, b) {
+    if (a.due_date !== b.due_date) {
+      return a.due_date < b.due_date ? -1 : 1;
+    }
+    if (a.created_at !== b.created_at) {
+      return a.created_at < b.created_at ? -1 : 1;
+    }
+    if (a._id === b._id) {
+      return 0;
+    }
+    return a._id < b._id ? -1 : 1;
+  });
+  var itemCache = Object.create(null);
+  var out = [];
+  for (var i = 0; i < docs.length; i++) {
+    var r = docs[i];
+    if (!Object.prototype.hasOwnProperty.call(itemCache, r.item_id)) {
+      var got = await collection(deps)
+        .where({ _id: r.item_id, household_id: deps.householdId, deleted: false })
+        .get();
+      itemCache[r.item_id] = (got.data && got.data[0]) || null;
+    }
+    var item = itemCache[r.item_id];
+    if (!item) {
+      continue; // 悬挂行:物品已删/跨家庭,不展示
+    }
+    out.push(remindRow(r, item));
+  }
+  var res = { ok: true, household_id: deps.householdId, reminders: out };
+  if (deps.householdShared === true) {
+    res.scope_revision = deps.scopeRevision;
+  }
+  return res;
+}
+
+/**
+ * remindComplete:入参 { action:"remindComplete", item_id, period_days? }。
+ * period_days 缺省或 0 表示不周期再生;携带则须为 0-3650 的整数,否则 INVALID_INPUT。
+ * 物品必须存在且属于当前家庭且未删(否则 NOT_FOUND);该 item 无 active 提醒也
+ * NOT_FOUND(已完成的重复完成按刷新列表收敛,绝不静默复活)。
+ * 将该 item 全部 active 提醒置 done 并记 completed_at;period_days>0 时再生一条
+ * 新 active 提醒:due_date = 完成日(服务端当天,UTC 日期)+ period_days 天,
+ * kind 固定「下次维护」(周期再生语义),quote 为空(再生提醒无原话锚点)。
+ */
+async function remindCompleteItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var periodDays = 0;
+  if (event.period_days !== undefined && event.period_days !== null) {
+    if (
+      !Number.isInteger(event.period_days) ||
+      event.period_days < 0 ||
+      event.period_days > REMIND_PERIOD_MAX
+    ) {
+      return fail("INVALID_INPUT");
+    }
+    periodDays = event.period_days;
+  }
+  var got = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!got.data || got.data.length === 0) {
+    return fail("NOT_FOUND");
+  }
+  var item = got.data[0];
+
+  var actives = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
+    .get();
+  var rows = (actives && actives.data) || [];
+  if (rows.length === 0) {
+    return fail("NOT_FOUND");
+  }
+
+  var now = deps.now();
+  await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
+    .update({ data: { status: "done", completed_at: now } });
+  if (periodDays > 0) {
+    var newDue = addDays(now.slice(0, 10), periodDays);
+    var doc = buildReminderDoc(deps, event.item_id, newDue, "下次维护", "", now);
+    await reminders(deps).add({ data: doc });
+    return { ok: true, reminder: remindRow(doc, item) };
+  }
+  return { ok: true };
+}
+
+/**
+ * remindClear:入参 { action:"remindClear", item_id }。
+ * 硬删除该 item 的全部 active 提醒(done 历史保留);天然幂等,
+ * 无可清时 cleared:0 也是成功。物品删除(delete)的级联清理同款。
+ */
+async function remindClearItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var removed = await removeActiveReminders(deps, event.item_id);
+  return { ok: true, cleared: removed };
+}
+
+/**
+ * remindSet:入参 { action:"remindSet", item_id, due_date, kind?, quote? }。
+ * 为已有物品把提醒设为用户所选的日子(日期选择器来源,#36 两个合法日期来源之一):
+ * AI 没提取出日期或用户清过的物品,在这里补录提醒,不必删掉重建。
+ * 物品必须存在、属当前家庭且未删(否则 NOT_FOUND);due_date 严格 YYYY-MM-DD
+ * 真实日历日(服务端只验格式绝不猜语义,口径同 create 的 reminder 入参);
+ * kind 缺省「下次维护」(用户选日子的通用语义),携带须在冻结词表内;
+ * quote 可缺省(选择器来源本无原话锚点);非法一律 INVALID_INPUT 且零写入。
+ * 替换语义:先清该 item 全部 active 提醒(remindClear 同款硬删)再建一条新
+ * active——「每 item 至多一条 active」不变形,重复对同一物品设不同日子不堆积。
+ * 返回 { ok:true, reminder(remindList 行投影) }。
+ */
+async function remindSetItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var kind = event.kind === undefined || event.kind === null ? "下次维护" : event.kind;
+  var reminder = parseReminderInput({ due_date: event.due_date, kind: kind, quote: event.quote });
+  if (reminder === "INVALID") {
+    return fail("INVALID_INPUT");
+  }
+  var got = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!got.data || got.data.length === 0) {
+    return fail("NOT_FOUND");
+  }
+  var item = got.data[0];
+  await removeActiveReminders(deps, event.item_id);
+  var doc = buildReminderDoc(deps, event.item_id, reminder.due_date, reminder.kind, reminder.quote, deps.now());
+  await reminders(deps).add({ data: doc });
+  return { ok: true, reminder: remindRow(doc, item) };
+}
+
 var ACTIONS = {
   create: createItem,
   update: updateItem,
   delete: deleteItem,
   get: getItem,
   query: queryItems,
-  list: listItems
+  list: listItems,
+  remindList: remindListItems,
+  remindComplete: remindCompleteItem,
+  remindClear: remindClearItem,
+  remindSet: remindSetItem
 };
 
 /**
  * 写类 action(issue #34 P0 F2 + P1-A 写入硬门,lib/household.js 的
  * checkWriteScopeBinding 统一裁定):
  * - 共享家庭(解析为 shared):必须携带与解析一致的 expected_household_id 与
- *   expected_scope_revision(客户端从 list 响应捕获)。缺失/不一致 →
+ *   expected_scope_revision(客户端从 list/remindList 响应捕获)。缺失/不一致 →
  *   FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零业务写入,绝不静默改投当前家庭;
  *   单调 scope_revision 挡成员变更后的旧请求误写与 A→B→A 的 ABA 重放
  *   (P1 硬门 B 第 1、2 条);
  * - 个人(单人)家庭:维持 P0 宽松口径——expected_household_id 可选(携带则
  *   校验,不一致 FAMILY_SWITCHED)、expected_scope_revision 忽略,0.4.7 及
  *   以前客户端单人零回归。
+ * 提醒写操作(issue #36):remindComplete/remindClear/remindSet 与
+ * create/update/delete 同走此硬门,不另起炉灶。
  * 两参数仅做一致性校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
  */
-var WRITE_ACTIONS = { create: true, update: true, delete: true };
+var WRITE_ACTIONS = {
+  create: true,
+  update: true,
+  delete: true,
+  remindComplete: true,
+  remindClear: true,
+  remindSet: true
+};
 
 /**
- * 日志只输出 action、错误码、耗时、计数;绝不输出原文、身份、物品名、位置。
+ * 日志只输出 action、错误码、耗时、计数;绝不输出原文、身份、物品名、位置,
+ * 也不输出提醒的日期明细(remindList 只记行数)。
  */
 function logResult(deps, action, result, startedAt) {
   if (!deps || !deps.logger || typeof deps.logger.log !== "function") {
@@ -494,7 +845,11 @@ function logResult(deps, action, result, startedAt) {
     ms: Date.now() - startedAt
   };
   if (result && result.ok) {
-    entry.count = Array.isArray(result.items) ? result.items.length : 1;
+    entry.count = Array.isArray(result.items)
+      ? result.items.length
+      : Array.isArray(result.reminders)
+        ? result.reminders.length
+        : 1;
   } else {
     entry.count = 0;
   }

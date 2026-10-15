@@ -5,6 +5,10 @@
  * 覆盖验收十场景中与数据层相关的九个(「AI 失败」属 extractDraft 测试):
  * 首次录入、同名不同件、移动、纠正、模糊别名、查无此物、两身份交叉越权、
  * 重试并发、删除;外加字段校验边界、日志脱敏与分页回归检查。
+ * issue #36 二阶段:提醒实体段——独立 reminders 集合、create 可选 reminder、
+ * remindList/remindComplete/remindClear/remindSet、物品删除级联、共享家庭双 marker
+ * 硬门、日期格式严格拒绝、周期再生、remindSet 补录与替换不堆积、duplicated
+ * 收敛与提醒日志脱敏(含日期明细)。
  * 零依赖:node:test + node:assert,只 require cloudfunctions/itemsApi/lib 与 tests/helpers。
  */
 
@@ -742,4 +746,679 @@ test("响应丢失恢复:重试时内容已改(同键异内容)→ OPERATION_CON
   assert.ok(res.existing && res.existing.item_id, "冲突必须附已有记录供引导");
   var raw = await rawItems(t.db);
   assert.equal(raw.data.length, 1);
+});
+
+// ---------- issue #36 二阶段:提醒实体(独立 reminders 集合) ----------
+
+var SHARED_HH = "hh_shared_reminders_1";
+
+/** 共享家庭形态的 deps(index.js 解析为 shared 时注入的字段,双 marker 硬门依据) */
+function makeSharedDeps(db) {
+  var deps = makeDeps(db, SHARED_HH);
+  deps.householdShared = true;
+  deps.scopeRevision = 7;
+  return deps;
+}
+
+/** 固定时钟 deps:remindComplete 的周期再生断言需要确定的「完成日」 */
+function fixedDeps(db, isoNow) {
+  var seq = 0;
+  return {
+    db: db,
+    householdId: HOUSEHOLD_A,
+    now: function () {
+      return isoNow;
+    },
+    genId: function () {
+      seq += 1;
+      return "f" + seq;
+    },
+    logger: { log: function () {} }
+  };
+}
+
+function rawReminders(db) {
+  return db.collection("reminders").where({}).get();
+}
+
+function activeReminderRows(data) {
+  return data.filter(function (r) {
+    return r.status === "active";
+  });
+}
+
+function remindEvent(opId, name, locationText, reminder) {
+  return {
+    action: "create",
+    operation_id: opId,
+    name: name,
+    location_text: locationText,
+    reminder: reminder
+  };
+}
+
+test("提醒:create 带合法 reminder → item 与独立 reminders 文档同时建立,items 文档零污染", async function () {
+  var t = fresh();
+  var res = await handler(
+    remindEvent("op-r1", "降压药", "厨房第二个抽屉", {
+      due_date: "2026-11-20",
+      kind: "有效期",
+      quote: "11月20号过期"
+    }),
+    t.deps
+  );
+  assert.equal(res.ok, true);
+  var raw = await rawReminders(t.db);
+  assert.equal(raw.data.length, 1, "恰建一条提醒文档");
+  var rd = raw.data[0];
+  assert.ok(rd._id.indexOf("rd_") === 0, "提醒 _id 应以 rd_ 开头");
+  assert.equal(rd.household_id, HOUSEHOLD_A, "提醒文档带服务端派生的家庭归属");
+  assert.equal(rd.item_id, res.item.item_id, "提醒内部关联 item_id");
+  assert.equal(rd.status, "active");
+  assert.equal(rd.due_date, "2026-11-20");
+  assert.equal(rd.kind, "有效期");
+  assert.equal(rd.quote, "11月20号过期");
+  assert.equal(typeof rd.created_at, "string");
+  // 独立实体纪律:items 文档不被堆上任何提醒字段
+  var items = await rawItems(t.db);
+  assert.equal(items.data.length, 1);
+  assert.equal(items.data[0].due_date, undefined, "items 文档不得出现提醒日期字段");
+  assert.equal(items.data[0].reminder, undefined);
+  assert.equal(items.data[0].kind, undefined);
+});
+
+test("提醒:不带 reminder 的 create 维持原行为,reminders 集合零写入(零回归)", async function () {
+  var t = fresh();
+  var res = await handler(createEvent("op-r0", "剪刀", "工具箱"), t.deps);
+  assert.equal(res.ok, true);
+  var raw = await rawReminders(t.db);
+  assert.equal(raw.data.length, 0, "无提醒参数时不建提醒文档");
+});
+
+test("remindList:投影只有物品名/位置文本/due/kind/item_id,按 due_date 升序", async function () {
+  var t = fresh();
+  await handler(
+    remindEvent("op-rl1", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    t.deps
+  );
+  await handler(
+    remindEvent("op-rl2", "降压药", "药箱", { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" }),
+    t.deps
+  );
+  // 无提醒的物品不出现在提醒列表
+  await handler(createEvent("op-rl3", "雨伞", "门口伞架"), t.deps);
+
+  var res = await handler({ action: "remindList" }, t.deps);
+  assert.equal(res.ok, true);
+  assert.equal(res.household_id, HOUSEHOLD_A, "只读 action 响应携带服务端解析的 household_id");
+  assert.equal(res.scope_revision, undefined, "个人家庭不带 scope_revision");
+  assert.equal(res.reminders.length, 2);
+  assert.deepEqual(
+    Object.keys(res.reminders[0]).sort(),
+    ["due_date", "item_id", "kind", "location_text", "name"],
+    "行投影字段固定,不带 quote 与内部字段"
+  );
+  // 升序:11-20 在 12-01 之前
+  assert.equal(res.reminders[0].name, "降压药");
+  assert.equal(res.reminders[0].due_date, "2026-11-20");
+  assert.equal(res.reminders[0].kind, "有效期");
+  assert.equal(res.reminders[0].location_text, "药箱");
+  assert.equal(res.reminders[1].name, "滤芯");
+  assert.equal(res.reminders[1].due_date, "2026-12-01");
+
+  // 跨家庭隔离:B 家庭的 remindList 看不到 A 的提醒
+  var listB = await handler({ action: "remindList" }, makeDeps(t.db, HOUSEHOLD_B));
+  assert.equal(listB.ok, true);
+  assert.deepEqual(listB.reminders, [], "跨家庭提醒不可见");
+});
+
+test("日期格式拒绝:due_date 必须严格 YYYY-MM-DD 且真实日历日,失败 item 与 reminders 均零写入", async function () {
+  var t = fresh();
+  var badDates = [
+    "2026-2-28", // 无补零
+    "2026-11-2", // 日无补零
+    "2026-02-30", // 不存在的日历日
+    "2026-02-29", // 2026 非闰年
+    "2026-13-01", // 月越界
+    "2026-00-10", // 月为零
+    "2026/11/20", // 斜杠分隔
+    "2026-11-20T00:00:00Z", // 带时间
+    "下个月", // 模糊表述(#36 纪律:绝不解析)
+    "20261120" // 无分隔
+  ];
+  for (var i = 0; i < badDates.length; i++) {
+    var res = await handler(
+      remindEvent("op-bad-" + i, "物品", "某处", { due_date: badDates[i], kind: "有效期" }),
+      t.deps
+    );
+    assert.equal(res.ok, false, "非法日期必须拒绝:" + badDates[i]);
+    assert.equal(res.error, "INVALID_INPUT", "非法日期错误码:" + badDates[i]);
+    assert.equal(typeof res.message, "string");
+  }
+  // 非字符串类型(数字)同样拒绝
+  var numeric = await handler(
+    remindEvent("op-bad-num", "物品", "某处", { due_date: 20261120, kind: "有效期" }),
+    t.deps
+  );
+  assert.equal(numeric.error, "INVALID_INPUT");
+  // 非法 kind(词表外)拒绝
+  var badKind = await handler(
+    remindEvent("op-bad-kind", "物品", "某处", { due_date: "2026-11-20", kind: "过期" }),
+    t.deps
+  );
+  assert.equal(badKind.error, "INVALID_INPUT", "kind 必须在冻结词表内");
+  var badKindEn = await handler(
+    remindEvent("op-bad-kind2", "物品", "某处", { due_date: "2026-11-20", kind: "expiry" }),
+    t.deps
+  );
+  assert.equal(badKindEn.error, "INVALID_INPUT");
+  // quote 类型非法 / 超 200 码点拒绝
+  var badQuote = await handler(
+    remindEvent("op-bad-quote", "物品", "某处", { due_date: "2026-11-20", kind: "有效期", quote: 123 }),
+    t.deps
+  );
+  assert.equal(badQuote.error, "INVALID_INPUT");
+  var longQuote = await handler(
+    remindEvent("op-bad-quote2", "物品", "某处", { due_date: "2026-11-20", kind: "有效期", quote: "字".repeat(201) }),
+    t.deps
+  );
+  assert.equal(longQuote.error, "INVALID_INPUT");
+  // reminder 非对象(直接传日期串)拒绝
+  var badShape = await handler(remindEvent("op-bad-shape", "物品", "某处", "2026-11-20"), t.deps);
+  assert.equal(badShape.error, "INVALID_INPUT");
+  // 以上全部失败请求之后:items 与 reminders 一条都不能有
+  assert.equal((await rawItems(t.db)).data.length, 0, "校验失败绝不写入 items");
+  assert.equal((await rawReminders(t.db)).data.length, 0, "校验失败绝不写入 reminders");
+});
+
+test("日期格式:闰年真实日历日放行;quote 子串锚定在服务端放宽(客户端已核)", async function () {
+  var t = fresh();
+  // 2028 为闰年,02-29 是真实日历日
+  var leap = await handler(
+    remindEvent("op-leap", "证件", "书房抽屉", { due_date: "2028-02-29", kind: "下次维护" }),
+    t.deps
+  );
+  assert.equal(leap.ok, true, "闰年 2 月 29 日合法");
+  // quote 不必是任何原话的子串:服务端无从比对(锚定在确认页完成),只做类型与长度校验
+  var relaxed = await handler(
+    remindEvent("op-relax", "药膏", "药箱", { due_date: "2026-11-20", kind: "开封后", quote: "任意非原话文本也接受" }),
+    t.deps
+  );
+  assert.equal(relaxed.ok, true, "quote 子串校验在服务端放宽");
+  // 用户日期选择器来源:无 quote,落库为空字符串
+  var noQuote = await handler(
+    remindEvent("op-picker", "酱油", "厨房调味架", { due_date: "2027-03-01", kind: "开封后" }),
+    t.deps
+  );
+  assert.equal(noQuote.ok, true);
+  var raw = await rawReminders(t.db);
+  var byOp = {};
+  for (var i = 0; i < raw.data.length; i++) {
+    byOp[raw.data[i].due_date] = raw.data[i];
+  }
+  assert.equal(byOp["2026-11-20"].quote, "任意非原话文本也接受");
+  assert.equal(byOp["2027-03-01"].quote, "", "无 quote 落库为空字符串");
+});
+
+test("duplicated 收敛:同键原内容重试不重复建提醒,恰一条 active", async function () {
+  var t = fresh();
+  var reminder = { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" };
+  var first = await handler(remindEvent("op-rem-dup", "降压药", "药箱", reminder), t.deps);
+  assert.equal(first.ok, true);
+  assert.equal(first.duplicated, false);
+  // 响应丢失后原键原内容重试(含同一 reminder)
+  var second = await handler(remindEvent("op-rem-dup", "降压药", "药箱", reminder), t.deps);
+  assert.equal(second.ok, true);
+  assert.equal(second.duplicated, true);
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 1, "重试不得重复建提醒");
+});
+
+test("remindComplete(无周期):active 置 done 记 completed_at,历史保留;重复完成与无提醒均 NOT_FOUND", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-rc1", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    t.deps
+  );
+  var itemId = created.item.item_id;
+
+  var done = await handler({ action: "remindComplete", item_id: itemId }, t.deps);
+  assert.equal(done.ok, true);
+  var raw = await rawReminders(t.db);
+  assert.equal(raw.data.length, 1, "done 行保留(历史)");
+  assert.equal(raw.data[0].status, "done");
+  assert.equal(typeof raw.data[0].completed_at, "string", "完成时间落库");
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.deepEqual(listed.reminders, [], "完成后提醒列表为空");
+
+  // 已无 active:重复完成 → NOT_FOUND(列表刷新即收敛,绝不静默复活)
+  var again = await handler({ action: "remindComplete", item_id: itemId }, t.deps);
+  assert.equal(again.ok, false);
+  assert.equal(again.error, "NOT_FOUND");
+  // 不存在的物品 → NOT_FOUND
+  var ghost = await handler({ action: "remindComplete", item_id: "it_ghost" }, t.deps);
+  assert.equal(ghost.error, "NOT_FOUND");
+  // 跨家庭:B 对 A 的物品完成 → NOT_FOUND
+  var foreign = await handler({ action: "remindComplete", item_id: itemId }, makeDeps(t.db, HOUSEHOLD_B));
+  assert.equal(foreign.error, "NOT_FOUND");
+  // item_id 非法 → INVALID_INPUT
+  var bad = await handler({ action: "remindComplete", item_id: "" }, t.deps);
+  assert.equal(bad.error, "INVALID_INPUT");
+});
+
+test("remindComplete(带周期):新 active 提醒 due=完成日+周期,kind 为下次维护;跨月跨年进位正确", async function () {
+  var db = createMemoryDb();
+  var deps = fixedDeps(db, "2026-10-15T08:00:00.000Z"); // 完成日 2026-10-15
+  var created = await handler(
+    remindEvent("op-rc2", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "有效期" }),
+    deps
+  );
+  var itemId = created.item.item_id;
+
+  var res = await handler({ action: "remindComplete", item_id: itemId, period_days: 30 }, deps);
+  assert.equal(res.ok, true);
+  assert.equal(res.reminder.due_date, "2026-11-14", "2026-10-15 + 30 天 = 2026-11-14");
+  assert.equal(res.reminder.kind, "下次维护", "周期再生的提醒为下次维护语义");
+  assert.equal(res.reminder.item_id, itemId);
+  assert.equal(res.reminder.name, "滤芯");
+
+  var raw = await rawReminders(db);
+  var active = activeReminderRows(raw.data);
+  assert.equal(active.length, 1, "恰再生一条 active");
+  assert.equal(active[0].due_date, "2026-11-14");
+  assert.equal(active[0].kind, "下次维护");
+  assert.equal(active[0].quote, "", "再生提醒无原话锚点");
+  var doneRows = raw.data.filter(function (r) {
+    return r.status === "done";
+  });
+  assert.equal(doneRows.length, 1, "原提醒置 done");
+  assert.equal(doneRows[0].due_date, "2026-10-20");
+  assert.equal(doneRows[0].kind, "有效期", "done 行保留原类别");
+
+  // 跨月进位:10-31 + 1 天 = 11-01;跨年进位:12-31 + 1 天 = 次年 01-01
+  var db2 = createMemoryDb();
+  var d2 = fixedDeps(db2, "2026-10-31T23:00:00.000Z");
+  var c2 = await handler(remindEvent("op-rc3", "药膏", "药箱", { due_date: "2026-10-31", kind: "开封后" }), d2);
+  var r2 = await handler({ action: "remindComplete", item_id: c2.item.item_id, period_days: 1 }, d2);
+  assert.equal(r2.reminder.due_date, "2026-11-01", "月末 +1 天自然进位");
+
+  var db3 = createMemoryDb();
+  var d3 = fixedDeps(db3, "2026-12-31T10:00:00.000Z");
+  var c3 = await handler(remindEvent("op-rc4", "日历", "书桌", { due_date: "2026-12-31", kind: "下次维护" }), d3);
+  var r3 = await handler({ action: "remindComplete", item_id: c3.item.item_id, period_days: 1 }, d3);
+  assert.equal(r3.reminder.due_date, "2027-01-01", "年末 +1 天跨年进位");
+
+  // period_days 非法:负数 / 非整数 / 超护栏 → INVALID_INPUT 且零写入
+  var t = fresh();
+  var created4 = await handler(
+    remindEvent("op-rc5", "剪刀", "工具箱", { due_date: "2026-11-01", kind: "下次维护" }),
+    t.deps
+  );
+  for (var i = 0; i < ["30x", 30.5, -1, 3660].length; i++) {
+    var bad = ["30x", 30.5, -1, 3660][i];
+    var res4 = await handler({ action: "remindComplete", item_id: created4.item.item_id, period_days: bad }, t.deps);
+    assert.equal(res4.ok, false, "非法 period_days 必须拒绝:" + bad);
+    assert.equal(res4.error, "INVALID_INPUT");
+  }
+  assert.equal((await rawReminders(t.db)).data.length, 1, "非法参数零写入,原 active 无损");
+  // period_days=0:显式不带周期,与缺省同义,不再生
+  var zero = await handler({ action: "remindComplete", item_id: created4.item.item_id, period_days: 0 }, t.deps);
+  assert.equal(zero.ok, true);
+  assert.equal(zero.reminder, undefined, "period_days=0 不再生");
+  assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 0);
+});
+
+test("remindClear:硬删该 item 的 active 提醒,done 历史保留,天然幂等", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-clr", "备用钥匙", "玄关抽屉", { due_date: "2026-11-20", kind: "下次维护" }),
+    t.deps
+  );
+  // 先完成一次生成 done 历史,再建一条新 active
+  await handler({ action: "remindComplete", item_id: created.item.item_id, period_days: 15 }, t.deps);
+  assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 1);
+
+  var cleared = await handler({ action: "remindClear", item_id: created.item.item_id }, t.deps);
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.cleared, 1, "恰清掉一条 active");
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 0);
+  assert.equal(raw.data.length, 1, "done 历史保留");
+  assert.equal(raw.data[0].status, "done");
+
+  var again = await handler({ action: "remindClear", item_id: created.item.item_id }, t.deps);
+  assert.equal(again.ok, true, "无可清也是成功(幂等)");
+  assert.equal(again.cleared, 0);
+
+  var bad = await handler({ action: "remindClear", item_id: "" }, t.deps);
+  assert.equal(bad.error, "INVALID_INPUT");
+});
+
+test("remindSet:无提醒的已有物品补录提醒(日期选择器来源),kind 缺省下次维护,quote 为空", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-set1", "酱油", "厨房调味架"), t.deps);
+  assert.equal((await rawReminders(t.db)).data.length, 0, "先确认无提醒");
+
+  var res = await handler(
+    { action: "remindSet", item_id: created.item.item_id, due_date: "2027-03-01" },
+    t.deps
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.reminder.item_id, created.item.item_id);
+  assert.equal(res.reminder.name, "酱油");
+  assert.equal(res.reminder.due_date, "2027-03-01");
+  assert.equal(res.reminder.kind, "下次维护", "未携带 kind 时缺省「下次维护」");
+
+  var raw = await rawReminders(t.db);
+  assert.equal(raw.data.length, 1, "恰建一条提醒文档");
+  assert.equal(raw.data[0].status, "active");
+  assert.equal(raw.data[0].household_id, HOUSEHOLD_A);
+  assert.equal(raw.data[0].due_date, "2027-03-01");
+  assert.equal(raw.data[0].quote, "", "选择器来源无原话锚点");
+
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.equal(listed.reminders.length, 1, "补录后提醒列表可见");
+  assert.equal(listed.reminders[0].due_date, "2027-03-01");
+});
+
+test("remindSet 替换语义:已有 active 先清后建,每 item 至多一条 active,不堆积", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-set2", "滤芯", "厨房柜子", { due_date: "2026-11-01", kind: "有效期", quote: "11月1号到期" }),
+    t.deps
+  );
+  var res = await handler(
+    { action: "remindSet", item_id: created.item.item_id, due_date: "2026-12-10", kind: "开封后" },
+    t.deps
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.reminder.due_date, "2026-12-10");
+  assert.equal(res.reminder.kind, "开封后");
+  var raw = await rawReminders(t.db);
+  assert.equal(raw.data.length, 1, "旧 active 被替换删除,不堆积");
+  assert.equal(activeReminderRows(raw.data).length, 1, "替换后恰一条 active");
+  assert.equal(raw.data[0].due_date, "2026-12-10");
+  assert.equal(raw.data[0].kind, "开封后");
+
+  // 同一天重复设同一日子:再替换一次,仍只有一条
+  var again = await handler(
+    { action: "remindSet", item_id: created.item.item_id, due_date: "2026-12-10" },
+    t.deps
+  );
+  assert.equal(again.ok, true);
+  assert.equal(again.reminder.kind, "下次维护", "未携带 kind 缺省,不沿用旧 kind");
+  assert.equal((await rawReminders(t.db)).data.length, 1, "重复设置不堆积");
+});
+
+test("remindSet 校验与归属:非法入参零写入;物品不存在/已删/跨家庭 NOT_FOUND", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-set3", "护照", "书房保险盒"), t.deps);
+  var bad = [
+    { due_date: "2026-11-32" },
+    { due_date: "2026-02-30" },
+    { due_date: "2026/11/20" },
+    { due_date: "20261120" },
+    { due_date: 20261120 },
+    { due_date: undefined },
+    { due_date: "2026-11-20", kind: "到期" },
+    { due_date: "2026-11-20", quote: 123 },
+    { due_date: "2026-11-20", quote: "字".repeat(201) }
+  ];
+  for (var i = 0; i < bad.length; i++) {
+    var res = await handler(
+      Object.assign({ action: "remindSet", item_id: created.item.item_id }, bad[i]),
+      t.deps
+    );
+    assert.equal(res.ok, false, JSON.stringify(bad[i]));
+    assert.equal(res.error, "INVALID_INPUT");
+  }
+  assert.equal((await rawReminders(t.db)).data.length, 0, "非法参数零写入");
+
+  var ghost = await handler({ action: "remindSet", item_id: "it_ghost", due_date: "2026-11-20" }, t.deps);
+  assert.equal(ghost.error, "NOT_FOUND");
+  var foreign = await handler(
+    { action: "remindSet", item_id: created.item.item_id, due_date: "2026-11-20" },
+    makeDeps(t.db, HOUSEHOLD_B)
+  );
+  assert.equal(foreign.error, "NOT_FOUND", "跨家庭物品不可设提醒");
+  var noId = await handler({ action: "remindSet", item_id: "", due_date: "2026-11-20" }, t.deps);
+  assert.equal(noId.error, "INVALID_INPUT");
+
+  await handler({ action: "delete", item_id: created.item.item_id }, t.deps);
+  var del = await handler({ action: "remindSet", item_id: created.item.item_id, due_date: "2026-11-20" }, t.deps);
+  assert.equal(del.error, "NOT_FOUND", "已删物品不可设提醒");
+  assert.equal((await rawReminders(t.db)).data.length, 0, "全程零提醒写入");
+});
+
+test("级联:delete 物品时其 active 提醒一并清掉,done 历史保留,他件提醒不受影响", async function () {
+  var t = fresh();
+  var doomed = await handler(
+    remindEvent("op-cas1", "旧合同", "阳台纸箱", { due_date: "2026-11-01", kind: "下次维护" }),
+    t.deps
+  );
+  var keeper = await handler(
+    remindEvent("op-cas2", "新合同", "书房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    t.deps
+  );
+  // doomed 再周期再生一条 active:级联应把两条 active 全清、done 保留
+  await handler({ action: "remindComplete", item_id: doomed.item.item_id, period_days: 20 }, t.deps);
+
+  var del = await handler({ action: "delete", item_id: doomed.item.item_id }, t.deps);
+  assert.equal(del.ok, true);
+
+  var raw = await rawReminders(t.db);
+  var doomedRows = raw.data.filter(function (r) {
+    return r.item_id === doomed.item.item_id;
+  });
+  assert.equal(activeReminderRows(doomedRows).length, 0, "已删物品不得残留 active 提醒");
+  assert.equal(doomedRows.length, 1, "done 历史保留");
+  assert.equal(doomedRows[0].status, "done");
+
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.equal(listed.reminders.length, 1, "提醒列表只剩未删物品的提醒");
+  assert.equal(listed.reminders[0].item_id, keeper.item.item_id);
+});
+
+test("remindList 读侧容忍:悬挂提醒行(物品已删/不存在)跳过不展示", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-dangle", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    t.deps
+  );
+  // 模拟级联失效的悬挂形态:直接给不存在的物品手插一条 active 提醒
+  await t.db.collection("reminders").add({
+    data: {
+      _id: "rd_dangling",
+      household_id: HOUSEHOLD_A,
+      item_id: "it_missing",
+      status: "active",
+      due_date: "2026-01-01",
+      kind: "有效期",
+      quote: "",
+      created_at: "2026-10-01T00:00:00.000Z"
+    }
+  });
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.reminders.length, 1, "悬挂行读侧容忍跳过");
+  assert.equal(listed.reminders[0].item_id, created.item.item_id);
+});
+
+test("双 marker 硬门:共享家庭 remindComplete/remindClear 缺或错 marker 零写入,一致才放行", async function () {
+  var db = createMemoryDb();
+  var deps = makeSharedDeps(db); // householdShared:true, scopeRevision:7
+
+  // create 带提醒本身也走硬门:缺 marker → FAMILY_SWITCHED,item 与 reminder 均零写入
+  var noMarkerCreate = await handler(
+    remindEvent("op-gate-0", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    deps
+  );
+  assert.equal(noMarkerCreate.ok, false);
+  assert.equal(noMarkerCreate.error, "FAMILY_SWITCHED");
+  assert.equal((await rawItems(db)).data.length, 0, "硬门拒绝零写入 items");
+  assert.equal((await rawReminders(db)).data.length, 0, "硬门拒绝零写入 reminders");
+
+  // 一致双 marker 建 item + 提醒(marker 在 event 上,checkWriteScopeBinding 只读 event)
+  var gatedEvent = remindEvent("op-gate-1", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" });
+  gatedEvent.expected_household_id = SHARED_HH;
+  gatedEvent.expected_scope_revision = 7;
+  var created = await handler(gatedEvent, deps);
+  assert.equal(created.ok, true, JSON.stringify(created));
+  var itemId = created.item.item_id;
+
+  // remindComplete 缺 expected_household_id → FAMILY_SWITCHED,零写入
+  var noMarker = await handler({ action: "remindComplete", item_id: itemId, period_days: 30 }, deps);
+  assert.equal(noMarker.ok, false);
+  assert.equal(noMarker.error, "FAMILY_SWITCHED");
+  // household 一致但缺 scope_revision → FAMILY_STALE_SCOPE
+  var noRev = await handler(
+    { action: "remindComplete", item_id: itemId, period_days: 30, expected_household_id: SHARED_HH },
+    deps
+  );
+  assert.equal(noRev.error, "FAMILY_STALE_SCOPE");
+  // 旧修订号 → FAMILY_STALE_SCOPE(成员变更后的旧请求)
+  var staleRev = await handler(
+    { action: "remindComplete", item_id: itemId, period_days: 30, expected_household_id: SHARED_HH, expected_scope_revision: 6 },
+    deps
+  );
+  assert.equal(staleRev.error, "FAMILY_STALE_SCOPE");
+  // marker 类型非法 → INVALID_INPUT
+  var badType = await handler(
+    { action: "remindComplete", item_id: itemId, expected_household_id: 123, expected_scope_revision: 7 },
+    deps
+  );
+  assert.equal(badType.error, "INVALID_INPUT");
+  // 以上全部拒绝后:提醒原样无损
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 1, "硬门拒绝必须零写入");
+
+  // remindClear 同款硬门
+  var noMarkerClear = await handler({ action: "remindClear", item_id: itemId }, deps);
+  assert.equal(noMarkerClear.error, "FAMILY_SWITCHED");
+  var staleClear = await handler(
+    { action: "remindClear", item_id: itemId, expected_household_id: SHARED_HH, expected_scope_revision: 3 },
+    deps
+  );
+  assert.equal(staleClear.error, "FAMILY_STALE_SCOPE");
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 1, "清除同样零写入");
+
+  // remindSet 同款硬门:缺 marker → FAMILY_SWITCHED 零写入;一致双 marker 放行(替换语义)
+  var noMarkerSet = await handler({ action: "remindSet", item_id: itemId, due_date: "2026-12-15" }, deps);
+  assert.equal(noMarkerSet.error, "FAMILY_SWITCHED");
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 1, "硬门拒绝必须零写入");
+  var okSet = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-15", expected_household_id: SHARED_HH, expected_scope_revision: 7 },
+    deps
+  );
+  assert.equal(okSet.ok, true, JSON.stringify(okSet));
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 1, "替换后仍恰一条 active");
+
+  // remindList 只读不参与校验,响应带共享域作用域字段(marker 捕获来源)
+  var listed = await handler({ action: "remindList" }, deps);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.household_id, SHARED_HH);
+  assert.equal(listed.scope_revision, 7, "共享家庭 remindList 附带 scope_revision");
+  assert.equal(listed.reminders.length, 1);
+
+  // 一致双 marker:完成放行
+  var done = await handler(
+    { action: "remindComplete", item_id: itemId, expected_household_id: SHARED_HH, expected_scope_revision: 7 },
+    deps
+  );
+  assert.equal(done.ok, true, JSON.stringify(done));
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 0);
+
+  // 个人家庭宽松口径:不带 marker 的提醒写操作零回归
+  var t2 = fresh();
+  var personal = await handler(
+    remindEvent("op-gate-p", "药膏", "药箱", { due_date: "2026-11-20", kind: "开封后" }),
+    t2.deps
+  );
+  assert.equal(personal.ok, true);
+  var personalDone = await handler({ action: "remindComplete", item_id: personal.item.item_id }, t2.deps);
+  assert.equal(personalDone.ok, true, "个人家庭提醒写操作维持宽松口径");
+});
+
+test("提醒日志脱敏:remindList 只记计数,绝不记物品名与日期明细", async function () {
+  var db = createMemoryDb();
+  var entries = [];
+  var deps = {
+    db: db,
+    householdId: HOUSEHOLD_A,
+    now: function () {
+      return new Date(1760000000000).toISOString();
+    },
+    genId: function () {
+      return "1";
+    },
+    logger: { log: function (e) { entries.push(e); } }
+  };
+  await handler(
+    remindEvent("op-rlog", "隐私物品名", "隐私位置", { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" }),
+    deps
+  );
+  await handler({ action: "remindList" }, deps);
+  var badComplete = await handler({ action: "remindComplete", item_id: "it_none" }, deps);
+
+  assert.equal(badComplete.error, "NOT_FOUND");
+  var dump = JSON.stringify(entries);
+  assert.equal(dump.indexOf("隐私物品名"), -1, "日志不得出现物品名");
+  assert.equal(dump.indexOf("隐私位置"), -1, "日志不得出现位置");
+  assert.equal(dump.indexOf("2026-11-20"), -1, "日志不得出现提醒日期明细");
+  assert.equal(dump.indexOf("11月20号"), -1, "日志不得出现提醒原话锚点");
+  assert.equal(dump.indexOf(HOUSEHOLD_A), -1, "日志不得出现身份");
+  for (var i = 0; i < entries.length; i++) {
+    var keys = Object.keys(entries[i]).sort();
+    assert.deepEqual(keys, ["action", "count", "error", "ms"], "日志字段只能是 action/error/ms/count");
+  }
+  var listEntry = entries.filter(function (e) {
+    return e.action === "remindList";
+  })[0];
+  assert.equal(listEntry.count, 1, "remindList 只记行数计数");
+});
+
+test("提醒:缺 householdId 一律 UNAUTHORIZED(含提醒专属 action)", async function () {
+  var db = createMemoryDb();
+  var noIdentity = makeDeps(db, "");
+  var r1 = await handler({ action: "remindList" }, noIdentity);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.error, "UNAUTHORIZED");
+  var r2 = await handler({ action: "remindComplete", item_id: "it_1" }, makeDeps(db, undefined));
+  assert.equal(r2.error, "UNAUTHORIZED");
+  var r3 = await handler({ action: "remindClear", item_id: "it_1" }, { db: db, logger: null });
+  assert.equal(r3.error, "UNAUTHORIZED");
+  assert.equal((await rawReminders(db)).data.length, 0, "无身份绝不写入");
+});
+
+test("提醒分页:active 提醒超过 100 条后 remindList 仍基于全量升序,不被单次 get 上限截断", async function () {
+  var t = fresh();
+  var TOTAL = 120;
+  function dueFromIndex(i) {
+    var d = new Date(Date.UTC(2027, 0, 1) + i * 86400000);
+    var pad = function (n) {
+      return n < 10 ? "0" + n : String(n);
+    };
+    return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate());
+  }
+  for (var i = 0; i < TOTAL; i++) {
+    var res = await handler(
+      remindEvent("op-rem-page-" + i, "备件" + String(i).padStart(3, "0"), "仓库", {
+        due_date: dueFromIndex(i),
+        kind: "下次维护"
+      }),
+      t.deps
+    );
+    assert.equal(res.ok, true);
+  }
+  // 未显式 limit 的裸 get 只能看到前 100 条(与云函数端行为一致),证明数据量确实越界
+  var raw = await t.db.collection("reminders").where({}).get();
+  assert.equal(raw.data.length, 100, "memoryDb 裸 get 模拟云函数端默认 100 条上限");
+
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.reminders.length, TOTAL, "分页拉全量,120 条全部可见");
+  assert.equal(listed.reminders[0].due_date, "2027-01-01", "最早到期在首位");
+  assert.equal(listed.reminders[TOTAL - 1].due_date, "2027-04-30", "最晚到期在末位");
+  for (var j = 1; j < listed.reminders.length; j++) {
+    assert.ok(listed.reminders[j - 1].due_date <= listed.reminders[j].due_date, "due_date 全程非降序");
+  }
 });

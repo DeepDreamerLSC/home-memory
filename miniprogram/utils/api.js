@@ -47,6 +47,36 @@ const ITEMS_API_MESSAGES = {
 const EXTRACT_DRAFT_MESSAGES = {
     AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
 };
+/** 提醒类别冻结词表(issue #36,与服务端 remind_kind 同源) */
+const REMIND_KIND_VALUES = ["有效期", "开封后", "下次维护"];
+/** 服务端规范化的提醒日期形态(客户端只透传,绝不自行解析/推算日期) */
+const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * 解析单件草稿的提醒候选三项(#36 日期纪律的客户端半边):
+ * 三项同现同缺才有效;残缺/形状非法(半态、非 YYYY-MM-DD、词表外、空 quote)整体置
+ * null——与服务端硬门同口径:不带提醒、不废件。客户端绝不从模糊表述补算日期。
+ */
+function parseRemindTriple(d) {
+    const at = d.remind_at;
+    const kind = d.remind_kind;
+    const quote = d.remind_quote;
+    const atEmpty = at === null || at === undefined;
+    const kindEmpty = kind === null || kind === undefined;
+    const quoteEmpty = quote === null || quote === undefined;
+    if (atEmpty && kindEmpty && quoteEmpty) {
+        return { remind_at: null, remind_kind: null, remind_quote: null };
+    }
+    if (typeof at === "string" &&
+        REMIND_DATE_RE.test(at) &&
+        typeof kind === "string" &&
+        REMIND_KIND_VALUES.indexOf(kind) !== -1 &&
+        typeof quote === "string" &&
+        quote.length > 0 &&
+        quote.length <= 200) {
+        return { remind_at: at, remind_kind: kind, remind_quote: quote };
+    }
+    return { remind_at: null, remind_kind: null, remind_quote: null };
+}
 const BAD_RESPONSE_MESSAGE = "服务返回异常,请稍后重试";
 const DEFAULT_ERROR_MESSAGE = "服务暂时不可用,请稍后重试";
 const NEEDS_SPLIT_DEFAULT_MESSAGE = "一次只记一件物品,请分开说";
@@ -130,15 +160,29 @@ function validateItemsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "remindList":
+            // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示
+            if (!Array.isArray(r.reminders) ||
+                !r.reminders.every((row) => isRecord(row) &&
+                    typeof row.item_id === "string" &&
+                    typeof row.name === "string" &&
+                    typeof row.location_text === "string" &&
+                    typeof row.due_date === "string")) {
+                throw bad();
+            }
+            break;
         default:
             break;
     }
 }
-/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定) */
+/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定;#36 提醒写操作同走硬门) */
 const ITEMS_MUTATING_ACTIONS = new Set([
     "create",
     "update",
     "delete",
+    "remindComplete",
+    "remindClear",
+    "remindSet",
 ]);
 async function callItemsApi(event) {
     // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision
@@ -169,9 +213,9 @@ async function callItemsApi(event) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     validateItemsOkResponse(event.action, result);
-    if (event.action === "list") {
-        // issue #34 P0/P1-B:从 list 响应捕获服务端解析的家庭作用域(household_id
-        // 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
+    if (event.action === "list" || event.action === "remindList") {
+        // issue #34 P0/P1-B:从 list / remindList 响应捕获服务端解析的家庭作用域
+        // (household_id 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
         // 把家庭切换显式接入 locations-cache 既有失效代数(F2);
         // 非法/缺省静默忽略,保持回退值(旧云函数窗口与单人阶段行为不变)
         if ((0, household_scope_1.captureHouseholdId)(result.household_id, result.scope_revision)) {
@@ -227,6 +271,8 @@ async function callExtractDraft(text, opts) {
                 qualifiers: d.qualifiers.filter((q) => typeof q === "string"),
                 source_quote: d.source_quote,
                 anchor_shared: d.anchor_shared === true,
+                // 提醒候选三项(issue #36):透传服务端已锚定的原话日期,残缺/非法整体置 null
+                ...parseRemindTriple(d),
             })),
             original_text: result.original_text,
             truncated: result.truncated === true,

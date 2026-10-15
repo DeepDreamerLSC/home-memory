@@ -50,6 +50,29 @@ export interface DraftWithQuote extends Draft {
   source_quote: string;
   /** 证据片段同时含其他物品名称(如整句原话):归属无法确定性排除交叉配对,须人工核对(默认不勾选) */
   anchor_shared?: boolean;
+  /**
+   * 提醒候选三项(issue #36,三项同现同缺,无提醒时均为 null):
+   * - remind_at:原话里明确说了的绝对日期,服务端规范化为 YYYY-MM-DD(AI 只提取,
+   *   绝不解析「下个月/快过期了/下周三」这类模糊或相对表述——一律不带);
+   * - remind_kind:冻结词表(有效期/开封后/下次维护);
+   * - remind_quote:该日期在原话中的逐字子串(锚定失败服务端已整体置 null)。
+   * 客户端只透传与展示,不做任何日期推算;「存日期但不提醒」的模式不存在。
+   */
+  remind_at?: string | null;
+  remind_kind?: RemindKind | null;
+  remind_quote?: string | null;
+}
+
+/** 提醒类别(issue #36 冻结词表,与 extractDraft v2 的 remind_kind 同源) */
+export type RemindKind = "有效期" | "开封后" | "下次维护";
+
+/** create 的可选提醒参数(issue #36):到期只在小程序内露出,无任何推送/通知承诺 */
+export interface ReminderInput {
+  /** YYYY-MM-DD(真实日历日);唯一来源=原话提取值或用户在日期选择器里选的值 */
+  due_date: string;
+  kind: RemindKind;
+  /** 日期仍为原话提取值时携带的逐字锚定子串;日期选择器改过的提醒没有 quote */
+  quote?: string;
 }
 
 /** query 的匹配层级 */
@@ -88,6 +111,8 @@ export type ItemsApiEvent =
       name: string;
       location_text: string;
       note?: string;
+      /** 可选提醒(issue #36):随物品同建;不带 = 无提醒 */
+      reminder?: ReminderInput;
     } & ScopeWriteBinding)
   | ({
       action: "update";
@@ -102,7 +127,29 @@ export type ItemsApiEvent =
   | ({ action: "delete"; item_id: string } & ScopeWriteBinding)
   | { action: "get"; item_id: string }
   | { action: "query"; q: string }
-  | { action: "list"; limit?: number };
+  | { action: "list"; limit?: number }
+  | (
+      {
+        /** 到期用完了(issue #36):把该 item 全部 active 提醒收掉;period_days>0 时按周期再生下次 */
+        action: "remindComplete";
+        item_id: string;
+        /** 周期天数(0-3650 整数;缺省/0=不再生);服务端以「完成日(UTC)+ period_days」算下次日期 */
+        period_days?: number;
+      } & ScopeWriteBinding
+    )
+  | ({ action: "remindClear"; item_id: string } & ScopeWriteBinding)
+  | (
+      {
+        /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
+        action: "remindSet";
+        item_id: string;
+        /** 用户在日期选择器选的日子(YYYY-MM-DD,真实日历日) */
+        due_date: string;
+        /** 提醒类别(缺省「下次维护」;携带须在冻结词表 有效期/开封后/下次维护 内) */
+        kind?: RemindKind;
+      } & ScopeWriteBinding
+    )
+  | { action: "remindList" };
 
 /* ---------------- itemsApi 响应 ---------------- */
 
@@ -143,6 +190,43 @@ export interface ListItemsResponse {
   items: ItemSummary[];
 }
 
+/** remindList 的行投影(issue #36):不含 quote 与内部字段 */
+export interface RemindRow {
+  item_id: string;
+  name: string;
+  location_text: string;
+  /** YYYY-MM-DD(真实日历日) */
+  due_date: string;
+  kind: RemindKind;
+}
+
+export interface RemindListResponse {
+  ok: true;
+  /** 作用域字段口径同 list(issue #34 P0/P1-A):remindComplete/remindClear 写请求双 marker 的捕获来源 */
+  household_id?: string;
+  scope_revision?: number;
+  /** due_date 升序(同日按 created_at、再按 _id) */
+  reminders: RemindRow[];
+}
+
+export interface RemindCompleteResponse {
+  ok: true;
+  /** period_days>0 时再生的下次提醒行(同 remindList 行投影);不带周期时缺省 */
+  reminder?: RemindRow;
+}
+
+export interface RemindClearResponse {
+  ok: true;
+  /** 硬删除的 active 提醒条数(幂等,无可清时 0 也是成功) */
+  cleared: number;
+}
+
+export interface RemindSetResponse {
+  ok: true;
+  /** 设好后的提醒行(同 remindList 行投影) */
+  reminder: RemindRow;
+}
+
 export interface ItemsApiErrorResponse {
   ok: false;
   error: ItemsApiErrorCode;
@@ -158,7 +242,11 @@ export type ItemsApiOkResponse =
   | DeleteItemResponse
   | GetItemResponse
   | QueryItemsResponse
-  | ListItemsResponse;
+  | ListItemsResponse
+  | RemindListResponse
+  | RemindCompleteResponse
+  | RemindClearResponse
+  | RemindSetResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
