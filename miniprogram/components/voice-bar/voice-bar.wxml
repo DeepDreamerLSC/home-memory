@@ -32,7 +32,7 @@
     <view class="rec-cancel">{{ voiceState === 'cancelPending' ? '↓ 滑回来就继续说' : '↑ 上滑取消 · 取消就当没说过,什么都不记' }}</view>
   </view>
 </block>
-<view class="voicebar {{ kbOpen ? 'kb-hide' : '' }}">
+<view class="voicebar {{ kbOpen ? 'kb-hide' : '' }} {{ voiceState === 'recording' || voiceState === 'cancelPending' ? 'pressed' : '' }}">
   <view
     class="hold {{ pressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
     catchtouchstart="onHoldTouchStart"
