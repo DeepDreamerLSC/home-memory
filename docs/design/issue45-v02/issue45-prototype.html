@@ -176,6 +176,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .sumrow .v{flex:1;font-size:15px;font-weight:750;min-width:0}
 .sumrow .v.warn{color:var(--danger)}
 .sumrow .edit{border:1px solid var(--line);background:var(--card-inset);color:var(--text-2);font-size:11.5px;font-weight:700;border-radius:9px;padding:7px 11px;cursor:pointer;min-height:36px;flex:none}
+.sumrow .pick{border:0;background:var(--card-inset);color:var(--text);border-radius:8px;font-size:12px;font-weight:700;padding:6px 10px;cursor:pointer;flex:none}
 .sumrow .inlinedit{flex:1;display:none}
 .sumrow.editing .v{display:none}
 .sumrow.editing .inlinedit{display:block}
@@ -237,6 +238,25 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .backchip{border:0;background:var(--card-inset);color:var(--text);font-size:12.5px;font-weight:700;border-radius:999px;padding:6px 12px;min-height:32px;cursor:pointer;flex:none}
 .backchip:active{opacity:.7}
 .morelink{display:block;width:100%;border:0;background:none;color:var(--text-2);font-size:13px;font-weight:700;min-height:44px;cursor:pointer;text-align:center}
+/* 提醒(#36 D0,十五轮):到期横幅/日期牌/保质期行 */
+.remind-banner{display:flex;align-items:center;gap:8px;width:100%;border:1px solid var(--danger-shadow);background:var(--danger-bg);color:var(--danger);border-radius:14px;padding:11px 13px;font-size:13px;font-weight:750;cursor:pointer;margin-top:10px;text-align:left;min-height:44px}
+.remind-banner .rb-arrow{margin-left:auto;font-size:14px}
+.duepill{font-size:11px;font-weight:800;border-radius:999px;padding:3px 10px;flex:none}
+.duepill.over{background:var(--danger);color:#fff}
+.duepill.soon{background:var(--banner-bg);color:var(--text)}
+.duepill.later{background:var(--card-inset);color:var(--text-2)}
+.r1-done{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:10px;font-size:12px;font-weight:700;min-height:36px;padding:0 10px;cursor:pointer;flex:none}
+.expire-row{display:flex;align-items:center;gap:10px;border:1px solid var(--danger-shadow);background:var(--danger-bg);border-radius:15px;padding:12px 14px;margin-top:12px}
+.expire-row .ex-main{flex:1;min-width:0}
+.expire-row .ex-t{font-size:13.5px;font-weight:800;color:var(--text)}
+.expire-row .ex-sub{font-size:11px;color:var(--danger);margin-top:3px}
+.field-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;border:1rpx solid var(--line);background:var(--card);border-radius:10px;padding:11px 12px;font-size:14px;color:var(--text);cursor:pointer;text-align:left;box-sizing:border-box}
+.field-btn .ph{color:var(--text-3)}
+.dwheel{display:flex;gap:6px;justify-content:center;margin:6px 0 2px}
+.dwheel .dcol{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:14px;font-weight:700;color:var(--text-3);max-height:132px;overflow:hidden}
+.dwheel .dcol b{color:var(--text);font-size:15px;background:var(--card-inset);border-radius:8px;padding:4px 10px}
+.dwheel .dcol span{padding:2px 0}
+.clearx{border:1px solid var(--line);background:var(--card);color:var(--text-3);border-radius:50%;width:36px;height:36px;font-size:14px;cursor:pointer;flex:none}
 /* 录音中:半屏半透明小窗悬浮于黄色按钮上方(用户反馈二轮:不滚动、信息全收录、
    黄条按住时仍可见且呈按下态、按压动效可感知) */
 .recback{position:absolute;inset:0;background:rgba(0,0,0,.22);backdrop-filter:blur(1.5px)}
@@ -289,7 +309,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
 
 <div class="proto-top">
   <h1>我靠东西呢 · 交互重构 v0.2 可点击原型</h1>
-  <p class="desc">Issue #45 D0-A 设计交付 · docs-only。主 8 屏 + 附加 3 态,可点屏号切换或直接在屏内点击跳转;浅色/深色两套主题与产品 tokens 一致。所有数据均为示意,<b>一切「确认 / 保存」都是模拟,不写任何数据</b>。</p>
+  <p class="desc">Issue #45 D0-A 设计交付 · docs-only。主 9 屏 + 附加 3 态,可点屏号切换或直接在屏内点击跳转;浅色/深色两套主题与产品 tokens 一致。所有数据均为示意,<b>一切「确认 / 保存」都是模拟,不写任何数据</b>。</p>
   <div class="proto-controls">
     <div class="chips" id="chips">
       <button class="chip on" data-nav="h0">H0 首用</button>
@@ -300,6 +320,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
       <button class="chip" data-nav="c1b">C1b 不确定</button>
       <button class="chip" data-nav="c2">C2 多件确认</button>
       <button class="chip" data-nav="f1">F1 家庭</button>
+      <button class="chip" data-nav="r1">R1 快到期</button>
       <button class="chip" data-nav="v1">附加·录音中</button>
       <button class="chip" data-nav="x1">附加·加载</button>
       <button class="chip" data-nav="x2">附加·网络失败</button>
@@ -371,6 +392,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
 
     <!-- 视图=家里:房间格子平铺;点进去,中间整页换成该房间(家具)的内容,抬头跟着变 -->
     <div id="h1v-home">
+      <button class="remind-banner" data-nav="r1">⏰ 1 件已过期,2 件这几天到期 <span class="rb-arrow">›</span></button>
       <div class="map-head">
         <span class="mtitle">家里有什么</span>
       </div>
@@ -616,11 +638,11 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
   <section class="screen" data-screen="d1">
     <div class="detail-head">
       <h1 class="pagetitle" style="margin:6px 0">备用钥匙</h1>
-      <span class="meta">上次确认 10-08</span>
+      <span class="meta">记录更新于 10-08</span>
     </div>
 
     <div class="bigcard">
-      <div class="lbl">上次确认的位置</div>
+      <div class="lbl">上次记录的位置</div>
       <div class="loc">
         <span class="pin">📍</span>
         <div>
@@ -629,6 +651,14 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         </div>
       </div>
       <div class="tiny" style="margin-top:9px">这是上次记录的位置,东西可能已经移动。</div>
+    </div>
+
+    <div class="expire-row" id="d1-expire" hidden>
+      <div class="ex-main">
+        <div class="ex-t" id="d1-expire-text">有效期 2026-11-20 · 还剩 12 天</div>
+        <div class="ex-sub">到了那天,它会出现在「快到期」里</div>
+      </div>
+      <button class="r1-done" data-toast="模拟:已用完。周期物品会问你要不要定下次时间(如净水器滤芯 3 个月),设计示意不写数据">用完了</button>
     </div>
 
     <div class="btnrow">
@@ -652,6 +682,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
     <div class="fold-body" id="d1-edit"><div class="inner">
       <div class="field"><label>名称</label><input id="d1-edit-name" value="备用钥匙" maxlength="50"></div>
       <div class="field"><label>位置(必填)</label><input id="d1-edit-loc" value="书房 / 书桌 / 右边第二个抽屉" maxlength="200"></div>
+      <div class="field"><label>提醒</label><div style="display:flex;gap:8px;align-items:center"><button class="field-btn" id="d1-edit-remind" data-opensheet="remind"><span class="val"></span><span class="ph">选一个日子;留空=不带提醒</span></button><button class="clearx" id="d1-edit-remind-x" hidden aria-label="清除提醒">✕</button></div></div>
       <div class="field"><label>备注</label><textarea id="d1-edit-note" maxlength="200">配了一把新的,旧的还在</textarea></div>
       <button class="cta" data-toast="模拟:保存修改(设计示意,不写数据)">保存修改</button>
       <p class="tiny" style="margin-top:9px">如果别处还留着这份的旧改动,保存前会先让你看完两版再选,不会悄悄覆盖。</p>
@@ -678,7 +709,14 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <span class="inlinedit"><input value="书房 / 右边第二抽屉" aria-label="修改位置"></span>
         <button class="edit" data-editrow="c1-row-loc">改</button>
       </div>
+      <div class="sumrow" id="c1-row-remind">
+        <span class="k">提醒</span>
+        <span class="v">11-20 到期</span>
+        <button class="pick" data-opensheet="remind">选日期</button>
+        <button class="clearx" id="c1-remind-x" aria-label="清除提醒">✕</button>
+      </div>
     </div>
+    <p class="tiny" style="margin:7px 2px 0">时间只来自你说的话;没说清就不带提醒,不猜日期。</p>
 
     <button class="fold" data-toggle="c1-quote" aria-expanded="false">原话(点开核对) <span class="chev">›</span></button>
     <div class="fold-body" id="c1-quote"><div class="inner">
@@ -706,7 +744,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
 
     <div class="warnbox" style="margin-top:12px">
       <div class="wtitle">⚠ 位置没听清,放在哪儿?</div>
-      <div class="whint">不确定的位置不猜、也不先存;补上才能确认。</div>
+      <div class="whint">补上位置才能确认。</div>
       <input id="c1b-loc" placeholder="例:客厅电视柜第二格" aria-label="补充位置">
     </div>
 
@@ -823,6 +861,45 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
     <div class="note"><strong>加入确认页同样保留这两条事实</strong><p>家人可看整个共享家庭已录入的物品;每人已有私人记录不会自动迁入。不为视觉清爽藏掉隐私提示。</p></div>
   </section>
 
+  <!-- ================= R1 快到期(#36 提醒线 D0,十五轮) ================= -->
+  <section class="screen" data-screen="r1">
+    <h1 class="pagetitle">快到期的东西</h1>
+    <p class="small">按时间先后;用完了就点右边的钮。</p>
+
+    <div class="section-label">已过期</div>
+    <button class="item" data-nav="d1" data-itemswap="感冒药|药箱 / 第一格|「感冒药放药箱第一格,11月20号到期」|有效期 2026-11-20 · 已过期 2 天|11-20 到期">
+      <span class="ico">感</span>
+      <span class="info"><strong>感冒药</strong><span>药箱 / 第一格</span></span>
+      <span class="duepill over">已过期</span>
+    </button>
+
+    <div class="section-label">这几天</div>
+    <button class="item" data-toast="示意:同上,进入该物品详情看保质期与「用完了」">
+      <span class="ico">滤</span>
+      <span class="info"><strong>净水器滤芯</strong><span>厨房 / 水槽下柜</span></span>
+      <span class="duepill soon">3 天后</span>
+    </button>
+    <button class="item" data-toast="示意:同上">
+      <span class="ico">酸</span>
+      <span class="info"><strong>酸奶</strong><span>冰箱 / 冷藏层</span></span>
+      <span class="duepill soon">5 天后</span>
+    </button>
+
+    <div class="section-label">再往后</div>
+    <button class="item" data-toast="示意:同上;远期项只列不催">
+      <span class="ico">防</span>
+      <span class="info"><strong>防晒霜</strong><span>卧室 / 梳妆台</span></span>
+      <span class="duepill later">明年 4 月</span>
+    </button>
+
+    <div class="note"><strong>时间只来自原话</strong><p>到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。点「用完了」的周期物品,会问你要不要定下次时间。</p></div>
+
+    <button class="fold" data-toggle="r1-miss" aria-expanded="false">看看「还没记过时间」的样子 <span class="chev">›</span></button>
+    <div class="fold-body" id="r1-miss"><div class="inner">
+      <div class="empty-note">还没记过会过期的时间。<br>下次记东西时顺口带上,比如:「感冒药放药箱,11 月 20 号过期」。</div>
+    </div></div>
+  </section>
+
   <!-- ================= 附加:V1 录音中(T1)——半屏小窗悬浮于"被按下的"黄色按钮上方 ================= -->
   <section class="screen" data-screen="v1" style="padding:0">
     <!-- 背景即按住前的首页(静态复刻;真实实现=页面不动+浮层) -->
@@ -927,6 +1004,21 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
   </div>
 
   <!-- 弹层:整理位置(各容器抬头「⋯」共用) -->
+  <!-- 弹层:到哪天提醒(日期选择,不让随手打字) -->
+  <div class="sheet-mask" id="sheet-remind">
+    <div class="sheet">
+      <div class="st">到哪天提醒你</div>
+      <p class="small" style="margin:2px 0 6px">日期用选的,保证算得准「还剩几天」。</p>
+      <div class="dwheel" aria-hidden="true">
+        <div class="dcol"><span>2024</span><b>2026</b><span>2027</span></div>
+        <div class="dcol"><span>10</span><b>11</b><span>12</span></div>
+        <div class="dcol"><span>18</span><span>19</span><b>20</b><span>21</span></div>
+      </div>
+      <button class="act" id="remind-ok" style="background:var(--go-bg);color:var(--go-fg)">就这天(2026-11-20)</button>
+      <button class="act" id="remind-cancel">取消</button>
+    </div>
+  </div>
+
   <div class="sheet-mask" id="sheet-tidy">
     <div class="sheet">
       <div class="st">整理这个位置(次级)</div>
@@ -965,6 +1057,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
     c1b:{title:'核对一下',tag:'C1b · 不确定态(显眼展开,不藏) — 任务 T1 / T3',voice:false},
     c2:{title:'核对一下',tag:'C2 · 多件确认(模糊项默认不选) — 任务 T3',voice:false},
     f1:{title:'家庭',tag:'F1 · 家庭管理(家人优先/创建者文案) — 任务 T5',voice:false},
+    r1:{title:'快到期的东西',tag:'R1 · 到期与维护 — #36 提醒线 D0(时间只来自原话,不猜日期)',voice:true},
     v1:{title:'录音中',tag:'V1 · 录音中态 — 任务 T1(上滑取消/松手去核对)',voice:false},
     x1:{title:'我靠东西呢',tag:'X1 · 加载态 — 任务 T7(骨架屏,不用旧数据冒充)',voice:false},
     x2:{title:'出了点问题',tag:'X2 · 网络失败态 — 任务 T7(可重试,记录不受影响)',voice:false}
@@ -1001,6 +1094,42 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
   var h1s=document.getElementById('h1-search');
   if(h1s){h1s.addEventListener('focus',openKeyboard);h1s.addEventListener('click',function(){phone.classList.toggle('kb-open')})}
   document.querySelectorAll('[data-kbclose]').forEach(function(b){b.addEventListener('click',closeKeyboard)});
+
+  /* 日期选择(#36 十五轮修订):提醒不允许随手打字——语音侧来自原话,手动侧必须选日期 */
+  var remindTarget=null;
+  document.addEventListener('click',function(e){
+    var o=e.target.closest('[data-opensheet="remind"]');
+    if(o){remindTarget=o;return}
+  });
+  (function(){
+    var ok=document.getElementById('remind-ok'),cl=document.getElementById('remind-cancel');
+    if(!ok)return;
+    ok.addEventListener('click',function(){
+      if(remindTarget&&remindTarget.id==='d1-edit-remind'){
+        remindTarget.querySelector('.val').textContent='2026-11-20 到期';
+        remindTarget.querySelector('.ph').style.display='none';
+      }else if(remindTarget){
+        var row=remindTarget.closest('.sumrow');
+        if(row)row.querySelector('.v').textContent='2026-11-20 到期';
+      }
+      document.querySelectorAll('.sheet-mask').forEach(function(m){m.classList.remove('open')});
+    });
+    cl.addEventListener('click',function(){
+      document.querySelectorAll('.sheet-mask').forEach(function(m){m.classList.remove('open')});
+    });
+    var cx=document.getElementById('c1-remind-x');
+    if(cx)cx.addEventListener('click',function(){
+      var v=document.querySelector('#c1-row-remind .v');
+      v.textContent='不提醒';v.style.color='var(--text-3)';
+    });
+    var okc=function(){var v=document.querySelector('#c1-row-remind .v');if(v)v.style.color='';};
+    ok.addEventListener('click',okc);
+    var x=document.getElementById('d1-edit-remind-x');
+    if(x)x.addEventListener('click',function(){
+      var f=document.getElementById('d1-edit-remind');
+      f.querySelector('.val').textContent='';f.querySelector('.ph').style.display='';x.hidden=true;
+    });
+  })();
 
   /* H1 家庭地图视图切换(用户反馈四轮):点房间/家具 → 中间整页换成该容器内容,抬头随容器变 */
   var H1VIEWS=['home','living','study','desk','bedroom','kitchen','unsorted'];
@@ -1041,6 +1170,10 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         if(en)en.value=p[0];
         if(el)el.value=p[1];
         if(enote)enote.value='';
+        var ex=document.getElementById('d1-expire');
+        if(ex){ex.hidden=!p[3];if(p[3])document.getElementById('d1-expire-text').textContent=p[3]}
+        var er=document.getElementById('d1-edit-remind');
+        if(er){var erv=er.querySelector('.val'),erp=er.querySelector('.ph');erv.textContent=p[4]||'';if(erp)erp.style.display=p[4]?'none':'';var exb=document.getElementById('d1-edit-remind-x');if(exb)exb.hidden=!p[4]}
       }
       navTo(t.dataset.nav);
       return;
