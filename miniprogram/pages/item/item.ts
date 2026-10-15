@@ -142,8 +142,10 @@ Page<
     /** 编辑折叠「提醒」字段的当前日期(YYYY-MM-DD;""=不带提醒) */
     remindAt: string;
     /**
-     * 页面所见提醒轮次号(PR #52 B1):-1=未知(未加载/旧服务端缺 generation,
-     * 请求不携带轮次号走旧协议);0=已确认无提醒(补录语义);≥1=所见轮次
+     * 页面所见提醒轮次号(PR #52 B1):-1=未知(未加载/加载失败/旧服务端缺
+     * generation)——此时一律不发 reminder 写(F4-B2,绝不退回旧协议无条件写),
+     * 先补拉读到 0/真实轮次后才带 expected_generation 提交;0=已确认无提醒
+     * (补录语义);≥1=所见轮次
      */
     remindGeneration: number;
     /** 今天(YYYY-MM-DD):编辑提醒的日期选择器下限 */
@@ -227,6 +229,13 @@ Page<
     noop(): void;
     /* ---------------- 提醒(#36 三阶段) ---------------- */
     fetchReminderRow(): Promise<RemindRow | null | undefined>;
+    /**
+     * F4-B2:轮次未知(-1)时补拉一次提醒行,只为把轮次号与基准对齐到最新
+     * (表单里的用户候选原样保留,到期行如实回到远端当前值)。
+     * 返回补拉后轮次是否已知(≥0);拉取失败/在途切换/旧服务端不回轮次时
+     * 返回 false,调用方失败关闭,绝不退回旧协议无条件写。
+     */
+    reloadRemindGeneration(): Promise<boolean>;
     refreshReminderRow(): Promise<void>;
     applyReminderRow(row: RemindRow | null): void;
     /** 保质期行「已处理」:确认后 remindComplete **/
@@ -569,7 +578,7 @@ Page<
       location: locationText,
       note,
     });
-    const remindWrite = this.pendingRemindWrite();
+    let remindWrite = this.pendingRemindWrite();
     if (Object.keys(changes).length === 0 && remindWrite === null) {
       // 冲突态下走到这里 = 冲突字段全部选了「采用最新记录」且无其他改动:
       // 表单已与最新基准一致,收起面板,不给用户留一个只会空跑的面板。
@@ -610,27 +619,39 @@ Page<
           updated_at: it.updated_at,
         });
       }
+      if (remindWrite !== null && this.data.remindGeneration < 0) {
+        // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)绝不退回旧协议
+        // 无条件写——先补拉一次(候选保留);补拉后与最新一致则无需再写,
+        // 仍读不到轮次则如实说没存上,文本部分已存好,提醒候选留在表单等重试
+        const known = await this.reloadRemindGeneration();
+        remindWrite = known ? this.pendingRemindWrite() : remindWrite;
+        if (!known) {
+          wx.showToast({
+            title: "提醒没存上,提醒还没加载好,你的选择已保留,稍后再试",
+            icon: "none",
+            duration: 2500,
+          });
+          return;
+        }
+      }
       if (remindWrite !== null) {
         try {
           if (remindWrite.action === "remindSet") {
             // 选「保留我的修改」的提醒以刷新后的最新轮次号重发(既有 remindSet 路径):
-            // 提交瞬间他处又改 → 服务端轮次门禁再次拒绝,重新进入双值对比
+            // 提交瞬间他处又改 → 服务端轮次门禁再次拒绝,重新进入双值对比。
+            // 轮次未知已被上方 F4-B2 门禁拦下,这里必带轮次,绝不省略
             const r = await callItemsApi({
               action: "remindSet",
               item_id: this.data.itemId,
               due_date: remindWrite.dueDate,
-              ...(this.data.remindGeneration >= 0
-                ? { expected_generation: this.data.remindGeneration }
-                : {}),
+              expected_generation: this.data.remindGeneration,
             });
             this.applyReminderRow(r.reminder);
           } else {
             await callItemsApi({
               action: "remindClear",
               item_id: this.data.itemId,
-              ...(this.data.remindGeneration >= 1
-                ? { expected_generation: this.data.remindGeneration }
-                : {}),
+              expected_generation: this.data.remindGeneration,
             });
             this.applyReminderRow(null);
           }
@@ -1190,6 +1211,24 @@ Page<
   },
 
   /**
+   * F4-B2:轮次未知(-1,未加载/加载失败/冲突刷新远端不可得)时的写前补拉。
+   * 只对齐轮次号与基准,表单里的用户候选(remindAt)原样保留——补拉不是
+   * 刷新展示,是给待发的写请求取 CAS 条件;拉不到就失败关闭,绝不省略
+   * expected_generation 退回旧协议无条件写。到期行按远端当前值如实回显。
+   */
+  async reloadRemindGeneration(): Promise<boolean> {
+    const row = await this.fetchReminderRow();
+    if (row === undefined) {
+      return false;
+    }
+    const candidate = this.data.remindAt;
+    this.remindRemoteUnknown = false;
+    this.applyReminderRow(row);
+    this.setData({ remindAt: candidate });
+    return this.data.remindGeneration >= 0;
+  },
+
+  /**
    * 拉当前家庭 active 提醒,取这件的那一行上屏。展示前先清旧行并经
    * households 资格复核(硬门 C,口径同 R1/首页);家庭切换(作用域代
    * 数变化)后旧家庭响应不上屏。加载失败
@@ -1249,6 +1288,22 @@ Page<
       });
       return;
     }
+    if (this.data.remindGeneration < 0) {
+      // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)时完成同样是
+      // reminder 写——先补拉取轮次,拉不到就失败关闭,绝不省略 expected_generation
+      const known = await this.reloadRemindGeneration();
+      if (!known) {
+        wx.showToast({
+          title: "提醒还没加载好,稍后再点用完了",
+          icon: "none",
+          duration: 2500,
+        });
+        return;
+      }
+      if (!this.data.expire) {
+        return; // 补拉发现远端已无提醒:没有可完成的,到期行已如实收起
+      }
+    }
     const confirmed = await askUseUp(this.data.name);
     if (!confirmed) {
       return; // 用户取消:不动、不写
@@ -1258,9 +1313,8 @@ Page<
       await callItemsApi({
         action: "remindComplete",
         item_id: this.data.itemId,
-        ...(this.data.remindGeneration >= 1
-          ? { expected_generation: this.data.remindGeneration }
-          : {}),
+        // 轮次未知已被上方 F4-B2 门禁拦下,这里必带轮次(≥0),绝不省略
+        expected_generation: this.data.remindGeneration,
         // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
         complete_date: localTodayYmd(),
       });
@@ -1346,6 +1400,24 @@ Page<
       }
       return;
     }
+    if (this.data.remindGeneration < 0) {
+      // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)不得发 remindSet
+      // ——先补拉一次取轮次,拉不到就失败关闭:候选保留在表单,提示稍后重试,
+      // 绝不省略 expected_generation 退回旧协议无条件替换
+      const known = await this.reloadRemindGeneration();
+      if (!known) {
+        this.setPendingRemind(value);
+        wx.showToast({
+          title: "提醒还没存好,你的选择已保留,稍后再试",
+          icon: "none",
+          duration: 2500,
+        });
+        return;
+      }
+      if (value === this.data.remindAt) {
+        return; // 补拉后远端已是这个日子:无需再写
+      }
+    }
     const hadReminder = this.data.remindAt !== "";
     this.setData({ remindBusy: true });
     try {
@@ -1353,9 +1425,8 @@ Page<
         action: "remindSet",
         item_id: this.data.itemId,
         due_date: value,
-        ...(this.data.remindGeneration >= 0
-          ? { expected_generation: this.data.remindGeneration }
-          : {}),
+        // 轮次未知已被上方 F4-B2 门禁拦下,这里必带轮次(≥0),绝不省略
+        expected_generation: this.data.remindGeneration,
       });
       if (res.reminder) {
         this.applyReminderRow(res.reminder);
@@ -1431,14 +1502,30 @@ Page<
       }
       return;
     }
+    if (this.data.remindGeneration < 0) {
+      // F4-B2:轮次未知时清除同样是 reminder 写——先补拉取轮次,拉不到就
+      // 失败关闭:候选(不带提醒)保留在表单,绝不无条件清除家人的提醒
+      const known = await this.reloadRemindGeneration();
+      if (!known) {
+        this.setPendingRemind("");
+        wx.showToast({
+          title: "还没改成,提醒还没加载好,稍后再试",
+          icon: "none",
+          duration: 2500,
+        });
+        return;
+      }
+      if (!this.data.remindAt) {
+        return; // 补拉后远端已无提醒:没有可清除的
+      }
+    }
     this.setData({ remindBusy: true });
     try {
       await callItemsApi({
         action: "remindClear",
         item_id: this.data.itemId,
-        ...(this.data.remindGeneration >= 1
-          ? { expected_generation: this.data.remindGeneration }
-          : {}),
+        // 轮次未知已被上方 F4-B2 门禁拦下,这里必带轮次(≥0),绝不省略
+        expected_generation: this.data.remindGeneration,
       });
       this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
       this.remindOriginal = "";
