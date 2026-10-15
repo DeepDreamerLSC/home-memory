@@ -71,6 +71,7 @@ Page({
         remindGeneration: -1,
         today: (0, remind_ui_1.localTodayYmd)(),
         remindBusy: false,
+        vagueQuote: "",
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -157,6 +158,11 @@ Page({
         // PR #48 复审 B2:updated_at 在名称/备注/位置任意修改时都会刷新,不能冒充
         // 「位置确认时间」——文案只如实说明记录更新时间
         const short = shortDate(s.updated_at);
+        // vagueQuote(Fix 4)只在 get(详情)响应携带;update 等其余投影不带时
+        // 保留现值——编辑内容不会动掉「当时提到时间」的留痕
+        const vague = typeof s.remind_vague_quote === "string"
+            ? s.remind_vague_quote || ""
+            : this.data.vagueQuote;
         this.setData({
             itemId: s.item_id,
             name: s.name,
@@ -169,6 +175,7 @@ Page({
                 : s.updated_at
                     ? "记录更新于 " + (0, api_1.formatDateTime)(s.updated_at)
                     : "",
+            vagueQuote: vague,
         });
     },
     /** 保存修改:itemsApi update,带 expected_version */
@@ -641,7 +648,7 @@ Page({
             remindGeneration: typeof row.generation === "number" ? row.generation : -1,
         });
     },
-    /** 保质期行「用完了」:先确认(周期物品问下次周期),再 remindComplete(带所见轮次号) */
+    /** 保质期行「用完了」:二次确认后 remindComplete(不带 period_days;下次提醒到详情里自己选日子) */
     async onExpireDoneTap() {
         if (this.data.remindBusy) {
             return;
@@ -650,34 +657,28 @@ Page({
         if (!expire) {
             return;
         }
-        const decision = await (0, remind_ui_1.askUseUp)(this.data.name, expire.kind);
-        if (decision === null) {
+        const confirmed = await (0, remind_ui_1.askUseUp)(this.data.name);
+        if (!confirmed) {
             return; // 用户取消:不动、不写
         }
         this.setData({ remindBusy: true });
         try {
-            const res = await (0, api_1.callItemsApi)({
+            await (0, api_1.callItemsApi)({
                 action: "remindComplete",
                 item_id: this.data.itemId,
                 ...(this.data.remindGeneration >= 1
                     ? { expected_generation: this.data.remindGeneration }
                     : {}),
-                ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
                 // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
                 complete_date: (0, remind_ui_1.localTodayYmd)(),
             });
-            if (decision.periodDays !== null && res.reminder) {
-                this.applyReminderRow(res.reminder);
-                wx.showToast({
-                    title: "已用完;下次 " + (0, remind_ui_1.monthDayText)(res.reminder.due_date) + " 到期",
-                    icon: "none",
-                    duration: 2500,
-                });
-            }
-            else {
-                this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
-                wx.showToast({ title: "已用完", icon: "success" });
-            }
+            this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
+            // 完成后不弹固定周期选项(#36 真机反馈 Fix 2):下次提醒时间由用户到详情里选日子
+            wx.showToast({
+                title: "已完成。要下次提醒,到详情里选日子",
+                icon: "none",
+                duration: 2500,
+            });
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
