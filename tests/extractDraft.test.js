@@ -1268,3 +1268,115 @@ test("v2 今天注入:缺 deps.today 用真实日期,非法值兜底当前日期
   await mk({ today: () => "不是日期" });
   assert.ok(/【今天】\d{4}-\d{2}-\d{2}/.test(calls[0]), "非法 today 兜底为当前日期");
 });
+
+// ---------- PR #52 复审 B2:显式年份片段遮蔽(无年份二次匹配) ----------
+
+test("B2 显式年份遮蔽:原话「2028年11月20号」+ 模型违规折报 2026-11-20 → 三项全 null 拦截", function () {
+  const original = "滤芯在厨房,2028年11月20号要更换。";
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "滤芯",
+        location_text: "厨房",
+        certain: true,
+        qualifiers: [],
+        source_quote: "滤芯在厨房,2028年11月20号要更换",
+        // 模型违规:把显式年份日期折报成无年份补全值(今天 2026-10-15 → 今年 11-20)
+        remind_at: "2026-11-20",
+        remind_kind: "下次维护",
+        remind_quote: "2028年11月20号",
+      },
+    ]),
+    original,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true, "锚定失败绝不废件");
+  // 反例核心:quote 确实是原话逐字子串(逐字锚定本可通过,负例才有效),
+  // 但遮蔽后该段只产出 2028-11-20 一个候选,折报的 2026-11-20 必须被
+  // 对应锚定拦下——三项全 null,物品照常提取
+  assert.notEqual(
+    original.replace(/\s+/g, "").indexOf("2028年11月20号"),
+    -1,
+    "前置自检:quote 是原话逐字子串(去空白比对)",
+  );
+  assert.equal(result.drafts[0].name, "滤芯");
+  assert.equal(result.drafts[0].location_text, "厨房");
+  assert.deepStrictEqual(
+    remindTrio(result.drafts[0]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "显式年份片段不得再被无年份正则剥出补全成今年",
+  );
+});
+
+test("B2 显式年份遮蔽:原话「2028年11月20号」+ 正确报 2028-11-20 → 三项保留通过", function () {
+  const original = "滤芯在厨房,2028年11月20号要更换。";
+  const result = validateDrafts(
+    rawItems([
+      {
+        name: "滤芯",
+        location_text: "厨房",
+        certain: true,
+        qualifiers: [],
+        source_quote: "滤芯在厨房,2028年11月20号要更换",
+        remind_at: "2028-11-20",
+        remind_kind: "下次维护",
+        remind_quote: "2028年11月20号",
+      },
+    ]),
+    original,
+    ANCHOR_TODAY,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.drafts[0].remind_at, "2028-11-20", "如实报显式年份日期:保留");
+  assert.equal(result.drafts[0].remind_kind, "下次维护");
+  assert.equal(result.drafts[0].remind_quote, "2028年11月20号");
+});
+
+test("B2 遮蔽不误伤:同 quote 里显式年份日期与独立无年份日期并存 → 各自产出候选,互不遮蔽", function () {
+  const original = "会员卡2027年6月30号年检,另外11月20号前要交物业费。";
+  const base = {
+    name: "会员卡",
+    location_text: "钱包",
+    certain: true,
+    qualifiers: [],
+    source_quote: "会员卡2027年6月30号年检",
+  };
+  // 显式年份候选照常(遮蔽只作用于同段的无年份再匹配)
+  const explicit = validateDrafts(
+    rawItems([Object.assign({}, base, {
+      remind_at: "2027-06-30",
+      remind_kind: "下次维护",
+      remind_quote: "2027年6月30号年检",
+    })]),
+    original,
+    ANCHOR_TODAY,
+  );
+  assert.equal(explicit.drafts[0].remind_at, "2027-06-30");
+  // 独立的无年份提法(不在任何显式年份片段内)仍按最近未来补全
+  const noYear = validateDrafts(
+    rawItems([Object.assign({}, base, {
+      remind_at: "2026-11-20",
+      remind_kind: "下次维护",
+      remind_quote: "11月20号前要交物业费",
+    })]),
+    original,
+    ANCHOR_TODAY,
+  );
+  assert.equal(noYear.drafts[0].remind_at, "2026-11-20", "独立无年份日期不受遮蔽影响");
+  // 但显式年份片段内部的「6月30号」不再单独产出 2026-06-30/2027-06-30 之外的无年份候选:
+  // 折报 2026-06-30(今天 2026-10-15 已过,无年份本应补 2027)必须拦下
+  const folded = validateDrafts(
+    rawItems([Object.assign({}, base, {
+      remind_at: "2026-06-30",
+      remind_kind: "下次维护",
+      remind_quote: "2027年6月30号年检",
+    })]),
+    original,
+    ANCHOR_TODAY,
+  );
+  assert.deepStrictEqual(
+    remindTrio(folded.drafts[0]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "显式年份段内剥出的无年份折算值必须拦截",
+  );
+});

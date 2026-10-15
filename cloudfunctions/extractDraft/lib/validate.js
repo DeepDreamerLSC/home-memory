@@ -83,6 +83,10 @@ function localTodayYmd() {
  * - 无年份(11月20号):按【今天】补全为最近的未来日期——今年的该月该日
  *   已过则用下一年,与 prompt 告诉模型的补全规则同款(today 非法时兜底
  *   当前本地日期,绝不抛错);
+ * - 显式年份片段遮蔽(PR #52 复审 B2):已被显式年份提法占据的片段不再
+ *   参与无年份二次匹配——「2028年11月20号」只产出 2028-11-20 一个候选,
+ *   绝不再从同段剥出「11月20号」补全成今年,让模型违规折报的
+ *   2026-11-20 错误通过对应锚定;
  * - 月/日越界的提法(13月/32号)构造不出合法候选,自然锚定失败;
  * - 模糊/相对表述(「下个月」「快过期了」「到2027年3月」)解析不出任何候选。
  */
@@ -93,17 +97,26 @@ function quoteDateCandidates(quote, todayYmd) {
     if (month < 1 || month > 12 || day < 1 || day > 31) return;
     out.push(year + "-" + pad2(month) + "-" + pad2(day));
   };
+  // 已被显式年份提法占据的 [start, end) 片段:无年份匹配与之重叠即跳过
+  const masked = [];
+  const overlapsMasked = (start, end) =>
+    masked.some(([ms, me]) => start < me && ms < end);
   let match;
   REMIND_QUOTE_FULL_DATE_RE.lastIndex = 0;
   while ((match = REMIND_QUOTE_FULL_DATE_RE.exec(quote)) !== null) {
     pushWithYear(Number(match[1]), Number(match[2]), Number(match[3]));
+    masked.push([match.index, match.index + match[0].length]);
   }
   REMIND_QUOTE_ISO_DATE_RE.lastIndex = 0;
   while ((match = REMIND_QUOTE_ISO_DATE_RE.exec(quote)) !== null) {
     pushWithYear(Number(match[1]), Number(match[2]), Number(match[3]));
+    masked.push([match.index, match.index + match[0].length]);
   }
   REMIND_QUOTE_MD_DATE_RE.lastIndex = 0;
   while ((match = REMIND_QUOTE_MD_DATE_RE.exec(quote)) !== null) {
+    if (overlapsMasked(match.index, match.index + match[0].length)) {
+      continue; // 显式年份片段的内部再匹配:遮蔽,不产出候选
+    }
     const month = Number(match[1]);
     const day = Number(match[2]);
     if (month < 1 || month > 12 || day < 1 || day > 31) continue;
