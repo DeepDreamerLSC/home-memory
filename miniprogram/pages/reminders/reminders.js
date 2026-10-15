@@ -171,6 +171,16 @@ Page({
                     await this.load();
                     return;
                 }
+                const superseded = err && typeof err === "object"
+                    ? err.superseded
+                    : undefined;
+                if (superseded === true) {
+                    // PR #52 R4-1:完成置 done 后、认领前提醒被家人重新设置——再生认领
+                    // 绑定原完成轮次被原子拒绝:如实告知本轮不再生成,新提醒原样保留
+                    wx.showToast({ title: "已完成;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
+                    await this.load();
+                    return;
+                }
                 // 这一轮已被家人处理并换了新提醒(PR #52 B1):刷新看最新,绝不误伤
                 wx.showToast({ title: "这条刚被家人处理过,已刷新", icon: "none" });
                 await this.load();

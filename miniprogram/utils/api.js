@@ -22,12 +22,13 @@ exports.CLIENT_NETWORK = "CLIENT_NETWORK";
 exports.CLIENT_BAD_RESPONSE = "CLIENT_BAD_RESPONSE";
 /** 携带错误码的异常,message 为可直接展示的中文文案 */
 class ApiError extends Error {
-    constructor(code, message, existing, cleared) {
+    constructor(code, message, existing, cleared, superseded) {
         super(message);
         this.name = "ApiError";
         this.code = code;
         this.existing = existing;
         this.cleared = cleared;
+        this.superseded = superseded;
     }
 }
 exports.ApiError = ApiError;
@@ -84,15 +85,15 @@ const NEEDS_SPLIT_DEFAULT_MESSAGE = "一次只记一件物品,请分开说";
 function isRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v);
 }
-/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared 附加数据 */
-function toServerError(code, message, fallbacks, existing, cleared) {
+/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared / superseded 附加数据 */
+function toServerError(code, message, fallbacks, existing, cleared, superseded) {
     const codeText = typeof code === "string" && code.length > 0 ? code : exports.CLIENT_BAD_RESPONSE;
     const fallback = fallbacks[codeText];
     const serverMessage = typeof message === "string" && message.trim().length > 0 ? message : "";
     const existingSummary = isRecord(existing)
         ? existing
         : undefined;
-    return new ApiError(codeText, serverMessage || fallback || DEFAULT_ERROR_MESSAGE, existingSummary, cleared === true);
+    return new ApiError(codeText, serverMessage || fallback || DEFAULT_ERROR_MESSAGE, existingSummary, cleared === true, superseded === true);
 }
 /** 调用云函数,带客户端超时;不静默吞错,失败一律 reject ApiError */
 function callCloudFunction(name, data, timeoutMs) {
@@ -208,7 +209,7 @@ async function callItemsApi(event) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     if (result.ok === false) {
-        const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing, result.cleared);
+        const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing, result.cleared, result.superseded);
         (0, households_api_1.notifyFamilyScopeDrift)(err);
         throw err;
     }

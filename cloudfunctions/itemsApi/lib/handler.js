@@ -585,7 +585,12 @@ function buildRegenDoc(deps, itemId, generation, dueDate, now) {
 }
 
 /**
- * 为周期再生认领下一轮(remindComplete 专用):条件 {rev=baseGen 读值 且欠账净空}。
+ * 为周期再生认领下一轮(remindComplete 专用):条件 {rev=baseGen 且欠账净空}。
+ * R4-1 再生认领绑定实际完成的原轮次:发号 CAS 的原子前置含 slot.rev === baseGen
+ * (与 pending_gen/clear_gen 同一次条件更新)——complete 置 done 与认领两步之间
+ * slot 权威被 set/其他操作推进(rev 前移到新轮)时,旧完成不得在新 rev 上发行:
+ * 读值发现 rev ≠ baseGen 直接拒绝,CAS 的等值条件 rev=baseGen 原子兜底(即使
+ * 读取与更新之间又发生推进也不命中),迟到的周期再生绝不叠加在他人新提醒上。
  * 行已置 done 但 slot 还挂着「该轮的 create 欠账」(首建追加已落地、消费欠账
  * 的写入丢失/中断)时,顺带消费该陈年欠账再认领,不让它永久卡住完成。
  * 认领失败返回 null,由调用方分类(同参在途收敛 / 显式冲突)。
@@ -602,6 +607,11 @@ async function reserveRegenClaim(deps, itemId, baseGen, periodDays, due) {
     // 第 baseGen 轮及其在途延续已被清除:迟到的再生认领显式拒绝
     return null;
   }
+  if (slot.rev !== baseGen) {
+    // R4-1:权威已不在被完成的原轮次上(他人 set/再生已发新轮推进了 rev)——
+    // 旧完成不得在新 rev 上发行再生;真正的原子保证在下方 CAS 的 rev=baseGen
+    return null;
+  }
   var claim = {
     kind: "regen",
     gen: slot.rev + 1,
@@ -613,12 +623,13 @@ async function reserveRegenClaim(deps, itemId, baseGen, periodDays, due) {
     rq: ""
   };
   var patch = Object.assign({ rev: claim.gen }, claimPatch(claim));
-  // 等值栅栏条件(本代码创建的 slot 必带 clear_gen;理论遗留缺字段时退化为无栅栏条件)
+  // 等值栅栏条件(本代码创建的 slot 必带 clear_gen;理论遗留缺字段时退化为无栅栏条件);
+  // rev 等值绑在 baseGen(被完成的原轮次)上——与发号同一次 CAS 的原子前置(R4-1)
   var fenceCond = Number.isInteger(slot.clear_gen) ? { clear_gen: fence } : {};
   var ok = await casSlot(
     deps,
     itemId,
-    Object.assign({ rev: slot.rev, pending_gen: 0 }, fenceCond),
+    Object.assign({ rev: baseGen, pending_gen: 0 }, fenceCond),
     patch
   );
   if (!ok) {
@@ -626,7 +637,7 @@ async function reserveRegenClaim(deps, itemId, baseGen, periodDays, due) {
       deps,
       itemId,
       Object.assign(
-        { rev: slot.rev, pending_gen: slot.rev, pending_kind: "create" },
+        { rev: baseGen, pending_gen: baseGen, pending_kind: "create" },
         fenceCond
       ),
       patch
@@ -1277,7 +1288,13 @@ async function remindListItems(event, deps) {
  * 缺省服务端 UTC 当天)+ period_days 天(跨月/跨年自然进位,纯日期算术),
  * kind 固定「下次维护」(周期再生语义),quote 为空(再生提醒无原话锚点)。
  * 新轮次号一律取自 slot 单调代际权威(N1:清除后也不回退);认领/落地被并发
- * 操作抢先 → 显式 VERSION_CONFLICT,绝不插出第二条 active。R3-1:置 done 与
+ * 操作抢先 → 显式 VERSION_CONFLICT,绝不插出第二条 active。R4-1(再生认领
+ * 绑定原完成轮次):认领 CAS 的原子前置含 slot.rev === 被完成的原轮次——
+ * 携带轮次时即该轮;旧协议无参路径以「被置 done 那一行的实际 generation」
+ * 为基准(done CAS 前读得的 active 行最大轮次,绝非请求后来才看到的
+ * slot.rev)。置 done 与认领两步之间 slot 被 set/其他操作推进 → 旧完成不得
+ * 在新 rev 上发行,显式告知「刚被重新设置过,本轮不再生成下一轮」
+ * (superseded:true),done 不回滚、他人新提醒原样无损。R3-1:置 done 与
  * 认领两步之间插入的 remindClear 会在 slot 上盖清除栅栏(clear_gen),认领
  * CAS 的等值栅栏条件原子挡住迟到的认领 → 显式告知「已完成,不再生(已被
  * 清除)」(cleared:true),done 不回滚。再生插入失败时
@@ -1329,6 +1346,25 @@ async function remindCompleteItem(event, deps) {
   if (periodDays > 0) {
     regenDue = addDays(completeDate !== null ? completeDate : now.slice(0, 10), periodDays);
   }
+  // 旧协议宽口径的完成轮次基准(R4-1):不带 expected_generation 的 complete
+  // 不得把「请求后来才看到的 slot.rev」当被完成行的轮次——以本次宽口径 done
+  // CAS 即将命中的 active 行的最大 generation 为基准(读在 CAS 之前,正是该
+  // CAS 将置 done 的行集,即「被置 done 那一行的实际轮次」);读到无 active
+  // 而 CAS 仍命中 = 读取与更新之间有并发落地新行(轮次必来自更新的认领),
+  // 调用方按 superseded 显式冲突处理,绝不猜轮次。
+  var legacyBaseGen = null;
+  if (periodDays > 0 && expectedGeneration === undefined) {
+    var preActives = await reminders(deps)
+      .where({ household_id: deps.householdId, item_id: event.item_id, status: "active" })
+      .get();
+    var preRows = (preActives && preActives.data) || [];
+    for (var p = 0; p < preRows.length; p++) {
+      var preGen = preRows[p].generation;
+      if (Number.isInteger(preGen) && (legacyBaseGen === null || preGen > legacyBaseGen)) {
+        legacyBaseGen = preGen;
+      }
+    }
+  }
   // 条件更新(CAS):带轮次号时只命中「用户看到的那一轮」;
   // 命中 0 条 → 本轮已非该轮,交由 divergence 裁定(冲突/收敛/治愈),绝不误伤
   var cond = { household_id: deps.householdId, item_id: event.item_id, status: "active" };
@@ -1355,15 +1391,18 @@ async function remindCompleteItem(event, deps) {
 
   if (periodDays > 0) {
     // 认领下一轮(N2 共享线性化点):携带轮次时以该轮为基准(权威 rev 必须
-    // 仍在该轮);旧协议宽口径以 slot 当前 rev 为基准。认领失败分类处理。
-    var baseGen = expectedGeneration;
-    if (baseGen === undefined) {
-      var slot = await ensureSlot(deps, event.item_id);
-      baseGen = slot.rev;
+    // 仍在该轮);旧协议宽口径以「被置 done 那一行的实际轮次」为基准(R4-1:
+    // done CAS 前读得的 active 行最大轮次,绝非后来才看到的 slot.rev)。认领
+    // CAS 的 rev===baseGen 原子前置保证:slot 已被 set/其他操作推进 → 旧完成
+    // 绝不在新 rev 上发行,分类为显式冲突(同轮在途收敛 / 跨轮 superseded)。
+    var baseGen = expectedGeneration !== undefined ? expectedGeneration : legacyBaseGen;
+    if (baseGen === null) {
+      // 宽口径读到无 active 而 done CAS 命中:并发在新落地行上交错——不猜轮次
+      return completeSupersededConflict();
     }
     var claim = await reserveRegenClaim(deps, event.item_id, baseGen, periodDays, regenDue);
     if (!claim) {
-      return completeReserveFailure(deps, item, expectedGeneration, periodDays);
+      return completeReserveFailure(deps, item, baseGen, periodDays);
     }
     var r = await materializeClaimedRow(deps, event.item_id, claim, function (gen) {
       return buildRegenDoc(deps, event.item_id, gen, claim.due, deps.now());
@@ -1381,18 +1420,33 @@ async function remindCompleteItem(event, deps) {
 }
 
 /**
- * 再生认领失败的分类(该轮已置 done,但下一轮声明被并发操作抢先):
- * slot 上挂着「同轮同周期」的再生欠账(此前同参完成的在途/中断)→ 收敛补齐
- * (replayed);其余(他人 set/clear 抢先、权威已前移)→ 显式 VERSION_CONFLICT,
- * 客户端刷新后重试收敛,绝不插出第二条 active。
- * R3-1 清除栅栏:完成的轮次生命周期已被 clear 覆盖 → 任何收敛/补齐都拒绝
- * (绝不复活)。done 已发生不回滚:显式告知「已完成,不再生成(已被清除)」,
- * 返回结构带 cleared:true 供客户端区分于一般冲突。
+ * R4-1 显式冲突:被完成的原轮次之后权威已被并发操作(典型:他人 remindSet
+ * 认领并落地了新轮)推进——本轮已完成,绝不在新 rev 上叠加生成下一轮提醒。
+ * done 不回滚,新提醒原样无损;返回结构带 superseded:true 供客户端区分文案。
  */
-async function completeReserveFailure(deps, item, expectedGeneration, periodDays) {
+function completeSupersededConflict() {
+  return {
+    ok: false,
+    error: "VERSION_CONFLICT",
+    message: "这条的提醒刚被重新设置过:本轮已完成,不再生成下一轮提醒",
+    superseded: true
+  };
+}
+
+/**
+ * 再生认领失败的分类(该轮已置 done,但下一轮声明被并发操作抢先;baseGen =
+ * 被完成的原轮次,expected_generation 与旧协议无参路径同一口径——R4-1):
+ * - 清除栅栏已覆盖该轮(R3-1)→ 显式告知「已完成,不再生成(已被清除)」,
+ *   返回结构带 cleared:true,done 不回滚,任何收敛/补齐都拒绝(绝不复活);
+ * - slot 上挂着「同轮(base=该轮)同周期」的再生欠账(此前同参完成的在途/
+ *   中断)→ 收敛补齐(replayed);跨轮欠账绝不猜,显式冲突;
+ * - 权威已推进到该轮之后(他人 set 等已发新轮,R4-1)→ 显式告知「刚被重新
+ *   设置过,本轮不再生成」(superseded:true),绝不叠加第二条 active;
+ * - 其余 → 显式 VERSION_CONFLICT,客户端刷新后重试收敛。
+ */
+async function completeReserveFailure(deps, item, baseGen, periodDays) {
   var slot = await ensureSlot(deps, item._id);
-  var fenceBase = expectedGeneration === undefined ? slot.rev : expectedGeneration;
-  if (slotClearGen(slot) >= fenceBase) {
+  if (slotClearGen(slot) >= baseGen) {
     return {
       ok: false,
       error: "VERSION_CONFLICT",
@@ -1404,8 +1458,8 @@ async function completeReserveFailure(deps, item, expectedGeneration, periodDays
   if (
     claim &&
     claim.kind === "regen" &&
-    claim.periodDays === periodDays &&
-    (expectedGeneration === undefined || claim.baseGen === expectedGeneration)
+    claim.baseGen === baseGen &&
+    claim.periodDays === periodDays
   ) {
     var r = await materializeClaimedRow(deps, item._id, claim, function (gen) {
       return buildRegenDoc(deps, item._id, gen, claim.due, deps.now());
@@ -1416,6 +1470,11 @@ async function completeReserveFailure(deps, item, expectedGeneration, periodDays
     if (r.verdict === "converged") {
       return { ok: true, reminder: remindRow(r.row, item), replayed: true };
     }
+  }
+  if (slot.rev > baseGen) {
+    // R4-1:权威已越过被完成的原轮次(他人 set/再生已发新轮)——旧完成
+    // 不得在新 rev 上发行,显式告知本轮不再生成下一轮
+    return completeSupersededConflict();
   }
   return fail("VERSION_CONFLICT");
 }
@@ -1527,7 +1586,10 @@ async function completeDivergence(deps, item, expectedGeneration, periodDays) {
     // 兜底治愈(slot 欠账已被消费的存量形态):经权威重新认领下一轮再补建,
     // 新轮次号仍取自单调权威,不与任何历史轮复用(N1)。认领基准记该轮次号
     // (R3-1 栅栏按该轮判定:治愈窗口内插入的 clear 会盖栅栏,重试认领被拒,
-    // 已清除的欠账绝不复活;同时与同参重试的收敛比对口径一致)
+    // 已清除的欠账绝不复活;同时与同参重试的收敛比对口径一致)。认领 CAS 的
+    // rev===该轮原子前置与主路径同口径(R4-1):同轮治愈(完成与认领之间
+    // 中断、权威未动)仍可收敛;权威已被跨轮推进(他人 set 已发新轮)→
+    // 显式冲突,绝不在新 rev 上叠加
     var fallbackClaim = await reserveRegenClaim(
       deps,
       itemId,
