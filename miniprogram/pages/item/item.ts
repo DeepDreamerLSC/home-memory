@@ -5,6 +5,7 @@ import {
   formatDateTime,
   uuid,
 } from "../../utils/api";
+import { ensureScopeVerified } from "../../utils/households-api";
 import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
@@ -765,11 +766,16 @@ Page<
   /* ---------------- 提醒的查看与处理(#36 三阶段) ---------------- */
 
   /**
-   * 拉当前家庭 active 提醒,取这件的那一行上屏。行数据来自服务端(资格
-   * 复核后);家庭切换(作用域代数变化)后旧家庭响应不上屏。加载失败
+   * 拉当前家庭 active 提醒,取这件的那一行上屏。展示前先清旧行并经
+   * households 资格复核(硬门 C,口径同 R1/首页);家庭切换(作用域代
+   * 数变化)后旧家庭响应不上屏。加载失败
    * 静默隐藏保质期行(增强露出,不影响详情主体)。
    */
   async refreshReminderRow() {
+    // 先收起旧保质期行:被移除/切换家庭后冷启动,展示前不得残留旧家庭提醒
+    this.setData({ expire: null, remindAt: "", remindGeneration: -1 });
+    await ensureScopeVerified();
+    // 复核可能揭示家庭漂移并递增代数:请求前重新捕获,响应后才校验
     const scopeGen = captureScopeGeneration();
     try {
       const res = await callItemsApi({ action: "remindList" });
