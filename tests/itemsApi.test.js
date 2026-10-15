@@ -1630,7 +1630,7 @@ test("B1 轮次号:remindList 行携带 generation,完成一轮后再生行轮�
   assert.equal(listed.reminders.length, 1, "恰一条 active");
 });
 
-test("B1 反例①(旧页顺序重放,不带周期):设备2 停在旧轮页点用完了 → VERSION_CONFLICT,新一轮无损", async function () {
+test("B1 反例①(旧页顺序重放,不带周期):设备2 停在旧轮页点已处理 → VERSION_CONFLICT,新一轮无损", async function () {
   var t = fresh();
   var created = await handler(
     remindEvent("op-b1-a1", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
@@ -1645,7 +1645,7 @@ test("B1 反例①(旧页顺序重放,不带周期):设备2 停在旧轮页点�
   assert.equal(first.ok, true);
   assert.equal(first.reminder.generation, 2);
 
-  // 设备2:还停在第 1 轮的旧页上点「用完了」(不带周期)
+  // 设备2:还停在第 1 轮的旧页上点「已处理」(不带周期)
   var stale = await handler(
     { action: "remindComplete", item_id: itemId, expected_generation: 1 },
     t.deps

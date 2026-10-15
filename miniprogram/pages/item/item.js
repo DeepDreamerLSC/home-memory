@@ -654,7 +654,7 @@ Page({
             remindGeneration: typeof row.generation === "number" ? row.generation : -1,
         });
     },
-    /** 保质期行「用完了」:二次确认后 remindComplete(不带 period_days;下次提醒到详情里自己选日子) */
+    /** 保质期行「已处理」:二次确认后 remindComplete(不带 period_days;下次提醒到详情里自己选日子) **/
     async onExpireDoneTap() {
         if (this.data.remindBusy) {
             return;
@@ -681,7 +681,7 @@ Page({
             this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
             // 完成后不弹固定周期选项(#36 真机反馈 Fix 2):下次提醒时间由用户到详情里选日子
             wx.showToast({
-                title: "已完成。要下次提醒,到详情里选日子",
+                title: "已处理。要下次提醒,到详情里选日子",
                 icon: "none",
                 duration: 2500,
             });
@@ -691,14 +691,14 @@ Page({
                 if (e.cleared === true) {
                     // PR #52 R3-1:完成置 done 后、认领前提醒被家人清除——本轮已完成,
                     // 服务端清除栅栏挡住了再生:如实告知,不再生成下一轮
-                    wx.showToast({ title: "已完成;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
+                    wx.showToast({ title: "已处理;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
                     await this.refreshReminderRow();
                     return;
                 }
                 if (e.superseded === true) {
                     // PR #52 R4-1:完成置 done 后、认领前提醒被家人重新设置——再生认领
                     // 绑定原完成轮次被原子拒绝:如实告知本轮不再生成,新提醒原样保留
-                    wx.showToast({ title: "已完成;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
+                    wx.showToast({ title: "已处理;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
                     await this.refreshReminderRow();
                     return;
                 }
