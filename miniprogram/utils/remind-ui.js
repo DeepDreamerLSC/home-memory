@@ -117,19 +117,20 @@ function dueBannerText(counts) {
     return parts.join(",");
 }
 /**
- * 「用完了」的确认交互(#36 0.6.0 真机反馈 Fix 2,用户裁定):
+ * 「已处理」的确认交互(#36 0.6.0 真机反馈 Fix 2 + 0.7.0 Fix 3 改字样):
  * 完成后不再弹 7/30/90 天等固定周期选项——下次提醒时间由用户自己到详情页
  * 的日期选择器里选日子(服务端 period_days 参数与再生逻辑保留,API 兼容,
  * 客户端不再传)。这里只做一次二次确认(绝不一点就收掉提醒),确认后返回 true;
- * 取消返回 false,页面不动、不写任何数据。
+ * 取消返回 false,页面不动、不写任何数据。按钮字样「已处理」(原「用完了」,
+ * 0.7.0 真机反馈:处理不等于用完,扔了/修了也是处理)。
  */
 function askUseUp(name) {
     const label = name || "这件东西";
     return new Promise((resolve) => {
         wx.showModal({
-            title: "用完了吗",
+            title: "处理好了吗",
             content: "把「" + label + "」这次的到期提醒收掉。",
-            confirmText: "用完了",
+            confirmText: "已处理",
             cancelText: "取消",
             success: (r) => {
                 resolve(r.confirm === true);

@@ -458,11 +458,17 @@
 
 /* 确认 CTA:墨底黄字(原型 .cta radius 15px、margin-top 16px)
    (Fix 1 压扁:去掉 line-height 撑高根因,视觉收进 .btn-face 78(原 108 × 0.75),
-   热区 = 按钮 88(78 + 透明上下 5);flex 居中 + line-height:1) */
-.cta-btn,
-.batch-btn {
+   热区 = 按钮 88(78 + 透明上下 5);flex 居中 + line-height:1)
+   (0.7.0 真机反馈 Fix 1:主 CTA 与摘要卡/批次卡/折叠条左右对齐同宽——
+   左右各让出 36rpx 页边距(.card/.fold/.warnbox 同口径),并盖掉
+   button.btn.block 的 width:100%(全宽 0 边距是此前偏宽的根因;C2 的
+   「确认保存 N 件」原先嵌在批次卡内再吃卡的 24rpx 内边距,已移出卡片),
+   display:flex 块级 + width:auto = 填满父宽减左右 margin,与卡片同宽) */
+button.btn.block.cta-btn,
+button.btn.block.batch-btn {
   padding: 5rpx 0;
-  margin-top: 32rpx;
+  margin: 32rpx 36rpx 0;
+  width: auto;
 }
 
 .cta-btn .btn-face,

@@ -130,7 +130,7 @@
   color: var(--text-2);
 }
 
-/* 「用完了」(原型 .r1-done):视觉/热区分层样式统一收在 app.wxss
+/* 「已处理」(原型 .r1-done):视觉/热区分层样式统一收在 app.wxss
    (.r-done + .r-done-face,#36 真机反馈 Fix 1:热区 88 = 面 66) */
 
 /* 底部纪律说明(原型 .note) */

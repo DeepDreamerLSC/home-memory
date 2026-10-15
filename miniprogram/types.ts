@@ -152,7 +152,7 @@ export type ItemsApiEvent =
   | { action: "list"; limit?: number }
   | (
       {
-        /** 到期用完了(issue #36):把该 item 的到期提醒收掉;period_days>0 时按周期再生下次 */
+        /** 到期已处理(issue #36):把该 item 的到期提醒收掉;period_days>0 时按周期再生下次 */
         action: "remindComplete";
         item_id: string;
         /**

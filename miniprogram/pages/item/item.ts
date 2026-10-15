@@ -107,7 +107,7 @@ Page<
     mountSaving: boolean;
     /**
      * 保质期行(#36):这件有 active 提醒才显示(mainText=有效期+相对天数,
-     * kind=用完了时判断是否问下次周期);null=无 active 提醒,整行不渲染
+     * kind=「已处理」时收掉本轮提醒);null=无 active 提醒,整行不渲染
      */
     expire: { mainText: string; dueDate: string; kind: string } | null;
     /** 编辑折叠「提醒」字段的当前日期(YYYY-MM-DD;""=不带提醒) */
@@ -119,7 +119,7 @@ Page<
     remindGeneration: number;
     /** 今天(YYYY-MM-DD):编辑提醒的日期选择器下限 */
     today: string;
-    /** 提醒操作执行中(用完了/改日期/清除;防并发重复提交) */
+    /** 提醒操作执行中(已处理/改日期/清除;防并发重复提交) **/
     remindBusy: boolean;
     /**
      * 当时提到时间但没换算的原话子串(0.6.0 真机反馈 Fix 4,来自 itemsApi.get
@@ -169,7 +169,7 @@ Page<
     /* ---------------- 提醒(#36 三阶段) ---------------- */
     refreshReminderRow(): Promise<void>;
     applyReminderRow(row: RemindRow | null): void;
-    /** 保质期行「用完了」:确认(周期物品问下次)后 remindComplete */
+    /** 保质期行「已处理」:确认后 remindComplete **/
     onExpireDoneTap(): Promise<void>;
     /** 编辑折叠「提醒」:picker mode=date 选日子 → remindSet 设提醒(无则补录,有则改期) */
     onRemindDateChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): Promise<void>;
@@ -811,7 +811,7 @@ Page<
     });
   },
 
-  /** 保质期行「用完了」:二次确认后 remindComplete(不带 period_days;下次提醒到详情里自己选日子) */
+  /** 保质期行「已处理」:二次确认后 remindComplete(不带 period_days;下次提醒到详情里自己选日子) **/
   async onExpireDoneTap() {
     if (this.data.remindBusy) {
       return;
@@ -838,7 +838,7 @@ Page<
       this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
       // 完成后不弹固定周期选项(#36 真机反馈 Fix 2):下次提醒时间由用户到详情里选日子
       wx.showToast({
-        title: "已完成。要下次提醒,到详情里选日子",
+        title: "已处理。要下次提醒,到详情里选日子",
         icon: "none",
         duration: 2500,
       });
@@ -847,14 +847,14 @@ Page<
         if (e.cleared === true) {
           // PR #52 R3-1:完成置 done 后、认领前提醒被家人清除——本轮已完成,
           // 服务端清除栅栏挡住了再生:如实告知,不再生成下一轮
-          wx.showToast({ title: "已完成;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
+          wx.showToast({ title: "已处理;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
           await this.refreshReminderRow();
           return;
         }
         if (e.superseded === true) {
           // PR #52 R4-1:完成置 done 后、认领前提醒被家人重新设置——再生认领
           // 绑定原完成轮次被原子拒绝:如实告知本轮不再生成,新提醒原样保留
-          wx.showToast({ title: "已完成;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
+          wx.showToast({ title: "已处理;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
           await this.refreshReminderRow();
           return;
         }

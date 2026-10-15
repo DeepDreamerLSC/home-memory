@@ -99,7 +99,7 @@ Page({
         const rows = this.data[field.field];
         return rows[index] || null;
     },
-    /** 行点击:进物品详情(保质期行与「用完了」都在那边) */
+    /** 行点击:进物品详情(保质期行与「已处理」都在那边) */
     onRowTap(e) {
         const row = this.rowOf(e.currentTarget.dataset);
         if (!row) {
@@ -113,7 +113,8 @@ Page({
         });
     },
     /**
-     * 「用完了」:二次确认后调 remindComplete(不带 period_days;下次提醒时间由
+     * 「已处理」(0.7.0 真机反馈 Fix 3:按钮字样由「用完了」改「已处理」):
+     * 二次确认后调 remindComplete(不带 period_days;下次提醒时间由
      * 用户到详情页的日期选择器里选日子——#36 0.6.0 真机反馈 Fix 2,用户裁定
      * 去掉 7/30/90 天固定周期选项)。完成后刷新列表(收掉的消失)。
      * 请求携带行上的提醒轮次号(PR #52 B1):服务端只完成用户看到的那一轮,
@@ -141,7 +142,7 @@ Page({
                 complete_date: (0, remind_ui_1.localTodayYmd)(),
             });
             wx.showToast({
-                title: "已完成。要下次提醒,到详情里选日子",
+                title: "已处理。要下次提醒,到详情里选日子",
                 icon: "none",
                 duration: 2500,
             });
@@ -162,7 +163,7 @@ Page({
                 if (cleared === true) {
                     // PR #52 R3-1:完成置 done 后、认领前提醒被家人清除——本轮已完成,
                     // 服务端清除栅栏挡住了再生:如实告知,不再生成下一轮
-                    wx.showToast({ title: "已完成;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
+                    wx.showToast({ title: "已处理;提醒已被清除,不再生成下次", icon: "none", duration: 2500 });
                     await this.load();
                     return;
                 }
@@ -172,7 +173,7 @@ Page({
                 if (superseded === true) {
                     // PR #52 R4-1:完成置 done 后、认领前提醒被家人重新设置——再生认领
                     // 绑定原完成轮次被原子拒绝:如实告知本轮不再生成,新提醒原样保留
-                    wx.showToast({ title: "已完成;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
+                    wx.showToast({ title: "已处理;提醒刚被重新设置,不再生成下次", icon: "none", duration: 2500 });
                     await this.load();
                     return;
                 }

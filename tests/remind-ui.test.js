@@ -34,6 +34,7 @@ test("pickerDateProblem:今天可设(与 picker start=今天 两端一致),昨�
 });
 
 // ---------- #36 0.6.0 真机反馈 Fix 2:「用完了」去掉固定周期选项 ----------
+// (0.7.0 真机反馈 Fix 3:按钮/确认字样统一改「已处理」)
 
 test("askUseUp:只剩一次二次确认——确认 true / 取消 false,不再弹 7/30/90 天选项", async function () {
   var modals = [];
@@ -52,7 +53,8 @@ test("askUseUp:只剩一次二次确认——确认 true / 取消 false,不再�
   assert.equal(confirmed, true, "确认后直接放行");
   assert.equal(modals.length, 1, "只弹一次确认框");
   assert.equal(sheets.length, 0, "不再弹固定周期选项(用户裁定:下次提醒自己到详情里选日子)");
-  assert.equal(modals[0].confirmText, "用完了");
+  assert.equal(modals[0].title, "处理好了吗", "0.7.0 Fix 3:确认框不再说「用完了吗」");
+  assert.equal(modals[0].confirmText, "已处理", "0.7.0 Fix 3:确认按钮字样「已处理」");
   assert.ok(modals[0].content.indexOf("感冒药") !== -1, "文案点名物品");
 
   modals.length = 0;

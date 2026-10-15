@@ -259,16 +259,19 @@
           <text wx:if="{{ item.itemId }}" class="fail-link" data-index="{{ index }}" catchtap="onRowDetail">去详情页</text>
         </view>
       </view>
-
-      <button
-        class="btn primary block batch-btn"
-        loading="{{ batchSaving }}"
-        disabled="{{ checkedCount === 0 }}"
-        bindtap="onSaveBatchTap"
-      >
-        <view class="btn-face">确认保存 {{ checkedCount }} 件</view>
-      </button>
     </view>
+
+    <!-- C2 主 CTA(0.7.0 真机反馈 Fix 1):移出批次卡、与卡片元素左右对齐同宽
+         (原型 .cta 本就在 .batch 卡外,width 与 .card 同口径) -->
+    <button
+      wx:if="{{ rows.length > 1 }}"
+      class="btn primary block batch-btn"
+      loading="{{ batchSaving }}"
+      disabled="{{ checkedCount === 0 }}"
+      bindtap="onSaveBatchTap"
+    >
+      <view class="btn-face">确认保存 {{ checkedCount }} 件</view>
+    </button>
 
     <!-- 单件:唯一确认(位置没补上前禁用) -->
     <block wx:if="{{ rows.length === 1 }}">

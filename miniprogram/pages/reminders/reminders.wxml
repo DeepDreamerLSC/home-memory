@@ -1,7 +1,7 @@
 <view class="page page-with-voice-bar">
   <view class="r-head">
     <view class="pagetitle">快到期的东西</view>
-    <view class="lead">按时间先后;用完了就点右边的钮。</view>
+    <view class="lead">按时间先后;处理好了就点右边的钮。</view>
   </view>
 
   <!-- X1 加载骨架:不拿旧数据冒充 -->
@@ -55,7 +55,7 @@
             data-group="over"
             data-index="{{ index }}"
             catchtap="onDoneTap"
-          ><view class="r-done-face">用完了</view></view>
+          ><view class="r-done-face">已处理</view></view>
         </view>
       </view>
     </block>
@@ -84,7 +84,7 @@
             data-group="soon"
             data-index="{{ index }}"
             catchtap="onDoneTap"
-          ><view class="r-done-face">用完了</view></view>
+          ><view class="r-done-face">已处理</view></view>
         </view>
       </view>
     </block>
@@ -113,7 +113,7 @@
             data-group="later"
             data-index="{{ index }}"
             catchtap="onDoneTap"
-          ><view class="r-done-face">用完了</view></view>
+          ><view class="r-done-face">已处理</view></view>
         </view>
       </view>
     </block>
@@ -122,7 +122,7 @@
          (0.6.0 真机反馈 Fix 2:完成后不再弹固定周期选项,下次提醒到详情里选日子) -->
     <view class="note">
       <view class="note-title">时间只来自原话</view>
-      <view class="note-text">到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。用完了就收掉这条提醒,要下次提醒,到详情里选日子。</view>
+      <view class="note-text">到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。处理好了就收掉这条提醒,要下次提醒,到详情里选日子。</view>
     </view>
   </block>
 </view>

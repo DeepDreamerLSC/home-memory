@@ -296,7 +296,7 @@ button.btn.block {
   width: 100%;
 }
 
-/* 「用完了」次级小按钮(item/reminders 共用):热区 88 = 面 66 + 透明上下 11 */
+/* 「已处理」次级小按钮(item/reminders 共用;0.7.0 前「用完了」):热区 88 = 面 66 + 透明上下 11 */
 .r-done {
   flex: none;
   display: flex;

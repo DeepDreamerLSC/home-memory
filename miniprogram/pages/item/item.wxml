@@ -39,7 +39,7 @@
       <view class="expire-t">{{ expire.mainText }}</view>
       <view class="expire-sub">到了那天,它会出现在「快到期」里</view>
     </view>
-    <view class="r-done {{ remindBusy ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">用完了</view></view>
+    <view class="r-done {{ remindBusy ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>
   </view>
 
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
