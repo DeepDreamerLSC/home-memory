@@ -86,9 +86,10 @@ page {
   padding-bottom: 48rpx;
 }
 
-/* 挂常驻语音条的页面:内容底部让出固定语音条高度(含底部安全区),不遮最后一条 */
+/* 挂常驻语音条的页面:内容底部让出固定语音条高度(含底部安全区),不遮最后一条
+   (语音条压扁后整条 112rpx + 20rpx 间隙,#36 真机反馈 Fix 1) */
 .page-with-voice-bar {
-  padding-bottom: calc(160rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(132rpx + env(safe-area-inset-bottom));
 }
 
 /* 卡片:原型 .card(radius 18px、padding 15px 14px、内容边距 18px,无投影) */
@@ -190,46 +191,174 @@ page {
   margin-left: 16rpx;
 }
 
-/* 按钮:原型 .btn(radius 14px、min-height 50px、14px/750);主操作一律墨底黄字(--go-*),大面积明黄只留给语音入口 */
+/* ============ 按钮(#36 0.6.0 真机反馈 Fix 1:文字垂直居中 + 整体压扁 1/4) ============
+ * 根因(按钮内字体偏上):按钮文本沿用 line-height 1.2/1.6 时,CJK 字形贴着
+ * 基线排布,行盒的下半是拉丁字母降部留白——中文在行盒内视觉重心整体偏上,
+ * 按钮越高偏得越明显。统一修法:垂直居中一律 flex align-items:center +
+ * line-height:1(行盒=字面框,会换行的长标签用 ≤1.2 的等效基线补偿)。
+ * 扁平:视觉高度整体 ×0.75,视觉收进内层 .btn-face(颜色/圆角都在这层);
+ * 按钮本体是透明热区层(上下 padding 透明延伸),触摸热区一律 ≥88rpx(44px)
+ * ——先例:首页 search-go-hit(视觉/热区分层)。深浅主题同改(面颜色全走主题变量)。 */
 button.btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 28rpx;
+  min-height: 88rpx;
+  padding: 6rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  border-radius: 0;
   font-size: 28rpx;
   font-weight: 700;
-  min-height: 100rpx;
-  line-height: 1.2;
-  padding-left: 0;
-  padding-right: 0;
-  box-sizing: border-box;
+  line-height: 1;
 }
 
 button.btn::after {
   border: none;
 }
 
-button.btn.primary {
+/* 视觉面:面 76(原 100 × 0.75)+ 透明上下 6 = 热区 88rpx */
+button.btn .btn-face {
+  width: 100%;
+  min-height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 28rpx;
+  background: var(--card-inset);
+  color: var(--text);
+  border: 1rpx solid var(--line);
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+button.btn.primary .btn-face {
   background: var(--go-bg);
   color: var(--go-fg);
+  border: none;
 }
 
 button.btn.primary[disabled] {
+  background: transparent;
+  color: inherit;
+  opacity: 1;
+}
+
+button.btn.primary[disabled] .btn-face {
   background: var(--go-bg);
   color: var(--go-fg);
   opacity: 0.38;
 }
 
-button.btn.danger {
+button.btn.danger .btn-face {
   background: var(--danger-bg);
   color: var(--danger);
   border: 3rpx solid var(--danger);
 }
 
 button.btn.block {
-  display: block;
+  display: flex;
   width: 100%;
   margin-top: 24rpx;
+}
+
+/* 墨底黄字大按钮(view 与 button 共用):热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11 */
+.btn.ink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.btn.ink .btn-face {
+  width: 100%;
+  min-height: 66rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 26rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.btn.ink.block {
+  display: flex;
+  width: 100%;
+}
+
+/* 「用完了」次级小按钮(item/reminders 共用):热区 88 = 面 66 + 透明上下 11 */
+.r-done {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.r-done .r-done-face {
+  min-height: 66rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 20rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  padding: 0 20rpx;
+  line-height: 1;
+}
+
+.r-done.busy {
+  opacity: 0.5;
+}
+
+/* 「⋯」方块入口(index 容器抬头/item 详情头共用):热区 88 = 面 66 + 透明上下 11 */
+.more-inline {
+  min-height: 88rpx;
+  min-width: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.more-inline .more-inline-face {
+  min-height: 66rpx;
+  min-width: 66rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16rpx;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 18rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1;
 }
 
 /* 列表条目:紧凑 */
@@ -244,20 +373,21 @@ button.btn.block {
   border-bottom: none;
 }
 
-/* 条目图标块:原型 .ico(42px 方块、radius 12px、墨底黄字,随主题翻转) */
+/* 条目图标块:原型 .ico(随按钮同比例压扁,42px→32px 方块) */
 .item-icon {
-  width: 84rpx;
-  height: 84rpx;
+  width: 64rpx;
+  height: 64rpx;
   margin-right: 22rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--go-bg);
-  border-radius: 24rpx;
+  border-radius: 20rpx;
   color: var(--accent);
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 800;
+  line-height: 1;
 }
 
 .item-main {

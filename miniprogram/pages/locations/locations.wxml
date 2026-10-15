@@ -21,7 +21,7 @@
 
   <view wx:elif="{{ loadError }}" class="card">
     <view class="error-text">{{ loadError }}</view>
-    <button class="btn block" bindtap="onRetryTap">重试</button>
+    <button class="btn block" bindtap="onRetryTap"><view class="btn-face">重试</view></button>
   </view>
 
   <block wx:else>

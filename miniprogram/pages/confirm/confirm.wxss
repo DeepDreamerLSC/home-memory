@@ -68,7 +68,7 @@
   font-weight: 500;
 }
 
-/* 行右侧「✕」清除:44px 高热区,仅在有日期时渲染 */
+/* 行右侧「✕」清除:44px 高热区,仅在有日期时渲染(Fix 1:line-height:1 居中) */
 .remind-clear {
   flex: none;
   display: flex;
@@ -79,6 +79,7 @@
   font-size: 30rpx;
   font-weight: 700;
   color: var(--text-3);
+  line-height: 1;
 }
 
 /* 纪律句(#36):只在提醒行存在时显示,原话折叠区之外常驻 */
@@ -99,8 +100,37 @@
   padding: 4rpx 16rpx;
 }
 
+/* 时间没换算小灰标(0.6.0 真机反馈 Fix 4):纯提示,不是换算;灰阶弱于提醒角标 */
+.vague-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--text-3);
+  background: var(--card-inset);
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+}
+
+/* C1 灰行:时间没换算的完整提示(Fix 4;与 sum-meta 同排版,灰阶更弱) */
+.sum-meta.vague-note {
+  color: var(--text-3);
+}
+
+/* 行内「改」小钮(Fix 1:热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11,flex 居中 + line-height:1) */
 .sum-edit {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+}
+
+.sum-edit-face {
+  min-height: 66rpx;
   display: flex;
   align-items: center;
   border: 1rpx solid var(--line);
@@ -109,9 +139,8 @@
   font-size: 23rpx;
   font-weight: 700;
   border-radius: 18rpx;
-  padding: 14rpx 22rpx;
-  min-height: 88rpx;
-  box-sizing: border-box;
+  padding: 0 22rpx;
+  line-height: 1;
 }
 
 .sum-field {
@@ -141,14 +170,14 @@
   margin: 20rpx 36rpx 0;
 }
 
-/* 单件「核对过再勾」行(默认未勾且位置已听清时出现) */
+/* 单件「核对过再勾」行(Fix 1 压扁:96→88,热区=元素 88rpx) */
 .sum-check-row {
   display: flex;
   align-items: center;
   gap: 20rpx;
   margin: 20rpx 36rpx 0;
-  padding: 18rpx 26rpx;
-  min-height: 96rpx;
+  padding: 14rpx 26rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
   background: var(--card);
   border-radius: 30rpx;
@@ -196,7 +225,8 @@
   margin-top: 18rpx;
 }
 
-/* 原话折叠:默认折叠,警示场景初始展开(原型 .fold 14px 13px;展开体=原型 note) */
+/* 原话折叠:默认折叠,警示场景初始展开(原型 .fold 14px 13px;展开体=原型 note)
+   (Fix 1 压扁:104→88,flex 居中 + line-height:1) */
 .fold {
   display: flex;
   align-items: center;
@@ -204,13 +234,14 @@
   gap: 16rpx;
   background: var(--card);
   border-radius: 30rpx;
-  padding: 28rpx 26rpx;
+  padding: 26rpx 26rpx;
   margin: 20rpx 36rpx;
-  min-height: 104rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
   font-size: 28rpx;
   font-weight: 700;
   color: var(--text);
+  line-height: 1;
 }
 
 .fold .chev {
@@ -394,23 +425,38 @@
   line-height: 1.5;
 }
 
-/* 确认 CTA:墨底黄字(原型 .cta radius 15px、54px 高、margin-top 16px) */
+/* 确认 CTA:墨底黄字(原型 .cta radius 15px、margin-top 16px)
+   (Fix 1 压扁:去掉 line-height 撑高根因,视觉收进 .btn-face 78(原 108 × 0.75),
+   热区 = 按钮 88(78 + 透明上下 5);flex 居中 + line-height:1) */
 .cta-btn,
 .batch-btn {
-  border-radius: 30rpx;
-  min-height: 108rpx;
-  line-height: 108rpx;
+  padding: 5rpx 0;
   margin-top: 32rpx;
 }
 
-button.btn.primary.cta-btn,
-button.btn.primary.batch-btn {
+.cta-btn .btn-face,
+.batch-btn .btn-face {
+  min-height: 78rpx;
+  border-radius: 30rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+button.btn.primary.cta-btn .btn-face,
+button.btn.primary.batch-btn .btn-face {
   background: var(--go-bg);
   color: var(--go-fg);
 }
 
 button.btn.primary.cta-btn[disabled],
 button.btn.primary.batch-btn[disabled] {
+  background: transparent;
+  color: inherit;
+  opacity: 1;
+}
+
+button.btn.primary.cta-btn[disabled] .btn-face,
+button.btn.primary.batch-btn[disabled] .btn-face {
   background: var(--go-bg);
   color: var(--go-fg);
   opacity: 0.38;

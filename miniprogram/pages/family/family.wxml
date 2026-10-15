@@ -5,7 +5,7 @@
   </view>
   <view wx:elif="{{ loadError && !shared }}" class="card">
     <view class="error-text">{{ loadError }}</view>
-    <button class="btn block" bindtap="refresh">重试</button>
+    <button class="btn block" bindtap="refresh"><view class="btn-face">重试</view></button>
   </view>
 
   <!-- 单人态:个人家庭 + 创建共享家庭入口 -->
@@ -27,7 +27,7 @@
       <view class="hint">
         和家人共用一个家庭:大家都能看到彼此记住的物品与位置,谁放哪儿了一目了然。
       </view>
-      <button class="btn primary block" bindtap="onStartCreateTap">创建共享家庭</button>
+      <button class="btn primary block" bindtap="onStartCreateTap"><view class="btn-face">创建共享家庭</view></button>
       <view class="mode-link" bindtap="onJoinByCodeTap">收到邀请码?输入加入</view>
     </view>
     <view class="card" wx:else>
@@ -63,7 +63,7 @@
         disabled="{{ !createAck }}"
         bindtap="onCreateTap"
       >
-        创建并成为创建者(Owner)
+        <view class="btn-face">创建并成为创建者(Owner)</view>
       </button>
       <view class="mode-link" bindtap="onCancelCreateTap">取消</view>
     </view>
@@ -125,13 +125,13 @@
       <view class="card-title">邀请家人</view>
       <view class="hint">邀请 7 天内有效,可随时撤销。</view>
       <button class="btn primary block" loading="{{ acting }}" bindtap="onInviteTap">
-        {{ shareToken ? '重新生成邀请' : '生成邀请' }}
+        <view class="btn-face">{{ shareToken ? '重新生成邀请' : '生成邀请' }}</view>
       </button>
       <button wx:if="{{ shareToken }}" class="btn block share-btn" open-type="share" bindtap="onShareTap">
-        分享给家人
+        <view class="btn-face">分享给家人</view>
       </button>
       <button wx:if="{{ shareToken }}" class="btn block" bindtap="onCopyInviteTap">
-        复制邀请码(分享受限时用)
+        <view class="btn-face">复制邀请码(分享受限时用)</view>
       </button>
       <view class="trial-note">体验版阶段:家人需先加为体验成员</view>
 
@@ -171,7 +171,7 @@
         loading="{{ acting }}"
         bindtap="onDissolveTap"
       >
-        解散家庭
+        <view class="btn-face">解散家庭</view>
       </button>
       <button
         wx:else
@@ -179,7 +179,7 @@
         loading="{{ acting }}"
         bindtap="onLeaveTap"
       >
-        退出家庭
+        <view class="btn-face">退出家庭</view>
       </button>
       <view wx:if="{{ isOwner && members.length > 1 }}" class="hint">
         还有其他成员在家庭里时,创建者不能退出(可先移除成员或等他们退出)。

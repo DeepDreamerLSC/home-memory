@@ -30,21 +30,8 @@
   margin-top: 8rpx;
 }
 
-.more-inline {
-  border: 1rpx solid var(--line);
-  background: var(--card);
-  color: var(--text-2);
-  border-radius: 18rpx;
-  font-size: 30rpx;
-  font-weight: 800;
-  min-height: 88rpx;
-  min-width: 88rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16rpx;
-  flex-shrink: 0;
+/* 「⋯」次级入口:视觉/热区分层样式统一收在 app.wxss(.more-inline + .more-inline-face) */
+.detail-head .more-inline {
   margin-top: 4rpx;
 }
 
@@ -107,6 +94,11 @@
   color: var(--text-3);
 }
 
+/* 时间没换算留痕(Fix 4):比原话更弱的灰阶,只说明「说了时间、没换算成日期」 */
+.bigcard-quote.vague-quote {
+  color: var(--text-3);
+}
+
 /* 「可能已移动」静态提示(原型 bigcard 内 tiny 句:如实区分上次记录与现在) */
 .bigcard-tiny {
   margin-top: 18rpx;
@@ -115,7 +107,8 @@
   line-height: 1.6;
 }
 
-/* ============ 编辑折叠(展开后=原有表单与保存路径;原型 .fold padding 14px 13px) ============ */
+/* ============ 编辑折叠(展开后=原有表单与保存路径;原型 .fold padding 14px 13px)
+   (Fix 1 压扁:104→88,flex 居中 + line-height:1) ============ */
 .fold {
   display: flex;
   align-items: center;
@@ -123,13 +116,14 @@
   gap: 16rpx;
   background: var(--card);
   border-radius: 30rpx;
-  padding: 28rpx 26rpx;
-  min-height: 104rpx;
+  padding: 26rpx 26rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
   margin: 20rpx 36rpx 0;
   font-size: 28rpx;
   font-weight: 700;
   color: var(--text);
+  line-height: 1;
 }
 
 .fold-hover {
@@ -168,23 +162,8 @@
   margin-top: 16rpx;
 }
 
-/* 保存 / 确认整理:墨底黄字主 CTA(一屏唯一大面积明黄留给语音条) */
-.btn.ink {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 88rpx;
-  border-radius: 30rpx;
-  background: var(--go-bg);
-  color: var(--go-fg);
-  font-size: 30rpx;
-  font-weight: 700;
-}
-
-.btn.ink.block {
-  display: flex;
-  width: 100%;
-}
+/* 保存 / 确认整理:墨底黄字主 CTA(一屏唯一大面积明黄留给语音条)
+   视觉/热区分层样式统一收在 app.wxss(.btn.ink + .btn-face,#36 真机反馈 Fix 1) */
 
 /* ============ 「⋯」次级菜单:底部弹层 ============ */
 .sheet-mask {
@@ -218,11 +197,15 @@
   margin-bottom: 20rpx;
 }
 
+/* 弹层动作行(Fix 1 压扁:104→88;纵向 flex 居中,热区=元素 ≥88rpx) */
 .sheet-act {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   background: var(--card);
   border-radius: 26rpx;
-  padding: 28rpx 26rpx;
-  min-height: 104rpx;
+  padding: 22rpx 26rpx;
+  min-height: 88rpx;
   box-sizing: border-box;
   margin-top: 16rpx;
 }
@@ -235,6 +218,7 @@
   font-size: 28rpx;
   font-weight: 700;
   color: var(--text);
+  line-height: 1;
 }
 
 .sheet-act.warn .sheet-act-name {
@@ -246,7 +230,7 @@
   font-weight: 400;
   color: var(--text-3);
   margin-top: 6rpx;
-  line-height: 1.5;
+  line-height: 1.3;
 }
 
 .sheet-close {
@@ -257,6 +241,7 @@
   font-size: 26rpx;
   color: var(--text-3);
   margin-top: 24rpx;
+  line-height: 1;
 }
 
 .field:last-of-type {
@@ -269,7 +254,7 @@
   border: 2rpx solid var(--banner-line);
 }
 
-/* ============ 保质期行(#36,原型 .expire-row:有 active 提醒才显示) ============ */
+/* ============ 保质期行(#36,原型 .expire-row:有 active 提醒才显示;Fix 1 压扁) ============ */
 .expire-row {
   display: flex;
   align-items: center;
@@ -277,7 +262,7 @@
   border: 2rpx solid var(--danger-shadow);
   background: var(--danger-bg);
   border-radius: 30rpx;
-  padding: 24rpx 28rpx;
+  padding: 18rpx 26rpx;
   margin: 24rpx 36rpx 0;
 }
 
@@ -299,25 +284,8 @@
   margin-top: 6rpx;
 }
 
-/* 「用完了」(原型 .r1-done;触点 ≥88rpx) */
-.r-done {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1rpx solid var(--line);
-  background: var(--card);
-  color: var(--text-2);
-  border-radius: 20rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-  min-height: 88rpx;
-  padding: 0 20rpx;
-}
-
-.r-done.busy {
-  opacity: 0.5;
-}
+/* 「用完了」(原型 .r1-done):视觉/热区分层样式统一收在 app.wxss
+   (.r-done + .r-done-face,#36 真机反馈 Fix 1:热区 88 = 面 66) */
 
 /* ============ 编辑折叠「提醒」字段(#36 十五轮:picker mode=date + ✕ 清除) ============ */
 .remind-field {
@@ -331,20 +299,21 @@
   min-width: 0;
 }
 
-/* 日期按钮行(原型 .field-btn) */
+/* 日期按钮行(原型 .field-btn;Fix 1 压扁:92→88,热区=元素 88rpx,flex 居中 + line-height:1) */
 .field-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
-  min-height: 92rpx;
+  min-height: 88rpx;
   border: 1rpx solid var(--line);
   background: var(--card);
   border-radius: 20rpx;
-  padding: 22rpx 24rpx;
+  padding: 20rpx 24rpx;
   font-size: 28rpx;
   color: var(--text);
   box-sizing: border-box;
+  line-height: 1;
 }
 
 .field-val {
@@ -362,11 +331,22 @@
   font-weight: 300;
 }
 
-/* 「✕」清除(原型 .clearx;触点 ≥88rpx) */
+/* 「✕」清除(原型 .clearx;Fix 1:热区 88 = 面 66 + 透明四周延伸) */
 .clearx {
   flex: none;
   width: 88rpx;
   height: 88rpx;
+  padding: 11rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+
+.clearx-face {
+  width: 66rpx;
+  height: 66rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -375,4 +355,5 @@
   color: var(--text-3);
   border-radius: 50%;
   font-size: 28rpx;
+  line-height: 1;
 }

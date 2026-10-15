@@ -32,21 +32,31 @@
   color: var(--text-3);
 }
 
-/* 家庭上下文头:共享=「我们家」+圆点;个人=「我的家」(原型 fam-chip,触点 ≥44px) */
+/* 家庭上下文头:共享=「我们家」+圆点;个人=「我的家」(原型 fam-chip)
+   (#36 真机反馈 Fix 1:热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11,flex 居中 + line-height:1) */
 .fam-chip {
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.fam-chip-face {
+  min-height: 66rpx;
   display: flex;
   align-items: center;
   gap: 10rpx;
   border: 1rpx solid var(--line);
   background: var(--card);
   border-radius: 999rpx;
-  padding: 16rpx 26rpx;
-  min-height: 88rpx;
-  box-sizing: border-box;
+  padding: 0 26rpx;
   font-size: 25rpx;
   font-weight: 700;
   color: var(--text);
-  flex-shrink: 0;
+  line-height: 1;
 }
 
 .fam-dot {
@@ -85,13 +95,14 @@
   color: var(--text);
 }
 
-/* ============ 到期横幅(#36,原型 .remind-banner:家里层、有过期/临期才显示) ============ */
+/* ============ 到期横幅(#36,原型 .remind-banner:家里层、有过期/临期才显示)
+   (Fix 1 压扁:padding 22→16,行内容紧凑;热区=元素 88rpx) ============ */
 .due-banner {
   display: flex;
   align-items: center;
   gap: 16rpx;
   margin-top: 20rpx;
-  padding: 22rpx 26rpx;
+  padding: 16rpx 24rpx;
   border: 2rpx solid var(--danger-shadow);
   background: var(--danger-bg);
   color: var(--danger);
@@ -171,7 +182,7 @@
   margin-top: 8rpx;
 }
 
-/* ============ H0 大语音 CTA(--vb-* 冻结配色,与语音条同族) ============ */
+/* ============ H0 大语音 CTA(--vb-* 冻结配色,与语音条同族;Fix 1 同步压扁) ============ */
 .voice-cta {
   margin-top: 32rpx;
   border: 2rpx solid var(--vb-line);
@@ -179,14 +190,15 @@
   background: var(--vb-bg);
   color: var(--vb-fg);
   box-shadow: 0 10rpx 0 var(--vb-cta-shadow);
-  padding: 44rpx 28rpx;
+  padding: 32rpx 28rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 18rpx;
+  gap: 14rpx;
   font-weight: 750;
   font-size: 31rpx;
+  line-height: 1.15; /* 会换行的长标签:等效基线补偿(≤1.2) */
   user-select: none;
   /* 录音中浮层压暗页面时,按住的按钮保持在背板之上可见(原型 V1:按下态仍可见) */
   position: relative;
@@ -206,10 +218,10 @@
   opacity: 0.92;
 }
 
-/* 麦克风圆点:米黄油底(--vb-hold-bg)+ 单色麦克风图形 */
+/* 麦克风圆点:米黄油底(--vb-hold-bg)+ 单色麦克风图形(Fix 1:96→72 同比例) */
 .cta-micdot {
-  width: 96rpx;
-  height: 96rpx;
+  width: 72rpx;
+  height: 72rpx;
   border-radius: 50%;
   background: var(--vb-hold-bg);
   display: flex;
@@ -220,31 +232,32 @@
 }
 
 .cta-micdot .mic-cap {
-  width: 24rpx;
-  height: 38rpx;
-  border-radius: 12rpx;
+  width: 18rpx;
+  height: 28rpx;
+  border-radius: 9rpx;
   background: var(--vb-hold-fg);
 }
 
 .cta-micdot .mic-stand {
-  width: 5rpx;
-  height: 14rpx;
+  width: 4rpx;
+  height: 10rpx;
   background: var(--vb-hold-fg);
-  margin-top: 6rpx;
+  margin-top: 4rpx;
 }
 
 .cta-micdot .mic-base {
-  width: 34rpx;
-  height: 5rpx;
+  width: 26rpx;
+  height: 4rpx;
   border-radius: 3rpx;
   background: var(--vb-hold-fg);
-  margin-top: 6rpx;
+  margin-top: 4rpx;
 }
 
 .cta-micdot .mic-seconds {
-  font-size: 30rpx;
+  font-size: 22rpx;
   font-weight: 700;
   color: var(--vb-hold-fg);
+  line-height: 1;
 }
 
 .cta-label {
@@ -261,17 +274,18 @@
   line-height: 1.5;
 }
 
-/* 「用文字记」:CTA 下的次级链接(原型 sublnk button,触点 ≥40px) */
+/* 「用文字记」:CTA 下的次级链接(原型 sublnk button;Fix 1:热区抬到 88,文本行 line-height:1 居中) */
 .cta-sublnk {
   margin-top: 20rpx;
   font-size: 25rpx;
   font-weight: 600;
   color: var(--text-2);
   text-align: center;
-  min-height: 80rpx;
+  min-height: 88rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 1;
 }
 
 /* ============ 搜索(H0/H1/H1b 共用,原型 searchbar) ============ */
@@ -293,7 +307,8 @@
   color: var(--text);
 }
 
-/* 「找」按钮外包透明热区:视觉方块不变,实际可点范围四周外扩 */
+/* 「找」按钮外包透明热区:视觉方块不变,实际可点范围四周外扩
+   (Fix 1 先例本体:视觉/热区分层;面 96→72) */
 .search-go-hit {
   flex-shrink: 0;
   padding: 20rpx 20rpx 20rpx 16rpx;
@@ -301,16 +316,17 @@
 }
 
 .search-go {
-  width: 96rpx;
-  height: 96rpx;
+  width: 72rpx;
+  height: 72rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--go-bg);
   color: var(--go-fg);
-  border-radius: 26rpx;
+  border-radius: 22rpx;
   font-size: 28rpx;
   font-weight: 750;
+  line-height: 1;
 }
 
 .search-go.busy {
@@ -342,23 +358,8 @@
   margin-top: 20rpx;
 }
 
-/* 墨底主 CTA(记一件 / 再试一次) */
-.btn.ink {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 88rpx;
-  border-radius: 30rpx;
-  background: var(--go-bg);
-  color: var(--go-fg);
-  font-size: 30rpx;
-  font-weight: 800;
-}
-
-.btn.ink.block {
-  display: flex;
-  width: 100%;
-}
+/* 墨底主 CTA(记一件 / 再试一次):视觉/热区分层样式统一收在 app.wxss
+   (.btn.ink + .btn-face,#36 真机反馈 Fix 1),本页不再重复定义 */
 
 /* ============ H1b 结果 / 容器条目:卡片内分隔行 ============ */
 .result-card {
@@ -378,7 +379,7 @@
   border-bottom: none;
 }
 
-/* 收起结果:原型 morelink(13px/700,触点 44px) */
+/* 收起结果:原型 morelink(13px/700;Fix 1:热区 88 + line-height:1 居中) */
 .collapse-link {
   display: flex;
   align-items: center;
@@ -389,6 +390,7 @@
   font-size: 26rpx;
   font-weight: 700;
   color: var(--text-2);
+  line-height: 1;
 }
 
 /* ============ 家庭地图:抬头 / 返回胶囊 / 「⋯」整理 ============ */
@@ -415,18 +417,28 @@
   flex-shrink: 0;
 }
 
+/* 返回胶囊(Fix 1:热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11,flex 居中 + line-height:1) */
 .backchip {
+  min-height: 88rpx;
+  padding: 11rpx 0;
+  box-sizing: border-box;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.backchip-face {
+  min-height: 66rpx;
+  display: flex;
+  align-items: center;
+  padding: 0 24rpx;
   border-radius: 999rpx;
   background: var(--card-inset);
   color: var(--text);
   font-size: 25rpx;
   font-weight: 700;
-  padding: 12rpx 24rpx;
-  min-height: 88rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
+  line-height: 1;
 }
 
 /* 按压反馈(原型 backchip:active opacity .7) */
@@ -434,22 +446,7 @@
   opacity: 0.7;
 }
 
-.more-inline {
-  border: 1rpx solid var(--line);
-  background: var(--card);
-  color: var(--text-2);
-  border-radius: 18rpx;
-  font-size: 30rpx;
-  font-weight: 800;
-  min-height: 88rpx;
-  min-width: 88rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16rpx;
-  flex-shrink: 0;
-}
+/* 「⋯」整理入口:视觉/热区分层样式统一收在 app.wxss(.more-inline + .more-inline-face) */
 
 /* ============ 房间格子两列(原型 roomgrid/roomtile) ============ */
 .roomgrid {
@@ -486,17 +483,18 @@
 }
 
 .rico {
-  width: 84rpx;
-  height: 84rpx;
-  border-radius: 26rpx;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 20rpx;
   background: var(--card-inset);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 40rpx;
+  font-size: 32rpx;
   font-weight: 800;
   color: var(--text-2);
   flex: none;
+  line-height: 1;
 }
 
 .rname {
@@ -521,7 +519,8 @@
   font-weight: 300;
 }
 
-/* 「尚未归类」通栏格:只显计数(明细服务端不投影,不自造清单) */
+/* 「尚未归类」通栏格(#36 真机反馈 Fix 3:可点入未挂物品明细视图;
+   Fix 1:padding 24→18、图标块 76→58 同比例压扁) */
 .roomtile.wide {
   width: 100%;
   margin-right: 0;
@@ -529,14 +528,14 @@
   align-items: center;
   min-height: 0;
   gap: 20rpx;
-  padding: 24rpx 28rpx;
+  padding: 18rpx 28rpx;
 }
 
 .roomtile.wide .rico {
-  width: 76rpx;
-  height: 76rpx;
-  font-size: 36rpx;
-  border-radius: 22rpx;
+  width: 58rpx;
+  height: 58rpx;
+  font-size: 28rpx;
+  border-radius: 18rpx;
 }
 
 .wide-main {
@@ -545,6 +544,23 @@
   display: flex;
   flex-direction: column;
   gap: 4rpx;
+}
+
+/* ============ 尚未归类明细视图(#36 0.6.0 真机反馈 Fix 3) ============
+   行 = 首字块 + 名称 + 原话位置 + 灰标「位置待核实」;行点进物品详情 */
+.unmounted-card {
+  margin-top: 20rpx;
+}
+
+.unverified-tag {
+  flex: none;
+  margin-left: 12rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--text-3);
+  background: var(--card-inset);
+  border-radius: 999rpx;
+  padding: 6rpx 16rpx;
 }
 
 .empty-map {
@@ -583,7 +599,7 @@
   position: relative;
   overflow: hidden;
   width: 100%;
-  height: 132rpx;
+  height: 96rpx;
   border: 1rpx solid var(--line);
   border-radius: 32rpx;
   background: var(--card);

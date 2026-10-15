@@ -110,13 +110,17 @@
 .add-link {
   font-size: 26rpx;
   color: var(--text-2);
-  padding: 4rpx 0 4rpx 16rpx;
+  padding: 0 0 0 16rpx;
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 
-/* 「⋯」管理入口:足够大的点击热区 */
+/* 「⋯」管理入口:足够大的点击热区(Fix 1:透明内边距延伸到 ≥88rpx) */
 .row-more {
   margin-left: 12rpx;
-  padding: 12rpx 8rpx 12rpx 20rpx;
+  padding: 26rpx 8rpx 26rpx 20rpx;
   color: var(--text-3);
   font-size: 36rpx;
   line-height: 1;
