@@ -879,10 +879,16 @@ test("HH-GLUE-REM:提醒读写随真实入口走共享域解析与双 marker 硬
   });
   assert.equal(created.ok, true, JSON.stringify(created));
   var rds = await rawDocs(db, "reminders");
-  assert.equal(rds.data.length, 1);
-  assert.equal(rds.data[0].household_id, SHARED_1, "提醒文档随写入门定向共享域");
-  assert.equal(rds.data[0].item_id, created.item.item_id);
-  assert.equal(rds.data[0].status, "active");
+  // PR #52 二轮收口起 reminders 集合内另有每物品一条 slot 生命周期权威文档
+  // (status:"slot");提醒行断言口径不变,过滤权威文档后恰一条
+  assert.equal(
+    rds.data.filter(function (r) { return r.status !== "slot"; }).length,
+    1
+  );
+  var rd = rds.data.filter(function (r) { return r.status !== "slot"; })[0];
+  assert.equal(rd.household_id, SHARED_1, "提醒文档随写入门定向共享域");
+  assert.equal(rd.item_id, created.item.item_id);
+  assert.equal(rd.status, "active");
 
   // 只读 remindList:不参与写硬门,响应定向共享域并携带作用域字段(marker 捕获来源)
   var listed = await entry.main({ action: "remindList" });

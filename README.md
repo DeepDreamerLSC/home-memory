@@ -146,7 +146,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 > 按上文创建集合并把权限并入 ③(「所有用户不可读不可写」)即可;**无需建任何索引**。
 
-该集合是独立提醒实体(itemsApi 的 `create` 可选 reminder 参数写入、`remindList`/`remindComplete`/`remindClear` 读写):每条 active 提醒内部关联一个 item,物品删除时其 active 提醒级联硬删,done 历史行保留。「每 item 至多一条 active」由代码先查后插维持(单客户端顺序操作下成立),数据库层无唯一索引。**需要重新部署 `itemsApi` 云函数后这三个 action 才存在**(部署方式见步骤 6)。
+该集合是独立提醒实体(itemsApi 的 `create` 可选 reminder 参数写入、`remindList`/`remindComplete`/`remindClear`/`remindSet` 读写):每条 active 提醒内部关联一个 item,物品删除时其 active 提醒级联硬删,done 历史行保留;集合内另有每物品一条 `slot_` 前缀的生命周期权威文档(status 固定 "slot",单调轮次权威 rev + 跨操作欠账声明,与提醒行的 active/done 查询天然隔离)。「每 item 至多一条 active、轮次单调绝不重用、清除不复活」由 slot 条件更新(CAS)+ 行级轮次条件更新 + 确定性 _id 三层维持(并发/多设备交错下成立),数据库层无唯一索引。**需要重新部署 `itemsApi` 云函数后这些 action 才存在**(部署方式见步骤 6)。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 

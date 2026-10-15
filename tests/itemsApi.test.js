@@ -777,8 +777,31 @@ function fixedDeps(db, isoNow) {
   };
 }
 
+/**
+ * 提醒行直查:过滤掉 slot 生命周期权威文档(PR #52 二轮收口起 reminders
+ * 集合内每物品还挂一条 status:"slot" 的权威文档,_id="slot_"+item_id,与
+ * active/done 行天然隔离)——本 helper 的语义始终是「提醒行」,各测试对行数
+ * 与行内容的断言口径不变;slot 权威自身用 rawSlot 直查断言。
+ */
 function rawReminders(db) {
-  return db.collection("reminders").where({}).get();
+  return db
+    .collection("reminders")
+    .where({})
+    .get()
+    .then(function (res) {
+      return { data: res.data.filter(function (r) { return r.status !== "slot"; }) };
+    });
+}
+
+/** slot 生命周期权威直查:返回该 item 的权威文档(无则 null) */
+function rawSlot(db, itemId) {
+  return db
+    .collection("reminders")
+    .where({ _id: "slot_" + itemId })
+    .get()
+    .then(function (res) {
+      return (res.data && res.data[0]) || null;
+    });
 }
 
 function activeReminderRows(data) {
@@ -811,7 +834,9 @@ test("提醒:create 带合法 reminder → item 与独立 reminders 文档同时
   var raw = await rawReminders(t.db);
   assert.equal(raw.data.length, 1, "恰建一条提醒文档");
   var rd = raw.data[0];
-  assert.ok(rd._id.indexOf("rd_") === 0, "提醒 _id 应以 rd_ 开头");
+  // PR #52 二轮收口:首建行 _id 也改为 rh_+item+轮次的确定性派生——
+  // 与原键重试的自愈路径共享同一 _id,并发时由集合 _id 唯一性收敛成一条
+  assert.ok(rd._id.indexOf("rh_") === 0, "提醒 _id 应以 rh_ 开头");
   assert.equal(rd.household_id, HOUSEHOLD_A, "提醒文档带服务端派生的家庭归属");
   assert.equal(rd.item_id, res.item.item_id, "提醒内部关联 item_id");
   assert.equal(rd.status, "active");
@@ -1425,12 +1450,13 @@ test("提醒分页:active 提醒超过 100 条后 remindList 仍基于全量升�
 
 // ---------- PR #52 复审 B1:提醒轮次号(generation)条件更新 ----------
 
-/**
- * 包装 db:把第一笔 reminders 再生插入(_id 以 rg_ 开头)停在闸门上,
- * 模拟双身份(同家庭两设备)并发请求在「已置 done、尚未再生」窗口的真实交错;
- * 其余集合与操作全部直通。
- */
+/** 包装 db:第一笔 rg_ 再生插入(_id 以 rg_ 开头)停在闸门上,模拟双身份并发在「已置 done、尚未再生」窗口的真实交错;其余直通 */
 function parkFirstRegenAdd(db) {
+  return parkFirstReminderAddByPrefix(db, ["rg_"]);
+}
+
+/** 包装 db:第一笔命中任一前缀(rg_/rs_/rh_)的提醒行插入停在闸门上(deferred 并发注入),其余直通 */
+function parkFirstReminderAddByPrefix(db, prefixes) {
   var releaseGate;
   var gate = new Promise(function (resolve) {
     releaseGate = resolve;
@@ -1445,7 +1471,14 @@ function parkFirstRegenAdd(db) {
       return {
         add: function (options) {
           var doc = options && options.data;
-          if (!parked && doc && typeof doc._id === "string" && doc._id.indexOf("rg_") === 0) {
+          if (
+            !parked &&
+            doc &&
+            typeof doc._id === "string" &&
+            prefixes.some(function (p) {
+              return doc._id.indexOf(p) === 0;
+            })
+          ) {
             parked = true;
             return gate.then(function () {
               return base.add(options);
@@ -1811,22 +1844,81 @@ test("Low-1 原键但提醒被清过:重试不再带 reminder 而已存 active �
   assert.equal(raw.data[0].due_date, "2026-11-20");
 });
 
-test("Low-1 首建追加中断自愈:item 已建、提醒没落地 → 原键重试带提醒(含改过的日期)补建成功,恰一条 active", async function () {
-  var t = fresh();
-  // 模拟「item 建成但 reminder 追加中断」的中间态:无提醒首建占位
-  var landed = await handler(createEvent("op-l1-c", "滤芯", "厨房柜子"), t.deps);
-  assert.equal(landed.ok, true);
-  // 原键重试带上提醒(此时无任何已存提醒可被吞,补的即用户最新意图)
+/**
+ * 包装 db:第一笔 rh_ 提醒行插入(首建追加/自愈补建共用该确定性 _id)失败
+ * 一次(基础设施故障注入),模拟「item 建成、slot 欠账已落、提醒行没落地」
+ * 的真实中间态;其余集合与操作全部直通。
+ */
+function failFirstCreateReminderAdd(db) {
+  var failed = false;
+  var wrapped = {
+    collection: function (name) {
+      var base = db.collection(name);
+      if (name !== "reminders") {
+        return base;
+      }
+      return {
+        add: function (options) {
+          var doc = options && options.data;
+          if (!failed && doc && typeof doc._id === "string" && doc._id.indexOf("rh_") === 0) {
+            failed = true;
+            return Promise.reject(new Error("injected create reminder add failure"));
+          }
+          return base.add(options);
+        },
+        where: function (cond) {
+          return base.where(cond);
+        },
+        doc: function (id) {
+          return base.doc(id);
+        }
+      };
+    }
+  };
+  return wrapped;
+}
+
+test("Low-1 首建追加中断自愈:item 已建、slot 欠账在、行没落地 → 原键同提醒重试凭欠账补建成功;换提醒 → 显式冲突", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var reminder = { due_date: "2026-12-01", kind: "下次维护" };
+  // 故障注入:首建的提醒行追加失败(此前 slot 认领+欠账已原子落地)
+  await assert.rejects(
+    function () {
+      return handler(remindEvent("op-l1-c", "滤芯", "厨房柜子", reminder), deviceDeps(failFirstCreateReminderAdd(db), "z1"));
+    },
+    /injected create reminder add failure/,
+    "追加失败如实上抛,绝不假装成功"
+  );
+  // 中间态如实:item 已建、无提醒行、slot 挂着未消费的 create 欠账
+  assert.equal((await rawItems(db)).data.length, 1, "item 已建成");
+  assert.equal((await rawReminders(db)).data.length, 0, "提醒行未落地");
+  var itemId = (await rawItems(db)).data[0]._id;
+  var slot = await rawSlot(db, itemId);
+  assert.ok(slot, "slot 权威已落");
+  assert.equal(slot.pending_kind, "create", "欠账=首建追加未成功");
+  assert.equal(slot.pending_rd, "2026-12-01", "欠账记着用户确认的三元组");
+
+  // 原键换提醒重试:与欠账不一致 → 原键提醒变更,显式冲突不静默吞
+  var changed = await handler(
+    remindEvent("op-l1-c", "滤芯", "厨房柜子", { due_date: "2027-01-01", kind: "下次维护" }),
+    deviceDeps(db, "z2")
+  );
+  assert.equal(changed.ok, false, "原键但提醒变更必须显式冲突");
+  assert.equal(changed.error, "OPERATION_CONFLICT");
+
+  // 原键同提醒重试(同 op 同内容):凭未消费欠账自愈补建,幂等成功
   var retry = await handler(
-    remindEvent("op-l1-c", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
-    t.deps
+    remindEvent("op-l1-c", "滤芯", "厨房柜子", reminder),
+    deviceDeps(db, "z3")
   );
   assert.equal(retry.ok, true, "自愈补建按幂等成功收敛");
   assert.equal(retry.duplicated, true);
-  var raw = await rawReminders(t.db);
+  var raw = await rawReminders(db);
   assert.equal(activeReminderRows(raw.data).length, 1, "恰补一条");
   assert.equal(raw.data[0].due_date, "2026-12-01");
   assert.equal(raw.data[0].generation, 1, "补建行带轮次号");
+  var slotAfter = await rawSlot(db, itemId);
+  assert.equal(slotAfter.pending_gen, 0, "欠账在补建成功后消费");
 });
 
 test("Low-1 原键原提醒重放(含 quote 一致):幂等成功,不重复建、不冲突", async function () {
@@ -1892,4 +1984,381 @@ test("Low-3 complete_date 校验:非严格 YYYY-MM-DD 真实日历日 → INVALI
   var raw = await rawReminders(t.db);
   assert.equal(activeReminderRows(raw.data).length, 1, "非法参数零写入,原 active 无损");
   assert.equal(raw.data.length, 1);
+});
+
+// ---------- PR #52 二轮复审收口:N1/N2/N3(每物品 slot 生命周期权威) ----------
+
+test("N1 顺序 ABA 反例(4 步):R0 g1 → clear(g1) → set(0) 补录 → 新轮绝不回到 1;旧页 complete/set/clear 全部显式冲突,新 R1 原样存活", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-n1-aba", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    t.deps
+  );
+  var itemId = created.item.item_id;
+  // 设备 B 打开提醒页,持有第 1 轮的 expected_generation=1
+  // 第 2 步:设备 A clear(g1) 唯一 active 行硬删,集合对该 item 的提醒行清空
+  var cleared = await handler(
+    { action: "remindClear", item_id: itemId, expected_generation: 1 },
+    t.deps
+  );
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.cleared, 1);
+  // 第 3 步:设备 A set(0) 补录——轮次取自 slot 单调权威 rev+1=2,绝不回到 1
+  var res = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-01", expected_generation: 0 },
+    t.deps
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.reminder.generation, 2, "清除后新提醒轮次为 2,绝不与被清掉的 g1 复用(N1 核心)");
+  var slot = await rawSlot(t.db, itemId);
+  assert.equal(slot.rev, 2, "权威 rev 在硬清除后保留");
+  assert.equal(slot.pending_gen, 0, "新行落地后欠账已消费");
+
+  // 第 4 步:设备 B 从旧页(仍持 g1)发 complete/set/clear → 全部显式冲突
+  var staleDone = await handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1 },
+    t.deps
+  );
+  assert.equal(staleDone.ok, false, "旧页 complete 不得命中新 R1");
+  assert.equal(staleDone.error, "VERSION_CONFLICT");
+  var staleDonePeriodic = await handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 },
+    t.deps
+  );
+  assert.equal(staleDonePeriodic.ok, false, "旧页带周期 complete 同样不得命中");
+  assert.equal(staleDonePeriodic.error, "VERSION_CONFLICT");
+  var staleSet = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2027-01-01", expected_generation: 1 },
+    t.deps
+  );
+  assert.equal(staleSet.ok, false, "旧页改期不得覆盖新 R1");
+  assert.equal(staleSet.error, "VERSION_CONFLICT");
+  var staleClear = await handler(
+    { action: "remindClear", item_id: itemId, expected_generation: 1 },
+    t.deps
+  );
+  assert.equal(staleClear.ok, false, "旧页清除不得删掉别人的新提醒");
+  assert.equal(staleClear.error, "VERSION_CONFLICT");
+
+  // 新 R1 原样存活:恰一条 active、轮次 2、日期未被旧页动过
+  var raw = await rawReminders(t.db);
+  var active = activeReminderRows(raw.data);
+  assert.equal(active.length, 1, "新 R1 原样存活");
+  assert.equal(active[0].generation, 2);
+  assert.equal(active[0].due_date, "2026-12-01");
+  assert.equal(raw.data.filter(function (r) { return r.status === "done"; }).length, 0, "此前没有任何 done 行");
+});
+
+test("N1 权威单调:完成/改期/清除多轮交错后,新行轮次始终高于一切历史轮次(含被清掉的)", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-n1-mono", "药膏", "药箱", { due_date: "2026-10-20", kind: "开封后" }),
+    t.deps
+  );
+  var itemId = created.item.item_id;
+  var done = await handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 },
+    t.deps
+  );
+  assert.equal(done.reminder.generation, 2);
+  await handler({ action: "remindClear", item_id: itemId, expected_generation: 2 }, t.deps);
+  // 清掉 g2 后补录:必须拿 g3,而不是复用被清掉的 g2
+  var set1 = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-01", expected_generation: 0 },
+    t.deps
+  );
+  assert.equal(set1.reminder.generation, 3, "清除后新轮不复用被清掉的轮次");
+  var done2 = await handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 3, period_days: 15 },
+    t.deps
+  );
+  assert.equal(done2.reminder.generation, 4);
+  await handler({ action: "remindClear", item_id: itemId }, t.deps);
+  var set2 = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2027-01-01", expected_generation: 0 },
+    t.deps
+  );
+  assert.equal(set2.reminder.generation, 5, "多轮清除后仍严格递增");
+  assert.equal((await rawSlot(t.db, itemId)).rev, 5);
+  var active = activeReminderRows((await rawReminders(t.db)).data);
+  assert.equal(active.length, 1, "全程恰一条 active");
+  assert.equal(active[0].generation, 5);
+});
+
+test("N2 deferred complete×set(完成先停,set 接管):放行后补偿撤销,任一次序 ≤1 active、冲突显式、已作废欠账不复活", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-n2-cs", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "a0")
+  );
+  var itemId = created.item.item_id;
+
+  var park = parkFirstReminderAddByPrefix(db, ["rg_"]);
+  var req1 = handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 },
+    deviceDeps(park.db, "a1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); }); // 停在「已 done、已认领、未落地」
+
+  // 设备 B 读到无 active,携 expected_generation=0 补录:接管欠账认领并落地
+  var res2 = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-15", expected_generation: 0 },
+    deviceDeps(park.db, "b1")
+  );
+  assert.equal(res2.ok, true, "set 接管未落地认领后成功");
+  assert.equal(res2.reminder.generation, 3, "被接管的 g2 认领作废,set 拿 g3");
+
+  park.release();
+  var res1 = await req1;
+  assert.equal(res1.ok, false, "完成的在途再生被接管 → 显式冲突");
+  assert.equal(res1.error, "VERSION_CONFLICT");
+
+  var raw = await rawReminders(db);
+  var active = activeReminderRows(raw.data);
+  assert.equal(active.length, 1, "任何完成次序下 ≤1 active");
+  assert.equal(active[0].generation, 3, "存活的是 set 的新提醒");
+  assert.equal(active[0].due_date, "2026-12-15");
+  var doneRow = raw.data.filter(function (r) { return r.status === "done"; })[0];
+  assert.equal(doneRow.next_period_days, 0, "set 成功后历史欠账作废,绝不复活");
+  var slot = await rawSlot(db, itemId);
+  assert.equal(slot.pending_gen, 0, "无悬挂欠账");
+  assert.equal(slot.rev, 3, "权威只增不减");
+
+  // 反序(顺序即可覆盖):他人先改期立新轮,旧轮 complete 命中不了 → 显式冲突
+  var db2 = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var c2 = await handler(
+    remindEvent("op-n2-cs2", "药膏", "药箱", { due_date: "2026-10-20", kind: "开封后" }),
+    deviceDeps(db2, "c0")
+  );
+  await handler(
+    { action: "remindSet", item_id: c2.item.item_id, due_date: "2026-12-20", expected_generation: 1 },
+    deviceDeps(db2, "c1")
+  );
+  var late = await handler(
+    { action: "remindComplete", item_id: c2.item.item_id, expected_generation: 1, period_days: 30 },
+    deviceDeps(db2, "c2")
+  );
+  assert.equal(late.ok, false);
+  assert.equal(late.error, "VERSION_CONFLICT");
+  var active2 = activeReminderRows((await rawReminders(db2)).data);
+  assert.equal(active2.length, 1, "反序同样 ≤1 active");
+  assert.equal(active2[0].generation, 2);
+});
+
+test("N2 deferred complete×clear(done 未再生窗口清除):clear 消费欠账,放行再生 → 补偿撤销,已清除绝不复活", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-n2-cc", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "d0")
+  );
+  var itemId = created.item.item_id;
+
+  var park = parkFirstReminderAddByPrefix(db, ["rg_"]);
+  var req1 = handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 },
+    deviceDeps(park.db, "d1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); });
+
+  // 用户在 done-未再生窗口清除:欠账被显式消费、行欠账作废
+  var cleared = await handler(
+    { action: "remindClear", item_id: itemId, expected_generation: 1 },
+    deviceDeps(park.db, "d2")
+  );
+  assert.equal(cleared.ok, true, "清除成功(该轮已 done,无可清行,幂等)");
+  assert.equal(cleared.cleared, 0);
+
+  park.release();
+  var res1 = await req1;
+  assert.equal(res1.ok, false, "在途再生被清除消费 → 补偿撤销 + 显式冲突,绝不复活");
+  assert.equal(res1.error, "VERSION_CONFLICT");
+
+  var raw = await rawReminders(db);
+  assert.equal(activeReminderRows(raw.data).length, 0, "已清除不复活");
+  var doneRow = raw.data.filter(function (r) { return r.status === "done"; })[0];
+  assert.equal(doneRow.next_period_days, 0, "done 行欠账已作废");
+  var slot = await rawSlot(db, itemId);
+  assert.equal(slot.pending_gen, 0, "slot 欠账已消费");
+  assert.equal(slot.rev, 2, "权威仍单调(认领过的 g2 作废不复用)");
+
+  // 反序:先清后完成 → 旧轮不存在,NOT_FOUND 收敛,零复活
+  var db2 = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var c2 = await handler(
+    remindEvent("op-n2-cc2", "药膏", "药箱", { due_date: "2026-10-20", kind: "开封后" }),
+    deviceDeps(db2, "e0")
+  );
+  await handler({ action: "remindClear", item_id: c2.item.item_id }, deviceDeps(db2, "e1"));
+  var late = await handler(
+    { action: "remindComplete", item_id: c2.item.item_id, expected_generation: 1, period_days: 30 },
+    deviceDeps(db2, "e2")
+  );
+  assert.equal(late.ok, false);
+  assert.equal(late.error, "NOT_FOUND", "已清后的旧轮完成按刷新收敛(旧语义)");
+  assert.equal(activeReminderRows((await rawReminders(db2)).data).length, 0);
+});
+
+test("N2 deferred set×clear(set 认领后被停,clear 消费认领):放行后补偿撤销,已清除不复活;反序 clear→set(0) 正常补录", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-n2-sc", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "f0")
+  );
+  var itemId = created.item.item_id;
+
+  var park = parkFirstReminderAddByPrefix(db, ["rs_"]);
+  var req1 = handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-01", expected_generation: 1 },
+    deviceDeps(park.db, "f1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); }); // 停在「已认领、旧行已清、新行未落地」
+
+  var cleared = await handler({ action: "remindClear", item_id: itemId }, deviceDeps(park.db, "f2"));
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.cleared, 0, "旧行已被 set 的替换流程清掉,无可清行,幂等成功");
+
+  park.release();
+  var res1 = await req1;
+  assert.equal(res1.ok, false, "set 的在途落地被清除消费 → 补偿撤销 + 显式冲突");
+  assert.equal(res1.error, "VERSION_CONFLICT");
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 0, "已清除不复活");
+  var slot = await rawSlot(db, itemId);
+  assert.equal(slot.pending_gen, 0, "认领已被消费");
+
+  // 反序:先清后补录 → 正常成功,≤1 active
+  var db2 = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var c2 = await handler(
+    remindEvent("op-n2-sc2", "药膏", "药箱", { due_date: "2026-10-20", kind: "开封后" }),
+    deviceDeps(db2, "g0")
+  );
+  await handler({ action: "remindClear", item_id: c2.item.item_id }, deviceDeps(db2, "g1"));
+  var set = await handler(
+    { action: "remindSet", item_id: c2.item.item_id, due_date: "2026-12-01", expected_generation: 0 },
+    deviceDeps(db2, "g2")
+  );
+  assert.equal(set.ok, true);
+  assert.equal(set.reminder.generation, 2, "清除后补录取权威 rev+1");
+  var active2 = activeReminderRows((await rawReminders(db2)).data);
+  assert.equal(active2.length, 1);
+  assert.equal(active2[0].generation, 2);
+});
+
+test("N2 deferred set×set:同参重试收敛到同一条(响应丢失恢复);异参接管,任一次序 ≤1 active、冲突显式", async function () {
+  // 同参(响应丢失后原样重试):两请求收敛到同一条 rs 行
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-n2-ss", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "h0")
+  );
+  var itemId = created.item.item_id;
+  var park = parkFirstReminderAddByPrefix(db, ["rs_"]);
+  var req1 = handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-01", expected_generation: 1 },
+    deviceDeps(park.db, "h1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); }); // 停在「已认领、旧行已清、新行未落地」
+  var res2 = await handler(
+    { action: "remindSet", item_id: itemId, due_date: "2026-12-01", expected_generation: 1 },
+    deviceDeps(park.db, "h2")
+  );
+  assert.equal(res2.ok, true, "同参重试收敛补齐(响应丢失恢复)");
+  assert.equal(res2.reminder.generation, 2);
+  park.release();
+  var res1 = await req1;
+  assert.equal(res1.ok, true, "原请求撞确定性 _id 后同样收敛成功");
+  assert.equal(res1.reminder.due_date, res2.reminder.due_date, "收敛到同一条");
+  assert.equal(activeReminderRows((await rawReminders(db)).data).length, 1, "同参重试恰一条 active");
+
+  // 异参(两台设备都确认「无提醒」、选了不同日子):后到者接管,先到者在途落地被补偿撤销
+  var db2 = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var c2 = await handler(createEvent("op-n2-ss2", "药膏", "药箱"), deviceDeps(db2, "i0"));
+  var park2 = parkFirstReminderAddByPrefix(db2, ["rs_"]);
+  var late1 = handler(
+    { action: "remindSet", item_id: c2.item.item_id, due_date: "2026-12-01", expected_generation: 0 },
+    deviceDeps(park2.db, "i1")
+  );
+  await new Promise(function (r) { setTimeout(r, 0); });
+  var late2 = await handler(
+    { action: "remindSet", item_id: c2.item.item_id, due_date: "2026-12-20", expected_generation: 0 },
+    deviceDeps(park2.db, "i2")
+  );
+  assert.equal(late2.ok, true, "后到者接管未落地认领成功");
+  assert.equal(late2.reminder.generation, 2, "被接管的 g1 作废,后到者拿 g2(此物品无历史轮次,从 1 起发)");
+  park2.release();
+  var r1 = await late1;
+  assert.equal(r1.ok, false, "先到者在途落地被接管 → 补偿撤销 + 显式冲突");
+  assert.equal(r1.error, "VERSION_CONFLICT");
+  var active2 = activeReminderRows((await rawReminders(db2)).data);
+  assert.equal(active2.length, 1, "异参并发仍恰一条 active");
+  assert.equal(active2[0].due_date, "2026-12-20", "存活的是后到者的新提醒");
+  assert.equal(active2[0].generation, 2);
+});
+
+test("N2 故障注入:完成再生失败后用户清除 → 欠账被消费,同参重试不再治愈复活", async function () {
+  var db = createMemoryDb({ uniqueIndexes: { reminders: [["_id"]] } });
+  var created = await handler(
+    remindEvent("op-n2-fi", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deviceDeps(db, "j0")
+  );
+  var itemId = created.item.item_id;
+  var event = { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30 };
+
+  await assert.rejects(
+    function () {
+      return handler(event, deviceDeps(failFirstRegenAdd(db), "j1"));
+    },
+    /injected regen add failure/,
+    "再生失败如实上抛"
+  );
+  var slotMid = await rawSlot(db, itemId);
+  assert.equal(slotMid.pending_kind, "regen", "失败后 slot 挂着再生欠账");
+  assert.equal(slotMid.pending_gen, 2);
+
+  // 用户显式清除:欠账被消费、行欠账作废
+  await handler({ action: "remindClear", item_id: itemId }, deviceDeps(db, "j2"));
+  var slotAfterClear = await rawSlot(db, itemId);
+  assert.equal(slotAfterClear.pending_gen, 0, "清除消费欠账");
+
+  // 同参重试:绝不再治愈出任何提醒
+  var retry = await handler(event, deviceDeps(db, "j3"));
+  assert.equal(retry.ok, false, "已清除的提醒绝不因重试复活");
+  var raw = await rawReminders(db);
+  assert.equal(activeReminderRows(raw.data).length, 0);
+  var doneRow = raw.data.filter(function (r) { return r.status === "done"; })[0];
+  assert.equal(doneRow.next_period_days, 0, "行欠账也已作废");
+});
+
+// ---------- PR #52 二轮复审 N3:创建失败自愈不复活用户已清除的提醒 ----------
+
+test("N3 用户已清除不复活:create 成功 → remindClear → 原键重放同 op 同提醒 → 显式拒绝并引导详情页,零新建", async function () {
+  var t = fresh();
+  var reminder = { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" };
+  var created = await handler(remindEvent("op-n3-clear", "降压药", "药箱", reminder), t.deps);
+  assert.equal(created.ok, true);
+  // 用户明确清除
+  var cleared = await handler({ action: "remindClear", item_id: created.item.item_id }, t.deps);
+  assert.equal(cleared.ok, true);
+
+  // 旧请求超时/网络重放同 op 仍携原提醒:绝不自动复活
+  var replay = await handler(remindEvent("op-n3-clear", "降压药", "药箱", reminder), t.deps);
+  assert.equal(replay.ok, false, "无可信欠账时拒绝猜测");
+  assert.equal(replay.error, "OPERATION_CONFLICT");
+  assert.ok(replay.message.indexOf("详情页") !== -1, "显式结果引导详情页补录");
+  assert.ok(replay.existing && replay.existing.item_id === created.item.item_id, "附已有记录供详情页引导");
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 0, "用户已清除的提醒绝不被自动复活");
+  var slot = await rawSlot(t.db, created.item.item_id);
+  assert.equal(slot.pending_gen, 0, "清除已消费 create 欠账");
+  assert.equal((await rawItems(t.db)).data.length, 1, "物品仍一件");
+});
+
+test("N3 完成过同样不自动复活:create 成功 → complete → 原键重放带提醒 → 显式拒绝", async function () {
+  var t = fresh();
+  var reminder = { due_date: "2026-11-20", kind: "有效期" };
+  var created = await handler(remindEvent("op-n3-done", "感冒药", "药箱", reminder), t.deps);
+  await handler({ action: "remindComplete", item_id: created.item.item_id }, t.deps);
+
+  var replay = await handler(remindEvent("op-n3-done", "感冒药", "药箱", reminder), t.deps);
+  assert.equal(replay.ok, false, "提醒已完成,重放不得复活");
+  assert.equal(replay.error, "OPERATION_CONFLICT");
+  assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 0);
 });
