@@ -1673,12 +1673,15 @@ test("v2 vague 对抗:模型把模糊时间折算成日期 → 日期被硬门�
 // v1 与 remind/vague 字段零回归。这是预览不是写入——建路径要等用户确认后
 // 由 locations.ensureAndLink 落地(绝不静默建路径)。
 
-test("v2 mount_path 正例:位置明确分层 → 路径逐字投影(主卧/柜子上);单层位置给单段数组", async function () {
+test("v2 mount_path 正例:位置明确分层 → 路径逐字投影(主卧/柜子);单层位置给单段数组", async function () {
+  // 0.7.0 真机反馈 Fix 2:模型按新合同剥方位后缀——location_text「主卧的柜子上」
+  // 的裸实体是「主卧的柜子」,段名不带「上」(prompt 规则 2/9)
   var { res } = await runV2("降压药放在主卧的柜子上。", rawItems([
-    { name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上"] },
+    { name: "降压药", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子"] },
   ]));
   assert.equal(res.ok, true);
-  assert.deepStrictEqual(res.drafts[0].mount_path, ["主卧", "柜子上"], "明确分层的路径如实投影");
+  assert.equal(res.drafts[0].location_text, "主卧的柜子", "位置实体不带方位后缀");
+  assert.deepStrictEqual(res.drafts[0].mount_path, ["主卧", "柜子"], "明确分层的路径如实投影(段名剥后缀)");
 
   var single = validateDrafts(
     rawItems([{ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙放玄关", mount_path: ["玄关"] }]),
@@ -1716,18 +1719,18 @@ test("v2 mount_path 反例:certain=false 时模型违规给了路径 → 强制 
 });
 
 test("v2 mount_path 反例:模糊说法不猜——「某个柜子」整段照 location_text 才可能通过,拆层必被锚定拦下", function () {
-  // 模型对模糊位置自觉给 null:透传
+  // 模型对模糊位置自觉给 null:透传(0.7.0 Fix 2:location_text 同样剥后缀出裸实体)
   var honest = validateDrafts(
-    rawItems([{ name: "扳手", location_text: "某个柜子里", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: null }]),
+    rawItems([{ name: "扳手", location_text: "某个柜子", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: null }]),
     "扳手在某个柜子里。",
     ANCHOR_TODAY,
   );
   assert.equal(honest.drafts[0].mount_path, null, "模型不给 → null");
-  assert.equal(honest.drafts[0].location_text, "某个柜子里", "位置本身照常保留");
+  assert.equal(honest.drafts[0].location_text, "某个柜子", "位置本身照常保留(剥后缀的裸实体)");
 
-  // 模型把模糊位置硬拆成编造层(「柜子」在、「里」也在,但「卧室」是编的)→ 锚定拦下
+  // 模型把模糊位置硬拆成编造层(「柜子」在、「卧室」是编的)→ 锚定拦下
   var guessed = validateDrafts(
-    rawItems([{ name: "扳手", location_text: "某个柜子里", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: ["卧室", "柜子"] }]),
+    rawItems([{ name: "扳手", location_text: "某个柜子", certain: true, qualifiers: [], source_quote: "扳手在某个柜子里", mount_path: ["卧室", "柜子"] }]),
     "扳手在某个柜子里。",
     ANCHOR_TODAY,
   );
@@ -1736,9 +1739,9 @@ test("v2 mount_path 反例:模糊说法不猜——「某个柜子」整段照 l
 });
 
 test("v2 mount_path 反例:错序 / 编造 / 拼接段一律 null(有序不重叠锚定)", function () {
-  // 错序:段都在位置文本里,但顺序与原文不一致
+  // 错序:段都在位置文本里,但顺序与原文不一致(段名按新合同剥后缀)
   var reversed = validateDrafts(
-    rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["柜子上", "主卧"] }]),
+    rawItems([{ name: "降压药", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["柜子", "主卧"] }]),
     "降压药放在主卧的柜子上。",
     ANCHOR_TODAY,
   );
@@ -1746,7 +1749,7 @@ test("v2 mount_path 反例:错序 / 编造 / 拼接段一律 null(有序不重�
 
   // 拼接:把两段拼成一个不存在的名字
   var joined = validateDrafts(
-    rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上", "主卧柜子上"] }]),
+    rawItems([{ name: "降压药", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子", "主卧柜子"] }]),
     "降压药放在主卧的柜子上。",
     ANCHOR_TODAY,
   );
@@ -1765,7 +1768,7 @@ test("v2 mount_path 反例:形状非法(非数组/空数组/超 6 段/非字符�
   for (var i = 0; i < cases.length; i++) {
     var c = cases[i];
     var result = validateDrafts(
-      rawItems([{ name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: c.mount_path }]),
+      rawItems([{ name: "降压药", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: c.mount_path }]),
       "降压药放在主卧的柜子上。",
       ANCHOR_TODAY,
     );
@@ -1843,7 +1846,7 @@ test("v2 mount_path 零回归:v1 响应不带 mount_path(模型多给的字段�
 
 test("v2 mount_path 纪律:prompt 定义该字段与「绝不猜测」规则;第 7 条不猜日期纪律原样在册", async function () {
   var { prompt } = await runV2("降压药放在主卧的柜子上。", rawItems([
-    { name: "降压药", location_text: "主卧的柜子上", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子上"] },
+    { name: "降压药", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "降压药放在主卧的柜子上", mount_path: ["主卧", "柜子"] },
   ]));
   assert.ok(prompt.indexOf("mount_path") !== -1, "prompt 应定义 mount_path");
   assert.ok(prompt.indexOf("绝不猜测、绝不编造层次") !== -1, "必须写明分层不猜");
@@ -1852,4 +1855,65 @@ test("v2 mount_path 纪律:prompt 定义该字段与「绝不猜测」规则;第
   // 既有 v2 契约零变化(既有纪律句逐字在册)
   assert.ok(prompt.indexOf("一律 remind_at=null、remind_kind=null、remind_quote=null") !== -1, "第 7 条不猜日期纪律一字不改");
   assert.ok(prompt.indexOf("禁止改写或拼接原文") !== -1, "证据规则不得被挤掉");
+});
+
+// ---------- 方位后缀剥离(0.7.0 真机反馈 Fix 2) ----------
+// 「冰箱里面有面条」的位置此前提取成「冰箱里面」——纯方位后缀(里/里面/上/
+// 左边…)不应留在位置实体名里。prompt 规则 2/9 要求 location_text 与
+// mount_path 各段剥后缀输出裸实体名;服务端校验零放松:剥后的实体仍是
+// 原话逐字子串(冰箱⊂冰箱里面),有序锚定/形状门/纯方位段规则原样够用,
+// source_quote/提醒/vague 字段零变化;v1 prompt 逐字节不变。
+
+test("v2 方位后缀剥离正例:「冰箱里面有面条」→ 冰箱;「主卧的柜子上」→ [主卧,柜子]", async function () {
+  var fridge = await runV2("冰箱里面有面条。", rawItems([
+    { name: "面条", location_text: "冰箱", certain: true, qualifiers: [], source_quote: "冰箱里面有面条", mount_path: ["冰箱"] },
+  ]));
+  assert.equal(fridge.res.ok, true);
+  assert.equal(fridge.res.drafts[0].location_text, "冰箱", "位置实体=裸实体名,不带「里面」");
+  assert.equal(fridge.res.drafts[0].certain, true);
+  assert.deepStrictEqual(fridge.res.drafts[0].mount_path, ["冰箱"], "单段路径同为裸实体名");
+  assert.equal(fridge.res.drafts[0].source_quote, "冰箱里面有面条", "原话证据逐字保留(不随后缀剥离变化)");
+
+  var cabinet = await runV2("护照放在主卧的柜子上。", rawItems([
+    { name: "护照", location_text: "主卧的柜子", certain: true, qualifiers: [], source_quote: "护照放在主卧的柜子上", mount_path: ["主卧", "柜子"] },
+  ]));
+  assert.equal(cabinet.res.ok, true);
+  assert.equal(cabinet.res.drafts[0].location_text, "主卧的柜子", "位置实体剥掉段尾「上」");
+  assert.deepStrictEqual(cabinet.res.drafts[0].mount_path, ["主卧", "柜子"], "多层各段均剥方位后缀");
+});
+
+test("v2 方位后缀剥离:服务端零放松即通过——旧式带后缀 location_text 配剥后缀段名同样过锚定", function () {
+  // 模型没把 location_text 的后缀剥干净、但 mount_path 段名已剥:段名「冰箱」
+  // ⊂「冰箱里面」,既有有序锚定天然放行——不需要为剥后缀放松任何服务端规则
+  var tolerant = validateDrafts(
+    rawItems([{ name: "面条", location_text: "冰箱里面", certain: true, qualifiers: [], source_quote: "冰箱里面有面条", mount_path: ["冰箱"] }]),
+    "冰箱里面有面条。",
+    ANCHOR_TODAY,
+  );
+  assert.equal(tolerant.ok, true);
+  assert.equal(tolerant.drafts[0].location_text, "冰箱里面", "位置按模型输出透传(服务端不代剥)");
+  assert.deepStrictEqual(tolerant.drafts[0].mount_path, ["冰箱"], "剥后缀的段名是位置文本的逐字子串 → 照常通过");
+
+  // 反例保持:方位词单独成段(非首段并入前段、首段整体 null)——既有规则不放松
+  var standalone = validateDrafts(
+    rawItems([{ name: "面条", location_text: "冰箱里面", certain: true, qualifiers: [], source_quote: "冰箱里面有面条", mount_path: ["冰箱", "里面"] }]),
+    "冰箱里面有面条。",
+    ANCHOR_TODAY,
+  );
+  assert.deepStrictEqual(standalone.drafts[0].mount_path, ["冰箱"], "纯方位段不另立层级(并入前段)");
+});
+
+test("v2 方位后缀剥离纪律:prompt 规则 2/9 写明剥后缀输出裸实体名;示例同步换新", async function () {
+  var { prompt } = await runV2("冰箱里面有面条。", rawItems([
+    { name: "面条", location_text: "冰箱", certain: true, qualifiers: [], source_quote: "冰箱里面有面条", mount_path: ["冰箱"] },
+  ]));
+  // 规则 2:位置实体剥后缀(正例在册)
+  assert.ok(prompt.indexOf("末尾不带「里」「里面」「上」「上面」「下面」「左边」这类纯方位后缀") !== -1, "规则 2 应写明位置实体剥方位后缀");
+  assert.ok(prompt.indexOf("「冰箱里面有面条」→ location_text 为「冰箱」") !== -1, "规则 2 正例:冰箱里面有面条→冰箱");
+  // 规则 9:各段剥后缀(闭集列举 + 剥后仍须是原话子串)
+  assert.ok(prompt.indexOf("每一段同样剥离段尾的纯方位后缀") !== -1, "规则 9 应写明各段剥方位后缀");
+  assert.ok(prompt.indexOf("输出裸实体名") !== -1, "输出裸实体名在册");
+  assert.ok(prompt.indexOf("「冰箱」⊂「冰箱里面」,天然成立") !== -1, "剥后段名仍是原话子串的口径在册");
+  assert.ok(prompt.indexOf('多层如「主卧的柜子上」→ ["主卧","柜子"]') !== -1, "原「柜子上」示例已按新合同更新");
+  assert.ok(prompt.indexOf('["主卧", "柜子上"]') === -1, "prompt 不得再出现带后缀的示例段名");
 });

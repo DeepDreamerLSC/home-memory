@@ -203,10 +203,12 @@ function makePage() {
 }
 
 function certainDraft(overrides) {
+  // 草稿形状按 0.7.0 Fix 2 新合同:位置实体/mount_path 段名为剥方位后缀的
+  // 裸实体(「主卧的柜子上」→ 主卧的柜子 / [主卧,柜子]);source_quote 仍逐字原话
   return Object.assign(
     {
       name: "护照",
-      location_text: "主卧的柜子上",
+      location_text: "主卧的柜子",
       certain: true,
       qualifiers: [],
       source_quote: "护照在主卧的柜子上",
@@ -215,7 +217,7 @@ function certainDraft(overrides) {
       remind_kind: null,
       remind_quote: null,
       remind_vague_quote: null,
-      mount_path: ["主卧", "柜子上"],
+      mount_path: ["主卧", "柜子"],
     },
     overrides,
   );
@@ -234,18 +236,18 @@ function loadConfirmPage(drafts) {
 
 test("MNT-PURE-1:draftMountPathPreview——certain 且形状合法才透传;certain=false 一律空(绝不猜路径)", function () {
   assert.deepEqual(
-    bs.draftMountPathPreview({ certain: true, mount_path: ["主卧", "柜子上"] }),
-    ["主卧", "柜子上"],
+    bs.draftMountPathPreview({ certain: true, mount_path: ["主卧", "柜子"] }),
+    ["主卧", "柜子"],
     "certain + 合法数组逐段透传",
   );
   assert.deepEqual(
-    bs.draftMountPathPreview({ certain: true, mount_path: [" 主卧 ", "柜子上"] }),
-    ["主卧", "柜子上"],
+    bs.draftMountPathPreview({ certain: true, mount_path: [" 主卧 ", "柜子"] }),
+    ["主卧", "柜子"],
     "段去空白后透传",
   );
   // #18 红线:certain=false 即使带路径也一律空(服务端已强制 null,客户端守第二道门)
   assert.deepEqual(
-    bs.draftMountPathPreview({ certain: false, mount_path: ["主卧", "柜子上"] }),
+    bs.draftMountPathPreview({ certain: false, mount_path: ["主卧", "柜子"] }),
     [],
     "certain=false → 空(=不显示「放进」行,照旧先进「尚未归类」)",
   );
@@ -288,12 +290,12 @@ function mountRow(overrides) {
     {
       key: "r0",
       name: "护照",
-      locationText: "主卧的柜子上",
+      locationText: "主卧的柜子",
       checked: true,
       status: "pending",
       failMsg: "",
       operationId: "op-1",
-      mountPath: ["主卧", "柜子上"],
+      mountPath: ["主卧", "柜子"],
       mountUpdateId: "u-1",
     },
     overrides,
@@ -318,7 +320,7 @@ test("MNT-PURE-3:saveRowWithMount——create 成功后带最终路径挂靠,lin
   assert.equal(creates.length, 1, "create 恰好一次");
   assert.deepEqual(
     links,
-    [{ item_id: "it-1", expected_version: 3, path: ["主卧", "柜子上"], update_id: "u-1" }],
+    [{ item_id: "it-1", expected_version: 3, path: ["主卧", "柜子"], update_id: "u-1" }],
     "挂靠用 create 返回的 item_id 与版本、行内固定幂等键、最终路径",
   );
 });
@@ -373,7 +375,7 @@ test("MNT-API-1:ensureAndLink 走写类通道,响应逐项校验;残缺结构按
   var res = await locationsApi.callLocationsApi({
     action: "ensureAndLink",
     item_id: "it-1",
-    path: ["主卧", "柜子上"],
+    path: ["主卧", "柜子"],
     expected_version: 3,
     update_id: "u-1",
     created_from: "parse",
@@ -381,7 +383,7 @@ test("MNT-API-1:ensureAndLink 走写类通道,响应逐项校验;残缺结构按
   assert.equal(res.ok, true);
   assert.equal(res.already, false);
   assert.equal(res.item.version, 4);
-  assert.deepEqual(res.path, ["主卧", "柜子上"]);
+  assert.deepEqual(res.path, ["主卧", "柜子"]);
   assert.equal(cloudCalls.length, 1);
   assert.equal(cloudCalls[0].name, "locations");
   // 个人态(未捕获作用域)不编造 marker:请求原样只含业务字段
@@ -420,8 +422,8 @@ test("MNT-PAGE-1:确认行渲染数据——mount_path 非空才显示「放进�
   resetEnv();
   var page = loadConfirmPage([certainDraft()]);
   var row = page.data.rows[0];
-  assert.equal(row.mountPathText, "主卧 / 柜子上", "C1「放进」行显示路径文本(段间「 / 」)");
-  assert.deepEqual(row.mountPath, ["主卧", "柜子上"]);
+  assert.equal(row.mountPathText, "主卧 / 柜子", "C1「放进」行显示路径文本(段间「 / 」)");
+  assert.deepEqual(row.mountPath, ["主卧", "柜子"]);
   assert.ok(typeof row.mountUpdateId === "string" && row.mountUpdateId.length > 0, "行内固定挂靠幂等键在册");
   assert.equal(row.checked, true, "certain 且有专属证据默认勾选(既有行为不变)");
 
@@ -618,9 +620,9 @@ test("MNT-PAGE-6:无 mount_path 的行保存——不调挂靠,行为与十七�
 test("MNT-PAGE-7:改位置文本即清「放进」预览(回「尚未归类」口径)——提交绝不挂背离的旧路径", async function () {
   resetEnv();
   var page = loadConfirmPage([certainDraft()]);
-  assert.equal(page.data.rows[0].mountPathText, "主卧 / 柜子上", "初始带「放进」预览");
+  assert.equal(page.data.rows[0].mountPathText, "主卧 / 柜子", "初始带「放进」预览");
 
-  // 用户把「主卧的柜子上」改成「书房」:预览随之清空,「放进」行不再显示
+  // 用户把「主卧的柜子」改成「书房」:预览随之清空,「放进」行不再显示
   pageOptions.onRowLocationInput.call(page, {
     currentTarget: { dataset: { index: 0 } },
     detail: { value: "书房" },
@@ -629,7 +631,7 @@ test("MNT-PAGE-7:改位置文本即清「放进」预览(回「尚未归类」�
   assert.deepEqual(page.data.rows[0].mountPath, [], "位置文本变化清空「放进」路径");
   assert.equal(page.data.rows[0].mountPathText, "", "「放进」行不再显示(不误导挂靠)");
 
-  // 提交:location_text 存新文本,绝不 ensureAndLink 挂进「主卧/柜子上」旧路径
+  // 提交:location_text 存新文本,绝不 ensureAndLink 挂进「主卧/柜子」旧路径
   await pageOptions.onSaveBatchTap.call(page);
   assert.equal(page.data.rows[0].status, "saved");
   assert.equal(cloudCalls.length, 1, "只有 create,没有挂靠调用");
@@ -676,7 +678,7 @@ test("MNT-PAGE-8:清空的路径随会话回写——进程回收恢复不回生
   assert.ok(persisted && persisted.rows, "清路径当即回写了行状态");
   assert.deepEqual(persisted.rows[0].mountPath, [], "回写值为空数组");
 
-  // 模拟进程回收(清内存会话,持久层保留):恢复后不得回生「主卧/柜子上」
+  // 模拟进程回收(清内存会话,持久层保留):恢复后不得回生「主卧/柜子」
   ds.simulateProcessRestartForTest();
   var page2 = makePage();
   pageStack = [page2];
