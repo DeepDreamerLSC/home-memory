@@ -60,6 +60,43 @@ function sameCreateContent(doc, name, locationText, note) {
   );
 }
 
+/** 提醒三元组逐字段比对(due_date/kind/quote;quote 缺省按空串归一) */
+function sameReminderContent(doc, reminder) {
+  return (
+    doc.due_date === reminder.due_date &&
+    doc.kind === reminder.kind &&
+    (doc.quote || "") === (reminder.quote || "")
+  );
+}
+
+/**
+ * 原键重放的提醒对账(PR #52 Low-1):物品内容一致时,再按「已存 active 提醒」
+ * 与本次请求携带的 reminder 裁定,返回 null / "HEAL" / "CONFLICT":
+ * - 请求不带提醒而已存 active:提醒被清过的重试,显式冲突(绝不静默保留旧提醒);
+ * - 请求带提醒而已存 active:内容一致=原键原提醒重放(幂等成功),
+ *   不一致=原键但提醒变更,显式冲突(指向详情页改,绝不静默吞);
+ * - 已存无 active:首建追加中断的自愈窗口,按本次请求补建(HEAL)——
+ *   此时没有任何已存提醒会被吞,补的即用户最新确认的意图。
+ */
+async function reconcileDuplicateReminder(deps, itemId, reminder) {
+  var actives = await reminders(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, status: "active" })
+    .get();
+  var rows = (actives && actives.data) || [];
+  if (rows.length === 0) {
+    return reminder === null ? null : "HEAL";
+  }
+  if (reminder === null) {
+    return "CONFLICT";
+  }
+  for (var i = 0; i < rows.length; i++) {
+    if (sameReminderContent(rows[i], reminder)) {
+      return null;
+    }
+  }
+  return "CONFLICT";
+}
+
 /**
  * 同键异内容(或命中已删文档):明确冲突,绝不静默返回旧数据。
  * deleted 为 true 时不带 existing(内容已抹空,进详情页无意义)。
@@ -456,9 +493,13 @@ async function createItem(event, deps) {
   if (existing.data && existing.data.length > 0) {
     var doc = existing.data[0];
     if (sameCreateContent(doc, name, locationText, note)) {
-      if (reminder) {
-        // 响应丢失后的原键重试:首建可能已建 item 但 reminder 追加中断,
-        // 这里收敛补建(已有 active 则不重复),绝不丢用户已确认的提醒
+      // 提醒对账(PR #52 Low-1):物品内容一致还要提醒一致才算幂等重放——
+      // 原键重试但提醒改过/清过 → 显式冲突指向详情页,绝不静默吞掉变更
+      var verdict = await reconcileDuplicateReminder(deps, doc._id, reminder);
+      if (verdict === "CONFLICT") {
+        return operationConflict(doc);
+      }
+      if (verdict === "HEAL") {
         await ensureActiveReminder(deps, doc._id, reminder);
       }
       return { ok: true, item: project(doc), duplicated: true };
@@ -494,7 +535,12 @@ async function createItem(event, deps) {
     if (after.data && after.data.length > 0) {
       var raced = after.data[0];
       if (!raced.deleted && sameCreateContent(raced, name, locationText, note)) {
-        if (reminder) {
+        // 提醒对账同 duplicated 分支(Low-1):并发孪生同样区分重放/变更
+        var racedVerdict = await reconcileDuplicateReminder(deps, raced._id, reminder);
+        if (racedVerdict === "CONFLICT") {
+          return operationConflict(raced);
+        }
+        if (racedVerdict === "HEAL") {
           await ensureActiveReminder(deps, raced._id, reminder);
         }
         return { ok: true, item: project(raced), duplicated: true };

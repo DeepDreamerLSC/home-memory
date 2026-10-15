@@ -1772,3 +1772,69 @@ test("B1 remindClear 旧页:清除带轮次条件,他人已更新 → VERSION_CO
   assert.equal(zombie.ok, false);
   assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 0, "绝不复活已清除的提醒");
 });
+
+// ---------- PR #52 复审 Low-1:create 同键重试的提醒对账 ----------
+
+test("Low-1 原键但提醒改过:同 op 重试、物品内容一致、提醒日期不同 → 显式冲突,已存提醒原样(不静默吞)", async function () {
+  var t = fresh();
+  var first = await handler(
+    remindEvent("op-l1-a", "降压药", "药箱", { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" }),
+    t.deps
+  );
+  assert.equal(first.ok, true);
+  // 响应丢失后用户在行内改了提醒日期,原键重试
+  var retry = await handler(
+    remindEvent("op-l1-a", "降压药", "药箱", { due_date: "2026-12-20", kind: "有效期", quote: "11月20号过期" }),
+    t.deps
+  );
+  assert.equal(retry.ok, false, "原键但提醒变更必须显式冲突");
+  assert.equal(retry.error, "OPERATION_CONFLICT");
+  assert.ok(retry.existing && retry.existing.item_id === first.item.item_id, "冲突附已有记录供详情页引导");
+  // 已存提醒原样保留:既不被新日期覆盖,也不静默当作重放吞掉
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 1);
+  assert.equal(raw.data[0].due_date, "2026-11-20");
+  assert.equal((await rawItems(t.db)).data.length, 1, "物品仍一件");
+});
+
+test("Low-1 原键但提醒被清过:重试不再带 reminder 而已存 active → 显式冲突,不静默保留也不静默清掉", async function () {
+  var t = fresh();
+  await handler(
+    remindEvent("op-l1-b", "降压药", "药箱", { due_date: "2026-11-20", kind: "有效期" }),
+    t.deps
+  );
+  var retry = await handler(createEvent("op-l1-b", "降压药", "药箱"), t.deps);
+  assert.equal(retry.ok, false, "重试不带提醒而已存提醒:必须显式冲突");
+  assert.equal(retry.error, "OPERATION_CONFLICT");
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 1, "已存提醒不动,交详情页明确处理");
+  assert.equal(raw.data[0].due_date, "2026-11-20");
+});
+
+test("Low-1 首建追加中断自愈:item 已建、提醒没落地 → 原键重试带提醒(含改过的日期)补建成功,恰一条 active", async function () {
+  var t = fresh();
+  // 模拟「item 建成但 reminder 追加中断」的中间态:无提醒首建占位
+  var landed = await handler(createEvent("op-l1-c", "滤芯", "厨房柜子"), t.deps);
+  assert.equal(landed.ok, true);
+  // 原键重试带上提醒(此时无任何已存提醒可被吞,补的即用户最新意图)
+  var retry = await handler(
+    remindEvent("op-l1-c", "滤芯", "厨房柜子", { due_date: "2026-12-01", kind: "下次维护" }),
+    t.deps
+  );
+  assert.equal(retry.ok, true, "自愈补建按幂等成功收敛");
+  assert.equal(retry.duplicated, true);
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 1, "恰补一条");
+  assert.equal(raw.data[0].due_date, "2026-12-01");
+  assert.equal(raw.data[0].generation, 1, "补建行带轮次号");
+});
+
+test("Low-1 原键原提醒重放(含 quote 一致):幂等成功,不重复建、不冲突", async function () {
+  var t = fresh();
+  var reminder = { due_date: "2026-11-20", kind: "有效期", quote: "11月20号过期" };
+  await handler(remindEvent("op-l1-d", "感冒药", "药箱第一格", reminder), t.deps);
+  var replay = await handler(remindEvent("op-l1-d", "感冒药", "药箱第一格", reminder), t.deps);
+  assert.equal(replay.ok, true, "同键同内容同提醒 = 幂等重放");
+  assert.equal(replay.duplicated, true);
+  assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 1);
+});
