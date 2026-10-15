@@ -1,10 +1,10 @@
 <!-- 容器抬头:返回胶囊(逐层退回)+ 抬头(随容器变)+ 「⋯」整理位置 + 刷新指示 -->
 <template name="map-head">
   <view class="map-head">
-    <view wx:if="{{ backLabel }}" class="backchip" hover-class="backchip-hover" hover-stay-time="80" bindtap="onBackTap">‹ {{ backLabel }}</view>
+    <view wx:if="{{ backLabel }}" class="backchip" hover-class="backchip-hover" hover-stay-time="80" bindtap="onBackTap"><view class="backchip-face">‹ {{ backLabel }}</view></view>
     <view class="mtitle">{{ mapTitle }}</view>
     <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
-    <view wx:if="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
+    <view wx:if="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore"><view class="more-inline-face">⋯</view></view>
   </view>
 </template>
 
@@ -16,9 +16,11 @@
       <view class="brand-sub">东西放哪儿了?我记得。</view>
     </view>
     <view class="fam-chip" bindtap="onFamilyTap">
-      <view wx:if="{{ familyShared }}" class="fam-dot"></view>
-      <view class="fam-name">{{ familyShared ? '我们家' : '我的家' }}</view>
-      <view class="fam-caret">▾</view>
+      <view class="fam-chip-face">
+        <view wx:if="{{ familyShared }}" class="fam-dot"></view>
+        <view class="fam-name">{{ familyShared ? '我们家' : '我的家' }}</view>
+        <view class="fam-caret">▾</view>
+      </view>
     </view>
   </view>
 
@@ -112,7 +114,7 @@
           <view class="section-label">找到 {{ queryResults.length }} 件</view>
           <view wx:if="{{ queryResults.length === 0 }}" class="empty-note">
             <view class="empty-note-main">没记住过「{{ queryKeyword }}」。要不要现在记一件?</view>
-            <view class="btn ink block empty-note-btn" bindtap="onTextRecordTap">记一件</view>
+            <view class="btn ink block empty-note-btn" bindtap="onTextRecordTap"><view class="btn-face">记一件</view></view>
           </view>
           <view wx:else class="result-card">
             <view
@@ -150,12 +152,37 @@
           <view class="fail-ico">⚠️</view>
           <view class="fail-title">网络好像断了</view>
           <view class="fail-sub">已记住的记录不受影响,联网后照常能找</view>
-          <view class="btn ink block fail-btn" bindtap="onRetryTap">再试一次</view>
+          <view class="btn ink block fail-btn" bindtap="onRetryTap"><view class="btn-face">再试一次</view></view>
         </view>
       </block>
 
       <!-- H1 家庭地图:根层=房间格子两列;点格子整页切入容器视图 -->
       <block wx:else>
+        <!-- 尚未归类明细视图(#36 真机反馈 Fix 3):整页切换,行点进物品详情,返回胶囊退家里 -->
+        <block wx:if="{{ unmountedView }}">
+          <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
+          <view class="result-card unmounted-card">
+            <view
+              wx:for="{{ unmountedItems }}"
+              wx:key="item_id"
+              class="result-row"
+              hover-class="roomtile-active"
+              hover-stay-time="80"
+              data-index="{{ index }}"
+              bindtap="onUnmountedRowTap"
+            >
+              <view class="item-icon">{{ item.initial }}</view>
+              <view class="item-main">
+                <view class="item-name">{{ item.name }}</view>
+                <view class="item-location">{{ item.locationText || '没说放在哪儿' }}</view>
+              </view>
+              <view class="unverified-tag">位置待核实</view>
+            </view>
+          </view>
+          <view wx:if="{{ unmountedCount > unmountedItems.length }}" class="tiny-center">先显示最近的 {{ unmountedItems.length }} 件</view>
+        </block>
+
+        <block wx:else>
         <!-- 到期横幅(#36):仅家里层、有过期/临期才显示;点进「快到期的东西」 -->
         <view
           wx:if="{{ isRootView && dueBanner }}"
@@ -184,13 +211,20 @@
             <view class="rcount">{{ item.countText }}</view>
             <view class="chev">›</view>
           </view>
-          <!-- 尚未归类通栏格:只显计数(未挂物品明细服务端不投影,不自造清单) -->
-          <view wx:if="{{ isRootView && unmountedCount > 0 }}" class="roomtile wide">
+          <!-- 尚未归类通栏格(#36 真机反馈 Fix 3:可点入未挂物品明细,不再只是计数) -->
+          <view
+            wx:if="{{ isRootView && unmountedCount > 0 }}"
+            class="roomtile wide"
+            hover-class="roomtile-active"
+            hover-stay-time="80"
+            bindtap="onUnmountedTap"
+          >
             <view class="rico">?</view>
             <view class="wide-main">
               <view class="rname">尚未归类</view>
               <view class="rcount">{{ unmountedCount }} 件待核实</view>
             </view>
+            <view class="chev">›</view>
           </view>
         </view>
 
@@ -217,6 +251,7 @@
               <view class="chevron">›</view>
             </view>
           </view>
+        </block>
         </block>
       </block>
     </view>
