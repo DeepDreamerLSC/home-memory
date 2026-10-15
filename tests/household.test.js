@@ -16,6 +16,9 @@
  *   个人家庭维持 P0 宽松口径(缺省放行、携带则校验、revision 忽略零回归);
  * - HH-LST:两函数 list 响应 household_id 断言(仅 list 携带;scope_revision
  *   仅共享家庭携带)。
+ * - HH-GLUE-REM(#36):提醒实体(独立 reminders 集合)走同一解析与写硬门——
+ *   胶水层 remindList 定向共享域并带 scope_revision;缺/旧双 marker 的
+ *   remindComplete/remindClear 零写入;家庭解析失败对提醒读同样失败关闭。
  * 零网络、零外部依赖;胶水测试用 stub 替身加载,绝不 require wx-server-sdk。
  */
 
@@ -854,4 +857,116 @@ test("HH-LST:两函数 list 响应携带 household_id 且仅 list 携带(query/g
   var ensured = await locHandler({ action: "ensurePath", path: ["书房"] }, locsDeps(locDb, HOUSEHOLD_A));
   assert.equal(ensured.ok, true);
   assert.equal(ensured.household_id, undefined, "ensurePath 响应不携带 household_id(仅 list)");
+});
+
+// ---------- HH-GLUE-REM:提醒实体(issue #36)走同一解析与写硬门(胶水级) ----------
+
+test("HH-GLUE-REM:提醒读写随真实入口走共享域解析与双 marker 硬门;解析失败 remindList 同样失败关闭", async function () {
+  var db = createMemoryDb();
+  await seedMembership(db, "o-remind-user", SHARED_1, { scope_revision: 2 });
+  var stub = makeItemsApiStub("o-remind-user", db);
+  var entry = loadCloudFunction(path.join(ROOT, "cloudfunctions", "itemsApi", "index.js"), stub.sdk);
+
+  // 一致双 marker:create 带提醒,reminder 文档随写入门定向共享域
+  var created = await entry.main({
+    action: "create",
+    operation_id: "rem-glue-1",
+    name: "滤芯",
+    location_text: "厨房柜子",
+    reminder: { due_date: "2026-12-01", kind: "下次维护", quote: "12月1号换" },
+    expected_household_id: SHARED_1,
+    expected_scope_revision: 2
+  });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  var rds = await rawDocs(db, "reminders");
+  assert.equal(rds.data.length, 1);
+  assert.equal(rds.data[0].household_id, SHARED_1, "提醒文档随写入门定向共享域");
+  assert.equal(rds.data[0].item_id, created.item.item_id);
+  assert.equal(rds.data[0].status, "active");
+
+  // 只读 remindList:不参与写硬门,响应定向共享域并携带作用域字段(marker 捕获来源)
+  var listed = await entry.main({ action: "remindList" });
+  assert.equal(listed.ok, true, JSON.stringify(listed));
+  assert.equal(listed.household_id, SHARED_1);
+  assert.equal(listed.scope_revision, 2);
+  assert.equal(listed.reminders.length, 1);
+  assert.equal(listed.reminders[0].name, "滤芯");
+  assert.equal(listed.reminders[0].due_date, "2026-12-01");
+
+  // 缺 expected_household_id:remindComplete / remindClear 均 FAMILY_SWITCHED 且零写入
+  var noMarker = await entry.main({ action: "remindComplete", item_id: created.item.item_id, period_days: 30 });
+  assert.equal(noMarker.ok, false);
+  assert.equal(noMarker.error, "FAMILY_SWITCHED");
+  var noMarkerClear = await entry.main({ action: "remindClear", item_id: created.item.item_id });
+  assert.equal(noMarkerClear.ok, false);
+  assert.equal(noMarkerClear.error, "FAMILY_SWITCHED");
+  assert.equal(
+    (await rawDocs(db, "reminders")).data.filter(function (r) { return r.status === "active"; }).length,
+    1,
+    "硬门拒绝必须零写入"
+  );
+
+  // 旧修订号:一致 household + 旧 scope_revision → FAMILY_STALE_SCOPE 零写入
+  var stale = await entry.main({
+    action: "remindComplete",
+    item_id: created.item.item_id,
+    period_days: 30,
+    expected_household_id: SHARED_1,
+    expected_scope_revision: 1
+  });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.error, "FAMILY_STALE_SCOPE");
+  assert.equal(
+    (await rawDocs(db, "reminders")).data.filter(function (r) { return r.status === "active"; }).length,
+    1,
+    "旧修订号同样零写入"
+  );
+
+  // 一致双 marker:完成并按周期再生(完成日为服务端当天,UTC 日期)
+  var done = await entry.main({
+    action: "remindComplete",
+    item_id: created.item.item_id,
+    period_days: 30,
+    expected_household_id: SHARED_1,
+    expected_scope_revision: 2
+  });
+  assert.equal(done.ok, true, JSON.stringify(done));
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(done.reminder.due_date), "再生提醒日期为 YYYY-MM-DD");
+  assert.equal(done.reminder.kind, "下次维护", "周期再生语义");
+  var rows = (await rawDocs(db, "reminders")).data;
+  assert.equal(
+    rows.filter(function (r) { return r.status === "active"; }).length,
+    1,
+    "周期再生恰一条新 active"
+  );
+  assert.equal(
+    rows.filter(function (r) { return r.status === "done"; }).length,
+    1,
+    "原提醒置 done 保留历史"
+  );
+
+  // 家庭解析失败(active 查询异常):提醒读同样失败关闭,绝不回退个人家庭
+  var db2 = createMemoryDb();
+  var broken = throwingCollectionDb(db2, "active_household");
+  var stub2 = {
+    sdk: {
+      DYNAMIC_CURRENT_ENV: "env-dynamic",
+      init: function () {},
+      getWXContext: function () {
+        return { OPENID: "o-closed-rem" };
+      },
+      database: function () {
+        return broken;
+      }
+    }
+  };
+  var entry2 = loadCloudFunction(path.join(ROOT, "cloudfunctions", "itemsApi", "index.js"), stub2.sdk);
+  var closed = await entry2.main({ action: "remindList" });
+  assert.equal(closed.ok, false);
+  assert.equal(closed.error, "HOUSEHOLD_UNAVAILABLE");
+  assert.equal(typeof closed.message, "string");
+  var closedWrite = await entry2.main({ action: "remindClear", item_id: "it_x" });
+  assert.equal(closedWrite.ok, false);
+  assert.equal(closedWrite.error, "HOUSEHOLD_UNAVAILABLE", "失败关闭先于一切提醒写操作");
+  assert.equal((await rawDocs(db2, "reminders")).data.length, 0, "失败关闭零写入");
 });

@@ -76,7 +76,7 @@
           />
         </view>
         <block wx:if="{{ rows[0].certain }}">
-          <view class="sumrow">
+          <view class="sumrow {{ rows[0].remindAt || rows[0].remindTouched ? 'line' : '' }}">
             <view class="k">位置</view>
             <view class="v {{ rows[0].locationText ? '' : 'warn' }}">{{ rows[0].locationText || '还没写位置' }}</view>
             <view class="sum-edit" data-field="location" bindtap="onToggleEdit">改</view>
@@ -94,12 +94,34 @@
             />
           </view>
         </block>
+        <!-- 提醒行(#36):原话里明确说了日期才显示;改=日期选择器弹层,✕=连日期一起清除(灰显「不提醒」);没提取到不催 -->
+        <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sumrow">
+          <view class="k">提醒</view>
+          <view class="v {{ rows[0].remindAt ? '' : 'muted' }}">{{ rows[0].remindAt ? rows[0].remindAt + ' 到期' : '不提醒' }}</view>
+          <picker
+            mode="date"
+            value="{{ rows[0].remindAt || today }}"
+            disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
+            bindchange="onRemindDateChange"
+          >
+            <view class="sum-edit">选日期</view>
+          </picker>
+          <view
+            wx:if="{{ rows[0].remindAt }}"
+            class="remind-clear"
+            data-index="0"
+            bindtap="onRemindClear"
+          >✕</view>
+        </view>
         <view wx:if="{{ rows[0].status !== 'pending' }}" class="sum-status">
           <text wx:if="{{ rows[0].status === 'saved' }}" class="st saved">已记住</text>
           <text wx:elif="{{ rows[0].status === 'saving' }}" class="st saving">保存中…</text>
           <text wx:elif="{{ rows[0].status === 'failed' }}" class="st failed">未保存</text>
         </view>
       </view>
+
+      <!-- 纪律句(#36):只在提醒行存在时显示;日期只来自原话或日期选择器 -->
+      <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sum-meta remind-note">时间只来自你说的话;没说清就不带提醒,不猜日期。</view>
 
       <!-- C1b:位置没听清的警示框(常驻展开,不藏进折叠) -->
       <view wx:if="{{ !rows[0].certain }}" class="warnbox">
@@ -196,6 +218,8 @@
             bindinput="onRowLocationInput"
           />
         </view>
+        <!-- 提醒角标(#36):原话里明确说了日期的行在副文下小字标出;不参与勾选逻辑 -->
+        <view wx:if="{{ item.remindAt }}" class="remind-badge">{{ item.remindBadgeText }}</view>
         <view wx:if="{{ !item.certain && !item.checked && item.status !== 'saved' }}" class="row-warn-line">没听清放在哪儿;补上位置再勾选。</view>
 
         <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>

@@ -26,6 +26,14 @@ export interface DraftSessionRowState {
   status: "pending" | "saving" | "saved" | "failed";
   failMsg: string;
   operationId: string;
+  /**
+   * 行内提醒日期(issue #36,YYYY-MM-DD;""=用户清除了/本就没有):
+   * 用户可能在确认页经日期选择器改过或清过,恢复时以回写值为准覆盖草稿提取值。
+   * 可选字段:旧版本会话缺省时确认页回落草稿提取值。
+   */
+  remindAt?: string;
+  /** 用户动过提醒行(清除后行仍显示灰显「不提醒」),恢复时保持 */
+  remindTouched?: boolean;
 }
 
 export interface DraftSessionPayload {

@@ -7,6 +7,10 @@ import type {
 } from "../../types";
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
 import {
+  countDue,
+  dueBannerText,
+} from "../../utils/remind-ui";
+import {
   captureScopeGeneration,
   isHouseholdScopeShared,
   isScopeGenerationCurrent,
@@ -78,6 +82,11 @@ Page<
     queryError: string;
     /** 未完成草稿会话恢复入口(非空时显示横幅) */
     resumeSession: { sid: string; count: number } | null;
+    /**
+     * 到期横幅(#36,仅家里层显示):remindList 有 active 且(已过期或 7 天内)
+     * 才非空;加载失败保持 null 静默(横幅属增强,不影响地图),切换家庭随作用域清。
+     */
+    dueBanner: { text: string; overdue: number; soon: number } | null;
     /** 家庭上下文头:共享家庭=「我们家」(带圆点),个人=「我的家」 */
     familyShared: boolean;
     /** 首用态(H0):根层既无房间也无未归位物品 */
@@ -180,6 +189,9 @@ Page<
     ): void;
     /** 「我们家/我的家」入口:进家庭管理页 */
     onFamilyTap(): void;
+    /** 到期横幅:拉计数、上屏与清空(#36;失败静默) */
+    refreshDueBanner(): Promise<void>;
+    onDueBannerTap(): void;
   }
 >({
   data: {
@@ -190,6 +202,7 @@ Page<
     queryResults: [],
     queryError: "",
     resumeSession: null as { sid: string; count: number } | null,
+    dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
     firstUse: false,
     mapLoading: true,
@@ -255,6 +268,8 @@ Page<
     void ensureScopeVerified().then(() => {
       this.setData({ resumeSession: this.currentResumeSession() });
     });
+    // 到期横幅(#36):同样资格复核后拉取;失败静默,不影响地图
+    void this.refreshDueBanner();
   },
 
   onHide() {
@@ -483,6 +498,8 @@ Page<
         queryKeyword: "",
         queryResults: [],
         queryError: "",
+        // 到期横幅随作用域一起清(#36):不把旧家庭的到期数带到新家庭
+        dueBanner: null,
       });
     }
     const nodeId = this.viewStack.length > 0
@@ -555,6 +572,8 @@ Page<
           queryKeyword: "",
           queryResults: [],
           queryError: "",
+          // 到期横幅随作用域一起清(#36):不把旧家庭的到期数带到新家庭
+          dueBanner: null,
         });
         void this.loadMapLayer(false, false);
         return;
@@ -937,6 +956,46 @@ Page<
   onFamilyTap() {
     wx.navigateTo({
       url: "/pages/family/family",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /**
+   * 到期横幅(#36 三阶段):remindList 有 active 且(已过期或 7 天内)时上屏
+   * 「⏰ N 件已过期,M 件这几天到期」。横幅属增强:加载失败静默隐藏、
+   * 绝不影响地图;家庭切换(作用域代数变化)后在途响应不上屏。
+   * 展示前先经 households 资格复核(硬门 C),不显示旧家庭数据。
+   */
+  async refreshDueBanner() {
+    await ensureScopeVerified();
+    const scopeGen = captureScopeGeneration();
+    try {
+      const res = await callItemsApi({ action: "remindList" });
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return; // 在途期间家庭已切换:旧家庭的到期数不上屏
+      }
+      const counts = countDue(res.reminders);
+      if (counts.overdue === 0 && counts.soon === 0) {
+        this.setData({ dueBanner: null });
+        return;
+      }
+      this.setData({
+        dueBanner: { ...counts, text: dueBannerText(counts) },
+      });
+    } catch (e) {
+      // 失败静默:横幅不显示,地图照常
+      if (isScopeGenerationCurrent(scopeGen)) {
+        this.setData({ dueBanner: null });
+      }
+    }
+  },
+
+  /** 点横幅:进「快到期的东西」(R1) */
+  onDueBannerTap() {
+    wx.navigateTo({
+      url: "/pages/reminders/reminders",
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },

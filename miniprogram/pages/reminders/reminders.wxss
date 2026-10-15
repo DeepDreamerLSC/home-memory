@@ -1,0 +1,187 @@
+/* 快到期页(R1,#36 三阶段)——照 docs/design/issue45-v02 原型 R1 屏逐px换算(1px=2rpx)
+   行=首字图标+物品名+位置+日期胶囊三态色(danger/banner-bg/card-inset 变量) */
+
+.r-head {
+  margin: 24rpx 36rpx 0;
+}
+
+.lead {
+  font-size: 25rpx;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin-top: 8rpx;
+}
+
+/* X1 骨架(原型 .skel 70px) */
+.r-skel {
+  height: 140rpx;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 30rpx;
+  margin: 20rpx 36rpx 0;
+}
+
+/* X2 失败态 */
+.fail-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 120rpx;
+}
+
+.fail-ico {
+  font-size: 80rpx;
+}
+
+.fail-title {
+  font-size: 52rpx;
+  font-weight: 800;
+  margin-top: 16rpx;
+}
+
+.fail-sub {
+  font-size: 25rpx;
+  color: var(--text-2);
+  margin-top: 12rpx;
+}
+
+.fail-btn {
+  width: 60%;
+  margin-top: 32rpx;
+}
+
+/* 墨底主 CTA(再试一次) */
+.btn.ink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  border-radius: 30rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.btn.ink.block {
+  display: flex;
+  width: 100%;
+}
+
+/* 空态(原型 .empty-note) */
+.empty-note {
+  margin: 24rpx 36rpx 0;
+  border: 2rpx dashed var(--line);
+  border-radius: 28rpx;
+  padding: 28rpx;
+  background: var(--card);
+}
+
+.empty-note-main {
+  font-size: 24rpx;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.empty-note-sub {
+  font-size: 22rpx;
+  color: var(--text-3);
+  margin-top: 6rpx;
+  line-height: 1.7;
+}
+
+/* 分组标题 */
+.section-label {
+  margin: 40rpx 36rpx 18rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* 行列表(原型 .item+.item 间距 8px) */
+.r-list {
+  margin: 0 36rpx;
+}
+
+.r-row {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  padding: 22rpx 20rpx;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 30rpx;
+  color: var(--text);
+  margin-top: 16rpx;
+  min-height: 140rpx;
+  box-sizing: border-box;
+}
+
+.r-row-hover {
+  background: var(--card-inset);
+}
+
+/* 日期胶囊三态色(原型 .duepill;全部走主题变量) */
+.duepill {
+  font-size: 22rpx;
+  font-weight: 800;
+  border-radius: 999rpx;
+  padding: 6rpx 20rpx;
+  flex: none;
+}
+
+.duepill.over {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.duepill.soon {
+  background: var(--banner-bg);
+  color: var(--text);
+}
+
+.duepill.later {
+  background: var(--card-inset);
+  color: var(--text-2);
+}
+
+/* 「用完了」(原型 .r1-done;触点 ≥88rpx) */
+.r-done {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 20rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  min-height: 88rpx;
+  padding: 0 20rpx;
+}
+
+.r-done.busy {
+  opacity: 0.5;
+}
+
+/* 底部纪律说明(原型 .note) */
+.note {
+  background: var(--card-inset);
+  border-radius: 28rpx;
+  padding: 24rpx 26rpx;
+  margin: 32rpx 36rpx 0;
+}
+
+.note-title {
+  font-size: 25rpx;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8rpx;
+}
+
+.note-text {
+  font-size: 23rpx;
+  color: var(--text-2);
+  line-height: 1.65;
+}

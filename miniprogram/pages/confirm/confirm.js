@@ -3,6 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const batch_save_1 = require("../../utils/batch-save");
 const draft_session_1 = require("../../utils/draft-session");
+/** 本地日期 → YYYY-MM-DD( picker mode=date 的 value 形态) */
+function todayYmd(now = new Date()) {
+    const pad = (n) => (n < 10 ? "0" + n : String(n));
+    return (now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()));
+}
+/**
+ * C2 角标文案:今年的日期紧凑显示 MM-DD,跨年带全年(绝不误导是哪一年);
+ * 只切字符串,不做任何日期推算。
+ */
+function remindBadgeText(dateYmd, now = new Date()) {
+    const sameYear = dateYmd.slice(0, 4) === String(now.getFullYear());
+    return (sameYear ? dateYmd.slice(5) : dateYmd) + " 到期";
+}
 Page({
     data: {
         isManual: false,
@@ -21,6 +34,7 @@ Page({
         quoteOpen: false,
         editingName: false,
         editingLocation: false,
+        today: todayYmd(),
     },
     /** 草稿会话 id(onUnload 清理用) */
     sid: "",
@@ -44,26 +58,39 @@ Page({
             return;
         }
         this.sid = sid;
-        const rows = payload.drafts.map((d, i) => ({
-            key: "row-" + i,
-            name: d.name,
-            locationText: d.location_text,
-            // 默认勾选决策下沉 utils:位置确定且有专属证据、锚定不共享才默认勾;
-            // 位置没听清的(certain=false)一律不默认勾(B3),补充位置后由用户明确勾选;
-            // 其余(无证据/整句共享)人工核对后手动勾
-            checked: (0, batch_save_1.shouldDefaultChecked)(d.source_quote, d.anchor_shared === true, d.certain === true),
-            status: "pending",
-            failMsg: "",
-            operationId: (0, api_1.uuid)(),
-            certain: d.certain,
-            qualifiersText: d.qualifiers.join("、"),
-            sourceQuote: d.source_quote,
-            anchorShared: d.anchor_shared === true,
-        }));
+        const rows = payload.drafts.map((d, i) => {
+            // 提醒候选三项(#36):只透传服务端已锚定的原话绝对日期;
+            // 没提取到日期 remindAt 为空串,提醒行整行不显示(不催)
+            const remindAt = d.remind_at ?? "";
+            return {
+                key: "row-" + i,
+                name: d.name,
+                locationText: d.location_text,
+                // 默认勾选决策下沉 utils:位置确定且有专属证据、锚定不共享才默认勾;
+                // 位置没听清的(certain=false)一律不默认勾(B3),补充位置后由用户明确勾选;
+                // 其余(无证据/整句共享)人工核对后手动勾
+                checked: (0, batch_save_1.shouldDefaultChecked)(d.source_quote, d.anchor_shared === true, d.certain === true),
+                status: "pending",
+                failMsg: "",
+                operationId: (0, api_1.uuid)(),
+                certain: d.certain,
+                qualifiersText: d.qualifiers.join("、"),
+                sourceQuote: d.source_quote,
+                anchorShared: d.anchor_shared === true,
+                remindAt,
+                remindOrigin: remindAt,
+                remindKind: d.remind_kind ?? "",
+                remindQuote: d.remind_quote ?? "",
+                remindTouched: false,
+                remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
+            };
+        });
         // 恢复上次未完成的行状态:沿用原 operation_id(幂等恢复,不重复建档),
-        // 已保存行保持 saved 不再提交
+        // 已保存行保持 saved 不再提交;提醒日期以会话回写值为准(用户可能改/清过),
+        // 旧版本会话缺省该字段时回落草稿提取值
         if (payload.rows && payload.rows.length === rows.length) {
             payload.rows.forEach((saved, i) => {
+                const remindAt = typeof saved.remindAt === "string" ? saved.remindAt : rows[i].remindAt;
                 rows[i] = {
                     ...rows[i],
                     name: saved.name,
@@ -72,6 +99,9 @@ Page({
                     status: saved.status,
                     failMsg: saved.failMsg,
                     operationId: saved.operationId,
+                    remindAt,
+                    remindTouched: saved.remindTouched === true || rows[i].remindTouched,
+                    remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
                 };
             });
         }
@@ -113,6 +143,9 @@ Page({
             status: r.status,
             failMsg: r.failMsg,
             operationId: r.operationId,
+            // 行内提醒可能被用户改/清过,一并回写(恢复时覆盖草稿提取值)
+            remindAt: r.remindAt,
+            remindTouched: r.remindTouched,
         }));
         (0, draft_session_1.updateDraftSessionRows)(this.sid, rows);
     },
@@ -285,6 +318,49 @@ Page({
         }
     },
     /**
+     * 单件提醒行「选日期」(#36 冻结:手动侧唯一日期来源=微信 picker mode=date 弹层,
+     * 绝无自由文本输入)。picker 回填必为合法 YYYY-MM-DD,异常值不写。
+     * 只改日期,不参与勾选逻辑(勾选仍由位置/证据决定)。
+     */
+    onRemindDateChange(e) {
+        if (this.data.batchSaving) {
+            return; // 整批提交中冻结:本轮写入的就是本轮开始时看到的
+        }
+        const row = this.data.rows[0];
+        if (!row || row.status === "saving" || row.status === "saved") {
+            return; // 已保存的行不再改(事实已入库)
+        }
+        const value = e.detail && typeof e.detail.value === "string" ? e.detail.value : "";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            return;
+        }
+        this.setData({
+            "rows[0].remindAt": value,
+            "rows[0].remindTouched": true,
+            "rows[0].remindBadgeText": remindBadgeText(value),
+        });
+        this.persistRows();
+    },
+    /**
+     * 单件提醒行「✕」:连日期一起清除,行灰显「不提醒」——日期的唯一作用就是到期
+     * 出现在快到期列表里,不存在也不需要「存日期但不提醒」的模式。
+     */
+    onRemindClear() {
+        if (this.data.batchSaving) {
+            return;
+        }
+        const row = this.data.rows[0];
+        if (!row || row.status === "saving" || row.status === "saved" || row.remindAt === "") {
+            return;
+        }
+        this.setData({
+            "rows[0].remindAt": "",
+            "rows[0].remindTouched": true,
+            "rows[0].remindBadgeText": "",
+        });
+        this.persistRows();
+    },
+    /**
      * 批量保存:提交瞬间对整页行做不可变快照,快照里的名称/位置/幂等键即本轮写入内容
      * (UI 冻结之外的第二道防线);逐行 create 由 runBatchSave 编排,行内固定
      * operation_id,失败行重试沿用原键。「一次确认」不是数据库原子事务——逐行如实反馈。
@@ -304,12 +380,26 @@ Page({
             return;
         }
         this.setData({ batchSaving: true });
-        const finalRows = await (0, batch_save_1.runBatchSave)(snapshot, (row) => (0, api_1.callItemsApi)({
-            action: "create",
-            operation_id: row.operationId,
-            name: row.name.trim(),
-            location_text: row.locationText.trim(),
-        }).then(() => undefined), (row, error) => {
+        const finalRows = await (0, batch_save_1.runBatchSave)(snapshot, (row) => {
+            // 行内提醒随 create 提交(可能被用户改/清过):行内还有日期才带;
+            // quote 只在日期仍是原话提取值时携带——日期选择器改过的提醒没有原话锚点
+            const reminder = row.remindAt !== "" && row.remindKind !== ""
+                ? {
+                    due_date: row.remindAt,
+                    kind: row.remindKind,
+                    quote: row.remindAt === row.remindOrigin && row.remindQuote !== ""
+                        ? row.remindQuote
+                        : undefined,
+                }
+                : undefined;
+            return (0, api_1.callItemsApi)({
+                action: "create",
+                operation_id: row.operationId,
+                name: row.name.trim(),
+                location_text: row.locationText.trim(),
+                ...(reminder ? { reminder } : {}),
+            }).then(() => undefined);
+        }, (row, error) => {
             const index = this.data.rows.findIndex((r) => r.key === row.key);
             if (index === -1) {
                 return;

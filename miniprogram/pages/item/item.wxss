@@ -268,3 +268,111 @@
   background: var(--banner-bg);
   border: 2rpx solid var(--banner-line);
 }
+
+/* ============ 保质期行(#36,原型 .expire-row:有 active 提醒才显示) ============ */
+.expire-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  border: 2rpx solid var(--danger-shadow);
+  background: var(--danger-bg);
+  border-radius: 30rpx;
+  padding: 24rpx 28rpx;
+  margin: 24rpx 36rpx 0;
+}
+
+.expire-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.expire-t {
+  font-size: 27rpx;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.expire-sub {
+  font-size: 22rpx;
+  color: var(--danger);
+  margin-top: 6rpx;
+}
+
+/* 「用完了」(原型 .r1-done;触点 ≥88rpx) */
+.r-done {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  border-radius: 20rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  min-height: 88rpx;
+  padding: 0 20rpx;
+}
+
+.r-done.busy {
+  opacity: 0.5;
+}
+
+/* ============ 编辑折叠「提醒」字段(#36 十五轮:picker mode=date + ✕ 清除) ============ */
+.remind-field {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.remind-field picker {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 日期按钮行(原型 .field-btn) */
+.field-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  min-height: 92rpx;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  border-radius: 20rpx;
+  padding: 22rpx 24rpx;
+  font-size: 28rpx;
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.field-val {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.field-ph {
+  color: var(--text-3);
+}
+
+.field-chev {
+  color: var(--text-3);
+  font-size: 32rpx;
+  font-weight: 300;
+}
+
+/* 「✕」清除(原型 .clearx;触点 ≥88rpx) */
+.clearx {
+  flex: none;
+  width: 88rpx;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--line);
+  background: var(--card);
+  color: var(--text-3);
+  border-radius: 50%;
+  font-size: 28rpx;
+}

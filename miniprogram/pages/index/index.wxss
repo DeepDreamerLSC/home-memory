@@ -85,6 +85,38 @@
   color: var(--text);
 }
 
+/* ============ 到期横幅(#36,原型 .remind-banner:家里层、有过期/临期才显示) ============ */
+.due-banner {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-top: 20rpx;
+  padding: 22rpx 26rpx;
+  border: 2rpx solid var(--danger-shadow);
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-radius: 28rpx;
+  font-size: 26rpx;
+  font-weight: 750;
+  min-height: 88rpx;
+  box-sizing: border-box;
+}
+
+.due-banner-hover {
+  opacity: 0.82;
+}
+
+.due-banner-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.due-banner-arrow {
+  flex: none;
+  font-size: 28rpx;
+}
+
 /* 中间区域统一左右边距(原型 viewport 18px) */
 .map-area {
   margin: 0 36rpx;
