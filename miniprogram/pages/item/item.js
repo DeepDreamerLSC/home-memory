@@ -87,6 +87,7 @@ Page({
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
     remindOriginal: "",
+    remindRemoteUnknown: false,
     remoteRemindKind: "下次维护",
     pendingRetry: null,
     onLoad(options) {
@@ -146,8 +147,10 @@ Page({
         this.setData({ familyShared: (0, household_scope_1.isHouseholdScopeShared)() });
         // 保质期行(#36):进页/回页时按服务端提醒刷新;加载失败静默不显示(增强露出)。
         // 提醒冲突待选时不刷:面板里「你的修改」是用户正要存的值,回页刷新会把它
-        // 悄悄换回服务端值(文字字段没有 onShow 刷新,提醒同口径不搞特殊)
-        if (!this.hasRemindConflict()) {
+        // 悄悄换回服务端值(文字字段没有 onShow 刷新,提醒同口径不搞特殊)。
+        // 表单里还有待补写的提醒选择时(冲突刷新那轮提醒远端不可得,选择留在表单
+        // 等保存补写)同样不刷:refreshReminderRow 会先清空 remindAt,选择会无痕蒸发
+        if (!this.hasRemindConflict() && this.pendingRemindWrite() === null) {
             void this.refreshReminderRow();
         }
     },
@@ -427,13 +430,16 @@ Page({
                 }
                 catch (e2) {
                     if (e2 instanceof api_1.ApiError && e2.code === "VERSION_CONFLICT") {
-                        // 提交瞬间提醒又被他处改过:文本部分已存好,提醒重新比较、再次显式选择
+                        // 提交瞬间提醒又被他处改过:文本部分已存好,提醒重新比较、再次显式选择;
+                        // 提醒行拉取失败时远端不可得:选择留在表单等下次保存补写,如实说没存上
                         const result = await this.refreshForConflict();
                         if (result === "refreshed") {
                             wx.showToast({
                                 title: this.data.conflictPending
                                     ? "提醒与最新记录冲突,请选择保留哪一版"
-                                    : "这条提醒刚被家人改过,已刷新",
+                                    : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                                        ? "提醒没存上,你的选择已保留,点保存修改再试"
+                                        : "这条提醒刚被家人改过,已刷新",
                                 icon: "none",
                                 duration: 2500,
                             });
@@ -544,7 +550,8 @@ Page({
      * - 非冲突字段:静默三方合并(用户改过保留用户值,否则采纳服务端值),既有语义;
      * - 冲突字段(双方都改且互不相同):进入冲突态,编辑折叠内并排两版值,
      *   逐项显式选择后才能再次保存,绝不静默覆盖。
-     * 提醒行拉取失败或家庭在途切换时不猜远端(该字段本轮不参与比较)。
+     * 提醒行拉取失败或家庭在途切换时不猜远端:该字段本轮不参与比较、基准维持
+     * 原值,用户待写的提醒选择留在表单等下次保存补写(见函数内注释)。
      */
     async refreshForConflict() {
         let item;
@@ -565,8 +572,13 @@ Page({
             return "error";
         }
         const row = await this.fetchReminderRow();
-        // 提醒不可得(undefined)时以表单现值充当远端:本轮提醒不判冲突、不被改写
-        const remoteRemind = row === undefined ? this.data.remindAt : row ? row.due_date : "";
+        // 提醒远端不可得(undefined,拉取失败/在途家庭切换)时不猜远端:本轮按「未变」
+        // 参与比较(不判冲突、不改表单),但基准绝不向表单现值对齐——对齐会让用户
+        // 待写的提醒选择蒸发(表单与基准一致后,既不随保存补写、也进不了冲突面板)。
+        // 基准维持原值,选择留在表单,下次保存按原所见轮次号补写;届时他处若又改过,
+        // 服务端轮次门禁会再次拦下、重新进流程
+        this.remindRemoteUnknown = row === undefined;
+        const remoteRemind = row === undefined ? this.remindOriginal : row ? row.due_date : "";
         const outcome = (0, conflict_1.mergeLatest)({ ...this.original, remind: this.remindOriginal }, {
             name: this.data.name.trim(),
             location: this.data.locationText.trim(),
@@ -585,7 +597,10 @@ Page({
             location: item.location_text,
             note: item.note || "",
         };
-        this.remindOriginal = remoteRemind;
+        if (row !== undefined) {
+            // 只有远端提醒真拿到了才对齐基准;不可得时维持原基准(见上方注释)
+            this.remindOriginal = remoteRemind;
+        }
         this.remoteRemindKind = row ? row.kind : "下次维护";
         const hasConflicts = outcome.conflicts.length > 0;
         const shown = outcome.merged.remind;
@@ -1124,9 +1139,11 @@ Page({
                     wx.showToast({
                         title: this.data.conflictPending
                             ? "提醒与最新记录冲突,请选择保留哪一版"
-                            : hadReminder
-                                ? "这条提醒刚被家人改过,已刷新"
-                                : "这条刚带上提醒,已刷新",
+                            : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                                ? "提醒没存上,你的选择已保留,点保存修改再试"
+                                : hadReminder
+                                    ? "这条提醒刚被家人改过,已刷新"
+                                    : "这条刚带上提醒,已刷新",
                         icon: "none",
                         duration: 2500,
                     });
@@ -1189,7 +1206,9 @@ Page({
                     wx.showToast({
                         title: this.data.conflictPending
                             ? "提醒与最新记录冲突,请选择保留哪一版"
-                            : "这条提醒刚被家人改过,已刷新",
+                            : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                                ? "提醒没存上,你的选择已保留,点保存修改再试"
+                                : "这条提醒刚被家人改过,已刷新",
                         icon: "none",
                         duration: 2500,
                     });
