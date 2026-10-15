@@ -1235,6 +1235,20 @@ Page<
     if (!expire) {
       return;
     }
+    if (this.hasRemindConflict() || this.pendingRemindWrite() !== null) {
+      // F4-B1(架构复审阻断):提醒冲突待选或待补写时,到期行显示的是「你正要
+      // 存的候选」预览,不是已确认的当前提醒——此时完成会以刷新对齐的远端新
+      // 轮次调 remindComplete,可能替家人收掉他刚设的提醒,绕开选边硬门。
+      // 失败关闭:先处理冲突(选边保存 / 补写),到期行照常显示候选供对照。
+      wx.showToast({
+        title: this.hasRemindConflict()
+          ? "提醒冲突还没处理,先选保留哪一版"
+          : "提醒还没存上,先保存修改,再点用完了",
+        icon: "none",
+        duration: 2500,
+      });
+      return;
+    }
     const confirmed = await askUseUp(this.data.name);
     if (!confirmed) {
       return; // 用户取消:不动、不写
@@ -1315,11 +1329,21 @@ Page<
       wx.showToast({ title: problem, icon: "none" });
       return;
     }
-    if (this.hasRemindConflict()) {
-      // 冲突面板已把「提醒」列为待选字段:改日期只更新面板「你的修改」并撤回
-      // 已有选择,不直接落库——与文本输入框同一门禁口径,必须点按钮显式选边
+    if (this.hasRemindConflict() || this.pendingRemindWrite() !== null) {
+      // 冲突面板已把「提醒」列为待选字段,或冲突刷新后提醒远端不可得、选择还
+      // 留在表单等保存补写(F4-B1):改日期只更新「你的修改」/候选并撤回已有
+      // 选择,不直接落库——与文本输入框同一门禁口径,必须点按钮显式选边或经
+      // 保存修改补写;表单里的是候选,不是已确认的当前提醒
       this.setPendingRemind(value);
       this.syncConflictFromInput("remind", value);
+      if (!this.hasRemindConflict()) {
+        // 无面板的待补写态:面板不会给出可见反馈,如实告知没存上并引导补写
+        wx.showToast({
+          title: "提醒没存上,你的选择已保留,点保存修改再试",
+          icon: "none",
+          duration: 2500,
+        });
+      }
       return;
     }
     const hadReminder = this.data.remindAt !== "";
@@ -1392,11 +1416,19 @@ Page<
     if (this.data.remindBusy || !this.data.remindAt) {
       return;
     }
-    if (this.hasRemindConflict()) {
-      // 冲突面板待选期间:清除只更新面板「你的修改」为「不带提醒」并撤回选择,
-      // 不直接落库——必须点按钮显式选边
+    if (this.hasRemindConflict() || this.pendingRemindWrite() !== null) {
+      // 冲突面板待选期间,或提醒远端不可得、选择还在表单待补写(F4-B1):
+      // 清除只更新面板「你的修改」/候选为「不带提醒」并撤回选择,不直接落库
+      // ——必须点按钮显式选边,或经保存修改补写
       this.setPendingRemind("");
       this.syncConflictFromInput("remind", "");
+      if (!this.hasRemindConflict()) {
+        wx.showToast({
+          title: "提醒没存上,你的选择已保留,点保存修改再试",
+          icon: "none",
+          duration: 2500,
+        });
+      }
       return;
     }
     this.setData({ remindBusy: true });
