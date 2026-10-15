@@ -91,12 +91,12 @@ page {
   padding-bottom: calc(160rpx + env(safe-area-inset-bottom));
 }
 
+/* 卡片:原型 .card(radius 18px、padding 15px 14px、内容边距 18px,无投影) */
 .card {
   background: var(--card);
-  border-radius: 24rpx;
-  padding: 32rpx 28rpx;
-  margin: 24rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+  border-radius: 36rpx;
+  padding: 30rpx 28rpx;
+  margin: 24rpx 36rpx;
 }
 
 .card-head {
@@ -127,16 +127,16 @@ page {
   color: var(--placeholder);
 }
 
-/* 输入控件:内嵌深槽 */
+/* 输入控件:原型 .field input(白卡底 + 描边圆角,内嵌槽感来自描边而非深底) */
 .memo-input {
   width: 100%;
   min-height: 140rpx;
-  background: var(--card-inset);
-  border: none;
-  border-radius: 16rpx;
-  padding: 20rpx;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 24rpx;
+  padding: 22rpx 24rpx;
   box-sizing: border-box;
-  font-size: 28rpx;
+  font-size: 27rpx;
   color: var(--text);
 }
 
@@ -148,23 +148,25 @@ page {
 }
 
 .input {
-  background: var(--card-inset);
-  border: none;
-  border-radius: 16rpx;
-  padding: 16rpx 20rpx;
-  font-size: 28rpx;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 24rpx;
+  padding: 22rpx 24rpx;
+  font-size: 27rpx;
   color: var(--text);
+  min-height: 92rpx;
+  box-sizing: border-box;
 }
 
 .textarea {
   width: 100%;
-  min-height: 120rpx;
-  background: var(--card-inset);
-  border: none;
-  border-radius: 16rpx;
-  padding: 16rpx 20rpx;
+  min-height: 176rpx;
+  background: var(--card);
+  border: 1rpx solid var(--line);
+  border-radius: 24rpx;
+  padding: 22rpx 24rpx;
   box-sizing: border-box;
-  font-size: 28rpx;
+  font-size: 27rpx;
   color: var(--text);
 }
 
@@ -188,14 +190,19 @@ page {
   margin-left: 16rpx;
 }
 
-/* 按钮:明黄主操作(一屏一个强调面) */
+/* 按钮:原型 .btn(radius 14px、min-height 50px、14px/750);主操作一律墨底黄字(--go-*),大面积明黄只留给语音入口 */
 button.btn {
-  border-radius: 16rpx;
-  font-size: 30rpx;
-  line-height: 2.4;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 28rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  min-height: 100rpx;
+  line-height: 1.2;
   padding-left: 0;
   padding-right: 0;
+  box-sizing: border-box;
 }
 
 button.btn::after {
@@ -203,18 +210,20 @@ button.btn::after {
 }
 
 button.btn.primary {
-  background: var(--accent);
-  color: #191919;
+  background: var(--go-bg);
+  color: var(--go-fg);
 }
 
 button.btn.primary[disabled] {
-  background: var(--accent-dim);
-  color: var(--placeholder);
+  background: var(--go-bg);
+  color: var(--go-fg);
+  opacity: 0.38;
 }
 
 button.btn.danger {
   background: var(--danger-bg);
   color: var(--danger);
+  border: 3rpx solid var(--danger);
 }
 
 button.btn.block {
@@ -235,20 +244,20 @@ button.btn.block {
   border-bottom: none;
 }
 
-/* 条目图标块:黑底白字首字(两主题通用,参考图的几何块) */
+/* 条目图标块:原型 .ico(42px 方块、radius 12px、墨底黄字,随主题翻转) */
 .item-icon {
-  width: 72rpx;
-  height: 72rpx;
-  margin-right: 20rpx;
+  width: 84rpx;
+  height: 84rpx;
+  margin-right: 22rpx;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #111111;
-  border-radius: 18rpx;
-  color: #f5f4f0;
-  font-size: 30rpx;
-  font-weight: 600;
+  background: var(--go-bg);
+  border-radius: 24rpx;
+  color: var(--accent);
+  font-size: 32rpx;
+  font-weight: 800;
 }
 
 .item-main {
@@ -258,20 +267,21 @@ button.btn.block {
 
 .item-name {
   font-size: 30rpx;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
 }
 
 .item-location {
-  font-size: 26rpx;
+  font-size: 23rpx;
   color: var(--text-2);
-  margin-top: 2rpx;
+  margin-top: 6rpx;
 }
 
 .chevron {
   margin-left: 12rpx;
   color: var(--text-3);
-  font-size: 32rpx;
+  font-size: 48rpx;
+  font-weight: 300;
   flex-shrink: 0;
 }
 
@@ -290,7 +300,7 @@ button.btn.block {
 
 /* 确认页 / 详情页表单:AI 草稿 = 黄底横幅(与已确认事实视觉分离) */
 .banner {
-  margin: 24rpx;
+  margin: 24rpx 36rpx;
   padding: 20rpx 24rpx;
   background: var(--banner-bg);
   color: var(--text);
@@ -308,7 +318,7 @@ button.btn.block {
 }
 
 .qualifiers {
-  margin: 12rpx 24rpx 0;
+  margin: 12rpx 36rpx 0;
   font-size: 24rpx;
   color: var(--text-2);
 }
