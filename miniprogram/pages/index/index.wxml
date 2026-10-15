@@ -1,7 +1,7 @@
 <!-- 容器抬头:返回胶囊(逐层退回)+ 抬头(随容器变)+ 「⋯」整理位置 + 刷新指示 -->
 <template name="map-head">
   <view class="map-head">
-    <view wx:if="{{ backLabel }}" class="backchip" bindtap="onBackTap">‹ {{ backLabel }}</view>
+    <view wx:if="{{ backLabel }}" class="backchip" hover-class="backchip-hover" hover-stay-time="80" bindtap="onBackTap">‹ {{ backLabel }}</view>
     <view class="mtitle">{{ mapTitle }}</view>
     <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
     <view wx:if="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
@@ -138,8 +138,8 @@
       <block wx:elif="{{ mapLoading }}">
         <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
         <view class="skel-grid">
-          <view class="skel-tile {{ index % 2 === 1 ? 'odd' : '' }}" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this"></view>
-          <view class="skel-wide"></view>
+          <view class="skel-tile {{ index % 2 === 1 ? 'odd' : '' }}" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this"><view class="skel-shimmer"></view></view>
+          <view class="skel-wide"><view class="skel-shimmer"></view></view>
         </view>
       </block>
 
