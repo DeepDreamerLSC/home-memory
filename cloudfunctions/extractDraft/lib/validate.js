@@ -28,6 +28,10 @@
  *   - v2:日期归属限定(PR #52 B3,多件保守门):多件时任一件的 remind_quote
  *     还必须落在该件自己的 source_quote 内、且不与其他物品竞争该日期段,
  *     否则该件三项全 null(物品照常提取,日期由用户在详情页自己补)。
+ *   - v2:remind_vague_quote(0.6.0 真机反馈 Fix 4)= 原话中检测到时间表述但
+ *     未换算的逐字子串;仅在 remind_at=null 且确有时间词时给出,子串/时间词
+ *     校验失败置 null;明确日期与 vague 互斥。这是透明化,不是换算——
+ *     任何相对/模糊日期都绝不换算成具体日子(不猜日期纪律一字不改)。
  */
 
 const NAME_MAX = 50;
@@ -39,6 +43,10 @@ const ITEMS_MAX = 5;
 const REMIND_QUOTE_MAX = 200;
 const REMIND_KINDS = ["有效期", "开封后", "下次维护"];
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/* 模糊时间表述的宽松时间词形(#36 0.6.0 真机反馈 Fix 4):remind_vague_quote
+ * 至少要含一个时间词才可信(「半年后」「下个月」「大概冬天」「快过期了」全覆盖);
+ * 这只是防滥用的形状门,主门仍是「原话逐字子串」锚定。 */
+const VAGUE_TIME_TOKEN_RE = /(年|月|周|天|日|号|小时|星期|礼拜|季度|春|夏|秋|冬|过期|到期)/;
 /* quote 内绝对日期的原话形态:显式年份(2027年6月30号)、无年份(11月20号)、
  * ISO(2026-11-20)。只认阿拉伯数字——中文数字日期(「十一月二十号」)解析不出
  * 候选,按锚定失败处理(不带提醒,日期由用户在确认页自己选)。 */
@@ -190,6 +198,40 @@ function extractJsonObject(rawText) {
 }
 
 /*
+ * 模糊时间表述标记(#36 0.6.0 真机反馈 Fix 4,透明化修复,不是换算):
+ * remind_vague_quote = 原话中检测到时间表述但未换算的逐字子串(如「半年后」
+ * 「下个月」)。服务端校验,任一失败置 null:
+ * - remind_at 非 null(该件已带明确日期)→ 互斥,vague 一律 null;
+ * - 非字符串 / 去空白为空 / 超 200 码点 → null;
+ * - 不是原话逐字子串(去空白比对,同 source_quote 口径)→ null;
+ * - 不含任何时间词 → null(防「什么原文片段都标成时间」的滥用)。
+ * 「不猜日期」纪律一字不改:这里绝不把任何相对日期换算成具体日子,
+ * 只把「说了时间但没换算」如实标给用户看。
+ */
+function validateVagueQuote(item, reminderFields, normalizedOriginal) {
+  if (reminderFields.remind_at !== null) {
+    return null; // 互斥:明确日期与 vague 不同现
+  }
+  if (!Object.prototype.hasOwnProperty.call(item, "remind_vague_quote")) {
+    return null;
+  }
+  if (typeof item.remind_vague_quote !== "string") {
+    return null;
+  }
+  const quote = stripWhitespace(item.remind_vague_quote);
+  if (quote === "" || codePointLength(quote) > REMIND_QUOTE_MAX) {
+    return null;
+  }
+  if (normalizedOriginal.indexOf(quote) === -1) {
+    return null; // 逐字子串锚定失败:置 null,不废件
+  }
+  if (!VAGUE_TIME_TOKEN_RE.test(quote)) {
+    return null; // 没有时间词:不是时间表述
+  }
+  return item.remind_vague_quote.trim();
+}
+
+/*
  * 单件草稿的字段校验与修正(v1/v2 共用):
  * 返回 { ok:true, draft } 或 { ok:false, error:"AI_UNAVAILABLE" }。
  */
@@ -320,12 +362,22 @@ function validateDrafts(rawText, originalText, todayYmd) {
         draft = Object.assign({}, draft, { certain: false, location_text: "" });
       }
     }
+    // 模糊时间表述标记(Fix 4):只在提醒三项全 null 时可能保留(服务端逐字
+    // 子串 + 时间词校验,失败置 null);明确日期与 vague 互斥
+    const reminderFields = validateReminderFields(item, normalizedOriginal, todayYmd);
     drafts.push(
       Object.assign(
         {},
         draft,
         { source_quote: sourceQuote },
-        validateReminderFields(item, normalizedOriginal, todayYmd),
+        reminderFields,
+        {
+          remind_vague_quote: validateVagueQuote(
+            item,
+            reminderFields,
+            normalizedOriginal,
+          ),
+        },
       ),
     );
   }

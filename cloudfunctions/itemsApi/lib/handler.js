@@ -220,6 +220,17 @@ function project(doc) {
   };
 }
 
+/**
+ * get(详情页)投影:#36 0.6.0 真机反馈 Fix 4 起,items 文档新增可选
+ * remind_vague_quote(录入时「说了时间但没换算」的原话子串,存储仅为详情
+ * 展示,不产生任何提醒)。只在 get 单查响应携带,query/list 投影不变。
+ */
+function projectDetail(doc) {
+  return Object.assign(project(doc), {
+    remind_vague_quote: typeof doc.remind_vague_quote === "string" ? doc.remind_vague_quote : ""
+  });
+}
+
 /** updated_at 降序(ISO 字符串按字典序比较) */
 function byUpdatedDesc(a, b) {
   if (a.updated_at === b.updated_at) {
@@ -818,7 +829,34 @@ function remindRow(doc, item) {
 }
 
 /**
- * create:入参 { action, operation_id, name, location_text, note? }
+ * create 的可选 remind_vague_quote 入参(#36 0.6.0 真机反馈 Fix 4):
+ * 录入时「原话提到了时间但没换算」的逐字子串(如「半年后」),存储到 items
+ * 文档仅供详情页展示,不产生任何提醒。校验比 extractDraft 宽松(服务端此刻
+ * 没有原话可比对,同 quote 的取舍):非字符串/去空白为空/超 200 码点一律按
+ * 未携带(存空串)处理;与 reminder 互斥——请求带合法 reminder(明确日期)时
+ * 一律忽略 vague 存空串。非法不报错不写入失败,只是不存。
+ */
+function parseVagueQuoteInput(event, reminder) {
+  if (reminder !== null) {
+    return ""; // 明确日期与 vague 互斥
+  }
+  if (event.remind_vague_quote === undefined || event.remind_vague_quote === null) {
+    return "";
+  }
+  if (!isString(event.remind_vague_quote)) {
+    return "";
+  }
+  var trimmed = event.remind_vague_quote.trim();
+  if (trimmed === "" || codePointLength(trimmed) > REMIND_QUOTE_MAX) {
+    return "";
+  }
+  return trimmed;
+}
+
+/**
+ * create:入参 { action, operation_id, name, location_text, note?, remind_vague_quote? }
+ * (remind_vague_quote:可选的「说了时间但没换算」原话子串,宽松校验只为详情展示,
+ * 见 parseVagueQuoteInput;与 reminder 互斥。)
  * 幂等:(household_id, operation_id) 已有则返回已有文档并 duplicated:true。
  */
 async function createItem(event, deps) {
@@ -843,6 +881,8 @@ async function createItem(event, deps) {
   if (reminder === "INVALID") {
     return fail("INVALID_INPUT");
   }
+  // 模糊时间表述标记(Fix 4):宽松校验,与 reminder 互斥,只为详情展示而存
+  var vagueQuote = parseVagueQuoteInput(event, reminder);
 
   // 幂等只对「同键同内容」成立:命中未删除的同键记录时,
   // 内容一致 → duplicated:true 稳定返回;内容不同 → OPERATION_CONFLICT(绝不静默吞掉用户的修改)。
@@ -886,6 +926,8 @@ async function createItem(event, deps) {
     version: 1,
     deleted: false,
     operation_id: operationId,
+    // 「说了时间但没换算」的原话子串(Fix 4):仅供详情页展示,不产生任何提醒
+    remind_vague_quote: vagueQuote,
     created_at: now,
     updated_at: now
   };
@@ -1214,7 +1256,7 @@ async function getItem(event, deps) {
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
     .get();
   if (got.data && got.data.length > 0) {
-    return { ok: true, item: project(got.data[0]) };
+    return { ok: true, item: projectDetail(got.data[0]) };
   }
   return fail("NOT_FOUND");
 }

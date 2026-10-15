@@ -99,6 +99,28 @@ export interface ReminderInputOfRow {
   quote?: string;
 }
 
+/** 行内「时间没换算」标记的字段形状(rowVagueQuoteInput 的输入) */
+export interface VagueQuoteRowFields {
+  /** 行内提醒日期(YYYY-MM-DD;""=不带提醒) */
+  remindAt: string;
+  /** 服务端标记的「说了时间但没换算」原话子串;无标记为 "" */
+  remindVagueQuote: string;
+}
+
+/**
+ * 行 → create 的可选 remind_vague_quote 参数(纯函数,0.6.0 真机反馈 Fix 4):
+ * 行内无日期且带有 vague 标记时返回该子串,否则 undefined 不携带
+ * (与 reminder 互斥:用户选了明确日期就不带 vague,与服务端口径一致)。
+ */
+export function rowVagueQuoteInput(
+  row: VagueQuoteRowFields,
+): string | undefined {
+  if (row.remindAt !== "" || row.remindVagueQuote === "") {
+    return undefined;
+  }
+  return row.remindVagueQuote;
+}
+
 /**
  * C2 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
  * 行内无日期(服务端因归属不明置空 / 用户清过) → undefined 不带提醒,

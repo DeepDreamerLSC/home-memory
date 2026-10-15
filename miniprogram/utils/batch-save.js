@@ -5,6 +5,7 @@ exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
 exports.batchSummary = batchSummary;
 exports.shouldDefaultChecked = shouldDefaultChecked;
+exports.rowVagueQuoteInput = rowVagueQuoteInput;
 exports.rowReminderInput = rowReminderInput;
 exports.runBatchSave = runBatchSave;
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
@@ -54,6 +55,17 @@ function batchSummary(rows) {
  */
 function shouldDefaultChecked(sourceQuote, anchorShared, certain) {
     return certain && sourceQuote !== "" && !anchorShared;
+}
+/**
+ * 行 → create 的可选 remind_vague_quote 参数(纯函数,0.6.0 真机反馈 Fix 4):
+ * 行内无日期且带有 vague 标记时返回该子串,否则 undefined 不携带
+ * (与 reminder 互斥:用户选了明确日期就不带 vague,与服务端口径一致)。
+ */
+function rowVagueQuoteInput(row) {
+    if (row.remindAt !== "" || row.remindVagueQuote === "") {
+        return undefined;
+    }
+    return row.remindVagueQuote;
 }
 /**
  * C2 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):

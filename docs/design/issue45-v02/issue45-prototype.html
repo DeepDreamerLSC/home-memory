@@ -90,7 +90,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .brand-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-top:4px}
 .brand-name{font-size:21px;font-weight:800;letter-spacing:.5px}
 .brand-sub{font-size:11.5px;color:var(--text-3);margin-top:3px}
-.fam-chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 13px;font-size:12.5px;font-weight:700;color:var(--text);cursor:pointer;min-height:38px;flex:none}
+.fam-chip{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 13px;font-size:12.5px;font-weight:700;color:var(--text);cursor:pointer;min-height:33px;flex:none;line-height:1}
 .fam-chip .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-shadow);margin-right:5px;vertical-align:1px}
 
 /* ============ 搜索 ============ */
@@ -126,7 +126,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .voicebar.pressed{transform:scale(.955) translateY(1px);filter:brightness(.94) saturate(1.05);box-shadow:inset 0 3px 8px rgba(0,0,0,.14)}
 .voicebar.pressed .micdot{animation:micpress .5s ease}
 @keyframes micpress{0%{transform:scale(.8)}55%{transform:scale(1.12)}100%{transform:scale(1)}}
-.voicebar .hold{flex:1;display:flex;align-items:center;gap:10px;border:0;background:var(--vb-hold-bg,transparent);border-radius:15px;padding:6px 14px 6px 6px;min-height:52px;font-size:13.5px;font-weight:750;color:var(--vb-hold-fg,var(--vb-fg));cursor:pointer;text-align:left;transition:filter .12s ease,transform .12s ease}
+.voicebar .hold{flex:1;display:flex;align-items:center;gap:10px;border:0;background:var(--vb-hold-bg,transparent);border-radius:15px;padding:6px 14px 6px 6px;min-height:39px;font-size:13.5px;font-weight:750;color:var(--vb-hold-fg,var(--vb-fg));cursor:pointer;text-align:left;line-height:1;transition:filter .12s ease,transform .12s ease}
 .voicebar .hold:active{filter:brightness(.94);transform:scale(.985)}
 .voicebar .micdot{height:40px;width:40px;border-radius:50%;background:var(--vb-mic-bg);color:var(--vb-mic-fg);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
 .voicebar .txtbtn{border:1px solid var(--vb-btn-line);border-radius:11px;background:var(--vb-btn-bg);color:var(--vb-btn-fg);font-size:12.5px;font-weight:750;padding:0 14px;height:38px;cursor:pointer;flex:none}
@@ -151,10 +151,10 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .bigcard .quote{margin-top:9px;font-size:11.5px;color:var(--text-2);line-height:1.6}
 .bigcard .quote b{font-weight:700;color:var(--text-2)}
 .btnrow{display:flex;gap:9px;margin-top:13px}
-.btnrow button{flex:1;min-height:50px;border-radius:14px;font-size:14px;font-weight:750;cursor:pointer;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text)}
+.btnrow button{flex:1;min-height:38px;border-radius:14px;font-size:14px;font-weight:750;cursor:pointer;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text);line-height:1}
 .btnrow button.primary{background:var(--go-bg);color:var(--go-fg)}
 .obs-tag{display:inline-block;margin-top:9px;font-size:10.5px;color:var(--text-2);background:var(--banner-manual-bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
-.fold{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:0;background:var(--card);border-radius:15px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:52px;margin-top:10px;text-align:left}
+.fold{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:0;background:var(--card);border-radius:15px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:44px;margin-top:10px;text-align:left;line-height:1}
 .fold-body{overflow:hidden;max-height:0;transition:max-height .25s ease}
 .fold-body.open{max-height:1200px}
 .fold-body .inner{padding:4px 2px 8px}
@@ -165,7 +165,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .field input,.field textarea{width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);font:inherit;font-size:13.5px;padding:11px 12px}
 .field input::placeholder,.field textarea::placeholder{color:var(--placeholder)}
 .field textarea{min-height:88px;resize:vertical}
-.cta{display:block;width:100%;border:0;border-radius:15px;background:var(--go-bg);color:var(--go-fg);font-size:15px;font-weight:800;min-height:54px;margin-top:16px;cursor:pointer}
+.cta{display:block;width:100%;border:0;border-radius:15px;background:var(--go-bg);color:var(--go-fg);font-size:15px;font-weight:800;min-height:39px;margin-top:16px;cursor:pointer;line-height:1}
 .cta:disabled{opacity:.38;cursor:not-allowed}
 .sublnk{display:flex;gap:18px;justify-content:center;margin-top:13px}
 .sublnk button{border:0;background:none;color:var(--text-2);font-size:12.5px;cursor:pointer;min-height:40px;padding:4px 8px;font-weight:600}
@@ -175,7 +175,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .sumrow .k{font-size:12.5px;color:var(--text-3);font-weight:700;width:44px;flex:none}
 .sumrow .v{flex:1;font-size:15px;font-weight:750;min-width:0}
 .sumrow .v.warn{color:var(--danger)}
-.sumrow .edit{border:1px solid var(--line);background:var(--card-inset);color:var(--text-2);font-size:11.5px;font-weight:700;border-radius:9px;padding:7px 11px;cursor:pointer;min-height:36px;flex:none}
+.sumrow .edit{border:1px solid var(--line);background:var(--card-inset);color:var(--text-2);font-size:11.5px;font-weight:700;border-radius:9px;padding:7px 11px;cursor:pointer;min-height:33px;flex:none;line-height:1}
 .sumrow .pick{border:0;background:var(--card-inset);color:var(--text);border-radius:8px;font-size:12px;font-weight:700;padding:6px 10px;cursor:pointer;flex:none}
 .sumrow .inlinedit{flex:1;display:none}
 .sumrow.editing .v{display:none}
@@ -211,7 +211,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .privacy{background:var(--banner-bg);border:1.5px solid var(--banner-line);border-radius:15px;padding:12px 14px;margin-top:12px}
 .privacy strong{font-size:12.5px;display:block;margin-bottom:6px}
 .privacy li{font-size:11.5px;color:var(--text-2);line-height:1.65;margin:4px 0}
-.btn{display:block;width:100%;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text);border-radius:14px;font-size:14px;font-weight:750;min-height:50px;margin-top:11px;cursor:pointer}
+.btn{display:block;width:100%;border:1.5px solid var(--go-bg);background:var(--card);color:var(--text);border-radius:14px;font-size:14px;font-weight:750;min-height:38px;margin-top:11px;cursor:pointer;line-height:1}
 .btn.ink{background:var(--go-bg);color:var(--go-fg)}
 .btn.danger{border-color:var(--danger);color:var(--danger);background:var(--danger-bg)}
 .danger-zone{border:1.5px dashed var(--danger-shadow);border-radius:15px;padding:10px 12px 12px;margin-top:9px;background:var(--card)}
@@ -220,7 +220,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .member .avatar{height:38px;width:38px;border-radius:50%;background:var(--go-bg);color:var(--go-fg);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;flex:none}
 .member .mn{flex:1;font-size:14px;font-weight:700}
 .member .role{font-size:11px;color:var(--text-2);background:var(--card-inset);border-radius:999px;padding:3px 9px}
-.more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:36px;min-width:36px;cursor:pointer;flex:none;padding:0 8px}
+.more-inline{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:9px;font-size:15px;font-weight:800;min-height:33px;min-width:33px;cursor:pointer;flex:none;padding:0 8px;line-height:1}
 /* H1 家庭地图(家里内容平铺,点房间摊开;用户反馈三轮) */
 .roomgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .roomtile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:13px 14px 12px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--text);text-align:left;cursor:pointer;min-height:118px;transition:transform .14s ease}
@@ -235,7 +235,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 /* 容器抬头:家里 / 某某房间(家具)里有什么(用户反馈四轮:整页进入,不再下拉摊开) */
 .map-head{margin:20px 0 9px;display:flex;align-items:center;gap:10px}
 .map-head .mtitle{flex:1;font-size:15px;font-weight:800;min-width:0}
-.backchip{border:0;background:var(--card-inset);color:var(--text);font-size:12.5px;font-weight:700;border-radius:999px;padding:6px 12px;min-height:32px;cursor:pointer;flex:none}
+.backchip{border:0;background:var(--card-inset);color:var(--text);font-size:12.5px;font-weight:700;border-radius:999px;padding:6px 12px;min-height:33px;cursor:pointer;flex:none;line-height:1}
 .backchip:active{opacity:.7}
 .morelink{display:block;width:100%;border:0;background:none;color:var(--text-2);font-size:13px;font-weight:700;min-height:44px;cursor:pointer;text-align:center}
 /* 提醒(#36 D0,十五轮):到期横幅/日期牌/保质期行 */
@@ -245,7 +245,7 @@ h2.sec{font-size:16.5px;margin:20px 0 10px;font-weight:750}
 .duepill.over{background:var(--danger);color:#fff}
 .duepill.soon{background:var(--banner-bg);color:var(--text)}
 .duepill.later{background:var(--card-inset);color:var(--text-2)}
-.r1-done{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:10px;font-size:12px;font-weight:700;min-height:36px;padding:0 10px;cursor:pointer;flex:none}
+.r1-done{border:1px solid var(--line);background:var(--card);color:var(--text-2);border-radius:10px;font-size:12px;font-weight:700;min-height:33px;padding:0 10px;cursor:pointer;flex:none;line-height:1}
 .expire-row{display:flex;align-items:center;gap:10px;border:1px solid var(--danger-shadow);background:var(--danger-bg);border-radius:15px;padding:12px 14px;margin-top:12px}
 .expire-row .ex-main{flex:1;min-width:0}
 .expire-row .ex-t{font-size:13.5px;font-weight:800;color:var(--text)}
@@ -292,7 +292,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
 .sheet-mask.open{display:flex}
 .sheet{width:100%;background:var(--bg);border-radius:22px 22px 0 0;padding:16px 18px 22px}
 .sheet .st{font-size:13px;font-weight:750;margin-bottom:10px;color:var(--text-2)}
-.sheet .act{display:block;width:100%;text-align:left;border:0;background:var(--card);border-radius:13px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:52px;margin-top:8px}
+.sheet .act{display:block;width:100%;text-align:left;border:0;background:var(--card);border-radius:13px;padding:14px 13px;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;min-height:44px;margin-top:8px;line-height:1.3}
 .sheet .act small{display:block;font-size:11px;color:var(--text-3);font-weight:400;margin-top:3px}
 .sheet .act.warn{color:var(--danger)}
 .sheet .close{display:block;width:100%;border:0;background:none;color:var(--text-3);font-size:13px;margin-top:12px;cursor:pointer;min-height:44px}
@@ -590,15 +590,15 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <span class="mtitle">尚未归类 · 2 件待核实</span>
         <span style="width:36px;flex:none" aria-hidden="true"></span>
       </div>
-      <button class="item" data-toast="示意:原话是「那个双肩包,不知道塞哪儿了」——位置没核实前,不归入房间,也不计数">
-        <span class="ico">?</span>
-        <span class="info"><strong>双肩包</strong><span>位置待核实 · 点开只看原话</span></span>
+      <button class="item" data-nav="d1" data-itemswap="双肩包|尚未归类|那个双肩包,不知道塞哪儿了">
+        <span class="ico">双</span>
+        <span class="info"><strong>双肩包</strong><span>那个双肩包,不知道塞哪儿了 · 位置待核实</span></span>
         <span class="arrow">›</span>
       </button>
       <div class="divider" style="margin:8px 0"></div>
-      <button class="item" data-toast="示意:原话是「装修发票收好了……在哪来着」——待补上位置后才会归入房间">
-        <span class="ico">?</span>
-        <span class="info"><strong>装修发票</strong><span>位置待核实 · 点开只看原话</span></span>
+      <button class="item" data-nav="d1" data-itemswap="装修发票|尚未归类|装修发票收好了……在哪来着">
+        <span class="ico">装</span>
+        <span class="info"><strong>装修发票</strong><span>装修发票收好了……在哪来着 · 位置待核实</span></span>
         <span class="arrow">›</span>
       </button>
     </div>
@@ -658,7 +658,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
         <div class="ex-t" id="d1-expire-text">有效期 2026-11-20 · 还剩 12 天</div>
         <div class="ex-sub">到了那天,它会出现在「快到期」里</div>
       </div>
-      <button class="r1-done" data-toast="模拟:已用完。周期物品会问你要不要定下次时间(如净水器滤芯 3 个月),设计示意不写数据">用完了</button>
+      <button class="r1-done" data-toast="模拟:已完成。要下次提醒,到详情里选日子(设计示意不写数据)">用完了</button>
     </div>
 
     <div class="btnrow">
@@ -717,6 +717,8 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
       </div>
     </div>
     <p class="tiny" style="margin:7px 2px 0">时间只来自你说的话;没说清就不带提醒,不猜日期。</p>
+    <!-- 时间没换算(0.6.0 真机反馈 Fix 4):原话有时间表述但没换成日期——纯提示,不是换算 -->
+    <p class="tiny" style="margin:5px 2px 0;color:var(--text-3)" data-toast="示意:只提示,不换算——用户说了时间但系统没换算成日期,如实告知">时间没换算:『半年后』——说具体日期,或以后在详情里选日子</p>
 
     <button class="fold" data-toggle="c1-quote" aria-expanded="false">原话(点开核对) <span class="chev">›</span></button>
     <div class="fold-body" id="c1-quote"><div class="inner">
@@ -892,7 +894,7 @@ html[data-theme="dark"] .micdot,html[data-theme="dark"] .voice-cta>span{filter:g
       <span class="duepill later">明年 4 月</span>
     </button>
 
-    <div class="note"><strong>时间只来自原话</strong><p>到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。点「用完了」的周期物品,会问你要不要定下次时间。</p></div>
+    <div class="note"><strong>时间只来自原话</strong><p>到期日只在你说的时候记(如「感冒药 11 月 20 号过期」);不自动推算、不猜日期。用完了就收掉这条提醒,要下次提醒,到详情里选日子。</p></div>
 
     <button class="fold" data-toggle="r1-miss" aria-expanded="false">看看「还没记过时间」的样子 <span class="chev">›</span></button>
     <div class="fold-body" id="r1-miss"><div class="inner">
