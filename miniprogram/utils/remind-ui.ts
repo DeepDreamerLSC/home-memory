@@ -2,12 +2,12 @@
  * 提醒的查看与处理(issue #36 三阶段)——R1 快到期页 / 首页到期横幅 /
  * 详情页保质期行共用的展示与「用完了」流程。
  *
- * 日期纪律(#36 冻结)在展示侧的口径:
- * - 分组界线与「还剩几天」按用户本地日历日计算(用户感知的「今天」):
- *   已过期 = due < 今天;这几天 = 7 天内(含今天);再往后 = 其余;
- * - 周期天数(period_days)按服务端同款 UTC 日历日计算——服务端以
- *   「完成日(服务端当天 UTC)+ period_days 天」再生下次提醒,同口径才能
- *   保证用户选的日子即再生的日子;
+ * 日期纪律(#36 冻结 + PR #52 Low-3 合同)在展示侧的口径:
+ * - 家庭提醒日期一律按用户本地自然日:分组界线与「还剩几天」按用户本地
+ *   日历日计算(已过期 = due < 今天;这几天 = 7 天内含今天;再往后 = 其余);
+ * - 「用完了」的完成日与周期天数也以用户本地自然日为可信输入随请求携带
+ *   (complete_date),服务端不靠运行时区猜;item 页改期 picker 的可选范围
+ *   (今天可选)与提交前校验(今天可设)两端一致;
  * - 只对服务端下发的 YYYY-MM-DD 做日历日算术,绝不解析模糊表述、
  *   绝不从文本推算日期;到期只在小程序内露出,无任何推送/通知承诺。
  */
@@ -26,24 +26,35 @@ function pad(n: number): string {
   return n < 10 ? "0" + n : String(n);
 }
 
+/** 用户本地自然日今天(YYYY-MM-DD)——家庭提醒日期合同的客户端基准 */
+export function localTodayYmd(now: Date = new Date()): string {
+  return (
+    now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate())
+  );
+}
+
 /** 距本地今天的日历天数(负数=已过期,0=今天) */
 export function daysUntilLocal(due: string, now: Date = new Date()): number {
-  const today =
-    now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+  const today = localTodayYmd(now);
   return Math.round(
     (Date.parse(due + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS,
   );
 }
 
 /**
- * 距服务端「今天」(UTC)的日历天数:period_days 的计算口径。
- * remindComplete 的下次日期 = 服务端完成日(UTC)+ period_days,同口径换算。
+ * item 页改期 picker 的提交前校验(与 picker start=今天 的可选范围两端一致):
+ * 今天可设(到期分组里「今天到期」本就存在),过去的日子与超 10 年的拒绝。
+ * 返回可展示的问题文案,空串=可提交。
  */
-export function utcDaysFromToday(due: string, now: Date = new Date()): number {
-  const today = now.toISOString().slice(0, 10);
-  return Math.round(
-    (Date.parse(due + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS,
-  );
+export function pickerDateProblem(value: string, now: Date = new Date()): string {
+  const days = daysUntilLocal(value, now);
+  if (days < 0) {
+    return "选今天或往后的日子";
+  }
+  if (days > PERIOD_DAYS_MAX) {
+    return "最多记十年内";
+  }
+  return "";
 }
 
 /** R1 的三分组界线(十五轮冻结):已过期 / 这几天(7 天内)/ 再往后 */

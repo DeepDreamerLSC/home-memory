@@ -15,11 +15,11 @@ import {
   isScopeGenerationCurrent,
 } from "../../utils/household-scope";
 import {
-  PERIOD_DAYS_MAX,
   askUseUp,
   expireMainText,
+  localTodayYmd,
   monthDayText,
-  utcDaysFromToday,
+  pickerDateProblem,
 } from "../../utils/remind-ui";
 import type { ItemSummary, RemindRow } from "../../types";
 
@@ -41,14 +41,6 @@ function shortDate(iso: string): string {
   const d = new Date(t);
   const pad = (n: number): string => (n < 10 ? "0" + n : String(n));
   return pad(d.getMonth() + 1) + "-" + pad(d.getDate());
-}
-
-/** 本地日期 → YYYY-MM-DD(picker mode=date 的 value 形态与下限) */
-function todayYmd(now: Date = new Date()): string {
-  const pad = (n: number): string => (n < 10 ? "0" + n : String(n));
-  return (
-    now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate())
-  );
 }
 
 /**
@@ -201,7 +193,7 @@ Page<
     expire: null as { mainText: string; dueDate: string; kind: string } | null,
     remindAt: "",
     remindGeneration: -1,
-    today: todayYmd(),
+    today: localTodayYmd(),
     remindBusy: false,
   },
 
@@ -822,6 +814,8 @@ Page<
           ? { expected_generation: this.data.remindGeneration }
           : {}),
         ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
+        // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
+        complete_date: localTodayYmd(),
       });
       if (decision.periodDays !== null && res.reminder) {
         this.applyReminderRow(res.reminder);
@@ -855,9 +849,11 @@ Page<
    * 编辑折叠「提醒」选日子(#36:picker mode=date 弹层,唯一手动日期来源):
    * 没有提醒的物品在这里补录,有提醒的在这里改期——都走 remindSet,把提醒
    * 设为所选的日子(服务端替换该物品的提醒,不堆积)。picker 回填必为合法
-   * YYYY-MM-DD,异常值不写;今天及更早、超 10 年的日子如实拒绝。
-   * 请求携带页面所见轮次号(PR #52 B1):这一轮已被家人换过 → VERSION_CONFLICT,
-   * 刷新后重选,绝不静默覆盖别人的新提醒(0=页面确认无提醒的补录)。
+   * YYYY-MM-DD,异常值不写;校验与 picker 范围两端一致——今天可设(到期分组
+   * 本就有「今天到期」),过去的日子与超 10 年的拒绝(PR #52 Low-3,按用户
+   * 本地自然日判定)。请求携带页面所见轮次号(PR #52 B1):这一轮已被家人
+   * 换过 → VERSION_CONFLICT,刷新后重选,绝不静默覆盖别人的新提醒
+   * (0=页面确认无提醒的补录)。
    */
   async onRemindDateChange(e) {
     if (this.data.remindBusy) {
@@ -870,13 +866,9 @@ Page<
     if (value === this.data.remindAt) {
       return; // 没变
     }
-    const days = utcDaysFromToday(value);
-    if (days < 1) {
-      wx.showToast({ title: "选一个往后的日子", icon: "none" });
-      return;
-    }
-    if (days > PERIOD_DAYS_MAX) {
-      wx.showToast({ title: "最多记十年内", icon: "none" });
+    const problem = pickerDateProblem(value);
+    if (problem !== "") {
+      wx.showToast({ title: problem, icon: "none" });
       return;
     }
     const hadReminder = this.data.remindAt !== "";

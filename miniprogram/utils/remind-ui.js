@@ -2,8 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PERIOD_DAYS_MAX = void 0;
 exports.isPeriodicKind = isPeriodicKind;
+exports.localTodayYmd = localTodayYmd;
 exports.daysUntilLocal = daysUntilLocal;
-exports.utcDaysFromToday = utcDaysFromToday;
+exports.pickerDateProblem = pickerDateProblem;
 exports.duePill = duePill;
 exports.monthDayText = monthDayText;
 exports.expireMainText = expireMainText;
@@ -20,18 +21,29 @@ function isPeriodicKind(kind) {
 function pad(n) {
     return n < 10 ? "0" + n : String(n);
 }
+/** 用户本地自然日今天(YYYY-MM-DD)——家庭提醒日期合同的客户端基准 */
+function localTodayYmd(now = new Date()) {
+    return (now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()));
+}
 /** 距本地今天的日历天数(负数=已过期,0=今天) */
 function daysUntilLocal(due, now = new Date()) {
-    const today = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+    const today = localTodayYmd(now);
     return Math.round((Date.parse(due + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS);
 }
 /**
- * 距服务端「今天」(UTC)的日历天数:period_days 的计算口径。
- * remindComplete 的下次日期 = 服务端完成日(UTC)+ period_days,同口径换算。
+ * item 页改期 picker 的提交前校验(与 picker start=今天 的可选范围两端一致):
+ * 今天可设(到期分组里「今天到期」本就存在),过去的日子与超 10 年的拒绝。
+ * 返回可展示的问题文案,空串=可提交。
  */
-function utcDaysFromToday(due, now = new Date()) {
-    const today = now.toISOString().slice(0, 10);
-    return Math.round((Date.parse(due + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS);
+function pickerDateProblem(value, now = new Date()) {
+    const days = daysUntilLocal(value, now);
+    if (days < 0) {
+        return "选今天或往后的日子";
+    }
+    if (days > exports.PERIOD_DAYS_MAX) {
+        return "最多记十年内";
+    }
+    return "";
 }
 /** 日期胶囊三态文案:已过期(danger)/ N 天后(banner-bg)/ 明年 4 月(card-inset) */
 function duePill(due, now = new Date()) {

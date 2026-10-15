@@ -140,6 +140,11 @@ export type ItemsApiEvent =
         expected_generation?: number;
         /** 周期天数(0-3650 整数;缺省/0=不再生);下次日期=完成基准日 + period_days */
         period_days?: number;
+        /**
+         * 用户本地自然日完成日(YYYY-MM-DD 真实日历日,PR #52 Low-3):家庭提醒
+         * 日期按用户本地自然日的合同输入,服务端不靠运行时区猜;缺省走旧协议
+         */
+        complete_date?: string;
       } & ScopeWriteBinding
     )
   | ({ action: "remindClear"; item_id: string; expected_generation?: number } & ScopeWriteBinding)

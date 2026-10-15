@@ -1,5 +1,11 @@
 import { callItemsApi, errorMessage } from "../../utils/api";
-import { askUseUp, duePill, monthDayText, type DueGroup } from "../../utils/remind-ui";
+import {
+  askUseUp,
+  duePill,
+  localTodayYmd,
+  monthDayText,
+  type DueGroup,
+} from "../../utils/remind-ui";
 import {
   captureScopeGeneration,
   isScopeGenerationCurrent,
@@ -178,6 +184,8 @@ Page<
         item_id: row.item_id,
         ...(row.generation !== undefined ? { expected_generation: row.generation } : {}),
         ...(decision.periodDays !== null ? { period_days: decision.periodDays } : {}),
+        // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
+        complete_date: localTodayYmd(),
       });
       if (decision.periodDays !== null && res.reminder) {
         wx.showToast({

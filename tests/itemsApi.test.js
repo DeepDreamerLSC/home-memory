@@ -1838,3 +1838,58 @@ test("Low-1 原键原提醒重放(含 quote 一致):幂等成功,不重复建、
   assert.equal(replay.duplicated, true);
   assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 1);
 });
+
+// ---------- PR #52 复审 Low-3:完成基准日按用户本地自然日 ----------
+
+test("Low-3 跨 UTC+8 回归:北京时间 10-15 凌晨完成(服务器 UTC 日期还是 10-14)→ 按用户本地日 10-15 再生,不早一天", async function () {
+  // 服务器时钟 2026-10-14T20:00Z = 北京时间 2026-10-15 04:00:用户感知的完成日是 10-15
+  var db = createMemoryDb();
+  var deps = fixedDeps(db, "2026-10-14T20:00:00.000Z");
+  var created = await handler(
+    remindEvent("op-l3-a", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deps
+  );
+  var itemId = created.item.item_id;
+
+  var res = await handler(
+    { action: "remindComplete", item_id: itemId, expected_generation: 1, period_days: 30, complete_date: "2026-10-15" },
+    deps
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.reminder.due_date, "2026-11-14", "本地完成日 10-15 + 30 天,绝不被 UTC 日期折成 11-13");
+
+  // 同时钟下缺省 complete_date(旧协议):按服务端 UTC 当天 10-14 再生,既有行为不变
+  var db2 = createMemoryDb();
+  var deps2 = fixedDeps(db2, "2026-10-14T20:00:00.000Z");
+  var created2 = await handler(
+    remindEvent("op-l3-b", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    deps2
+  );
+  var legacy = await handler(
+    { action: "remindComplete", item_id: created2.item.item_id, period_days: 30 },
+    deps2
+  );
+  assert.equal(legacy.ok, true);
+  assert.equal(legacy.reminder.due_date, "2026-11-13", "缺省走旧协议(服务端 UTC 当天),零回归");
+});
+
+test("Low-3 complete_date 校验:非严格 YYYY-MM-DD 真实日历日 → INVALID_INPUT 零写入", async function () {
+  var t = fresh();
+  var created = await handler(
+    remindEvent("op-l3-c", "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+    t.deps
+  );
+  var itemId = created.item.item_id;
+  var badDates = ["2026-02-30", "2026/10/15", "20261015", 20261015, "2026-10-15T00:00:00Z"];
+  for (var i = 0; i < badDates.length; i++) {
+    var res = await handler(
+      { action: "remindComplete", item_id: itemId, period_days: 7, complete_date: badDates[i] },
+      t.deps
+    );
+    assert.equal(res.ok, false, "非法完成日必须拒绝:" + badDates[i]);
+    assert.equal(res.error, "INVALID_INPUT");
+  }
+  var raw = await rawReminders(t.db);
+  assert.equal(activeReminderRows(raw.data).length, 1, "非法参数零写入,原 active 无损");
+  assert.equal(raw.data.length, 1);
+});

@@ -858,6 +858,10 @@ async function remindListItems(event, deps) {
  * remindComplete:入参 { action:"remindComplete", item_id, expected_generation?,
  * period_days?, complete_date? }。
  * period_days 缺省或 0 表示不周期再生;携带则须为 0-3650 的整数,否则 INVALID_INPUT。
+ * complete_date(PR #52 Low-3):客户端携带的「用户本地自然日」完成日(YYYY-MM-DD
+ * 真实日历日,严格校验)。家庭提醒日期的合同=按用户本地自然日:客户端以本地
+ * 日期为可信输入随请求携带,服务端不靠运行时区猜(北京时间 00:00-08:00 完成
+ * 不再被 UTC 日期折早一天)。缺省 = 旧协议按服务端当天 UTC 日期,行为不变。
  * expected_generation(PR #52 B1):remindList 行返回的提醒轮次号,携带时服务端
  * 只完成「用户实际看到的那一轮」——条件更新命中 0 条即本轮已非该轮:
  * 他轮仍在 → VERSION_CONFLICT(绝不误伤新一轮);本轮已完成且已再生、请求与
@@ -866,12 +870,14 @@ async function remindListItems(event, deps) {
  * 物品必须存在且属于当前家庭且未删(否则 NOT_FOUND);该 item 无 active 提醒也
  * NOT_FOUND(已完成的重复完成按刷新列表收敛,绝不静默复活)。
  * 将命中的 active 提醒置 done 并记 completed_at;period_days>0 时再生一条新
- * active 提醒:due_date = 完成基准日 + period_days 天(跨月/跨年自然进位),
- * kind 固定「下次维护」(周期再生语义),quote 为空(再生提醒无原话锚点)。
+ * active 提醒:due_date = 完成基准日(complete_date,缺省服务端 UTC 当天)
+ * + period_days 天(跨月/跨年自然进位,纯日期算术),kind 固定「下次维护」
+ * (周期再生语义),quote 为空(再生提醒无原话锚点)。
  * 再生行的 _id 由 (item, 下一轮次) 确定性派生:并发双写只插成一条,第二笔被
  * _id 唯一性拒绝后回查收敛——并发/重试/中断后「每 item 至多一条 active、
  * 同一轮至多完成与再生一次」。再生插入失败时如实上抛(绝不假装完成),done 行
- * 携带 next_period_days/next_due 欠账标记,同参数重试走治愈路径恢复。
+ * 携带 next_period_days/next_due 欠账标记,同参数重试走治愈路径恢复
+ * (next_due 在完成时按当时基准算好,治愈不漂移)。
  */
 async function remindCompleteItem(event, deps) {
   if (!validItemId(event.item_id)) {
@@ -892,6 +898,14 @@ async function remindCompleteItem(event, deps) {
     }
     periodDays = event.period_days;
   }
+  // 完成基准日(Low-3):客户端本地自然日为可信输入;缺省回退服务端 UTC 当天
+  var completeDate = null;
+  if (event.complete_date !== undefined && event.complete_date !== null) {
+    if (!isValidDueDate(event.complete_date)) {
+      return fail("INVALID_INPUT");
+    }
+    completeDate = event.complete_date.trim();
+  }
   var got = await collection(deps)
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
     .get();
@@ -903,7 +917,7 @@ async function remindCompleteItem(event, deps) {
   var now = deps.now();
   var regenDue = null;
   if (periodDays > 0) {
-    regenDue = addDays(now.slice(0, 10), periodDays);
+    regenDue = addDays(completeDate !== null ? completeDate : now.slice(0, 10), periodDays);
   }
   // 条件更新(CAS):带轮次号时只命中「用户看到的那一轮」;
   // 命中 0 条 → 本轮已非该轮,交由 divergence 裁定(冲突/收敛/治愈),绝不误伤
