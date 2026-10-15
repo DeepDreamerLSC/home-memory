@@ -237,12 +237,17 @@ Page<
     /* ---------------- 提醒(#36 三阶段) ---------------- */
     fetchReminderRow(): Promise<RemindRow | null | undefined>;
     /**
-     * F4-B2:轮次未知(-1)时补拉一次提醒行,只为把轮次号与基准对齐到最新
-     * (表单里的用户候选原样保留,到期行如实回到远端当前值)。
-     * 返回补拉后轮次是否已知(≥0);拉取失败/在途切换/旧服务端不回轮次时
-     * 返回 false,调用方失败关闭,绝不退回旧协议无条件写。
+     * F4-B2/F4-B4:轮次未知(-1)时写前补拉一次提醒行,结果三分支:
+     * - "unknown":拉取失败/在途切换/旧服务端仍不回轮次——失败关闭,调用方
+     *   绝不退回旧协议无条件写(F4-B2);
+     * - "known":远端确认无提醒(轮次 0,补录语义)或远端内容与用户已确认
+     *   基准(remindOriginal 语义)一致——对齐轮次与基准后按轮次正常提交,
+     *   表单里的用户候选原样保留;
+     * - "diverged":远端已是与基准不同的内容且用户尚未知悉——不得直接写
+     *   (F4-B4,CAS 只保证提交瞬间无新变化,不构成对他人已有修改的知情选择),
+     *   调用方保留候选并进入既有冲突双值面板,显式选边后才能写。
      */
-    reloadRemindGeneration(): Promise<boolean>;
+    reloadRemindGeneration(): Promise<"known" | "unknown" | "diverged">;
     refreshReminderRow(): Promise<void>;
     applyReminderRow(row: RemindRow | null): void;
     /** 保质期行「已处理」:确认后 remindComplete **/
@@ -630,9 +635,36 @@ Page<
         // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)绝不退回旧协议
         // 无条件写——先补拉一次(候选保留);补拉后与最新一致则无需再写,
         // 仍读不到轮次则如实说没存上,文本部分已存好,提醒候选留在表单等重试
-        const known = await this.reloadRemindGeneration();
-        remindWrite = known ? this.pendingRemindWrite() : remindWrite;
-        if (!known) {
+        const outcome = await this.reloadRemindGeneration();
+        if (outcome === "diverged") {
+          // F4-B4:补拉撞见远端已是不同内容且用户从未看过:不得直接写——
+          // 保留候选,进入既有冲突双值面板(远端值 vs 本地候选),显式选边
+          // 保存时以刷新后的最新轮次提交
+          const result = await this.refreshForConflict();
+          if (result === "notfound") {
+            wx.showModal({
+              title: "记录不存在",
+              content: "没有找到这条记录,可能已被删除。",
+              showCancel: false,
+              success: () => {
+                this.goBack();
+              },
+            });
+          } else if (result === "refreshed") {
+            wx.showToast({
+              title: this.data.conflictPending
+                ? "提醒与最新记录冲突,请选择保留哪一版"
+                : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                  ? "提醒没存上,你的选择已保留,点保存修改再试"
+                  : "这条提醒刚被家人改过,已刷新",
+              icon: "none",
+              duration: 2500,
+            });
+          }
+          return;
+        }
+        remindWrite = outcome === "known" ? this.pendingRemindWrite() : remindWrite;
+        if (outcome === "unknown") {
           wx.showToast({
             title: "提醒没存上,提醒还没加载好,你的选择已保留,稍后再试",
             icon: "none",
@@ -1264,20 +1296,30 @@ Page<
 
   /**
    * F4-B2:轮次未知(-1,未加载/加载失败/冲突刷新远端不可得)时的写前补拉。
-   * 只对齐轮次号与基准,表单里的用户候选(remindAt)原样保留——补拉不是
-   * 刷新展示,是给待发的写请求取 CAS 条件;拉不到就失败关闭,绝不省略
-   * expected_generation 退回旧协议无条件写。到期行按远端当前值如实回显。
+   * 表单里的用户候选(remindAt)原样保留——补拉不是刷新展示,是给待发的写
+   * 请求取 CAS 条件;拉不到("unknown")就失败关闭,绝不省略
+   * expected_generation 退回旧协议无条件写。
+   * F4-B4:补拉结果三分支收紧——远端确认无提醒(轮次 0,补录语义)或远端
+   * 内容与用户已确认基准(remindOriginal 语义)一致才返回 "known"(对齐轮次
+   * 与基准后按轮次正常提交);远端已是不同内容且用户尚未知悉返回 "diverged"
+   * 且不做任何对齐:此时直接写会在用户从未看过远端值的情况下覆盖他人修改
+   * (CAS 只保证提交瞬间无新变化,不构成知情选择),由调用方保留候选并进入
+   * 既有冲突双值面板,显式选边后才能写。diverged 时也不把基准对齐到远端——
+   * 对齐会让候选在随后的冲突刷新里退化成「仅本机修改」,绕开双值面板。
    */
-  async reloadRemindGeneration(): Promise<boolean> {
+  async reloadRemindGeneration(): Promise<"known" | "unknown" | "diverged"> {
     const row = await this.fetchReminderRow();
     if (row === undefined) {
-      return false;
+      return "unknown";
+    }
+    if (row !== null && row.due_date !== this.remindOriginal) {
+      return "diverged";
     }
     const candidate = this.data.remindAt;
     this.remindRemoteUnknown = false;
     this.applyReminderRow(row);
     this.setData({ remindAt: candidate });
-    return this.data.remindGeneration >= 0;
+    return this.data.remindGeneration >= 0 ? "known" : "unknown";
   },
 
   /**
@@ -1343,8 +1385,8 @@ Page<
     if (this.data.remindGeneration < 0) {
       // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)时完成同样是
       // reminder 写——先补拉取轮次,拉不到就失败关闭,绝不省略 expected_generation
-      const known = await this.reloadRemindGeneration();
-      if (!known) {
+      const outcome = await this.reloadRemindGeneration();
+      if (outcome === "unknown") {
         wx.showToast({
           title: "提醒还没加载好,稍后再点用完了",
           icon: "none",
@@ -1352,7 +1394,42 @@ Page<
         });
         return;
       }
-      if (!this.data.expire) {
+      if (outcome === "diverged") {
+        // F4-B4:补拉发现提醒已变成用户没看过的内容:停止原完成动作——
+        // 先把最新提醒如实上屏,再由用户经「带新日期的确认框」显式确认这一条,
+        // 确认后才按最新轮次完成;取消则不写,屏上已如实显示最新提醒
+        await this.refreshReminderRow();
+        const latest = this.data.expire;
+        if (!latest || this.data.remindGeneration < 0) {
+          wx.showToast({
+            title: "提醒有变化,已刷新,确认后再点用完了",
+            icon: "none",
+            duration: 2500,
+          });
+          return;
+        }
+        const confirmed = await new Promise<boolean>((resolve) => {
+          wx.showModal({
+            title: "提醒有变化",
+            content:
+              "这条提醒现在是 " +
+              monthDayText(latest.dueDate) +
+              " 到期,要按这一条完成吗?",
+            confirmText: "按这一条完成",
+            cancelText: "先不完成",
+            success: (r) => {
+              resolve(r.confirm === true);
+            },
+            fail: () => {
+              resolve(false);
+            },
+          });
+        });
+        if (!confirmed) {
+          return; // 用户不确认最新提醒:不写
+        }
+        // 已显式确认最新提醒:按 refreshReminderRow 读到的最新轮次继续完成
+      } else if (!this.data.expire) {
         return; // 补拉发现远端已无提醒:没有可完成的,到期行已如实收起
       }
     }
@@ -1452,12 +1529,13 @@ Page<
       }
       return;
     }
+    const hadReminder = this.data.remindAt !== "";
     if (this.data.remindGeneration < 0) {
       // F4-B2:轮次未知(未加载/加载失败/冲突刷新远端不可得)不得发 remindSet
       // ——先补拉一次取轮次,拉不到就失败关闭:候选保留在表单,提示稍后重试,
       // 绝不省略 expected_generation 退回旧协议无条件替换
-      const known = await this.reloadRemindGeneration();
-      if (!known) {
+      const outcome = await this.reloadRemindGeneration();
+      if (outcome === "unknown") {
         this.setPendingRemind(value);
         wx.showToast({
           title: "提醒还没存好,你的选择已保留,稍后再试",
@@ -1466,11 +1544,42 @@ Page<
         });
         return;
       }
-      if (value === this.data.remindAt) {
+      if (outcome === "diverged") {
+        // F4-B4:补拉撞见远端已是不同内容且用户从未看过:不得直接写——
+        // 候选保留,进入既有冲突双值面板(远端值 vs 本地候选),显式选边后
+        // 经保存修改按最新轮次提交(与 remindSet 撞 VERSION_CONFLICT 同口径)
+        this.setPendingRemind(value);
+        const result = await this.refreshForConflict();
+        if (result === "notfound") {
+          wx.showModal({
+            title: "记录不存在",
+            content: "没有找到这条记录,可能已被删除。",
+            showCancel: false,
+            success: () => {
+              this.goBack();
+            },
+          });
+          return;
+        }
+        if (result === "refreshed") {
+          wx.showToast({
+            title: this.data.conflictPending
+              ? "提醒与最新记录冲突,请选择保留哪一版"
+              : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                ? "提醒没存上,你的选择已保留,点保存修改再试"
+                : hadReminder
+                  ? "这条提醒刚被家人改过,已刷新"
+                  : "这条刚带上提醒,已刷新",
+            icon: "none",
+            duration: 2500,
+          });
+        }
+        return;
+      }
+      if (value === this.remindOriginal) {
         return; // 补拉后远端已是这个日子:无需再写
       }
     }
-    const hadReminder = this.data.remindAt !== "";
     this.setData({ remindBusy: true });
     try {
       const res = await callItemsApi({
@@ -1557,8 +1666,8 @@ Page<
     if (this.data.remindGeneration < 0) {
       // F4-B2:轮次未知时清除同样是 reminder 写——先补拉取轮次,拉不到就
       // 失败关闭:候选(不带提醒)保留在表单,绝不无条件清除家人的提醒
-      const known = await this.reloadRemindGeneration();
-      if (!known) {
+      const outcome = await this.reloadRemindGeneration();
+      if (outcome === "unknown") {
         this.setPendingRemind("");
         wx.showToast({
           title: "还没改成,提醒还没加载好,稍后再试",
@@ -1567,8 +1676,41 @@ Page<
         });
         return;
       }
-      if (!this.data.remindAt) {
-        return; // 补拉后远端已无提醒:没有可清除的
+      if (outcome === "diverged") {
+        // F4-B4:补拉撞见远端已是不同内容且用户从未看过:不得直接清——
+        // 候选(不带提醒)保留,进入既有冲突双值面板显式选边
+        //(与 remindClear 撞 VERSION_CONFLICT 同口径)
+        this.setPendingRemind("");
+        const result = await this.refreshForConflict();
+        if (result === "notfound") {
+          wx.showModal({
+            title: "记录不存在",
+            content: "没有找到这条记录,可能已被删除。",
+            showCancel: false,
+            success: () => {
+              this.goBack();
+            },
+          });
+          return;
+        }
+        if (result === "refreshed") {
+          wx.showToast({
+            title: this.data.conflictPending
+              ? "提醒与最新记录冲突,请选择保留哪一版"
+              : this.remindRemoteUnknown && this.pendingRemindWrite() !== null
+                ? "提醒没存上,你的选择已保留,点保存修改再试"
+                : "这条提醒刚被家人改过,已刷新",
+            icon: "none",
+            duration: 2500,
+          });
+        }
+        return;
+      }
+      if (this.remindOriginal === "") {
+        // 补拉确认远端已无提醒:没有可清除的,不发空写,表单对齐远端事实
+        this.setData({ remindAt: "" });
+        wx.showToast({ title: "已不带提醒", icon: "none" });
+        return;
       }
     }
     this.setData({ remindBusy: true });
