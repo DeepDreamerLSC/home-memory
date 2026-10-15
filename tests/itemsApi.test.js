@@ -2362,3 +2362,88 @@ test("N3 完成过同样不自动复活:create 成功 → complete → 原键重
   assert.equal(replay.error, "OPERATION_CONFLICT");
   assert.equal(activeReminderRows((await rawReminders(t.db)).data).length, 0);
 });
+
+// ---------- PR #52 二轮复审附带校准:complete_date ±1 自然日窗口 ----------
+
+test("complete_date 窗口:与服务端 UTC 当天相差 ±1 自然日放行(边界含两端),±2 拒绝且零写入", async function () {
+  // 服务器时钟 2026-10-14T20:00Z:UTC 当天 10-14;窗口 = {10-13, 10-14, 10-15}
+  var cases = [
+    { date: "2026-10-13", ok: true, due: "2026-11-12" }, // -1 天(西半球本地今天)放行
+    { date: "2026-10-14", ok: true, due: "2026-11-13" }, // 0 天(服务端 UTC 当天)放行
+    { date: "2026-10-15", ok: true, due: "2026-11-14" }, // +1 天(东八区凌晨本地今天)放行
+    { date: "2026-10-12", ok: false }, // -2 天:异常时钟/伪造,拒绝
+    { date: "2026-10-16", ok: false }, // +2 天:拒绝
+    { date: "2026-09-15", ok: false }, // 远离一个月:拒绝
+    { date: "2027-10-14", ok: false } // 未来一年:拒绝
+  ];
+  for (var i = 0; i < cases.length; i++) {
+    var db = createMemoryDb();
+    var deps = fixedDeps(db, "2026-10-14T20:00:00.000Z");
+    var created = await handler(
+      remindEvent("op-win-" + i, "滤芯", "厨房柜子", { due_date: "2026-10-20", kind: "下次维护" }),
+      deps
+    );
+    var res = await handler(
+      {
+        action: "remindComplete",
+        item_id: created.item.item_id,
+        expected_generation: 1,
+        period_days: 30,
+        complete_date: cases[i].date
+      },
+      deps
+    );
+    if (cases[i].ok) {
+      assert.equal(res.ok, true, cases[i].date + " 窗口内(±1 自然日)必须放行");
+      assert.equal(res.reminder.due_date, cases[i].due, cases[i].date + " 按客户端本地日 +30 天");
+    } else {
+      assert.equal(res.ok, false, cases[i].date + " 超出 ±1 自然日窗口必须拒绝");
+      assert.equal(res.error, "INVALID_INPUT");
+      var raw = await rawReminders(db);
+      assert.equal(activeReminderRows(raw.data).length, 1, cases[i].date + " 拒绝时零写入");
+      assert.equal(raw.data.filter(function (r) { return r.status === "done"; }).length, 0, "原轮原样");
+    }
+  }
+});
+
+test("complete_date 窗口边界:月初/年末自然日进位不误拒(09-30、12-31 恰为 ±1)", async function () {
+  // 服务器 2026-10-01T00:30Z:UTC 当天 10-01,窗口含 09-30(月末边界)
+  var db = createMemoryDb();
+  var deps = fixedDeps(db, "2026-10-01T00:30:00.000Z");
+  var c1 = await handler(
+    remindEvent("op-win-edge1", "药膏", "药箱", { due_date: "2026-10-05", kind: "开封后" }),
+    deps
+  );
+  var r1 = await handler(
+    {
+      action: "remindComplete",
+      item_id: c1.item.item_id,
+      expected_generation: 1,
+      period_days: 7,
+      complete_date: "2026-09-30"
+    },
+    deps
+  );
+  assert.equal(r1.ok, true, "月初前一天(09-30)在窗口内,不因跨月误拒");
+  assert.equal(r1.reminder.due_date, "2026-10-07");
+
+  // 服务器 2027-01-01T00:30Z:窗口含 2026-12-31(年末边界)
+  var db2 = createMemoryDb();
+  var deps2 = fixedDeps(db2, "2027-01-01T00:30:00.000Z");
+  var c2 = await handler(
+    remindEvent("op-win-edge2", "日历", "书桌", { due_date: "2027-01-05", kind: "下次维护" }),
+    deps2
+  );
+  var r2 = await handler(
+    {
+      action: "remindComplete",
+      item_id: c2.item.item_id,
+      expected_generation: 1,
+      period_days: 7,
+      complete_date: "2026-12-31"
+    },
+    deps2
+  );
+  assert.equal(r2.ok, true, "年末前一天(12-31)在窗口内,不因跨年误拒");
+  assert.equal(r2.reminder.due_date, "2027-01-07");
+});

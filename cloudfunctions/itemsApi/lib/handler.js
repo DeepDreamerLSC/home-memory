@@ -306,6 +306,22 @@ function addDays(dueDate, days) {
   return dt.getUTCFullYear() + "-" + pad(dt.getUTCMonth() + 1) + "-" + pad(dt.getUTCDate());
 }
 
+/**
+ * complete_date 窗口(PR #52 附带校准):complete_date 是客户端携带的用户本地
+ * 自然日,体验口径为本地日;但客户端时间不是可信的服务器事实——服务端只接受
+ * 与服务端 UTC 当天相差 ≤1 个自然日的日期(恰好覆盖现实时区 UTC-12 ~ UTC+14
+ * 的「本地今天」全集,边界含两端),超出按异常设备时钟/伪造拒绝
+ * (INVALID_INPUT 零写入),防生成离谱的下次提醒。
+ */
+function completeDateWithinWindow(nowIso, completeDate) {
+  var today = nowIso.slice(0, 10);
+  return (
+    completeDate === today ||
+    completeDate === addDays(today, -1) ||
+    completeDate === addDays(today, 1)
+  );
+}
+
 function reminders(deps) {
   return deps.db.collection(REMINDERS_COLLECTION);
 }
@@ -1150,10 +1166,12 @@ async function remindListItems(event, deps) {
  * remindComplete:入参 { action:"remindComplete", item_id, expected_generation?,
  * period_days?, complete_date? }。
  * period_days 缺省或 0 表示不周期再生;携带则须为 0-3650 的整数,否则 INVALID_INPUT。
- * complete_date(PR #52 Low-3):客户端携带的「用户本地自然日」完成日(YYYY-MM-DD
- * 真实日历日,严格校验)。家庭提醒日期的合同=按用户本地自然日:客户端随请求
- * 携带本地完成日,服务端不靠运行时区猜(北京时间 00:00-08:00 完成不再被 UTC
- * 日期折早一天)。缺省 = 旧协议按服务端当天 UTC 日期,行为不变。
+ * complete_date(PR #52 Low-3 + 附带校准):客户端携带的「用户本地自然日」完成日
+ * (YYYY-MM-DD 真实日历日,严格校验;且须与服务端 UTC 当天相差 ≤1 个自然日——
+ * 覆盖现实时区的本地今天全集,超出 INVALID_INPUT 零写入,客户端时间不是可信的
+ * 服务器事实)。家庭提醒日期的合同=按用户本地自然日(体验口径):服务端不靠
+ * 运行时区猜(北京时间 00:00-08:00 完成不再被 UTC 日期折早一天)。
+ * 缺省 = 旧协议按服务端当天 UTC 日期,行为不变。
  * expected_generation(PR #52 B1):remindList 行返回的提醒轮次号,携带时服务端
  * 只完成「用户实际看到的那一轮」——条件更新命中 0 条即本轮已非该轮:
  * 他轮仍在 → VERSION_CONFLICT(绝不误伤新一轮);本轮已完成且已再生、请求与
@@ -1191,13 +1209,17 @@ async function remindCompleteItem(event, deps) {
     }
     periodDays = event.period_days;
   }
-  // 完成基准日(Low-3):用户本地自然日随请求携带;缺省回退服务端 UTC 当天
+  // 完成基准日(Low-3 + 附带校准):用户本地自然日随请求携带(体验口径),
+  // 服务端按 ±1 自然日窗口校验(不是可信服务器事实,超出拒绝);缺省回退服务端 UTC 当天
   var completeDate = null;
   if (event.complete_date !== undefined && event.complete_date !== null) {
     if (!isValidDueDate(event.complete_date)) {
       return fail("INVALID_INPUT");
     }
     completeDate = event.complete_date.trim();
+    if (!completeDateWithinWindow(deps.now(), completeDate)) {
+      return fail("INVALID_INPUT");
+    }
   }
   var got = await collection(deps)
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
