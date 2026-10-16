@@ -627,7 +627,12 @@ Page<
     // 应用内提醒,绝不阻塞保存流程)。行口径与下方提交一致:勾选且未 saved、
     // rowReminderInput 会随 create 携带 reminder 的行。
     if (rowsToSave(snapshot).some((r) => rowReminderInput(r) !== undefined)) {
-      requestExpirySubscribe();
+      // 回执日期=本批最早到期日(多件带提醒时,首条推送就是它;YMD 字典序即日期序)
+      const earliest = rowsToSave(snapshot)
+        .map((r) => r.remindAt)
+        .filter((d) => d !== "")
+        .sort()[0];
+      requestExpirySubscribe(undefined, earliest);
     }
     this.setData({ batchSaving: true });
     let mountFailed = 0;

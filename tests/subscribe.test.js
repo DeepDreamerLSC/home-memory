@@ -97,13 +97,11 @@ test("SB-FLOW-1:accept → 调 remindNotify recordSubscription(带模板授权�
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
-    assert.equal(calls.length, 2, "一次订阅弹窗 + 一次云函数记录");
+    assert.equal(calls.length, 3, "一次订阅弹窗 + 一次云函数记录 + 一次成功回执 toast(0.9.5 起全环境)");
     assert.deepEqual(calls[0].tmplIds, [TEMPLATE_ID], "弹窗模板即单一常量");
     assert.equal(calls[1].name, "remindNotify");
     assert.equal(calls[1].data.action, "recordSubscription");
-    assert.equal(calls.some(function (c) {
-      return c.kind === "showToast";
-    }), false, "绝不 toast(静默降级)");
+    assert.equal(calls[2].kind, "showToast", "accept 后成功回执");
   } finally {
     restoreWx(prevWx);
   }
@@ -194,7 +192,7 @@ test("SB-FLOW-3:低版本基础库(无 requestSubscribeMessage)与无云能力(�
   }
 });
 
-test("SB-FLOW-4:云函数失败(callFunction fail / 返回 ok:false)静默吞掉,不 toast 不抛错", async function () {
+test("SB-FLOW-4:云函数失败(callFunction fail)不抛错不阻塞;成功回执照常(授权已成,落库 fire-and-forget 失败静默=既有披露)", async function () {
   var prevWx = globalThis.wx;
   var toasts = [];
   globalThis.wx = {
@@ -219,7 +217,7 @@ test("SB-FLOW-4:云函数失败(callFunction fail / 返回 ok:false)静默吞掉
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
-    assert.equal(toasts.length, 0, "落库失败不 toast:提醒仍有应用内提醒页兜底");
+    assert.equal(toasts.length, 1, "落库失败不影响回执:用户侧授权已成功,服务端记录 fire-and-forget 失败仍静默吞掉(提醒有应用内页兜底)");
   } finally {
     restoreWx(prevWx);
   }
@@ -974,7 +972,7 @@ test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast、
   }
 });
 
-test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);release success → 静默(记录照常)", async function () {
+test("SB-DIAG-3:accept → 全环境成功回执「订阅成功!将在X年X月X日推送微信提醒」(无日期退化);develop 非 accept → 状态 toast;release 非 accept → 静默", async function () {
   var prevWx = globalThis.wx;
   var toasts = [];
   var modals = [];
@@ -986,20 +984,39 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     }
   };
   try {
-    subscribe.requestExpirySubscribe();
+    subscribe.requestExpirySubscribe(undefined, "2026-10-20");
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
     assert.deepEqual(calls, ["recordSubscription"], "accept 记录像常");
-    assert.equal(toasts.length, 1, "develop toast 授权结果");
-    assert.equal(toasts[0].title, "订阅:accept");
+    assert.equal(toasts.length, 1, "accept 成功回执(全环境)");
+    assert.equal(toasts[0].title, "订阅成功!将在2026年10月20日推送微信提醒", "带日期回执(月/日去前导零)");
     assert.equal(toasts[0].duration, 4000, "success 保留小 toast duration 4000");
     assert.equal(modals.length, 0, "success 不 modal(短状态 toast 足够)");
   } finally {
     restoreWx(prevWx);
   }
 
-  // reject:不记录,但仍 toast 状态
+  // accept 无日期参数:退化为不带日期的回执(三入口均已接线,防御分支)
+  prevWx = globalThis.wx;
+  toasts = [];
+  modals = [];
+  globalThis.wx = makeEnvWx("develop", { status: "accept", toasts: toasts, modals: modals });
+  globalThis.wx.cloud = {
+    callFunction: function () {}
+  };
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(toasts.length, 1);
+    assert.equal(toasts[0].title, "订阅成功!到期时微信将提醒你", "无合法日期时不出现残缺的「将在…」句式");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // reject:不记录,develop 仍 toast 状态(诊断,非回执)
   prevWx = globalThis.wx;
   toasts = [];
   modals = [];
@@ -1022,7 +1039,7 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     restoreWx(prevWx);
   }
 
-  // release success:静默(既有 SB-FLOW 断言同款行为,此处显式锁 envVersion=release)
+  // release accept:回执同样展示(0.9.5 起全环境);记录照常
   prevWx = globalThis.wx;
   toasts = [];
   modals = [];
@@ -1034,12 +1051,13 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     }
   };
   try {
-    subscribe.requestExpirySubscribe();
+    subscribe.requestExpirySubscribe(undefined, "2027-01-05");
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
     assert.deepEqual(calls, ["recordSubscription"], "release 记录像常");
-    assert.equal(toasts.length, 0, "release 成功不 toast(静默现状)");
+    assert.equal(toasts.length, 1, "release accept 同样给成功回执(非诊断,用户确认)");
+    assert.equal(toasts[0].title.indexOf("订阅成功!"), 0, "release 回执同款文案");
     assert.equal(modals.length, 0, "release 成功不 modal");
   } finally {
     restoreWx(prevWx);
@@ -1148,15 +1166,16 @@ test("SB-GESTURE-1:develop success 全链路——第一条 wx API 调用必须�
       "requestSubscribeMessage",
       "请求前置零桥接调用:第一条 wx API 调用必须是订阅请求本身(任何先行的 getAccountInfoSync/存储/toast 都会破坏 iOS 点击手势上下文)"
     );
-    assert.ok(
-      rec.calls.indexOf("requestSubscribeMessage") < rec.calls.indexOf("getAccountInfoSync"),
-      "getAccountInfoSync(同步桥接调用)只能出现在请求之后的回调里,绝不先于请求"
+    assert.equal(
+      rec.calls.indexOf("getAccountInfoSync"),
+      -1,
+      "accept 路径不查环境(0.9.5 回执全环境展示,成功链路零环境分支)"
     );
-    // 全链路仍完整:请求 → 记录(accept)→ 环境诊断 → 状态 toast
+    // 全链路仍完整:请求 → 记录(accept)→ 成功回执
     assert.deepEqual(
       rec.calls,
-      ["requestSubscribeMessage", "cloud.callFunction", "getAccountInfoSync", "showToast"],
-      "develop accept 全链路调用序列(诊断在请求之后)"
+      ["requestSubscribeMessage", "cloud.callFunction", "showToast"],
+      "develop accept 全链路调用序列(回执在记录之后)"
     );
   } finally {
     restoreWx(prevWx);

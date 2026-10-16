@@ -699,7 +699,8 @@ Page<
     // 「保留我的修改」与遗留待补写)时,在 tap 手势链内同步请求订阅授权
     //(必须先于下方任何 await;清除提醒不请求;拒绝/失败静默降级应用内提醒)
     if (remindWrite !== null && remindWrite.action === "remindSet") {
-      requestExpirySubscribe();
+      // 回执日期=本次写入的到期日(remindSet 的 dueDate)
+      requestExpirySubscribe(undefined, remindWrite.dueDate);
     }
     this.setData({ saving: true });
     try {
@@ -1627,7 +1628,7 @@ Page<
     requestExpirySubscribe(() => {
       writeNotifyAccepted();
       this.setData({ notifyAccepted: true });
-    });
+    }, this.data.remindAt);
   },
 
   onDiagEntryTap() {
