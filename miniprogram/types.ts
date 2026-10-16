@@ -5,6 +5,8 @@
  * (household_id / openid 全部由云函数服务端自行派生)。
  */
 
+import type { Box } from "./utils/photo-box";
+
 /** items 集合完整文档(create / update 成功后返回) */
 export interface ItemRecord {
   _id: string;
@@ -794,3 +796,46 @@ export type HouseholdsApiEvent =
   | { action: "dissolve" }
   | { action: "memberList" }
   | { action: "switch"; target: "personal" | "shared" };
+
+/* ---------------- 拍照识物(#3,docs/design/issue3-photo-intake/IMPLEMENTATION.md) ---------------- */
+
+/** VL 识别置信度(vlRecognize 响应词表,词表外服务端已按 "low" 收敛) */
+export type VlConfidence = "high" | "mid" | "low";
+
+/** vlRecognize 响应的单件候选行(服务端已校验清洗;box 已归一 0-1,null=无框整照关联) */
+export interface VlCandidate {
+  /** 中文物品名,1-50 码点 */
+  name: string;
+  /** 数量线索原样(如「约2根」;可空串,≤40 码点) */
+  qty_note: string;
+  confidence: VlConfidence;
+  /** 0-1 相对原图左上角;null = 该件无框 */
+  box: Box | null;
+}
+
+/**
+ * 拍照识物确认页的候选行(与 photo-session 会话载荷同形状,IMPLEMENTATION.md §4.1;
+ * 供页面与 utils 共用)。三态:未勾选=「候选」、checked=「保留(待存)」、
+ * 保存成功=「已确认记住」(done 态由 intake-draft 的行状态承载,不进本形状)。
+ */
+export interface PhotoCandidate {
+  /** 入列即生成的稳定标识(uuid):锁定/语音编辑/计数一律以此为准,绝不按行号 */
+  draftId: string;
+  name: string;
+  /** 数量拆 qty+suffix(V0.4.2 单一来源;qty 域 1-99,数量只是备注不做库存) */
+  qty: number;
+  /** 数量备注后缀(空串按「备注」展示;与 qty 共同拼成 note 文本) */
+  suffix: string;
+  /** 位置例外(null=继承批次默认位置;非空=该件单独位置,保存确认只汇总已勾选件的例外) */
+  exc: string | null;
+  /** 行来源:照片识别 / 语音补录 / 圈选补识别 */
+  src: "ai" | "voice" | "circle";
+  /** VL 置信度(voice 行无 VL 依据,恒 "low" 且无框,不参与框样式) */
+  confidence: VlConfidence;
+  /** 0-1 相对原图;null = 无框(手动/语音行,整照关联) */
+  box: Box | null;
+  /** 勾选=「保留」;未勾=「候选」(AI 预选规则:confidence="high" 默认勾选) */
+  checked: boolean;
+  /** 入列即生成的 photoCommit 幂等键(uuid):内容改后仍沿用,服务端同键同内容幂等 */
+  operationId: string;
+}
