@@ -93,6 +93,8 @@
   .src.keep{background:var(--accent);color:var(--text)}
   .src.voice{background:var(--accent);color:var(--text)}
   .src.boxsel{background:var(--danger-bg);color:var(--danger)}
+  .src.done{background:var(--go-bg);color:var(--go-fg)}
+  .row.done{border-color:var(--go-bg)}
   .row .meta{font-size:11px;color:var(--text3);margin-top:2px}
   .row .meta .did{color:var(--text2);font-weight:700}
   .step{flex:none;display:flex;align-items:center;gap:4px}
@@ -283,7 +285,7 @@
       <div class="card" style="margin-bottom:12px">
         <div class="ct">我理解为 3 处修改,勾选应用</div>
         <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">名称</div><div class="dline"><span class="old">黄色薯片罐</span><span class="arr">→</span><span class="new">品客薯片罐</span></div></div></div>
-        <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">数量不明</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
+        <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">×1(不确定)</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
         <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">位置(例外,不继承批次)</div><div class="dline"><span class="old">玄关柜·第二层</span><span class="arr">→</span><span class="new">厨房</span></div></div></div>
         <div class="why">解析:内容词「品客的薯片罐」对上 #d3;「空了」进备注;「放厨房去」只改这一件的位置。</div>
       </div>
@@ -292,6 +294,24 @@
         <button class="btn go" id="diffApply" onclick="applyDiff()">应用勾选的 3 处</button>
       </div>
       <div class="keepTip">改完接着按住说下一处就行;一句话多项修改会像这样拆开,你可以只应用其中几项。</div>
+    </div>
+    <!-- 保存最终确认弹层(V0.4.1:位置/例外/数量过目,确认才「已确认记住」) -->
+    <div class="dim" id="saveDim" style="display:none"></div>
+    <div class="sheet" id="saveSheet" style="display:none">
+      <div class="grip"></div>
+      <h3>保存前最后确认</h3>
+      <div class="conf">本批位置与例外,确认了才写入</div>
+      <div class="card"><div class="ct">本批位置(保留的候选默认继承)</div>
+        <div style="font-size:15px;font-weight:800">玄关柜 · 第二层抽屉</div></div>
+      <div class="card"><div class="ct">位置例外</div>
+        <div id="excList" style="font-size:13px;line-height:1.9;color:var(--text)"></div></div>
+      <div class="card" style="margin-bottom:12px"><div class="ct">最终保存</div>
+        <div id="saveSummary" style="font-size:13.5px;line-height:1.7;color:var(--text)"></div></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn quiet" id="saveBack">再看看</button>
+        <button class="btn go" id="saveGo">确认,记住了</button>
+      </div>
+      <div class="keepTip">未勾选的候选不会入库(就当没看见);确认后即为「已确认记住」,此时才有正式记录。</div>
     </div>
     <div class="toast" id="toast" style="display:none"></div>
   </div>
@@ -338,7 +358,7 @@
       <div class="card" style="margin-bottom:12px">
         <div class="ct">我理解为 3 处修改,勾选应用</div>
         <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">名称</div><div class="dline"><span class="old">黄色薯片罐</span><span class="arr">→</span><span class="new">品客薯片罐</span></div></div></div>
-        <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">数量不明</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
+        <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">×1(不确定)</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
         <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">位置(例外,不继承批次)</div><div class="dline"><span class="old">玄关柜·第二层</span><span class="arr">→</span><span class="new">厨房</span></div></div></div>
         <div class="why">解析:内容词「品客的薯片罐」对上 #d3;「空了」进备注;「放厨房去」只改这一件的位置。</div>
       </div>
@@ -411,7 +431,7 @@
       <div class="hold" style="pointer-events:none">
         <div class="hold-face"><div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div><div class="hold-label">按住说话</div></div>
       </div>
-      <button class="saveSm">存 3 件</button>
+      <button class="saveSm" id="saveBtn5">存 3 件</button>
     </div>
   </div>
 </div>
@@ -493,32 +513,60 @@ function renderBoxes(){
     d.className="bbox"+(it.ok?"":" amber"); d.id="bx-"+it.id;
     d.style.left=(x1/10)+"%"; d.style.top=(y1/10)+"%";
     d.style.width=((x2-x1)/10)+"%"; d.style.height=((y2-y1)/10)+"%";
-    d.innerHTML=`<span class="tag">${it.ok?"预选":"候选"}·${it.name}</span>`;
+    d.innerHTML=`<span class="tag">${it.name}</span>`;
     d.onclick=()=>flashRow(it.id);
     p.appendChild(d);
   });
+}
+/* V0.4.1:演示草稿=名称/数量备注/位置例外独立存储(不引正式数据模型);
+   语音只改勾选的字段,勾选状态(保留)不被动变更 */
+const DRAFT={};
+R1.forEach(it=>{ DRAFT[it.id]={name:it.name, note: it.id==="chips"?"×1(数量不确定)":`×${it.n} 备注`, exc:null, src:"ai"}; });
+function rowHTML(it,i,sel,done){
+  const d=DRAFT[it.id];
+  const badges=(d.src==="voice"?'<span class="src voice">语音</span>':'')+
+    `<span class="src ${done?"done":sel?"keep":"ai"}">${done?"已记住":sel?"保留":"候选"}</span>`;
+  const exc=d.exc?` · 位置例外:${d.exc}`:"";
+  return `<div class="ck" onclick="toggleRow('${it.id}');event.stopPropagation()">${sel?"✓":""}</div>
+    <div class="mid"><div class="nm">${d.name} ${badges}</div>
+    <div class="meta">${done?"已入库 · ":""}<span class="did">#d${i+1}</span> · ${d.note}${exc} · ${it.sub}</div></div>
+    <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${it.n}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
+}
+function renderRow(id){
+  const i=R1.findIndex(x=>x.id===id), it=R1[i], r=document.getElementById("rw-"+id);
+  if(!r)return;
+  r.innerHTML=rowHTML(it,i,r.classList.contains("sel"),r.classList.contains("done"));
 }
 function renderList(){
   const l=document.getElementById("list1");
   R1.forEach((it,i)=>{
     const r=document.createElement("div");
     r.className="row"+(it.ok?" sel":""); r.id="rw-"+it.id;
-    r.innerHTML=`<div class="ck" onclick="toggleRow('${it.id}');event.stopPropagation()">${it.ok?"✓":""}</div>
-      <div class="mid"><div class="nm">${it.name} <span class="src ${it.ok?"keep":"ai"}">${it.ok?"保留":"候选"}</span></div>
-      <div class="meta"><span class="did">#d${i+1}</span> · ×${it.n} 备注 · ${it.sub}</div></div>
-      <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${it.n}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
+    r.innerHTML=rowHTML(it,i,it.ok,false);
     r.onclick=()=>{expandPhoto(true);flashBox(it.id);};
     l.appendChild(r);
   });
+  R1.forEach(it=>syncTag(it.id));
   updateCounts();
 }
-function toggleRow(id){const r=document.getElementById("rw-"+id);
+function toggleRow(id){
+  const r=document.getElementById("rw-"+id);
+  if(!r||r.classList.contains("done"))return;
   r.classList.toggle("sel");
-  r.querySelector(".ck").textContent=r.classList.contains("sel")?"✓":"";
-  const src=r.querySelector(".src"); src.textContent=r.classList.contains("sel")?"保留":"候选";
-  src.className="src "+(r.classList.contains("sel")?"keep":"ai");
-  updateCounts();}
+  renderRow(id); syncTag(id); updateCounts();
+}
+/* 框标签与清单状态同步(V0.4.1:取消预选时照片框同步变更) */
+function syncTag(id){
+  const b=document.getElementById("bx-"+id), r=document.getElementById("rw-"+id);
+  if(!b||!r)return;
+  const pre=r.classList.contains("done")?"已记住·":r.classList.contains("sel")?"保留·":"候选·";
+  b.querySelector(".tag").textContent=pre+DRAFT[id].name;
+}
 function updateCounts(){
+  const done=document.querySelectorAll("#list1 .row.done").length;
+  if(done){
+    document.getElementById("cntHead").textContent=`已确认记住 ${done} 件 · 本批完成`;
+    document.getElementById("saveBtn").textContent="✓ 已入库";return;}
   const n=document.querySelectorAll("#list1 .row.sel").length;
   document.getElementById("cntHead").textContent=`保留 ${n} / 7(待核对)`;
   document.getElementById("saveBtn").textContent=`存 ${n} 件`;}
@@ -594,21 +642,52 @@ document.getElementById("diffCancel").onclick=()=>{
   toast("好,当我没说。");};
 function diffCount(){
   const n=document.querySelectorAll("#diffSheet .dck:checked").length;
-  document.getElementById("diffApply").textContent=`应用勾选的 ${n} 处`;}
+  const btn=document.getElementById("diffApply");
+  btn.textContent=n?`应用勾选的 ${n} 处`:"一项都没勾";
+  btn.style.opacity=n?1:.45; btn.disabled=!n;}
 function applyDiff(){
   const cks=[...document.querySelectorAll("#diffSheet .dck")];
+  const n=cks.filter(c=>c.checked).length;
+  if(!n)return;                       /* 全不勾=不执行,也不把物品改成保留 */
+  const d=DRAFT.chips;
+  if(cks[0].checked)d.name="品客薯片罐";
+  if(cks[1].checked)d.note="×1(空罐)";
+  if(cks[2].checked)d.exc="厨房";      /* 只改这一件的位置例外,不碰其他字段 */
+  d.src="voice";
+  renderRow("chips"); syncTag("chips");
   document.getElementById("diffDim").style.display="none";
   document.getElementById("diffSheet").style.display="none";
-  const row=document.getElementById("rw-chips");
-  if(row){
-    if(cks[0]&&cks[0].checked){row.classList.add("sel");row.querySelector(".ck").textContent="✓";
-      row.querySelector(".nm").innerHTML='品客薯片罐 <span class="src voice">语音</span>';
-      row.querySelector(".src")&&0;}
-    else{row.classList.add("sel");row.querySelector(".ck").textContent="✓";}
-    if(cks[2]&&cks[2].checked)row.querySelector(".meta").innerHTML='<span class="did">#d3</span> · ×1 备注 · 位置例外:厨房(语音)';
-    updateCounts();
-  }
-  toast(`改好了 ${cks.filter(c=>c.checked).length} 处 · 接着按住说`);}
+  toast(`改好了 ${n} 处 · 接着按住说`);}
+
+/* ===== 保存最终确认(V0.4.1:批次位置/例外/数量过目 → 确认才「已确认记住」) ===== */
+document.getElementById("saveBtn").onclick=confirmSave;
+function confirmSave(){
+  if(document.querySelector("#list1 .row.done"))return;
+  const sel=[...document.querySelectorAll("#list1 .row.sel")];
+  if(!sel.length){toast("先勾选要保留的候选");return;}
+  const excs=R1.filter(it=>DRAFT[it.id].exc)
+    .map(it=>`📍 #d${R1.indexOf(it)+1} ${DRAFT[it.id].name} → ${DRAFT[it.id].exc}`);
+  document.getElementById("excList").innerHTML=excs.length?excs.join("<br>"):"无例外,全部继承本批位置";
+  document.getElementById("saveSummary").innerHTML=
+    `保留 <b>${sel.length}</b> 件写入 · 未勾选 ${7-sel.length} 件不保存`;
+  document.getElementById("saveDim").style.display="block";
+  document.getElementById("saveSheet").style.display="block";}
+document.getElementById("saveBack").onclick=()=>{
+  document.getElementById("saveDim").style.display="none";
+  document.getElementById("saveSheet").style.display="none";};
+document.getElementById("saveGo").onclick=()=>{
+  document.querySelectorAll("#list1 .row.sel").forEach(r=>r.classList.add("done"));
+  R1.forEach(it=>{const r=document.getElementById("rw-"+it.id);
+    if(r&&r.classList.contains("done")){renderRow(it.id);syncTag(it.id);}});
+  document.getElementById("saveDim").style.display="none";
+  document.getElementById("saveSheet").style.display="none";
+  updateCounts();
+  toast(`都记住了 · ${document.querySelectorAll("#list1 .row.done").length} 件已入库`);};
+
+/* ===== 屏⑤ 保存计数联动(V0.4.1:基础预选 3 件 + 圈选清单勾选数) ===== */
+function updateCounts5(){
+  const n=3+document.querySelectorAll("#list5 .row.sel").length;
+  document.getElementById("saveBtn5").textContent=`存 ${n} 件`;}
 
 /* ===== 克隆屏①到屏②③ ===== */
 document.querySelectorAll(".cloneSlot").forEach(slot=>{
@@ -635,13 +714,17 @@ function addCircled(){
   const l5=document.getElementById("list5");
   const r=document.createElement("div"); r.className="row addedRow";
   r.innerHTML='<div class="ck"></div><div class="mid"><div class="nm">PlayStation 游戏盒 <span class="src boxsel">圈选·候选</span></div><div class="meta"><span class="did">#d8</span> · ×1 备注 · 刚由圈选补入,勾选才保留</div></div><div class="step"><button>−</button><b>1</b><button>+</button></div>';
-  r.onclick=()=>{r.classList.toggle("sel");r.querySelector(".ck").textContent=r.classList.contains("sel")?"✓":"";};
+  r.onclick=()=>{r.classList.toggle("sel");
+    r.querySelector(".ck").textContent=r.classList.contains("sel")?"✓":"";
+    updateCounts5();};
   l5.appendChild(r);
+  updateCounts5();
 }
 function resetCircle(){
   document.querySelectorAll("#photo5 .bbox.user").forEach(e=>e.remove());
   document.getElementById("askResult").style.display="none";
   document.getElementById("list5").innerHTML=""; circled=false;
+  updateCounts5();
 }
 
 /* ===== 屏⑥ 电池高亮框(real-3 实测 [605,248,997,731]) ===== */
