@@ -520,8 +520,9 @@ function renderBoxes(){
 }
 /* V0.4.1:演示草稿=名称/数量备注/位置例外独立存储(不引正式数据模型);
    语音只改勾选的字段,勾选状态(保留)不被动变更 */
+/* V0.4.2:qty+suffix 分开存,步进器与备注单一来源;仍不引正式 quantity 字段 */
 const DRAFT={};
-R1.forEach(it=>{ DRAFT[it.id]={name:it.name, note: it.id==="chips"?"×1(数量不确定)":`×${it.n} 备注`, exc:null, src:"ai"}; });
+R1.forEach(it=>{ DRAFT[it.id]={name:it.name, qty:it.n, suffix: it.id==="chips"?"(数量不确定)":" 备注", exc:null, src:"ai"}; });
 function rowHTML(it,i,sel,done){
   const d=DRAFT[it.id];
   const badges=(d.src==="voice"?'<span class="src voice">语音</span>':'')+
@@ -529,8 +530,8 @@ function rowHTML(it,i,sel,done){
   const exc=d.exc?` · 位置例外:${d.exc}`:"";
   return `<div class="ck" onclick="toggleRow('${it.id}');event.stopPropagation()">${sel?"✓":""}</div>
     <div class="mid"><div class="nm">${d.name} ${badges}</div>
-    <div class="meta">${done?"已入库 · ":""}<span class="did">#d${i+1}</span> · ${d.note}${exc} · ${it.sub}</div></div>
-    <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${it.n}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
+    <div class="meta">${done?"已入库 · ":""}<span class="did">#d${i+1}</span> · ×${d.qty}${d.suffix}${exc} · ${it.sub}</div></div>
+    <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${d.qty}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
 }
 function renderRow(id){
   const i=R1.findIndex(x=>x.id===id), it=R1[i], r=document.getElementById("rw-"+id);
@@ -575,7 +576,13 @@ function flashBox(id){const b=document.getElementById("bx-"+id),r=document.getEl
   document.querySelectorAll(".row").forEach(e=>e.classList.remove("hl"));
   if(b){b.classList.add("pulse");b.scrollIntoView({block:"center",behavior:"smooth"});}
   if(r)r.classList.add("hl");}
-function step(btn,d){const b=btn.parentElement.querySelector("b");b.textContent=Math.max(1,+b.textContent+d);}
+/* V0.4.2:步进器同步草稿数量(备注随之更新),屏幕数字与草稿单一来源 */
+function step(btn,d){
+  const row=btn.closest(".row"), id=row?row.id.replace("rw-",""):null;
+  const v=Math.max(1,+(btn.parentElement.querySelector("b").textContent)+d);
+  if(id&&DRAFT[id]){DRAFT[id].qty=v;renderRow(id);}
+  else btn.parentElement.querySelector("b").textContent=v;
+}
 function expandPhoto(open){const p=document.getElementById("photo1");
   if(open)p.classList.remove("collapsed");
   else p.classList.add("collapsed");}
@@ -651,7 +658,7 @@ function applyDiff(){
   if(!n)return;                       /* 全不勾=不执行,也不把物品改成保留 */
   const d=DRAFT.chips;
   if(cks[0].checked)d.name="品客薯片罐";
-  if(cks[1].checked)d.note="×1(空罐)";
+  if(cks[1].checked){d.qty=1;d.suffix="(空罐)";}
   if(cks[2].checked)d.exc="厨房";      /* 只改这一件的位置例外,不碰其他字段 */
   d.src="voice";
   renderRow("chips"); syncTag("chips");
@@ -665,8 +672,11 @@ function confirmSave(){
   if(document.querySelector("#list1 .row.done"))return;
   const sel=[...document.querySelectorAll("#list1 .row.sel")];
   if(!sel.length){toast("先勾选要保留的候选");return;}
-  const excs=R1.filter(it=>DRAFT[it.id].exc)
-    .map(it=>`📍 #d${R1.indexOf(it)+1} ${DRAFT[it.id].name} → ${DRAFT[it.id].exc}`);
+  /* V0.4.2:例外只汇总本次实际勾选、准备保存的物品;未保留候选不进确认清单 */
+  const excs=R1.filter(it=>{
+    const r=document.getElementById("rw-"+it.id);
+    return r&&r.classList.contains("sel")&&DRAFT[it.id].exc;
+  }).map(it=>`📍 #d${R1.indexOf(it)+1} ${DRAFT[it.id].name} → ${DRAFT[it.id].exc}`);
   document.getElementById("excList").innerHTML=excs.length?excs.join("<br>"):"无例外,全部继承本批位置";
   document.getElementById("saveSummary").innerHTML=
     `保留 <b>${sel.length}</b> 件写入 · 未勾选 ${7-sel.length} 件不保存`;
