@@ -292,6 +292,7 @@
      picker bindchange 无点击手势,授权入口收在这里)。小号次级触点,贴「已处理/⋯」
    的次级规范:热区 ≥88(透明上下延伸)、视觉面 60;全用主题变量,浅深两套主题通用 ============ */
 .notify-chip {
+  /* 原生 button 手势令牌用(鸿蒙);重置微信 button 默认观感,视觉仍由 face 胶囊承担 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -300,6 +301,17 @@
   margin: 0 36rpx;
   box-sizing: border-box;
   background: transparent;
+  border: none;
+  border-radius: 0;
+  width: auto;
+  line-height: normal;
+  font-size: inherit;
+  font-weight: normal;
+  color: inherit;
+}
+
+.notify-chip::after {
+  border: none;
 }
 
 .notify-chip-face {
