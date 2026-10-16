@@ -12,6 +12,7 @@ import {
 } from "../../utils/locations-api";
 import {
   captureScopeGeneration,
+  householdScopeSuffix,
   isHouseholdScopeShared,
   isScopeGenerationCurrent,
 } from "../../utils/household-scope";
@@ -57,6 +58,40 @@ function shortDate(iso: string): string {
   const d = new Date(t);
   const pad = (n: number): string => (n < 10 ? "0" + n : String(n));
   return pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+/**
+ * 「到期时微信提醒我」已成功开启的本地标记键(#36 真机手势规则):
+ * 按家庭作用域键约定拼 household-scope 后缀(换家庭键隔离,互不可见)。
+ * 注意:该标记只是**展示启发式**——仅用来决定详情页显式订阅入口是否露出,
+ * 权威订阅记录在服务端 remind_subscriptions(remindNotify 云函数),本地
+ * 标记不参与任何发送/落库决策。storage 一律 best-effort:读写失败按未开启
+ * 处理,不影响任何业务语义。
+ */
+const NOTIFY_ACCEPTED_KEY = "wx-notify-accepted";
+
+/** 读本地「已成功开启订阅」标记(best-effort;读失败/无存储按未开启) */
+function readNotifyAccepted(): boolean {
+  try {
+    if (typeof wx.getStorageSync !== "function") {
+      return false;
+    }
+    return wx.getStorageSync(NOTIFY_ACCEPTED_KEY + householdScopeSuffix()) === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 写本地「已成功开启订阅」标记(best-effort;写失败不影响本次会话收起入口) */
+function writeNotifyAccepted(): void {
+  try {
+    if (typeof wx.setStorageSync !== "function") {
+      return;
+    }
+    wx.setStorageSync(NOTIFY_ACCEPTED_KEY + householdScopeSuffix(), true);
+  } catch (e) {
+    // best-effort:展示启发式标记,失败不重试不抛出
+  }
 }
 
 /**
@@ -162,6 +197,13 @@ Page<
     /** 提醒操作执行中(已处理/改日期/清除;防并发重复提交) **/
     remindBusy: boolean;
     /**
+     * 「到期时微信提醒我 ›」显式订阅入口(#36 真机手势规则):该物品当前有
+     * 生效提醒(remindAt 非空)且本地未标记「已成功开启」时显示;本地标记
+     * 是展示启发式(键按家庭作用域隔离,换家庭重读)——权威订阅记录在服务端
+     * remind_subscriptions,本标记不参与任何发送决策
+     */
+    notifyAccepted: boolean;
+    /**
      * 当时提到时间但没换算的原话子串(0.6.0 真机反馈 Fix 4,来自 itemsApi.get
      * 的 remind_vague_quote):录入时「说了时间但没换算成日期」的如实留痕,
      * 只展示、不产生任何提醒;已有 active 提醒(到期行在屏)时不再显示。
@@ -261,6 +303,11 @@ Page<
     applyReminderRow(row: RemindRow | null): void;
     /** 保质期行「已处理」:确认后 remindComplete **/
     onExpireDoneTap(): Promise<void>;
+    /**
+     * 「到期时微信提醒我 ›」显式订阅入口(#36 真机手势规则):真实 tap 请求
+     * 订阅授权;accept 且记录发起后写本地「已开启」标记并收起入口
+     */
+    onNotifyChipTap(): void;
     /** 编辑折叠「提醒」:picker mode=date 选日子 → remindSet 设提醒(无则补录,有则改期) */
     onRemindDateChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): Promise<void>;
     /** 编辑折叠「提醒」:✕ 连日期一起清除(remindClear;不存在存日期但不提醒) */
@@ -297,6 +344,7 @@ Page<
     remindGeneration: -1,
     today: localTodayYmd(),
     remindBusy: false,
+    notifyAccepted: false,
     vagueQuote: "",
     conflicts: [] as ConflictEntry[],
     conflictPending: false,
@@ -371,8 +419,13 @@ Page<
   },
 
   onShow() {
-    // 家庭上下文可能切换(创建/加入/退出):「分享给家人」只在共享家庭显示
-    this.setData({ familyShared: isHouseholdScopeShared() });
+    // 家庭上下文可能切换(创建/加入/退出):「分享给家人」只在共享家庭显示;
+    // 订阅入口的本地「已开启」标记按家庭键隔离,回页时一并重读(作用域经
+    // 服务端复核后 refreshReminderRow 末尾还会再读一次,双保险)
+    this.setData({
+      familyShared: isHouseholdScopeShared(),
+      notifyAccepted: readNotifyAccepted(),
+    });
     // 保质期行(#36):进页/回页时按服务端提醒刷新;加载失败静默不显示(增强露出)。
     // 提醒冲突待选时不刷:面板里「你的修改」是用户正要存的值,回页刷新会把它
     // 悄悄换回服务端值(文字字段没有 onShow 刷新,提醒同口径不搞特殊)。
@@ -1353,6 +1406,9 @@ Page<
     this.setData({ expire: null, remindAt: "", remindGeneration: -1 });
     this.remindOriginal = "";
     const row = await this.fetchReminderRow();
+    // 家庭作用域此刻刚经服务端复核:重读「已成功开启订阅」本地标记
+    // (#36 真机手势规则:显式入口的显示条件之一;键随家庭隔离)
+    this.setData({ notifyAccepted: readNotifyAccepted() });
     if (row === undefined) {
       return; // 失败/在途切换:静默,详情其余照常
     }
@@ -1537,6 +1593,26 @@ Page<
   },
 
   /**
+   * 「到期时微信提醒我 ›」显式订阅入口(#36 真机手势规则,0.9.0 iOS 实测):
+   * 微信规定 wx.requestSubscribeMessage 必须在「用户点击手势」的直接回调内
+   * 发起,picker 的 bindchange(滚轮选完)回调不算点击手势、必然被拒——
+   * 订阅授权入口从 picker 直写路径移到这里,真实按钮点击(官方推荐模式;
+   * 入口只在有生效提醒且本地未标记「已开启」时露出,见 wxml 显示条件)。
+   * accept 且服务端记录已发起后:写本地标记并收起入口(标记是展示启发式,
+   * 权威记录在服务端 remind_subscriptions);reject/fail 静默降级应用内提醒
+   * 页,入口保留可再点,绝不阻塞任何流程。
+   */
+  onNotifyChipTap() {
+    if (!this.data.remindAt) {
+      return; // 无生效提醒:入口不该在(双保险)
+    }
+    requestExpirySubscribe(() => {
+      writeNotifyAccepted();
+      this.setData({ notifyAccepted: true });
+    });
+  },
+
+  /**
    * 编辑折叠「提醒」选日子(#36:picker mode=date 弹层,唯一手动日期来源):
    * 没有提醒的物品在这里补录,有提醒的在这里改期——都走 remindSet,把提醒
    * 设为所选的日子(服务端替换该物品的提醒,不堆积)。picker 回填必为合法
@@ -1562,12 +1638,12 @@ Page<
       wx.showToast({ title: problem, icon: "none" });
       return;
     }
-    if (!this.hasRemindConflict() && this.pendingRemindWrite() === null) {
-      // V1.5(#36 到期微信提醒):直写路径本次将写入提醒 → 在 picker 确认手势链内
-      // 同步请求订阅授权(必须先于下方任何 await);冲突/待补写路径不在此请求
-      //(保存修改时 onSaveTap 会请求,避免连弹两次)。
-      requestExpirySubscribe();
-    }
+    // #36 真机手势规则(0.9.0 iOS 实测):picker bindchange(滚轮选完)不是
+    // 用户点击手势,此处调 wx.requestSubscribeMessage 必然报错
+    // 「requestSubscribeMessage:fail can only be invoked by user TAP gesture」
+    // (真机 toast 被截断只见「…fail c…」),留着只产生错误 toast 噪音——授权
+    // 入口移至保质期行下方的「到期时微信提醒我 ›」显式入口(onNotifyChipTap,
+    // 真实 tap);onSaveTap 的真实按钮点击路径照旧请求订阅。
     if (this.hasRemindConflict() || this.pendingRemindWrite() !== null) {
       // 冲突面板已把「提醒」列为待选字段,或冲突刷新后提醒远端不可得、选择还
       // 留在表单等保存补写(F4-B1):改日期只更新「你的修改」/候选并撤回已有
