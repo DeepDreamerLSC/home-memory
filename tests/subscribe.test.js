@@ -24,7 +24,7 @@ var assert = require("node:assert/strict");
 
 var subscribe = require("../miniprogram/utils/subscribe.js");
 
-var TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+var TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 
 function restoreWx(prev) {
   if (prev === undefined) {

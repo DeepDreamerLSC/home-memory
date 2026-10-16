@@ -72,7 +72,7 @@ function byDueThenItemId(a, b) {
  * rows:已过滤进窗口、已连接物品的提醒行
  *   [{ household_id, item_id, name, location_text, due_date }]。
  * 返回 { <household_id>: { name, date, location, tip } }——语义字段名,
- * 模板关键词 key(thing1/date2/…)的映射在调用方(handler.js 单一常量处)。
+ * 模板关键词 key(thing1/time2/…)的映射在调用方(handler.js 单一常量处)。
  */
 function buildHouseholdCards(rows, todayYmd) {
   var grouped = {};

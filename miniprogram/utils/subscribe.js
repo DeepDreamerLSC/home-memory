@@ -35,8 +35,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EXPIRY_REMIND_TEMPLATE_ID = void 0;
 exports.isSubscribeAccepted = isSubscribeAccepted;
 exports.requestExpirySubscribe = requestExpirySubscribe;
-/** 订阅消息模板 ID(微信公众平台「保质期到期提醒」) */
-exports.EXPIRY_REMIND_TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+/** 订阅消息模板 ID(微信公众平台「质保即将过期提醒」编号 75799;旧「保质期到期提醒」模板 2026-10-16 服务端失效已弃用) */
+exports.EXPIRY_REMIND_TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 /** 云函数名(与 cloudfunctions/remindNotify 对应) */
 const REMIND_NOTIFY_FUNCTION = "remindNotify";
 /**
