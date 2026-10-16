@@ -61,7 +61,7 @@ function installWx() {
     showToast: function (o) {
       toasts.push(o);
     },
-    showModal: function () {},
+    showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); },
     navigateTo: function (o) {
       navs.push(o);
     },

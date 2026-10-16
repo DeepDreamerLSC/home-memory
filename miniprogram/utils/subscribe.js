@@ -34,6 +34,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EXPIRY_REMIND_TEMPLATE_ID = void 0;
 exports.isSubscribeAccepted = isSubscribeAccepted;
+exports.askNotifyIntent = askNotifyIntent;
 exports.requestExpirySubscribe = requestExpirySubscribe;
 /** 订阅消息模板 ID(微信公众平台「质保即将过期提醒」编号 75799;旧「保质期到期提醒」模板 2026-10-16 服务端失效已弃用) */
 exports.EXPIRY_REMIND_TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
@@ -150,6 +151,47 @@ function diagnoseModal(errMsg) {
         title: "订阅失败",
         content: errMsg,
         showCancel: false,
+    });
+}
+/**
+ * 设提醒时的「要不要微信提醒」预问(0.9.6,#36 用户反馈):在选日期的
+ * picker bindchange 时机弹(picker 回调无点击手势,但纯提问的 modal 不受
+ * 手势限制);用户答「提醒我」→ 调用方记下意向,真正的订阅授权仍骑在保存
+ * 按钮/chip 的真实 tap 手势上(SB-GESTURE 锁序,绝不在本函数里发订阅请求)。
+ * 用户答「不用了」→ 保存时跳过订阅询问(不打扰明确拒绝的用户)。
+ * fail/无 showModal 保守 resolve(true):提问组件故障时维持既有「保存时
+ * 自动询问」现状,绝不因提问失败漏掉订阅机会。
+ */
+function askNotifyIntent(ymd) {
+    return new Promise((resolve) => {
+        if (typeof wx.showModal !== "function" || zhRemindDate(ymd) === "") {
+            resolve(true);
+            return;
+        }
+        let settled = false;
+        // 看门狗:modal 确认/取消/失败都没回来(异常平台/测试桩无回调)时按
+        // 「要提醒」收敛,绝不挂死调用方的 await;一次性,先到先得
+        const timer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                resolve(true);
+            }
+        }, 10000);
+        const finish = (wants) => {
+            if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve(wants);
+            }
+        };
+        wx.showModal({
+            title: "微信到期提醒",
+            content: "已设为 " + zhRemindDate(ymd) + " 到期。快到期时早上 8 点微信提醒你?",
+            confirmText: "提醒我",
+            cancelText: "不用了",
+            success: (r) => finish(r.confirm === true),
+            fail: () => finish(true),
+        });
     });
 }
 /**

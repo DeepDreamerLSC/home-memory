@@ -1152,7 +1152,7 @@ test("SB-GESTURE-1:develop success 全链路——第一条 wx API 调用必须�
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1193,7 +1193,7 @@ test("SB-GESTURE-2:develop fail 路径同样请求先行;fail 诊断走 modal �
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1226,7 +1226,7 @@ test("SB-GESTURE-3:低版本(无 requestSubscribeMessage)提前 return——零 
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1235,6 +1235,66 @@ test("SB-GESTURE-3:低版本(无 requestSubscribeMessage)提前 return——零 
       subscribe.requestExpirySubscribe();
     }, "低版本降级不抛错");
     assert.equal(rec.calls.length, 0, "不发请求的降级路径同样零桥接调用(getAccountInfoSync 也不该被调)");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SB-ASK(#36 0.9.6 用户反馈:设提醒时「要不要微信提醒」预问):
+// 纯提问 modal,在 picker bindchange 等无手势时机安全;答案由调用方落位,
+// 本函数绝不发订阅请求(手势纪律)。fail/无组件保守 true=维持既有自动询问。
+// ---------------------------------------------------------------------------
+
+test("SB-ASK-1:confirm → true;cancel → false;内容带中文日期", async function () {
+  var prevWx = globalThis.wx;
+  var seen = [];
+  globalThis.wx = {
+    showModal: function (o) {
+      seen.push(o.content);
+      o.success({ confirm: true, cancel: false });
+    }
+  };
+  try {
+    var yes = await subscribe.askNotifyIntent("2026-10-20");
+    assert.equal(yes, true, "确认=要提醒");
+    assert.equal(seen.length, 1);
+    assert.ok(
+      seen[0].indexOf("2026年10月20日") !== -1,
+      "内容含去前导零的中文日期:" + seen[0]
+    );
+    globalThis.wx = {
+      showModal: function (o) {
+        o.success({ confirm: false, cancel: true });
+      }
+    };
+    var no = await subscribe.askNotifyIntent("2026-10-20");
+    assert.equal(no, false, "取消=不要提醒(保存时跳过订阅询问)");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-ASK-2:modal fail / 无 showModal / 非法日期 → 保守 true(不漏订阅机会)", async function () {
+  var prevWx = globalThis.wx;
+  var modals = 0;
+  globalThis.wx = {
+    showModal: function (o) {
+      modals++;
+      o.fail({ errMsg: "showModal:fail" });
+    }
+  };
+  try {
+    assert.equal(await subscribe.askNotifyIntent("2026-10-20"), true, "fail 保守 true");
+    globalThis.wx = {};
+    assert.equal(await subscribe.askNotifyIntent("2026-10-20"), true, "无组件保守 true");
+    globalThis.wx = {
+      showModal: function () {
+        modals++;
+      }
+    };
+    assert.equal(await subscribe.askNotifyIntent("不是日期"), true, "非法日期不弹直接 true");
+    assert.equal(modals, 1, "非法日期那次没弹 modal(全程只 fail 那次弹过)");
   } finally {
     restoreWx(prevWx);
   }

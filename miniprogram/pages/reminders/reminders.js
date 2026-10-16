@@ -4,6 +4,7 @@ const api_1 = require("../../utils/api");
 const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
 const households_api_1 = require("../../utils/households-api");
+const notify_accepted_1 = require("../../utils/notify-accepted");
 /** 三分组界线(#36 冻结):已过期 / 这几天(7 天内)/ 再往后 */
 const GROUP_KEYS = [
     { key: "over", field: "overdue" },
@@ -141,6 +142,9 @@ Page({
                 // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
                 complete_date: (0, remind_ui_1.localTodayYmd)(),
             });
+            // 0.9.6(#36 用户反馈):已处理=微信提醒关掉——提醒已完成、天然不再进
+            // 推送;清「已开启」标记让之后的新提醒能重新询问/开启订阅
+            (0, notify_accepted_1.clearNotifyAccepted)();
             // #36 真机反馈三件 B(用户功能请求):完成后问「记录还保留吗」——
             // 保留(确认/dismiss)= 现状不动;删除物品(取消)= itemsApi delete
             // (级联硬删 active 提醒 + 软删物品,调用与详情页删除先例同款:api 层

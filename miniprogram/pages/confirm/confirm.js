@@ -384,6 +384,13 @@ Page({
             "rows[0].remindConverted": false,
         });
         this.persistRows();
+        // 0.9.6(#36 用户反馈):选完日子问一句「要不要微信提醒」(picker 回调无
+        // 手势,但纯提问不受限);答案存行内 wantsNotify,保存按钮的真实 tap
+        // 据此决定是否弹订阅授权
+        void (0, subscribe_1.askNotifyIntent)(value).then((wants) => {
+            this.setData({ "rows[0].wantsNotify": wants });
+            this.persistRows();
+        });
     },
     /**
      * 单件提醒行「✕」:连日期一起清除,行灰显「不提醒」——日期的唯一作用就是到期
@@ -475,9 +482,11 @@ Page({
         // 手势链内同步请求订阅授权(必须先于下方任何 await;拒绝/失败静默降级
         // 应用内提醒,绝不阻塞保存流程)。行口径与下方提交一致:勾选且未 saved、
         // rowReminderInput 会随 create 携带 reminder 的行。
-        if ((0, batch_save_1.rowsToSave)(snapshot).some((r) => (0, batch_save_1.rowReminderInput)(r) !== undefined)) {
-            // 回执日期=本批最早到期日(多件带提醒时,首条推送就是它;YMD 字典序即日期序)
+        if ((0, batch_save_1.rowsToSave)(snapshot).some((r) => (0, batch_save_1.rowReminderInput)(r) !== undefined && r.wantsNotify !== false)) {
+            // 回执日期=本批最早到期日(多件带提醒时,首条推送就是它;YMD 字典序即日期序);
+            // wantsNotify=false 的行已被条件排除,日期也相应不计入
             const earliest = (0, batch_save_1.rowsToSave)(snapshot)
+                .filter((r) => r.wantsNotify !== false)
                 .map((r) => r.remindAt)
                 .filter((d) => d !== "")
                 .sort()[0];

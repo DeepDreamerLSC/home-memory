@@ -14,7 +14,7 @@ import {
   shouldDefaultChecked,
   type BatchRow,
 } from "../../utils/batch-save";
-import { requestExpirySubscribe } from "../../utils/subscribe";
+import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
   clearDraftSession,
   getDraftSession,
@@ -43,6 +43,12 @@ interface ConfirmRow extends BatchRow {
   remindQuote: string;
   /** 用户动过提醒行:清除后行仍显示(灰显「不提醒」);未提取到日期且没动过则整行不显示(不催) */
   remindTouched: boolean;
+  /**
+   * 「要不要微信提醒」意向(0.9.6,#36 用户反馈):用户在提醒行选日期时经
+   * askNotifyIntent 询问后写入;undefined/true=保存时询问订阅(AI 预填日期
+   * 未经弹窗,保持既有自动询问),false=明确拒绝过跳过
+   */
+  wantsNotify?: boolean;
   /** C2 行副文下的小角标文案(如「11-20 到期」;无日期为 "" 不渲染) */
   remindBadgeText: string;
   /**
@@ -531,6 +537,13 @@ Page<
       "rows[0].remindConverted": false,
     });
     this.persistRows();
+    // 0.9.6(#36 用户反馈):选完日子问一句「要不要微信提醒」(picker 回调无
+    // 手势,但纯提问不受限);答案存行内 wantsNotify,保存按钮的真实 tap
+    // 据此决定是否弹订阅授权
+    void askNotifyIntent(value).then((wants) => {
+      this.setData({ "rows[0].wantsNotify": wants });
+      this.persistRows();
+    });
   },
 
   /**
@@ -626,9 +639,15 @@ Page<
     // 手势链内同步请求订阅授权(必须先于下方任何 await;拒绝/失败静默降级
     // 应用内提醒,绝不阻塞保存流程)。行口径与下方提交一致:勾选且未 saved、
     // rowReminderInput 会随 create 携带 reminder 的行。
-    if (rowsToSave(snapshot).some((r) => rowReminderInput(r) !== undefined)) {
-      // 回执日期=本批最早到期日(多件带提醒时,首条推送就是它;YMD 字典序即日期序)
+    if (
+      rowsToSave(snapshot).some(
+        (r) => rowReminderInput(r) !== undefined && r.wantsNotify !== false,
+      )
+    ) {
+      // 回执日期=本批最早到期日(多件带提醒时,首条推送就是它;YMD 字典序即日期序);
+      // wantsNotify=false 的行已被条件排除,日期也相应不计入
       const earliest = rowsToSave(snapshot)
+        .filter((r) => r.wantsNotify !== false)
         .map((r) => r.remindAt)
         .filter((d) => d !== "")
         .sort()[0];

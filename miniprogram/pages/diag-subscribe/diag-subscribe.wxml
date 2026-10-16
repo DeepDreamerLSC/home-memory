@@ -6,7 +6,8 @@
   </view>
 
   <button class="diag-btn" bindtap="onRawTap">裸调用订阅授权</button>
-  <view class="diag-hint">素按钮零封装;可连续点多次,结果记录在下方(最新在上),截一张图即可</view>
+  <button class="diag-btn" bindtap="onModalTap">弹窗确认后订阅(手势实验)</button>
+  <view class="diag-hint">上=素按钮零封装;下=先弹确认框再订阅。可连点多次,结果记录在下方(最新在上),截一张图即可</view>
 
   <view class="diag-results">
     <view wx:for="{{ results }}" wx:key="index" class="diag-r {{ item.ok ? 'ok' : 'fail' }}">

@@ -23,7 +23,7 @@ var kbRemoved = [];
 globalThis.wx = {
   navigateTo: function (o) { navs.push(o.url); },
   showToast: function () {},
-  showModal: function () {},
+  showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); },
   showActionSheet: function () {},
   getStorageSync: function () { return ""; },
   setStorageSync: function () {},

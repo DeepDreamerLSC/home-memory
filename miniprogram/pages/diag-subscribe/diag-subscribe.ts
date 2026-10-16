@@ -28,6 +28,7 @@ interface DiagSubscribeData {
 
 interface DiagSubscribeCustom {
   onRawTap(): void;
+  onModalTap(): void;
   pushResult(ok: boolean, text: string): void;
 }
 
@@ -91,6 +92,39 @@ Page<DiagSubscribeData, DiagSubscribeCustom>({
       },
       fail: (err) => {
         this.pushResult(false, (err && err.errMsg) || "unknown");
+      },
+    });
+  },
+
+  /**
+   * 实验 B(#36 0.9.6):wx.showModal 确认回调里直接调订阅——验证 modal 的
+   * 「确认」点击是否保手势(picker bindchange 已证实无手势;若本实验在真机
+   * 通过,详情页选日期路径即可做成「问一句→确认→授权弹窗」一步到位)。
+   */
+  onModalTap() {
+    wx.showModal({
+      title: "微信到期提醒",
+      content: "点「确认」后直接请求订阅授权(手势实验)",
+      confirmText: "确认",
+      cancelText: "取消",
+      success: (r) => {
+        if (r.confirm !== true) {
+          this.pushResult(false, "modal: 取消,未发请求");
+          return;
+        }
+        wx.requestSubscribeMessage({
+          tmplIds: [EXPIRY_REMIND_TEMPLATE_ID],
+          success: (res) => {
+            const status = (res as Record<string, unknown>)[EXPIRY_REMIND_TEMPLATE_ID];
+            this.pushResult(
+              true,
+              "modal确认后 success / " + (typeof status === "string" ? status : "unknown"),
+            );
+          },
+          fail: (err) => {
+            this.pushResult(false, "modal确认后 " + ((err && err.errMsg) || "unknown"));
+          },
+        });
       },
     });
   },
