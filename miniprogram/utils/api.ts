@@ -256,7 +256,8 @@ function validateItemsOkResponse(
       break;
     case "remindList":
       // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
-      // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确
+      // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
+      // remind_converted/remind_quote(三件 A 换算标记对)同为可选——仅换算行携带
       if (
         !Array.isArray(r.reminders) ||
         !r.reminders.every(
@@ -266,7 +267,10 @@ function validateItemsOkResponse(
             typeof row.name === "string" &&
             typeof row.location_text === "string" &&
             typeof row.due_date === "string" &&
-            (row.generation === undefined || typeof row.generation === "number"),
+            (row.generation === undefined || typeof row.generation === "number") &&
+            (row.remind_converted === undefined ||
+              typeof row.remind_converted === "boolean") &&
+            (row.remind_quote === undefined || typeof row.remind_quote === "string"),
         )
       ) {
         throw bad();
@@ -434,6 +438,17 @@ export async function callExtractDraft(
         anchor_shared: (d as { anchor_shared?: boolean }).anchor_shared === true,
         // 提醒候选三项(issue #36):透传服务端已锚定的原话日期,残缺/非法整体置 null
         ...parseRemindTriple(d as Record<string, unknown>),
+        // 「时间没换算」透明标记(0.6.0 真机反馈 Fix 4):透传服务端 vague 原文
+        // 子串(字符串才透传,缺省/非法按 null)——曾因本映射漏传导致确认页
+        // 灰行与详情留痕整链失效(三件 A 复审发现,此处补上断链)
+        remind_vague_quote:
+          typeof (d as { remind_vague_quote?: unknown }).remind_vague_quote === "string"
+            ? ((d as { remind_vague_quote: string }).remind_vague_quote)
+            : null,
+        // 相对时间换算标记(三件 A):仅服务端换算成功的件为 true(严格 ===,
+        // 其余形态一律 false,绝不把模型/异常值当换算候选透传)
+        remind_converted:
+          (d as { remind_converted?: unknown }).remind_converted === true,
         // 「放进」路径预览(issue #45 十七轮):仅 certain 且形状合法才透传,
         // 否则 null(certain=false 一律 null = 确认卡不显示「放进」行,
         // 照旧先进「尚未归类」;绝不静默建路径)

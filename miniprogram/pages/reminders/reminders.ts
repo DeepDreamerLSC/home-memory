@@ -1,5 +1,6 @@
 import { callItemsApi, errorMessage } from "../../utils/api";
 import {
+  askKeepAfterDone,
   askUseUp,
   duePill,
   localTodayYmd,
@@ -187,6 +188,27 @@ Page<
         // 完成日按用户本地自然日随请求携带(PR #52 Low-3):服务端不靠运行时区猜
         complete_date: localTodayYmd(),
       });
+      // #36 真机反馈三件 B(用户功能请求):完成后问「记录还保留吗」——
+      // 保留(确认/dismiss)= 现状不动;删除物品(取消)= itemsApi delete
+      // (级联硬删 active 提醒 + 软删物品,调用与详情页删除先例同款:api 层
+      // 自动拼装作用域双 marker)。dismiss(点遮罩/系统返回)= 保留(安全默认,
+      // 误触删除不可逆)。删除失败:如实 toast 错误文本,物品保留、已处理
+      // 状态不回滚(完成已发生),仍刷新列表(收掉的提醒行消失)。
+      const keep = await askKeepAfterDone(row.name);
+      if (keep === "delete") {
+        try {
+          await callItemsApi({ action: "delete", item_id: row.item_id });
+          wx.showToast({ title: "已删除", icon: "success" });
+        } catch (delErr) {
+          wx.showToast({
+            title: "没删成:" + errorMessage(delErr),
+            icon: "none",
+            duration: 2500,
+          });
+        }
+        await this.load();
+        return;
+      }
       wx.showToast({
         title: "已处理。要下次提醒,到详情里选日子",
         icon: "none",

@@ -135,6 +135,13 @@
       <!-- 纪律句(#36):只在提醒行存在时显示;日期只来自原话或日期选择器 -->
       <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sum-meta remind-note">时间只来自你说的话;没说清就不带提醒,不猜日期。</view>
 
+      <!-- 换算候选标注(#36 真机反馈三件 A):日期来自服务端对『原相对话』的闭集换算,
+           是候选不是定论——可改可清;用户改过日期(remindConverted=false)即收起 -->
+      <view
+        wx:if="{{ rows[0].remindAt && rows[0].remindConverted && rows[0].remindAt === rows[0].remindOrigin }}"
+        class="sum-meta converted-note"
+      >(按『{{ rows[0].remindQuote }}』换算,可改可清)</view>
+
       <!-- 时间没换算(0.6.0 真机反馈 Fix 4):原话有时间表述但没换成日期——纯提示,不是换算 -->
       <view wx:if="{{ rows[0].remindVagueQuote }}" class="sum-meta vague-note">时间没换算:『{{ rows[0].remindVagueQuote }}』——说具体日期,或以后在详情里选日子</view>
 
@@ -245,6 +252,8 @@
         </view>
         <!-- 提醒角标(#36):原话里明确说了日期的行在副文下小字标出;不参与勾选逻辑 -->
         <view wx:if="{{ item.remindAt }}" class="remind-badge">{{ item.remindBadgeText }}</view>
+        <!-- 换算候选标注(#36 真机反馈三件 A):日期来自服务端闭集换算,可改可清 -->
+        <view wx:if="{{ item.remindAt && item.remindConverted }}" class="row-meta converted-note">(按『{{ item.remindQuote }}』换算,可改可清)</view>
         <!-- 时间没换算小灰标(0.6.0 真机反馈 Fix 4):纯提示,不是换算 -->
         <view wx:if="{{ item.remindVagueQuote }}" class="vague-badge">时间没换算</view>
         <view wx:if="{{ !item.certain && !item.checked && item.status !== 'saved' }}" class="row-warn-line">没听清放在哪儿;补上位置再勾选。</view>

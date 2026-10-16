@@ -2828,3 +2828,107 @@ test("create 的 vague 与 reminder 互斥;非法 vague(非字符串/空/超长)
   var raw4 = (await t.db.collection("items").where({ _id: plain.item.item_id }).get()).data[0];
   assert.equal(raw4.remind_vague_quote, "", "不带 vague 存空串");
 });
+
+// ---------- #36 真机反馈三件 A:reminder 可选 remind_converted(换算候选透传) ----------
+
+test("create 带 remind_converted:true → 存入 reminder 文档;remindList 行携带 remind_converted + remind_quote(仅换算行)", async function () {
+  var t = fresh();
+  var created = await handler({
+    action: "create",
+    operation_id: "op-conv-1",
+    name: "净水器备用滤芯",
+    location_text: "厨房水槽下面的柜子",
+    reminder: { due_date: "2027-04-15", kind: "下次维护", quote: "半年后", remind_converted: true },
+  }, t.deps);
+  assert.equal(created.ok, true);
+  var raw = (await t.db.collection("reminders").where({ item_id: created.item.item_id, status: "active" }).get()).data[0];
+  assert.equal(raw.remind_converted, true, "换算标记存入 reminder 文档");
+  assert.equal(raw.quote, "半年后", "quote 仍是原话子串(vague 原文)");
+  assert.equal(raw.due_date, "2027-04-15");
+
+  var list = await handler({ action: "remindList" }, t.deps);
+  assert.equal(list.ok, true);
+  assert.equal(list.reminders.length, 1);
+  assert.equal(list.reminders[0].remind_converted, true, "读侧投影回带换算标记");
+  assert.equal(list.reminders[0].remind_quote, "半年后", "换算行携带换算源文案(供详情「按『…』换算」)");
+
+  // 对照:常规行(无换算标记)投影零变化,不带 quote/converted 字段
+  var t2 = fresh();
+  await handler({
+    action: "create",
+    operation_id: "op-conv-2",
+    name: "感冒药",
+    location_text: "药箱第一格",
+    reminder: { due_date: "2026-11-20", kind: "有效期", quote: "11月20号" },
+  }, t2.deps);
+  var list2 = await handler({ action: "remindList" }, t2.deps);
+  assert.equal(list2.reminders[0].remind_converted, undefined, "常规行不带 converted");
+  assert.equal(list2.reminders[0].remind_quote, undefined, "常规行不带 quote(投影零变化)");
+  var raw2 = (await t2.db.collection("reminders").where({ status: "active" }).get()).data[0];
+  assert.equal(raw2.remind_converted, false, "不带 converted 的 create 存 false(文档形状恒定)");
+
+  // 旧文档(存量,缺字段)读侧容忍:不携带 converted/quote
+  var t3 = fresh();
+  var legacy = await handler({
+    action: "create",
+    operation_id: "op-conv-3",
+    name: "口罩",
+    location_text: "玄关抽屉",
+    reminder: { due_date: "2026-12-01", kind: "有效期" },
+  }, t3.deps);
+  await t3.db.collection("reminders")
+    .where({ _id: (await t3.db.collection("reminders").where({ item_id: legacy.item.item_id, status: "active" }).get()).data[0]._id })
+    .update({ data: { remind_converted: "" } }); // 模拟历史脏值/缺字段
+  var list3 = await handler({ action: "remindList" }, t3.deps);
+  assert.equal(list3.reminders[0].remind_converted, undefined, "非 true 值按无标记读(读侧容忍)");
+});
+
+test("remindSet 透传 remind_converted;非布尔形状 INVALID_INPUT 零写入(create/remindSet 同严)", async function () {
+  var t = fresh();
+  var created = await handler(createEvent("op-conv-set-1", "滤芯", "柜子里"), t.deps);
+  assert.equal(created.ok, true);
+
+  var set = await handler({
+    action: "remindSet",
+    item_id: created.item.item_id,
+    due_date: "2027-04-15",
+    kind: "下次维护",
+    quote: "半年后",
+    remind_converted: true,
+    expected_generation: 0,
+  }, t.deps);
+  assert.equal(set.ok, true);
+  var raw = (await t.db.collection("reminders").where({ item_id: created.item.item_id, status: "active" }).get()).data[0];
+  assert.equal(raw.remind_converted, true, "remindSet 换算标记存入文档");
+  assert.equal(set.reminder.remind_converted, true, "remindSet 响应行携带标记");
+  assert.equal(set.reminder.remind_quote, "半年后");
+
+  // 形状门:非布尔一律 INVALID_INPUT,零写入(create 与 remindSet 两处同严)
+  var t2 = fresh();
+  var badCreate = await handler({
+    action: "create",
+    operation_id: "op-conv-bad-1",
+    name: "物品",
+    location_text: "桌上",
+    reminder: { due_date: "2026-11-20", kind: "有效期", remind_converted: "yes" },
+  }, t2.deps);
+  assert.equal(badCreate.ok, false);
+  assert.equal(badCreate.error, "INVALID_INPUT");
+  assert.equal((await rawItems(t2.db)).data.length, 0, "create 零写入");
+  assert.equal((await t2.db.collection("reminders").where({}).get()).data.length, 0, "提醒零写入");
+
+  var created2 = await handler(createEvent("op-conv-bad-2", "物品2", "桌上"), t2.deps);
+  var badSet = await handler({
+    action: "remindSet",
+    item_id: created2.item.item_id,
+    due_date: "2026-11-20",
+    remind_converted: 1,
+  }, t2.deps);
+  assert.equal(badSet.ok, false);
+  assert.equal(badSet.error, "INVALID_INPUT");
+  assert.equal(
+    (await t2.db.collection("reminders").where({ item_id: created2.item.item_id, status: "active" }).get()).data.length,
+    0,
+    "remindSet 零写入",
+  );
+});

@@ -10,6 +10,7 @@ exports.expireMainText = expireMainText;
 exports.countDue = countDue;
 exports.dueBannerText = dueBannerText;
 exports.askUseUp = askUseUp;
+exports.askKeepAfterDone = askKeepAfterDone;
 const DAY_MS = 86400000;
 /** 周期再生的天数上限(与服务端 REMIND_PERIOD_MAX 同源;item 页改期护栏用) */
 exports.PERIOD_DAYS_MAX = 3650;
@@ -136,6 +137,31 @@ function askUseUp(name) {
                 resolve(r.confirm === true);
             },
             fail: () => resolve(false),
+        });
+    });
+}
+/**
+ * 「已处理后问保留还是删除物品记录」(#36 真机反馈三件 B,用户功能请求):
+ * remindComplete 成功后追问一次——确认(保留)= 物品记录原样保留(现状);
+ * 取消(删除物品)= 调 itemsApi delete 级联清提醒并软删物品;dismiss
+ * (点遮罩/系统返回,fail 回调)= **保留**(安全默认:误触删除不可逆,服务端
+ * 虽是软删但客户端无恢复入口;用户原话是「不选择保留就删除」,按防误触
+ * 收紧,如需改一行即可)。物品名只出现在用户自己屏幕的 UI 上,绝不进日志。
+ */
+function askKeepAfterDone(name) {
+    const label = name || "这件东西";
+    return new Promise((resolve) => {
+        wx.showModal({
+            title: "已处理",
+            content: "「" + label + "」的记录还保留吗?",
+            confirmText: "保留",
+            cancelText: "删除物品",
+            success: (r) => {
+                resolve(r.confirm === true ? "keep" : "delete");
+            },
+            fail: () => {
+                resolve("dismiss"); // 调用方按保留处理(安全默认)
+            },
         });
     });
 }

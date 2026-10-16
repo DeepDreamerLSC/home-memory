@@ -46,6 +46,8 @@ const ITEMS_MAX = 5;
 const REMIND_QUOTE_MAX = 200;
 const REMIND_KINDS = ["有效期", "开封后", "下次维护"];
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/* 相对时间换算器(#36 真机反馈三件 A):闭集纯函数,handler 组包处对 vague 原文换算 */
+const { convertRelativeQuote } = require("./relative-date");
 /* 「放进」路径预览(十七轮,#18 红线):段数/段长与 locations 节点同限 */
 const MOUNT_PATH_MAX_SEGMENTS = 6;
 const MOUNT_SEGMENT_MAX = 30;
@@ -164,8 +166,15 @@ function quoteDateCandidates(quote, todayYmd) {
  * 双重锚定:逐字子串之外,quote 内还必须解析得出 remind_at 这个日期——
  * 模型把模糊表述折算成日期(quote=「下个月」+折算值)、或配一个与 quote
  * 无关的日期,都过不了这道门,同样三项全 null。
+ * converted(#36 真机反馈三件 A,服务端内部参数,绝不从模型输出读取):
+ * true = 本组合来自服务端换算器(applyRelativeConversion 的复核调用),
+ * quote 是相对表述(如「半年后」),quoteDateCandidates 天然解不出日期——
+ * 仅对这一组合放行「对应锚定」这道检查;逐字子串/格式/日历/类别/长度
+ * 校验一概不放松。模型输出里的 remind_converted 字段从不参与本判定
+ * (validateItemFields 只产出四个基础字段,模型自报的 converted 被自然丢弃),
+ * 模型无法自我认证换算绕过硬门。
  */
-function validateReminderFields(item, normalizedOriginal, todayYmd) {
+function validateReminderFields(item, normalizedOriginal, todayYmd, converted) {
   const none = { remind_at: null, remind_kind: null, remind_quote: null };
   const has = (key) => Object.prototype.hasOwnProperty.call(item, key);
   if (!has("remind_at") || item.remind_at === null || item.remind_at === undefined) {
@@ -179,11 +188,61 @@ function validateReminderFields(item, normalizedOriginal, todayYmd) {
   const quote = stripWhitespace(item.remind_quote);
   if (quote === "" || codePointLength(quote) > REMIND_QUOTE_MAX) return none;
   // 逐字锚定:日期证据必须是原话子串(去空白比对,同 source_quote 口径)。
+  // 换算组合(服务端 converted)同样必须过这道门——quote 锚定仍在原话,不放松。
   if (normalizedOriginal.indexOf(quote) === -1) return none;
   // 对应锚定:quote 里必须真的说了这个日期(候选集合含 quote 内全部绝对日期
   // 提法,无年份按最近未来补全)。折算值/编造值/月份精度对不上 → 三项全 null。
-  if (quoteDateCandidates(quote, todayYmd).indexOf(date) === -1) return none;
-  return { remind_at: date, remind_kind: item.remind_kind, remind_quote: item.remind_quote.trim() };
+  // 仅服务端换算组合(quote 本就是相对表述)放行此检查。
+  if (converted !== true && quoteDateCandidates(quote, todayYmd).indexOf(date) === -1) {
+    return none;
+  }
+  const out = { remind_at: date, remind_kind: item.remind_kind, remind_quote: item.remind_quote.trim() };
+  if (converted === true) {
+    out.remind_converted = true; // 形状恒为布尔 true(服务端构造,非模型输入)
+  }
+  return out;
+}
+
+/*
+ * 相对时间换算的组包(#36 真机反馈三件 A,handler 在 v2 链路逐件调用):
+ * 该件未取到绝对 remind_at 且带 remind_vague_quote 时,对 vague 原文跑闭集
+ * 换算器(convertRelativeQuote,锚点=提取时刻的服务端今天 Asia/Shanghai,
+ * 由调用方注入)。换算成功 → 组装候选 { remind_at=换算值, remind_kind=下次维护,
+ * remind_quote=vague 原文(锚定仍在原话), remind_converted=true } 并**经
+ * validateReminderFields 复核**(converted=true 放行对应锚定、其余硬门不放松);
+ * 复核通过 → 覆盖三项 + remind_converted:true + remind_vague_quote 置空;
+ * 换算失败/复核不通过 → 原样返回,维持灰行「时间没换算」现状。
+ * 换算只是**候选**:确认卡上用户可改可清,延续「不猜日期」的确认纪律;
+ * remind_kind 取「下次维护」(与 remindSet 用户自选日子的缺省类别同源——
+ * 相对周期语义是「到那天要处理这件事」,不是保质期/开封)。
+ */
+function applyRelativeConversion(draft, normalizedOriginal, anchorYmd) {
+  if (!draft || draft.remind_at !== null) {
+    return draft; // 已带绝对日期(或形状异常,由既有门禁处理):不换算
+  }
+  const vague = draft.remind_vague_quote;
+  if (typeof vague !== "string" || vague.trim() === "") {
+    return draft; // 没有 vague 标记:不换算
+  }
+  const convertedAt = convertRelativeQuote(vague, anchorYmd);
+  if (convertedAt === null) {
+    return draft; // 闭集外(下个月/快过期了/月精度/需基准日…):维持灰行现状
+  }
+  const checked = validateReminderFields(
+    {
+      remind_at: convertedAt,
+      remind_kind: "下次维护",
+      remind_quote: vague,
+      remind_converted: true,
+    },
+    normalizedOriginal,
+    anchorYmd,
+    true,
+  );
+  if (checked.remind_at === null) {
+    return draft; // 复核不通过(理论不可达,防御):维持灰行现状
+  }
+  return Object.assign({}, draft, checked, { remind_vague_quote: null });
 }
 
 /*
@@ -513,4 +572,4 @@ function validateDrafts(rawText, originalText, todayYmd) {
   return { ok: true, drafts, truncated: hasMore };
 }
 
-module.exports = { validateDraft, validateDrafts };
+module.exports = { validateDraft, validateDrafts, applyRelativeConversion };

@@ -623,3 +623,179 @@ test("SB-PAGE-ITEM-3:保存修改补写提醒(remindSet)请求订阅;补清除(r
     "清除照常完成"
   );
 });
+
+// ---------- SB-DIAG(#36 真机反馈三件 C):订阅授权失败的版本分支诊断 ----------
+// release 静默(现状);develop/trial 的 fail → console.warn 完整 errMsg +
+// toast「订阅失败:」+ errMsg 前 30 字;success → toast 授权结果状态;
+// getAccountInfoSync 异常/缺失 → 保守按 release 静默(测试锁此行为)。
+
+function makeEnvWx(envVersion, opts) {
+  opts = opts || {};
+  var wxStub = {
+    requestSubscribeMessage: function (o) {
+      if (opts.failErr) {
+        o.fail({ errMsg: opts.failErr });
+        return;
+      }
+      var res = {};
+      res[TEMPLATE_ID] = opts.status || "accept";
+      o.success(res);
+    },
+    showToast: function (o) {
+      (opts.toasts = opts.toasts || []).push(o);
+    }
+  };
+  if (envVersion !== "missing") {
+    wxStub.getAccountInfoSync = function () {
+      if (envVersion === "throw") {
+        throw new Error("getAccountInfoSync boom");
+      }
+      if (envVersion === "malformed") {
+        return { miniProgram: null };
+      }
+      return { miniProgram: { envVersion: envVersion } };
+    };
+  }
+  return wxStub;
+}
+
+test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失败:」前 30 字(duration 3000)", async function () {
+  var prevWx = globalThis.wx;
+  var prevWarn = console.warn;
+  var warns = [];
+  console.warn = function () {
+    warns.push(Array.prototype.slice.call(arguments).join(" "));
+  };
+  var opts = {};
+  var longErr =
+    "requestSubscribeMessage:fail 吧啦吧啦很多字很多字很多字很多字很多字很多字很多字";
+  globalThis.wx = makeEnvWx("develop", { failErr: longErr, toasts: opts.toasts || (opts.toasts = []) });
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(warns.length, 1, "warn 恰一次");
+    assert.ok(warns[0].indexOf(longErr) !== -1, "warn 携带完整 errMsg(定位用)");
+    assert.equal(opts.toasts.length, 1, "toast 恰一次");
+    assert.equal(opts.toasts[0].title, "订阅失败:" + Array.from(longErr).slice(0, 30).join("") + "…", "errMsg 截断到 30 字(码点)");
+    assert.equal(opts.toasts[0].icon, "none");
+    assert.equal(opts.toasts[0].duration, 3000);
+  } finally {
+    console.warn = prevWarn;
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast", async function () {
+  var prevWx = globalThis.wx;
+  var prevWarn = console.warn;
+  var warns = [];
+  console.warn = function () {
+    warns.push(1);
+  };
+  var toasts = [];
+  globalThis.wx = makeEnvWx("release", { failErr: "requestSubscribeMessage:fail", toasts: toasts });
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(warns.length, 0, "release 不 warn");
+    assert.equal(toasts.length, 0, "release 不 toast(现状静默)");
+  } finally {
+    console.warn = prevWarn;
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release success → 静默(记录照常)", async function () {
+  var prevWx = globalThis.wx;
+  var toasts = [];
+  var calls = [];
+  globalThis.wx = makeEnvWx("develop", { status: "accept", toasts: toasts });
+  globalThis.wx.cloud = {
+    callFunction: function (o) {
+      calls.push(o.data.action);
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(calls, ["recordSubscription"], "accept 记录像常");
+    assert.equal(toasts.length, 1, "develop toast 授权结果");
+    assert.equal(toasts[0].title, "订阅:accept");
+    assert.equal(toasts[0].duration, 3000);
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // reject:不记录,但仍 toast 状态
+  prevWx = globalThis.wx;
+  toasts = [];
+  calls = [];
+  globalThis.wx = makeEnvWx("develop", { status: "reject", toasts: toasts });
+  globalThis.wx.cloud = {
+    callFunction: function (o) {
+      calls.push(o.data.action);
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(calls.length, 0, "reject 不记录");
+    assert.equal(toasts[0].title, "订阅:reject", "拒绝也如实 toast 状态");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // release success:静默(既有 SB-FLOW 断言同款行为,此处显式锁 envVersion=release)
+  prevWx = globalThis.wx;
+  toasts = [];
+  calls = [];
+  globalThis.wx = makeEnvWx("release", { status: "accept", toasts: toasts });
+  globalThis.wx.cloud = {
+    callFunction: function (o) {
+      calls.push(o.data.action);
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(calls, ["recordSubscription"], "release 记录像常");
+    assert.equal(toasts.length, 0, "release 成功不 toast(静默现状)");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-DIAG-4:getAccountInfoSync 异常/缺失/形状异常 → 保守按 release 静默(fail 不 toast 不 warn)", async function () {
+  var prevWarn = console.warn;
+  var warns = [];
+  console.warn = function () {
+    warns.push(1);
+  };
+  var cases = ["throw", "missing", "malformed"];
+  try {
+    for (var i = 0; i < cases.length; i++) {
+      var prevWx = globalThis.wx;
+      var toasts = [];
+      globalThis.wx = makeEnvWx(cases[i], { failErr: "requestSubscribeMessage:fail", toasts: toasts });
+      subscribe.requestExpirySubscribe();
+      await new Promise(function (r) {
+        setTimeout(r, 10);
+      });
+      assert.equal(toasts.length, 0, cases[i] + ":异常兜底保守静默=release 行为(不 toast)");
+      assert.equal(warns.length, 0, cases[i] + ":不 warn");
+      restoreWx(prevWx);
+    }
+  } finally {
+    console.warn = prevWarn;
+  }
+});

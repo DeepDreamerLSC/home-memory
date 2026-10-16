@@ -270,12 +270,15 @@ function isValidDueDate(v) {
 }
 
 /**
- * 校验 create 的可选 reminder 入参 { due_date, kind, quote? }。
+ * 校验 create 的可选 reminder 入参 { due_date, kind, quote?, remind_converted? }。
  * 返回 null(未带提醒)/ "INVALID"(非法,调用方返回 INVALID_INPUT 且零写入)/
- * { due_date, kind, quote }(规范化后)。
+ * { due_date, kind, quote, remind_converted }(规范化后)。
  * quote 的「原话逐字子串」这条在服务端放宽:锚定由客户端在确认页完成,
  * create 时服务端没有原话可比对;日期选择器来源的提醒本就没有 quote。
  * 只做类型与长度校验;due_date 与 kind 必须严格。
+ * remind_converted(#36 真机反馈三件 A):可选布尔,标记该提醒日期来自
+ * 服务端相对时间换算(extractDraft 闭集换算器的候选,用户确认后随行提交);
+ * 携带时必须为布尔(非布尔一律 INVALID_INPUT 零写入,形状门与 due_date 同严)。
  */
 function parseReminderInput(reminder) {
   if (reminder === undefined || reminder === null) {
@@ -300,7 +303,19 @@ function parseReminderInput(reminder) {
       return "INVALID";
     }
   }
-  return { due_date: reminder.due_date.trim(), kind: reminder.kind, quote: quote };
+  var remindConverted = false;
+  if (reminder.remind_converted !== undefined && reminder.remind_converted !== null) {
+    if (typeof reminder.remind_converted !== "boolean") {
+      return "INVALID";
+    }
+    remindConverted = reminder.remind_converted;
+  }
+  return {
+    due_date: reminder.due_date.trim(),
+    kind: reminder.kind,
+    quote: quote,
+    remind_converted: remindConverted
+  };
 }
 
 /** 完成日+周期(UTC 日历日算术,跨月/跨年自然进位):"2026-10-31" + 1 → "2026-11-01" */
@@ -337,7 +352,7 @@ function reminders(deps) {
   return deps.db.collection(REMINDERS_COLLECTION);
 }
 
-function buildReminderDoc(deps, itemId, docId, dueDate, kind, quote, now, generation) {
+function buildReminderDoc(deps, itemId, docId, dueDate, kind, quote, now, generation, remindConverted) {
   return {
     _id: docId,
     household_id: deps.householdId,
@@ -347,6 +362,9 @@ function buildReminderDoc(deps, itemId, docId, dueDate, kind, quote, now, genera
     due_date: dueDate,
     kind: kind,
     quote: quote,
+    // 换算来源标记(#36 真机反馈三件 A):日期来自服务端相对时间换算的候选;
+    // 读侧投影(remindRow)据此携带 remind_converted + remind_quote 供详情展示
+    remind_converted: remindConverted === true,
     created_at: now
   };
 }
@@ -776,7 +794,8 @@ async function ensureActiveReminder(deps, itemId, reminder) {
       claim.rk,
       claim.rq,
       deps.now(),
-      gen
+      gen,
+      reminder.remind_converted === true
     );
   });
   if (r.verdict === "landed" || r.verdict === "converged") {
@@ -816,9 +835,15 @@ async function fetchActiveReminders(deps) {
   throw new Error("reminders query exceeded " + MAX_PAGES * PAGE_SIZE + " documents");
 }
 
-/** remindList 行投影:物品名/位置文本/due/kind/item_id/generation,不带 quote 与内部字段 */
+/**
+ * remindList 行投影:物品名/位置文本/due/kind/item_id/generation,不带 quote 与内部字段。
+ * 唯一例外(#36 真机反馈三件 A):remind_converted=true 的行(日期来自服务端
+ * 相对时间换算的候选)额外携带 remind_converted:true + remind_quote(该行换算
+ * 所依据的原话子串,如「半年后」)——详情页保质期行据此标注「按『…』换算」;
+ * 常规行(原话绝对日期/选择器日期)投影零变化,不带 quote。
+ */
 function remindRow(doc, item) {
-  return {
+  var row = {
     item_id: doc.item_id,
     name: item.name,
     location_text: item.location_text,
@@ -826,6 +851,11 @@ function remindRow(doc, item) {
     kind: doc.kind,
     generation: doc.generation
   };
+  if (doc.remind_converted === true) {
+    row.remind_converted = true;
+    row.remind_quote = typeof doc.quote === "string" ? doc.quote : "";
+  }
+  return row;
 }
 
 /**
@@ -1007,7 +1037,8 @@ async function createItem(event, deps) {
         reminder.kind,
         reminder.quote,
         deps.now(),
-        gen
+        gen,
+        reminder.remind_converted === true
       );
     });
     if (landed.verdict !== "landed" && landed.verdict !== "converged") {
@@ -1727,13 +1758,15 @@ async function remindClearItem(event, deps) {
 
 /**
  * remindSet:入参 { action:"remindSet", item_id, due_date, kind?, quote?,
- * expected_generation? }。
+ * remind_converted?, expected_generation? }。
  * 为已有物品把提醒设为用户所选的日子(日期选择器来源,#36 两个合法日期来源之一):
  * AI 没提取出日期或用户清过的物品,在这里补录提醒,不必删掉重建。
  * 物品必须存在、属当前家庭且未删(否则 NOT_FOUND);due_date 严格 YYYY-MM-DD
  * 真实日历日(服务端只验格式绝不猜语义,口径同 create 的 reminder 入参);
  * kind 缺省「下次维护」(用户选日子的通用语义),携带须在冻结词表内;
- * quote 可缺省(选择器来源本无原话锚点);非法一律 INVALID_INPUT 且零写入。
+ * quote 可缺省(选择器来源本无原话锚点);remind_converted 可选布尔
+ * (#36 真机反馈三件 A:标记日期来自服务端相对时间换算的候选,非布尔
+ * INVALID_INPUT 零写入);非法一律 INVALID_INPUT 且零写入。
  * expected_generation(PR #52 B1):remindList 行的轮次号;0=客户端确认当前
  * 无提醒(补录)。携带时按轮次条件替换——0 时若已有 active、或 n>0 时命中
  * 不了第 n 轮(他人后来更新过)→ VERSION_CONFLICT,刷新后重选,绝不静默
@@ -1753,7 +1786,12 @@ async function remindSetItem(event, deps) {
     return fail("INVALID_INPUT");
   }
   var kind = event.kind === undefined || event.kind === null ? "下次维护" : event.kind;
-  var reminder = parseReminderInput({ due_date: event.due_date, kind: kind, quote: event.quote });
+  var reminder = parseReminderInput({
+    due_date: event.due_date,
+    kind: kind,
+    quote: event.quote,
+    remind_converted: event.remind_converted
+  });
   if (reminder === "INVALID") {
     return fail("INVALID_INPUT");
   }
@@ -1804,7 +1842,8 @@ async function remindSetItem(event, deps) {
             reminder.kind,
             reminder.quote,
             deps.now(),
-            gen
+            gen,
+            reminder.remind_converted === true
           );
         });
         if (ownRelanded.verdict === "landed" || ownRelanded.verdict === "converged") {
@@ -1846,7 +1885,8 @@ async function remindSetItem(event, deps) {
         reminder.kind,
         reminder.quote,
         deps.now(),
-        gen
+        gen,
+        reminder.remind_converted === true
       );
     });
     if (replayed.verdict !== "landed" && replayed.verdict !== "converged") {
@@ -1901,7 +1941,8 @@ async function remindSetItem(event, deps) {
       reminder.kind,
       reminder.quote,
       deps.now(),
-      gen
+      gen,
+      reminder.remind_converted === true
     );
   });
   if (landed.verdict !== "landed" && landed.verdict !== "converged") {

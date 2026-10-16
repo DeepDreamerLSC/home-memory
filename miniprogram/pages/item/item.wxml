@@ -37,6 +37,8 @@
   <view wx:if="{{ expire }}" class="expire-row">
     <view class="expire-main">
       <view class="expire-t">{{ expire.mainText }}</view>
+      <!-- 换算候选标注(#36 真机反馈三件 A):日期来自服务端对『原相对话』的闭集换算 -->
+      <view wx:if="{{ expire.convertedNote }}" class="expire-sub converted-note">按『{{ expire.convertedNote }}』换算</view>
       <view class="expire-sub">到了那天,它会出现在「快到期」里</view>
     </view>
     <view class="r-done {{ remindBusy || conflictPending ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>

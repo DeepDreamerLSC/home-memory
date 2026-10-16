@@ -49,8 +49,17 @@ interface ConfirmRow extends BatchRow {
    * 时间没换算的透明标记(0.6.0 真机反馈 Fix 4):服务端在原话里检测到时间
    * 表述但未换算的逐字子串(如「半年后」)。纯提示不参与逻辑——C1 显示灰行
    * 「时间没换算:『…』」,C2 行内小灰标;用户选了明确日期即清空(互斥)。
+   * (三件 A 起带数量锚的闭集表述已被服务端换算成候选,这类灰行只在真换算
+   * 失败——闭集外——时出现。)
    */
   remindVagueQuote: string;
+  /**
+   * 相对时间换算候选标记(#36 真机反馈三件 A):true = 行内 remindAt 来自
+   * 服务端闭集换算(锚点=提取时刻服务端今天),remindQuote 即换算依据的原话
+   * 子串;C1/C2 在日期旁小字标注「(按『…』换算)」,用户改日期即置 false
+   * (候选被用户选择替代,标注随之收起)。换算是候选不是定论:可改可清。
+   */
+  remindConverted: boolean;
   /**
    * 「放进」行的最终路径(issue #45 十七轮,#18 红线语义升级):AI 确定时
    * 来自草稿 mount_path 预览,用户可经「换」(选位置弹层)替换;空数组 =
@@ -214,6 +223,7 @@ Page<
         remindTouched: false,
         remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
         remindVagueQuote: d.remind_vague_quote ?? "",
+        remindConverted: d.remind_converted === true,
         mountPath,
         mountPathText: mountPath.join(" / "),
         mountUpdateId: uuid(),
@@ -242,6 +252,9 @@ Page<
           remindAt,
           remindTouched: saved.remindTouched === true || rows[i].remindTouched,
           remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
+          // 换算候选标记:回写过(用户改过日期置 false)以回写值为准,
+          // 缺省(旧版本会话)回落草稿提取值
+          remindConverted: typeof saved.remindConverted === "boolean" ? saved.remindConverted : rows[i].remindConverted,
           mountPath,
           mountPathText: mountPath.join(" / "),
         };
@@ -289,6 +302,8 @@ Page<
       // 行内提醒可能被用户改/清过,一并回写(恢复时覆盖草稿提取值)
       remindAt: r.remindAt,
       remindTouched: r.remindTouched,
+      // 换算候选标记:用户改过日期后为 false(候选已被替代),恢复时以回写值为准
+      remindConverted: r.remindConverted,
       // 「放进」路径可能被用户「换」过,一并回写(恢复时覆盖草稿预览)
       mountPath: r.mountPath,
     }));
@@ -510,8 +525,10 @@ Page<
       "rows[0].remindAt": value,
       "rows[0].remindTouched": true,
       "rows[0].remindBadgeText": remindBadgeText(value),
-      // 用户选了明确日期:时间没换算的提示随之收起(与服务端互斥口径一致)
+      // 用户选了明确日期:时间没换算的提示随之收起(与服务端互斥口径一致);
+      // 换算候选标注同样收起——日期已是用户自己的选择,不再是换算候选
       "rows[0].remindVagueQuote": "",
+      "rows[0].remindConverted": false,
     });
     this.persistRows();
   },

@@ -64,10 +64,18 @@ export interface DraftWithQuote extends Draft {
   /**
    * 时间没换算的透明标记(0.6.0 真机反馈 Fix 4):原话中检测到时间表述但
    * 未换算的逐字子串(如「半年后」「下个月」),仅在 remind_at=null 且确有
-   * 时间词时由服务端给出(子串校验失败置 null)。客户端只透传与展示,
-   * 绝不换算任何相对日期——「自动换算」是产品决策,不在修复范围。
+   * 时间词时由服务端给出(子串校验失败置 null)。客户端只透传与展示。
    */
   remind_vague_quote?: string | null;
+  /**
+   * 相对时间换算标记(#36 真机反馈三件 A,产品拍板:产品换算,用户只确认):
+   * true = 该件的 remind_at 来自服务端闭集换算器(extractDraft 组包处,锚点=
+   * 提取时刻服务端今天 Asia/Shanghai)对 vague 原文的换算,remind_quote 即
+   * 换算所依据的原话子串(如「半年后」)、remind_vague_quote 已置空。换算
+   * 结果在确认卡是**候选**(用户可改可清),「不猜日期」的确认纪律不变;
+   * 未换算的件不携带该字段。客户端只透传与展示。
+   */
+  remind_converted?: boolean | null;
   /**
    * 「放进」路径预览(issue #45 十七轮,#18 红线语义升级):仅 certain=true
    * 且位置能明确分层时服务端才给出(如「主卧的柜子上」→ ["主卧","柜子上"],
@@ -84,11 +92,17 @@ export type RemindKind = "有效期" | "开封后" | "下次维护";
 
 /** create 的可选提醒参数(issue #36):到期只在小程序内露出,无任何推送/通知承诺 */
 export interface ReminderInput {
-  /** YYYY-MM-DD(真实日历日);唯一来源=原话提取值或用户在日期选择器里选的值 */
+  /** YYYY-MM-DD(真实日历日);唯一来源=原话提取值、服务端换算候选或用户在日期选择器里选的值 */
   due_date: string;
   kind: RemindKind;
-  /** 日期仍为原话提取值时携带的逐字锚定子串;日期选择器改过的提醒没有 quote */
+  /** 日期仍为原话提取值(或换算候选)时携带的逐字锚定子串;日期选择器改过的提醒没有 quote */
   quote?: string;
+  /**
+   * 相对时间换算候选标记(#36 真机反馈三件 A):true = due_date 来自服务端
+   * 对 vague 原文(quote)的闭集换算,用户在确认卡确认后随行提交;存入
+   * reminder 文档,读侧投影据此标注「按『…』换算」。可选布尔,非布尔服务端拒绝。
+   */
+  remind_converted?: boolean;
 }
 
 /** query 的匹配层级 */
@@ -227,7 +241,7 @@ export interface ListItemsResponse {
   items: ItemSummary[];
 }
 
-/** remindList 的行投影(issue #36):不含 quote 与内部字段 */
+/** remindList 的行投影(issue #36):不含内部字段;quote 仅换算行以 remind_quote 携带(见下) */
 export interface RemindRow {
   item_id: string;
   name: string;
@@ -240,6 +254,14 @@ export interface RemindRow {
    * 的前置条件来源;旧云函数窗口可能缺省(此时客户端不携带轮次号,走旧协议)
    */
   generation?: number;
+  /**
+   * 相对时间换算标记(#36 真机反馈三件 A):true = due_date 来自服务端闭集
+   * 换算的候选(仅换算行携带);详情页保质期行据此标注「按『…』换算」。
+   * 常规行(原话绝对日期/选择器日期)不带该字段。
+   */
+  remind_converted?: boolean;
+  /** 换算所依据的原话子串(如「半年后」);仅 remind_converted=true 的行携带 */
+  remind_quote?: string;
 }
 
 export interface RemindListResponse {

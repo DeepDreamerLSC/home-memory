@@ -89,6 +89,7 @@ Page({
                 remindTouched: false,
                 remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
                 remindVagueQuote: d.remind_vague_quote ?? "",
+                remindConverted: d.remind_converted === true,
                 mountPath,
                 mountPathText: mountPath.join(" / "),
                 mountUpdateId: (0, api_1.uuid)(),
@@ -116,6 +117,9 @@ Page({
                     remindAt,
                     remindTouched: saved.remindTouched === true || rows[i].remindTouched,
                     remindBadgeText: remindAt === "" ? "" : remindBadgeText(remindAt),
+                    // 换算候选标记:回写过(用户改过日期置 false)以回写值为准,
+                    // 缺省(旧版本会话)回落草稿提取值
+                    remindConverted: typeof saved.remindConverted === "boolean" ? saved.remindConverted : rows[i].remindConverted,
                     mountPath,
                     mountPathText: mountPath.join(" / "),
                 };
@@ -162,6 +166,8 @@ Page({
             // 行内提醒可能被用户改/清过,一并回写(恢复时覆盖草稿提取值)
             remindAt: r.remindAt,
             remindTouched: r.remindTouched,
+            // 换算候选标记:用户改过日期后为 false(候选已被替代),恢复时以回写值为准
+            remindConverted: r.remindConverted,
             // 「放进」路径可能被用户「换」过,一并回写(恢复时覆盖草稿预览)
             mountPath: r.mountPath,
         }));
@@ -372,8 +378,10 @@ Page({
             "rows[0].remindAt": value,
             "rows[0].remindTouched": true,
             "rows[0].remindBadgeText": remindBadgeText(value),
-            // 用户选了明确日期:时间没换算的提示随之收起(与服务端互斥口径一致)
+            // 用户选了明确日期:时间没换算的提示随之收起(与服务端互斥口径一致);
+            // 换算候选标注同样收起——日期已是用户自己的选择,不再是换算候选
             "rows[0].remindVagueQuote": "",
+            "rows[0].remindConverted": false,
         });
         this.persistRows();
     },

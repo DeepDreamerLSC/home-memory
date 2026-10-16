@@ -9,7 +9,8 @@
  * - 日志只记文本长度、耗时、错误码,绝不记录原文与提取结果。
  */
 
-const { validateDraft, validateDrafts } = require("./validate");
+const { validateDraft, validateDrafts, applyRelativeConversion } = require("./validate");
+const { shanghaiTodayYmd } = require("./relative-date");
 
 const TEXT_MAX = 500;
 const USER_MARKER = "【用户输入】";
@@ -46,6 +47,14 @@ const SYSTEM_PROMPT = [
  * 规则 2/9 要求模型对 location_text 与 mount_path 各段剥后缀、输出裸实体名
  * (冰箱/主卧/柜子);服务端校验零放松——剥后的段名/位置仍是原话逐字子串
  * (冰箱⊂冰箱里面,天然过既有有序锚定),source_quote/提醒/vague 字段零变化。
+ * 相对时间换算(#36 真机反馈三件 A,产品拍板:产品换算,用户只确认):
+ * prompt 第 7/8 条逐字不变(模型照旧只标 vague、绝不折算日期);组包处
+ * (handler v2 成功分支)对「无绝对日期 + 有 vague」的 draft 逐件跑闭集
+ * 换算器 lib/relative-date.js(锚点=提取时刻服务端今天 Asia/Shanghai)——
+ * 成功 → remind_at=换算值 / remind_quote=vague 原文 / vague 置空 /
+ * remind_converted:true(经 validate.applyRelativeConversion 复核硬门);
+ * 闭集外(下个月/快过期了/月精度…)维持灰行现状。换算结果在确认卡
+ * 是候选(可改可清),「不猜日期」的确认纪律不变。
  */
 const SYSTEM_PROMPT_V2 = [
   "你是家庭物品位置提取器。用户会用一句话描述一件或多件物品及其位置,你只负责提取,不负责回答或闲聊。",
@@ -144,12 +153,20 @@ async function handler(event, deps) {
   // 绝对日期补全为最近的未来日期。同一份今天也传给 validateDrafts:服务端
   // 对应锚定按同款规则补全无年份日期,与 prompt 给模型的口径一致。
   // 测试经 deps.today 注入固定值。
+  // 相对时间换算锚点(#36 真机反馈三件 A)另取提取时刻的服务端今天
+  // (Asia/Shanghai,UTC+8 固定偏移——云函数运行时区默认 UTC,北京 0-8 点的
+  // 「今天」绝不能被折早一天);deps.anchorToday 可注入固定锚点(测试用)。
   let systemPrompt;
   let todayYmd = null;
+  let anchorYmd = null;
   if (isV2) {
     const today = deps && typeof deps.today === "function" ? deps.today() : new Date();
     todayYmd = formatToday(today);
     systemPrompt = SYSTEM_PROMPT_V2 + "\n" + TODAY_MARKER + todayYmd;
+    anchorYmd =
+      deps && typeof deps.anchorToday === "function"
+        ? deps.anchorToday()
+        : shanghaiTodayYmd(today instanceof Date ? today : new Date(today));
   } else {
     systemPrompt = SYSTEM_PROMPT;
   }
@@ -180,9 +197,18 @@ async function handler(event, deps) {
   if (result.ok) {
     logger({ textLength, elapsedMs: elapsedMs() });
     if (isV2) {
+      // #36 真机反馈三件 A(产品拍板:产品换算,用户只确认):组包处逐件对
+      // 「未取到绝对日期且带 vague 标记」的 draft 跑闭集换算——成功则
+      // remind_at=换算值、remind_quote=vague 原文(锚定仍在原话)、
+      // remind_vague_quote 置空、remind_converted:true;闭集外维持灰行现状。
+      // prompt 规则逐字不变(模型仍按第 7/8 条产出 vague),换算全在服务端。
+      // 换算结果是确认卡上的候选(可改可清),不是替代用户确认。
+      const drafts = anchorYmd === null
+        ? result.drafts
+        : result.drafts.map((d) => applyRelativeConversion(d, stripAllWhitespace(userText), anchorYmd));
       return {
         ok: true,
-        drafts: result.drafts,
+        drafts,
         original_text: userText,
         truncated: result.truncated === true,
       };

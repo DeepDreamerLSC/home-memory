@@ -859,6 +859,8 @@ async function runV2(text, reply, opts) {
   const res = await handler({ text, protocol: 2 }, {
     logger: opts.logger || function () {},
     today: opts.today || FIXED_TODAY,
+    // 换算锚点(三件 A):固定注入,断言与运行环境时区无关
+    anchorToday: opts.anchorToday || function () { return "2026-10-15"; },
     callLLM(prompt) {
       calls.push(prompt);
       return Promise.resolve(reply);
@@ -1527,10 +1529,13 @@ test("B3 单件不受影响:一件时日期证据在整句原话中即可(不可
 // ---------- #36 0.6.0 真机反馈 Fix 4:remind_vague_quote(时间没换算透明化) ----------
 // 这是透明化修复,不是换算:「半年后」绝不换算成任何日期,只把「说了时间但
 // 没换算」的原话子串如实标出来,用户不再被静默丢弃。
+// (#36 真机反馈三件 A 起产品拍板「产品换算,用户只确认」:带数量锚的闭集
+// 相对表述在 handler 组包处换算为候选日期(remind_converted:true);
+// 闭集外(下个月/快过期了/…)的 vague 灰行行为不变——见文末 RD-LINK 组。)
 
 var VAGUE_ORIGINAL = "净水器的备用滤芯放在厨房水槽下面的柜子里,半年后提醒我换。";
 
-test("v2 vague 正例:原话有模糊时间、提醒三项 null → remind_vague_quote 逐字保留(不换算)", async function () {
+test("v2 vague 正例(三件 A 后):「半年后」属闭集 → handler 换算为候选(remind_converted:true),vague 置空", async function () {
   var { res } = await runV2(VAGUE_ORIGINAL, rawItems([
     {
       name: "净水器备用滤芯",
@@ -1545,8 +1550,13 @@ test("v2 vague 正例:原话有模糊时间、提醒三项 null → remind_vague
     },
   ]));
   assert.equal(res.ok, true);
-  assert.deepStrictEqual(remindTrio(res.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null }, "绝不换算成日期");
-  assert.equal(res.drafts[0].remind_vague_quote, "半年后", "时间没换算的原话子串如实保留");
+  // 锚点 2026-10-15 + 6 个月(月算术)= 2027-04-15;类别取「下次维护」;
+  // quote 锚定仍是原话子串「半年后」;vague 置空、converted 标真
+  assert.equal(res.drafts[0].remind_at, "2027-04-15", "半年后 = 今天+6月(服务端换算候选)");
+  assert.equal(res.drafts[0].remind_kind, "下次维护", "换算候选类别=下次维护(与 remindSet 缺省同源)");
+  assert.equal(res.drafts[0].remind_quote, "半年后", "锚定仍在原话:quote= vague 原文");
+  assert.equal(res.drafts[0].remind_vague_quote, null, "已换算:vague 置空");
+  assert.equal(res.drafts[0].remind_converted, true, "换算标记必须为 true(服务端构造)");
 });
 
 test("v2 vague 互斥:同件带明确日期(remind_at 三项)→ vague 一律 null", function () {
@@ -1647,7 +1657,7 @@ test("v2 vague 纪律:prompt 新增透明标记规则,但第 7 条不猜日期�
   assert.ok(v1calls[0].indexOf("remind_vague_quote") === -1, "v1 prompt 不得出现 vague 字段");
 });
 
-test("v2 vague 对抗:模型把模糊时间折算成日期 → 日期被硬门拦下;vague 按最终 remind_at 判定保留(透明化)", async function () {
+test("v2 vague 对抗(三件 A 后):模型把模糊时间折算成日期 → 仍被硬门拦下;换算候选由服务端闭集产出(锚点=服务端今天)", async function () {
   var { res } = await runV2(VAGUE_ORIGINAL, rawItems([
     {
       name: "净水器备用滤芯",
@@ -1662,10 +1672,102 @@ test("v2 vague 对抗:模型把模糊时间折算成日期 → 日期被硬门�
     },
   ]));
   assert.equal(res.ok, true, "不废件");
-  assert.deepStrictEqual(remindTrio(res.drafts[0]), { remind_at: null, remind_kind: null, remind_quote: null }, "折算日期必须被拦下");
-  // 互斥按最终 remind_at 判定:折算被拦后提醒三项为 null,原话确实说了时间——
-  // vague 如实保留,用户看到「时间没换算:『半年后』」而不是静默丢弃
-  assert.equal(res.drafts[0].remind_vague_quote, "半年后", "拦下折算后透明标记如实保留");
+  // 模型的折算值先被对应锚定硬门拦下(quote「半年后」解不出绝对日期候选),
+  // vague 按最终 remind_at=null 判定保留;随后 handler 对 vague 跑闭集换算,
+  // 换算候选 2027-04-15 来自**服务端锚定今天+6月**(与模型折报值同值纯属巧合,
+  // 标记 remind_converted:true 证明来源是换算器,不是模型透传)。
+  assert.equal(res.drafts[0].remind_at, "2027-04-15", "最终日期=服务端换算值");
+  assert.equal(res.drafts[0].remind_quote, "半年后", "锚定仍是原话子串");
+  assert.equal(res.drafts[0].remind_converted, true, "来源=服务端换算器(converted 标记)");
+  assert.equal(res.drafts[0].remind_vague_quote, null, "已换算:vague 置空");
+});
+
+// ---------- #36 真机反馈三件 A:v2 链路相对时间换算(handler 组包处) ----------
+
+test("RD-LINK-1:mock 模型返回 vague「半年后」→ remind_at=今天+6月、converted=true、vague 置空;「下个月」→ 维持灰行现状", async function () {
+  // 闭集内:半年后(见文首正例,此处验证不同数量锚与锚点注入)
+  var soon = await runV2("创可贴在药箱第二层,两周后要用。", rawItems([
+    { name: "创可贴", location_text: "药箱第二层", certain: true, qualifiers: [], source_quote: "创可贴在药箱第二层", remind_at: null, remind_kind: null, remind_quote: null, remind_vague_quote: "两周后" },
+  ]));
+  assert.equal(soon.res.drafts[0].remind_at, "2026-10-29", "两周后 = 锚点今天+14 天");
+  assert.equal(soon.res.drafts[0].remind_kind, "下次维护");
+  assert.equal(soon.res.drafts[0].remind_quote, "两周后");
+  assert.equal(soon.res.drafts[0].remind_converted, true);
+  assert.equal(soon.res.drafts[0].remind_vague_quote, null);
+
+  // 闭集外:下个月(无数量锚)→ 灰行现状零变化(透明化,不换算)
+  var vague = await runV2("下个月要换净水器滤芯,滤芯在厨房抽屉里。", rawItems([
+    { name: "净水器滤芯", location_text: "厨房抽屉", certain: true, qualifiers: [], source_quote: "净水器滤芯在厨房抽屉里", remind_at: null, remind_kind: null, remind_quote: null, remind_vague_quote: "下个月" },
+  ]));
+  assert.deepStrictEqual(
+    remindTrio(vague.res.drafts[0]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "无数量锚:三项仍全 null",
+  );
+  assert.equal(vague.res.drafts[0].remind_vague_quote, "下个月", "灰行如实保留");
+  assert.notEqual(vague.res.drafts[0].remind_converted, true, "未换算不带 converted 标记");
+});
+
+test("RD-LINK-2:锚点经 deps.anchorToday 注入生效(月末 clamp 场景)+ 明天换算 + 多件逐件独立换算", async function () {
+  // 月末 clamp:锚点 2026-10-31 + 6 个月 → 2027-04-30(绝不编出 4月31日)
+  var clamped = await runV2("滤芯在柜子里,六个月后换。", rawItems([
+    { name: "滤芯", location_text: "柜子", certain: true, qualifiers: [], source_quote: "滤芯在柜子里", remind_vague_quote: "六个月后" },
+  ]), { anchorToday: function () { return "2026-10-31"; } });
+  assert.equal(clamped.res.drafts[0].remind_at, "2027-04-30", "月末 clamp");
+
+  // 明天(闭集,无后缀模式)
+  var tomorrow = await runV2("明天要带的伞在玄关。", rawItems([
+    { name: "雨伞", location_text: "玄关", certain: true, qualifiers: [], source_quote: "明天要带的伞在玄关", remind_vague_quote: "明天" },
+  ]));
+  assert.equal(tomorrow.res.drafts[0].remind_at, "2026-10-16");
+
+  // 多件:各带各的 vague,逐件独立换算;不带的件零影响
+  var multi = await runV2("感冒药在药箱,明天吃;口罩在玄关抽屉,半年后过期。", rawItems([
+    { name: "感冒药", location_text: "药箱", certain: true, qualifiers: [], source_quote: "感冒药在药箱", remind_vague_quote: "明天" },
+    { name: "口罩", location_text: "玄关抽屉", certain: true, qualifiers: [], source_quote: "口罩在玄关抽屉", remind_vague_quote: "半年后" },
+    { name: "钥匙", location_text: "玄关", certain: true, qualifiers: [], source_quote: "钥匙在玄关" },
+  ]));
+  assert.equal(multi.res.drafts[0].remind_at, "2026-10-16", "第 1 件:明天=今天+1");
+  assert.equal(multi.res.drafts[0].remind_converted, true);
+  assert.equal(multi.res.drafts[1].remind_at, "2027-04-15", "第 2 件:半年后=今天+6月");
+  assert.equal(multi.res.drafts[1].remind_converted, true);
+  assert.deepStrictEqual(remindTrio(multi.res.drafts[2]), { remind_at: null, remind_kind: null, remind_quote: null }, "第 3 件无时间:零影响");
+});
+
+test("RD-LINK-3:v1 链路零变化(不换算);模型自报 remind_converted 不被采信", async function () {
+  // v1:模型输出无 vague 字段概念,v1 响应形状零变化(不出现 converted)
+  var v1res = await handler({ text: "钥匙在玄关" }, {
+    logger() {},
+    callLLM() {
+      return Promise.resolve(JSON.stringify({ name: "钥匙", location_text: "玄关", certain: true, qualifiers: [] }));
+    },
+  });
+  assert.equal(v1res.ok, true);
+  assert.equal("remind_converted" in v1res.draft, false, "v1 草稿不携带 converted");
+
+  // 模型自报 remind_converted:true + 折算日期 + 相对 quote:硬门不放行
+  // (converted 只由服务端换算器构造,模型自报值被丢弃)
+  var fake = await runV2(VAGUE_ORIGINAL, rawItems([
+    {
+      name: "净水器备用滤芯",
+      location_text: "厨房水槽下面的柜子里",
+      certain: true,
+      qualifiers: [],
+      source_quote: "净水器的备用滤芯放在厨房水槽下面的柜子里",
+      remind_at: "2026-12-25", // 编造值
+      remind_kind: "有效期",
+      remind_quote: "半年后",
+      remind_converted: true, // 模型自报:不得被采信
+      remind_vague_quote: null,
+    },
+  ]));
+  assert.deepStrictEqual(
+    remindTrio(fake.res.drafts[0]),
+    { remind_at: null, remind_kind: null, remind_quote: null },
+    "模型自报 converted 不放行对应锚定:折算值仍被拦下",
+  );
+  assert.equal(fake.res.drafts[0].remind_converted, undefined, "模型自报的 converted 字段被丢弃(不透传)");
+  assert.equal(fake.res.drafts[0].remind_vague_quote, null, "模型说没有 vague:没有灰行,也没有提醒");
 });
 
 // ---------- 十七轮「放进」路径预览 mount_path(#18 红线语义升级) ----------
