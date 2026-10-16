@@ -7,6 +7,7 @@ const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
 const subscribe_1 = require("../../utils/subscribe");
+const notify_accepted_1 = require("../../utils/notify-accepted");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -27,41 +28,8 @@ function shortDate(iso) {
     return pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 }
 /**
- * 「到期时微信提醒我」已成功开启的本地标记键(#36 真机手势规则):
- * 按家庭作用域键约定拼 household-scope 后缀(换家庭键隔离,互不可见)。
- * 注意:该标记只是**展示启发式**——仅用来决定详情页显式订阅入口是否露出,
- * 权威订阅记录在服务端 remind_subscriptions(remindNotify 云函数),本地
- * 标记不参与任何发送/落库决策。storage 一律 best-effort:读写失败按未开启
- * 处理,不影响任何业务语义。
- */
-const NOTIFY_ACCEPTED_KEY = "wx-notify-accepted";
-/** 读本地「已成功开启订阅」标记(best-effort;读失败/无存储按未开启) */
-function readNotifyAccepted() {
-    try {
-        if (typeof wx.getStorageSync !== "function") {
-            return false;
-        }
-        return wx.getStorageSync(NOTIFY_ACCEPTED_KEY + (0, household_scope_1.householdScopeSuffix)()) === true;
-    }
-    catch (e) {
-        return false;
-    }
-}
-/** 写本地「已成功开启订阅」标记(best-effort;写失败不影响本次会话收起入口) */
-function writeNotifyAccepted() {
-    try {
-        if (typeof wx.setStorageSync !== "function") {
-            return;
-        }
-        wx.setStorageSync(NOTIFY_ACCEPTED_KEY + (0, household_scope_1.householdScopeSuffix)(), true);
-    }
-    catch (e) {
-        // best-effort:展示启发式标记,失败不重试不抛出
-    }
-}
-/**
  * 解析跳转方带来的空间路径(进入时的容器层 path,JSON 字符串数组)。
- * 只信严格结构:非数组 / 含非字符串 / 超过 6 段一律视为没有,不猜。
+ * 只信严格结构:非数组 / 含非字符串 / 超 6 段一律视为没有,不猜。
  */
 function parseSpacePath(raw) {
     if (!raw) {
@@ -115,6 +83,8 @@ Page({
         today: (0, remind_ui_1.localTodayYmd)(),
         remindBusy: false,
         notifyAccepted: false,
+        diagEntryVisible: false,
+        wantsNotify: true,
         vagueQuote: "",
         conflicts: [],
         conflictPending: false,
@@ -132,6 +102,17 @@ Page({
             spacePath: parseSpacePath(options.path),
             familyShared: (0, household_scope_1.isHouseholdScopeShared)(),
         });
+        // 诊断入口仅 develop 显示(预览/开发版);getAccountInfoSync 不在任何 tap
+        // 手势链上(onLoad 时调用),不影响订阅手势纪律
+        try {
+            const acc = wx.getAccountInfoSync();
+            this.setData({
+                diagEntryVisible: !!acc.miniProgram && acc.miniProgram.envVersion === "develop",
+            });
+        }
+        catch (e) {
+            this.setData({ diagEntryVisible: false });
+        }
         const rawItemId = options.item_id;
         if (rawItemId) {
             // 按 id 直接打开(生成向导的 skipped 件、结果页跳转):get 单查不受 list 分页影响
@@ -183,7 +164,7 @@ Page({
         // 服务端复核后 refreshReminderRow 末尾还会再读一次,双保险)
         this.setData({
             familyShared: (0, household_scope_1.isHouseholdScopeShared)(),
-            notifyAccepted: readNotifyAccepted(),
+            notifyAccepted: (0, notify_accepted_1.isNotifyAccepted)(),
         });
         // 保质期行(#36):进页/回页时按服务端提醒刷新;加载失败静默不显示(增强露出)。
         // 提醒冲突待选时不刷:面板里「你的修改」是用户正要存的值,回页刷新会把它
@@ -424,8 +405,10 @@ Page({
         // V1.5(#36 到期微信提醒):本次保存会写入到期提醒(remindSet,含冲突选边
         // 「保留我的修改」与遗留待补写)时,在 tap 手势链内同步请求订阅授权
         //(必须先于下方任何 await;清除提醒不请求;拒绝/失败静默降级应用内提醒)
-        if (remindWrite !== null && remindWrite.action === "remindSet") {
-            (0, subscribe_1.requestExpirySubscribe)();
+        if (remindWrite !== null && remindWrite.action === "remindSet" && this.data.wantsNotify !== false) {
+            // 回执日期=本次写入的到期日(remindSet 的 dueDate);wantsNotify=false
+            // =用户在选日期时明确答过「不用了」,本次保存跳过订阅询问
+            (0, subscribe_1.requestExpirySubscribe)(undefined, remindWrite.dueDate);
         }
         this.setData({ saving: true });
         try {
@@ -1136,7 +1119,7 @@ Page({
         const row = await this.fetchReminderRow();
         // 家庭作用域此刻刚经服务端复核:重读「已成功开启订阅」本地标记
         // (#36 真机手势规则:显式入口的显示条件之一;键随家庭隔离)
-        this.setData({ notifyAccepted: readNotifyAccepted() });
+        this.setData({ notifyAccepted: (0, notify_accepted_1.isNotifyAccepted)() });
         if (row === undefined) {
             return; // 失败/在途切换:静默,详情其余照常
         }
@@ -1256,6 +1239,10 @@ Page({
             });
             this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
             this.remindOriginal = "";
+            // 0.9.6(#36 用户反馈):已处理=微信提醒关掉——该物品提醒已完成、天然
+            // 不再进推送(每日扫描只看 active 提醒);清「已开启」标记,让之后的新
+            // 提醒能重新询问/开启订阅(无论记录保留还是删除都一样)
+            (0, notify_accepted_1.clearNotifyAccepted)();
             // #36 真机反馈三件 B(用户功能请求):完成后问「记录还保留吗」——
             // 保留(确认/dismiss)= 现状(已处理 toast);删除物品(取消)= itemsApi
             // delete(与 ⋯ 菜单删除先例同款:级联硬删 active 提醒 + 软删物品,api 层
@@ -1333,9 +1320,12 @@ Page({
             return; // 无生效提醒:入口不该在(双保险)
         }
         (0, subscribe_1.requestExpirySubscribe)(() => {
-            writeNotifyAccepted();
+            (0, notify_accepted_1.markNotifyAccepted)();
             this.setData({ notifyAccepted: true });
-        });
+        }, this.data.remindAt);
+    },
+    onDiagEntryTap() {
+        wx.navigateTo({ url: "/pages/diag-subscribe/diag-subscribe" });
     },
     /**
      * 编辑折叠「提醒」选日子(#36:picker mode=date 弹层,唯一手动日期来源):
@@ -1363,6 +1353,19 @@ Page({
             wx.showToast({ title: problem, icon: "none" });
             return;
         }
+        // 0.9.6(#36 用户反馈):选完日子先问一句「要不要微信提醒」。此处是
+        // picker bindchange,无点击手势,但纯提问的 modal 不受手势限制;答案存
+        // wantsNotify。0.9.7:点「提醒我」**立即**尝试授权——骑 modal 确认的
+        // 激活窗口(现代基础库保留);picker 本身无手势,若此处被手势拒绝,落回
+        // 保存 tap 二次机会与 chip 入口(双兜底)。
+        const wantsNotify = await (0, subscribe_1.askNotifyIntent)(value);
+        if (wantsNotify) {
+            (0, subscribe_1.requestExpirySubscribe)(() => {
+                (0, notify_accepted_1.markNotifyAccepted)();
+                this.setData({ notifyAccepted: true });
+            }, value);
+        }
+        this.setData({ wantsNotify });
         // #36 真机手势规则(0.9.0 iOS 实测):picker bindchange(滚轮选完)不是
         // 用户点击手势,此处调 wx.requestSubscribeMessage 必然报错
         // 「requestSubscribeMessage:fail can only be invoked by user TAP gesture」
@@ -1448,12 +1451,27 @@ Page({
             });
             if (res.reminder) {
                 this.applyReminderRow(res.reminder);
-                wx.showToast({
-                    title: hadReminder
-                        ? "提醒已改到 " + (0, remind_ui_1.monthDayText)(res.reminder.due_date)
-                        : "已带上提醒:" + (0, remind_ui_1.monthDayText)(res.reminder.due_date) + " 到期",
-                    icon: "none",
-                });
+                if (wantsNotify && !this.data.notifyAccepted) {
+                    // 用户想要提醒且「提醒我」的立即授权没有成功(未 accept/被手势拒):
+                    // 清「已开启」标记让 chip 露出引导点按(一次性订阅额度随每次发送
+                    // 消耗,新提醒需要新的授权),toast 一并指路。notifyAccepted 已为
+                    // true = 立即授权已成功,跳过(入口保持收起,不出多余引导)
+                    (0, notify_accepted_1.clearNotifyAccepted)();
+                    this.setData({ notifyAccepted: false });
+                    wx.showToast({
+                        title: "提醒已设好;点「到期时微信提醒我」开微信推送",
+                        icon: "none",
+                        duration: 2500,
+                    });
+                }
+                else if (!wantsNotify) {
+                    wx.showToast({
+                        title: hadReminder
+                            ? "提醒已改到 " + (0, remind_ui_1.monthDayText)(res.reminder.due_date)
+                            : "已带上提醒:" + (0, remind_ui_1.monthDayText)(res.reminder.due_date) + " 到期",
+                        icon: "none",
+                    });
+                }
             }
             else {
                 // 不应发生(remindSet 必回所设行):回查一次,如实收敛

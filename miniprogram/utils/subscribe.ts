@@ -31,9 +31,9 @@
  * (模板 ID 非密钥,各自单一常量收敛;改模板时两处同步)。
  */
 
-/** 订阅消息模板 ID(微信公众平台「保质期到期提醒」) */
+/** 订阅消息模板 ID(微信公众平台「质保即将过期提醒」编号 75799;旧「保质期到期提醒」模板 2026-10-16 服务端失效已弃用) */
 export const EXPIRY_REMIND_TEMPLATE_ID =
-  "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+  "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 
 /** 云函数名(与 cloudfunctions/remindNotify 对应) */
 const REMIND_NOTIFY_FUNCTION = "remindNotify";
@@ -109,9 +109,25 @@ function clampCodePoints(text: string, max: number): string {
 }
 
 /**
- * 诊断 toast(仅 success 回调的授权结果短状态:develop/trial 专用,release
- * 由调用方拦下,绝不打扰正式用户)。截断 60 字、duration 4000。fail 诊断
- * 0.9.2 起改走 diagnoseModal(toast 真机只显约 30 字,错误全文看不全)。
+ * 成功回执的中文日期(YYYY-MM-DD → 「2026年10月20日」,月/日去前导零);
+ * 非法/缺失入参返回 "",调用方据此退化为不带日期的回执。
+ */
+function zhRemindDate(ymd?: string): string {
+  if (typeof ymd !== "string") {
+    return "";
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) {
+    return "";
+  }
+  return m[1] + "年" + Number(m[2]) + "月" + Number(m[3]) + "日";
+}
+
+/**
+ * 短 toast(0.9.5 起两用:①success-accept 的**成功回执**(全环境,非诊断——
+ * 用户刚授权,回一句「订阅成功!将在X年X月X日推送微信提醒」,无日期时退化
+ * 为不带日期);②develop/trial 的非 accept 诊断状态。release 的非 accept
+ * 一律静默。截断 60 字、duration 4000。fail 诊断 0.9.2 起走 diagnoseModal。
  */
 function diagnoseToast(titlePrefix: string, detail: string): void {
   if (typeof wx.showToast !== "function") {
@@ -143,6 +159,48 @@ function diagnoseModal(errMsg: string): void {
 }
 
 /**
+ * 设提醒时的「要不要微信提醒」预问(0.9.6,#36 用户反馈):在选日期的
+ * picker bindchange 时机弹(picker 回调无点击手势,但纯提问的 modal 不受
+ * 手势限制);用户答「提醒我」→ 调用方记下意向,真正的订阅授权仍骑在保存
+ * 按钮/chip 的真实 tap 手势上(SB-GESTURE 锁序,绝不在本函数里发订阅请求)。
+ * 用户答「不用了」→ 保存时跳过订阅询问(不打扰明确拒绝的用户)。
+ * fail/无 showModal 保守 resolve(true):提问组件故障时维持既有「保存时
+ * 自动询问」现状,绝不因提问失败漏掉订阅机会。
+ */
+export function askNotifyIntent(ymd: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof wx.showModal !== "function" || zhRemindDate(ymd) === "") {
+      resolve(true);
+      return;
+    }
+    let settled = false;
+    // 看门狗:modal 确认/取消/失败都没回来(异常平台/测试桩无回调)时按
+    // 「要提醒」收敛,绝不挂死调用方的 await;一次性,先到先得
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(true);
+      }
+    }, 10000);
+    const finish = (wants: boolean) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(wants);
+      }
+    };
+    wx.showModal({
+      title: "微信到期提醒",
+      content: "已设为 " + zhRemindDate(ymd) + " 到期。快到期时早上 8 点微信提醒你?",
+      confirmText: "提醒我",
+      cancelText: "不用了",
+      success: (r) => finish(r.confirm === true),
+      fail: () => finish(true),
+    });
+  });
+}
+
+/**
  * 请求「保质期到期提醒」订阅授权。
  * 硬性约束 1(tap 手势链):必须在用户 tap 手势链内同步调用(调用方在 tap
  * 回调开头第一时间调用,绝不 await 之后再调;picker 的 bindchange 滚轮选完
@@ -158,6 +216,10 @@ function diagnoseModal(errMsg: string): void {
  * 已发起后同步调用(不 await 云函数结果;reject/fail/低版本/无云能力——
  * 记录未发起——一律不调用)。现有调用点(确认卡保存/详情保存修改)不传
  * 回调,行为零变化。
+ * remindDateYmd(0.9.5 成功回执):可选 YYYY-MM-DD,accept 后的回执文案
+ * 「订阅成功!将在X年X月X日推送微信提醒」用它拼日期(三入口均已接线:
+ * 详情页 chip=当前 remindAt/详情保存=本次 remindSet 的 dueDate/确认卡保存=
+ * 本批最早到期日);缺省/非法退化为「到期时微信将提醒你」。
  * 失败口径(#36 真机反馈三件 C 起):release 一律静默——提醒仍有应用内
  * 「提醒页」兜底,保存流程照旧;develop/trial(开发者工具/体验版)可见诊断:
  * - fail 回调:console.warn 完整 errMsg + wx.showModal 全文(title「订阅失败」/
@@ -166,7 +228,7 @@ function diagnoseModal(errMsg: string): void {
  *   多行可截图,体验版复现后截图回报即可定位);
  * - success 回调:toast 该模板的授权结果状态(「订阅:accept/reject/ban/filter」)。
  */
-export function requestExpirySubscribe(onAccepted?: () => void): void {
+export function requestExpirySubscribe(onAccepted?: () => void, remindDateYmd?: string): void {
   // 请求前零 wx API 调用:此处只做属性存在性检查(不发桥接调用),诊断的
   // getAccountInfoSync 一律推迟到 success/fail 回调内(SB-GESTURE 锁序)
   if (!wx.requestSubscribeMessage) {
@@ -179,8 +241,14 @@ export function requestExpirySubscribe(onAccepted?: () => void): void {
         if (recordSubscription() && onAccepted) {
           onAccepted(); // 记录已发起(不 await 结果):accept 后置动作同步回调
         }
-      }
-      if (!isReleaseEnv()) {
+        // 成功回执(全环境,非诊断):「订阅成功!将在X年X月X日推送微信提醒」;
+        // 调用方没给到合法日期(理论不发生,三入口都已接线)退化为不带日期
+        const zh = zhRemindDate(remindDateYmd);
+        diagnoseToast(
+          "订阅成功!",
+          zh ? "将在" + zh + "推送微信提醒" : "到期时微信将提醒你",
+        );
+      } else if (!isReleaseEnv()) {
         const status = (res as Record<string, unknown>)[EXPIRY_REMIND_TEMPLATE_ID];
         diagnoseToast(
           "订阅:",

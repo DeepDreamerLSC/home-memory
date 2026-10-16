@@ -34,8 +34,8 @@ var createMemoryDb = require("./helpers/memoryDb").createMemoryDb;
 
 var ROOT = path.join(__dirname, "..");
 
-/** 订阅消息模板 ID(「保质期到期提醒」,与 remindNotify lib/handler.js 同一常量) */
-var TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+/** 订阅消息模板 ID(「质保即将过期提醒」编号 75799,与 remindNotify lib/handler.js 同一常量;旧模板 2026-10-16 服务端失效已弃用) */
+var TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 var TEMPLATE_PAGE = "pages/reminders/reminders";
 
 function sha256hex(s) {
@@ -418,9 +418,9 @@ test("RN-SCAN-1:窗口过滤——今天/明天纳入,昨天/后天不纳入;卡
   assert.equal(payload.templateId, TEMPLATE_ID);
   assert.equal(payload.page, TEMPLATE_PAGE);
   assert.equal(payload.data.thing1.value, "鲜牛奶 等 2 件");
-  assert.equal(payload.data.date2.value, "2026-10-14");
+  assert.equal(payload.data.time2.value, "2026年10月14日 08:00");
   assert.equal(payload.data.thing4.value, "冰箱冷藏层");
-  assert.equal(payload.data.thing8.value, "今天到期,点开处理");
+  assert.equal(payload.data.thing5.value, "今天到期,点开处理");
 });
 
 test("RN-SCAN-2:资格复核——被移出家庭的订阅跳过、家庭解散跳过、个人家庭订阅照发", async function () {
@@ -673,8 +673,8 @@ test("RN-GLUE-2:timer 入口(无 action / Type:Timer)——扫描并经 cloud.op
   assert.equal(payload.templateId, TEMPLATE_ID);
   assert.equal(payload.page, TEMPLATE_PAGE);
   assert.equal(payload.miniprogramState, "formal", "正式版状态(订阅消息默认跳开发版)");
-  assert.equal(payload.data.date2.value, today);
-  assert.equal(payload.data.thing8.value, "今天到期,点开处理");
+  assert.equal(payload.data.time2.value, today.slice(0, 4) + "年" + Number(today.slice(5, 7)) + "月" + Number(today.slice(8, 10)) + "日 08:00");
+  assert.equal(payload.data.thing5.value, "今天到期,点开处理");
 
   // 控制台「手动触发」(空事件体)同走扫描;同日幂等不再发送
   var sent2 = [];

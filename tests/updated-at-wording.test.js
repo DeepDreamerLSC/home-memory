@@ -21,7 +21,7 @@ var ROOT = path.join(__dirname, "..");
 
 globalThis.wx = {
   showToast: function () {},
-  showModal: function () {},
+  showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); },
   showActionSheet: function () {},
   navigateTo: function () {},
   navigateBack: function () {},

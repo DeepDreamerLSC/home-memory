@@ -40,18 +40,22 @@ var PAGE_SIZE = 100;
 var MAX_PAGES = 100;
 
 /**
- * 订阅消息模板(微信公众平台「保质期到期提醒」):模板 ID 非密钥,收敛于本
- * 单一常量处(小程序端 miniprogram/utils/subscribe.ts 持有同值的另一份常量)。
+ * 订阅消息模板(微信公众平台「质保即将过期提醒」编号 75799,2026-10-16 添加):
+ * 模板 ID 非密钥,收敛于本单一常量处(小程序端 miniprogram/utils/subscribe.ts
+ * 持有同值的另一份常量)。注:首版用的「保质期到期提醒」模板(WUVZmS47…)在
+ * 2026-10-16 当天服务端失效(20001 No template data return,同账号当日添加新
+ * 模板后复现;开发者工具实证新模板可弹授权框),遂整体切换,勿回切旧 ID。
  */
-var TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+var TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 /** 卡片点击进入的落地页(提醒页三分组:已过期/这几天/再往后) */
 var TEMPLATE_PAGE = "pages/reminders/reminders";
 /**
- * 模板四字段关键词 key(2026-10-16 控制台模板详情核实:物品名称 thing1/到期日期
- * date2/存放位置 thing4/温馨提醒 thing8——编号是选题顺序非展示顺序,勿按展示位推断);
- * 如控制台再变,只需改这一处映射,聚合语义字段 name/date/location/tip 不变。
+ * 模板四字段关键词 key(2026-10-16 控制台模板详情核实:物品名称 thing1/过保日期
+ * time2/所属位置 thing4/温馨提示 thing5——编号是选题顺序非展示顺序,勿按展示位
+ * 推断);如控制台再变,只需改这一处映射,聚合语义字段 name/date/location/tip
+ * 不变。time2 是**时间类型**关键词,值须带时分(templateData 处统一拼 08:00)。
  */
-var TEMPLATE_FIELDS = { name: "thing1", date: "date2", location: "thing4", tip: "thing8" };
+var TEMPLATE_FIELDS = { name: "thing1", date: "time2", location: "thing4", tip: "thing5" };
 
 var ERROR_MESSAGES = {
   INVALID_INPUT: "输入不合法,请检查后重试",
@@ -148,11 +152,23 @@ async function memberRowExists(deps, householdId, memberKey) {
   return !!(res && res.data && res.data.length > 0);
 }
 
+/**
+ * 过保日期(time2,时间类型关键词)的值格式:微信 time.DATA 要求带时分,统一拼
+ * 「X年X月X日 08:00」——08:00 即每日扫描发送时刻,语义如实;月/日不带前导零,
+ * 贴官方示例「2019年10月1日 15:01」风格。入参是聚合层的 YYYY-MM-DD(聚合语义
+ * 不变,时间化只发生在发送映射这一层);非预期形状原样透传(不在此处吞错)。
+ */
+function formatNotifyTime(ymd) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof ymd === "string" ? ymd : "");
+  if (!m) return ymd;
+  return m[1] + "年" + Number(m[2]) + "月" + Number(m[3]) + "日 08:00";
+}
+
 /** 订阅消息 data 载荷(模板关键词 key 在 TEMPLATE_FIELDS 单一常量处映射) */
 function templateData(card) {
   var data = {};
   data[TEMPLATE_FIELDS.name] = { value: card.name };
-  data[TEMPLATE_FIELDS.date] = { value: card.date };
+  data[TEMPLATE_FIELDS.date] = { value: formatNotifyTime(card.date) };
   data[TEMPLATE_FIELDS.location] = { value: card.location };
   data[TEMPLATE_FIELDS.tip] = { value: card.tip };
   return data;

@@ -24,7 +24,7 @@ var assert = require("node:assert/strict");
 
 var subscribe = require("../miniprogram/utils/subscribe.js");
 
-var TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
+var TEMPLATE_ID = "fM4crRcrPk2kQ5iRL0WwTPoRhNS7Da8skrWqfcEdBSM";
 
 function restoreWx(prev) {
   if (prev === undefined) {
@@ -97,13 +97,11 @@ test("SB-FLOW-1:accept → 调 remindNotify recordSubscription(带模板授权�
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
-    assert.equal(calls.length, 2, "一次订阅弹窗 + 一次云函数记录");
+    assert.equal(calls.length, 3, "一次订阅弹窗 + 一次云函数记录 + 一次成功回执 toast(0.9.5 起全环境)");
     assert.deepEqual(calls[0].tmplIds, [TEMPLATE_ID], "弹窗模板即单一常量");
     assert.equal(calls[1].name, "remindNotify");
     assert.equal(calls[1].data.action, "recordSubscription");
-    assert.equal(calls.some(function (c) {
-      return c.kind === "showToast";
-    }), false, "绝不 toast(静默降级)");
+    assert.equal(calls[2].kind, "showToast", "accept 后成功回执");
   } finally {
     restoreWx(prevWx);
   }
@@ -194,7 +192,7 @@ test("SB-FLOW-3:低版本基础库(无 requestSubscribeMessage)与无云能力(�
   }
 });
 
-test("SB-FLOW-4:云函数失败(callFunction fail / 返回 ok:false)静默吞掉,不 toast 不抛错", async function () {
+test("SB-FLOW-4:云函数失败(callFunction fail)不抛错不阻塞;成功回执照常(授权已成,落库 fire-and-forget 失败静默=既有披露)", async function () {
   var prevWx = globalThis.wx;
   var toasts = [];
   globalThis.wx = {
@@ -219,7 +217,7 @@ test("SB-FLOW-4:云函数失败(callFunction fail / 返回 ok:false)静默吞掉
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
-    assert.equal(toasts.length, 0, "落库失败不 toast:提醒仍有应用内提醒页兜底");
+    assert.equal(toasts.length, 1, "落库失败不影响回执:用户侧授权已成功,服务端记录 fire-and-forget 失败仍静默吞掉(提醒有应用内页兜底)");
   } finally {
     restoreWx(prevWx);
   }
@@ -663,15 +661,15 @@ function itemSummary() {
   };
 }
 
-// 回归依据(#36 0.9.0 iOS 真机实测):详情页 picker mode=date 的 bindchange
-// (滚轮选完)回调不在用户 tap 手势链内,此处调 wx.requestSubscribeMessage
-// 100% 报「requestSubscribeMessage:fail can only be invoked by user TAP
-// gesture」(真机 toast 被截断只见「…fail c…」),只产生错误 toast 噪音。
-// 本测试改写自旧断言(picker 直写会请求订阅)——按新行为锁定:picker 路径
-// 不请求订阅,授权入口移至保质期行下方「到期时微信提醒我 ›」显式入口
-// (onNotifyChipTap,SB-PAGE-ITEM-4);onSaveTap 的按钮 tap 路径照旧请求
-// (SB-PAGE-ITEM-3 锁定)。
-test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——不请求订阅授权(真机手势规则),remindSet 照常发出", async function () {
+// 0.9.7 合同(#36 用户反馈:点「提醒我」应立即弹授权):picker 选完日子先经
+// askNotifyIntent 询问;答「提醒我」→ 在 modal 确认的激活窗口内**立即尝试
+// 一次**订阅授权(现代基础库保留该窗口;真机若被手势拒绝则失败静默,落回
+// 保存 tap 二次机会与「到期时微信提醒我›」入口双兜底);答「不用了」→
+// 零订阅调用。remindSet 两种答案下都照常写入。历史注记(#36 0.9.0 iOS
+// 实测):picker bindchange 本身无手势,直接调用必报手势错——发请求的是
+// 「提醒我」确认回调的激活窗口,不是 bindchange 本身。
+test("SB-PAGE-ITEM-1:设置到期提醒(picker 直写)——答「提醒我」立即尝试一次授权;答「不用了」零订阅;remindSet 均照常", async function () {
+  // ①答「提醒我」(桩默认 confirm):picker 路径恰好一次订阅尝试,accept 后入口收起
   itemPageResetEnv();
   var page = makePageFrom(itemConfig);
   itemConfig.applySummary.call(page, itemSummary());
@@ -682,16 +680,43 @@ test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——不请求�
   await itemConfig.onRemindDateChange.call(page, { detail: { value: "2026-11-25" } });
   await settle();
 
-  assert.equal(subscribeCalls.length, 0, "picker bindchange 无点击手势:不请求订阅(必然失败的调用已移除)");
+  assert.equal(subscribeCalls.length, 1, "「提醒我」确认窗口内恰好一次订阅尝试");
   assert.ok(
     pageCloudCalls.some(function (c) {
       return c.name === "itemsApi" && c.data.action === "remindSet" && c.data.due_date === "2026-11-25";
     }),
-    "提醒照常写入(订阅入口移走不影响保存)"
+    "提醒照常写入(订阅尝试不影响保存)"
   );
   assert.equal(page.data.remindAt, "2026-11-25", "提醒照常上屏");
-  // 直写成功后显式入口条件成立:有生效提醒且本地未标记已开启(点击流程见 SB-PAGE-ITEM-4)
-  assert.equal(page.data.notifyAccepted, false, "未开启过订阅:显式入口可露出");
+  assert.equal(page.data.notifyAccepted, true, "立即授权 accept:本地标记已开启,入口收起");
+
+  // ②答「不用了」:零订阅调用,写入与意向记录照常
+  itemPageResetEnv();
+  var prevModal = globalThis.wx.showModal;
+  globalThis.wx.showModal = function (o) {
+    if (o.success) {
+      o.success({ confirm: false, cancel: true });
+    }
+  };
+  try {
+    page = makePageFrom(itemConfig);
+    itemConfig.applySummary.call(page, itemSummary());
+    await itemConfig.refreshReminderRow.call(page);
+    await settle();
+    await itemConfig.onRemindDateChange.call(page, { detail: { value: "2026-11-26" } });
+    await settle();
+    assert.equal(subscribeCalls.length, 0, "「不用了」零订阅调用");
+    assert.ok(
+      pageCloudCalls.some(function (c) {
+        return c.name === "itemsApi" && c.data.action === "remindSet" && c.data.due_date === "2026-11-26";
+      }),
+      "拒绝订阅不影响提醒写入"
+    );
+    assert.equal(page.data.wantsNotify, false, "意向已记录(保存路径同样跳过询问)");
+    assert.equal(page.data.notifyAccepted, false, "入口条件不受影响");
+  } finally {
+    globalThis.wx.showModal = prevModal;
+  }
 });
 
 test("SB-PAGE-ITEM-2:清除提醒(onRemindFieldClear)——不请求订阅授权", async function () {
@@ -974,7 +999,7 @@ test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast、
   }
 });
 
-test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);release success → 静默(记录照常)", async function () {
+test("SB-DIAG-3:accept → 全环境成功回执「订阅成功!将在X年X月X日推送微信提醒」(无日期退化);develop 非 accept → 状态 toast;release 非 accept → 静默", async function () {
   var prevWx = globalThis.wx;
   var toasts = [];
   var modals = [];
@@ -986,20 +1011,39 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     }
   };
   try {
-    subscribe.requestExpirySubscribe();
+    subscribe.requestExpirySubscribe(undefined, "2026-10-20");
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
     assert.deepEqual(calls, ["recordSubscription"], "accept 记录像常");
-    assert.equal(toasts.length, 1, "develop toast 授权结果");
-    assert.equal(toasts[0].title, "订阅:accept");
+    assert.equal(toasts.length, 1, "accept 成功回执(全环境)");
+    assert.equal(toasts[0].title, "订阅成功!将在2026年10月20日推送微信提醒", "带日期回执(月/日去前导零)");
     assert.equal(toasts[0].duration, 4000, "success 保留小 toast duration 4000");
     assert.equal(modals.length, 0, "success 不 modal(短状态 toast 足够)");
   } finally {
     restoreWx(prevWx);
   }
 
-  // reject:不记录,但仍 toast 状态
+  // accept 无日期参数:退化为不带日期的回执(三入口均已接线,防御分支)
+  prevWx = globalThis.wx;
+  toasts = [];
+  modals = [];
+  globalThis.wx = makeEnvWx("develop", { status: "accept", toasts: toasts, modals: modals });
+  globalThis.wx.cloud = {
+    callFunction: function () {}
+  };
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(toasts.length, 1);
+    assert.equal(toasts[0].title, "订阅成功!到期时微信将提醒你", "无合法日期时不出现残缺的「将在…」句式");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // reject:不记录,develop 仍 toast 状态(诊断,非回执)
   prevWx = globalThis.wx;
   toasts = [];
   modals = [];
@@ -1022,7 +1066,7 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     restoreWx(prevWx);
   }
 
-  // release success:静默(既有 SB-FLOW 断言同款行为,此处显式锁 envVersion=release)
+  // release accept:回执同样展示(0.9.5 起全环境);记录照常
   prevWx = globalThis.wx;
   toasts = [];
   modals = [];
@@ -1034,12 +1078,13 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);r
     }
   };
   try {
-    subscribe.requestExpirySubscribe();
+    subscribe.requestExpirySubscribe(undefined, "2027-01-05");
     await new Promise(function (r) {
       setTimeout(r, 10);
     });
     assert.deepEqual(calls, ["recordSubscription"], "release 记录像常");
-    assert.equal(toasts.length, 0, "release 成功不 toast(静默现状)");
+    assert.equal(toasts.length, 1, "release accept 同样给成功回执(非诊断,用户确认)");
+    assert.equal(toasts[0].title.indexOf("订阅成功!"), 0, "release 回执同款文案");
     assert.equal(modals.length, 0, "release 成功不 modal");
   } finally {
     restoreWx(prevWx);
@@ -1134,7 +1179,7 @@ test("SB-GESTURE-1:develop success 全链路——第一条 wx API 调用必须�
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1148,15 +1193,16 @@ test("SB-GESTURE-1:develop success 全链路——第一条 wx API 调用必须�
       "requestSubscribeMessage",
       "请求前置零桥接调用:第一条 wx API 调用必须是订阅请求本身(任何先行的 getAccountInfoSync/存储/toast 都会破坏 iOS 点击手势上下文)"
     );
-    assert.ok(
-      rec.calls.indexOf("requestSubscribeMessage") < rec.calls.indexOf("getAccountInfoSync"),
-      "getAccountInfoSync(同步桥接调用)只能出现在请求之后的回调里,绝不先于请求"
+    assert.equal(
+      rec.calls.indexOf("getAccountInfoSync"),
+      -1,
+      "accept 路径不查环境(0.9.5 回执全环境展示,成功链路零环境分支)"
     );
-    // 全链路仍完整:请求 → 记录(accept)→ 环境诊断 → 状态 toast
+    // 全链路仍完整:请求 → 记录(accept)→ 成功回执
     assert.deepEqual(
       rec.calls,
-      ["requestSubscribeMessage", "cloud.callFunction", "getAccountInfoSync", "showToast"],
-      "develop accept 全链路调用序列(诊断在请求之后)"
+      ["requestSubscribeMessage", "cloud.callFunction", "showToast"],
+      "develop accept 全链路调用序列(回执在记录之后)"
     );
   } finally {
     restoreWx(prevWx);
@@ -1174,7 +1220,7 @@ test("SB-GESTURE-2:develop fail 路径同样请求先行;fail 诊断走 modal �
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1207,7 +1253,7 @@ test("SB-GESTURE-3:低版本(无 requestSubscribeMessage)提前 return——零 
         return { miniProgram: { envVersion: "develop" } };
       },
       showToast: function () {},
-      showModal: function () {}
+      showModal: function (o) { if (o && typeof o.success === "function") o.success({ confirm: false, cancel: true }); }
     }
   });
   globalThis.wx = rec.wx;
@@ -1216,6 +1262,66 @@ test("SB-GESTURE-3:低版本(无 requestSubscribeMessage)提前 return——零 
       subscribe.requestExpirySubscribe();
     }, "低版本降级不抛错");
     assert.equal(rec.calls.length, 0, "不发请求的降级路径同样零桥接调用(getAccountInfoSync 也不该被调)");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SB-ASK(#36 0.9.6 用户反馈:设提醒时「要不要微信提醒」预问):
+// 纯提问 modal,在 picker bindchange 等无手势时机安全;答案由调用方落位,
+// 本函数绝不发订阅请求(手势纪律)。fail/无组件保守 true=维持既有自动询问。
+// ---------------------------------------------------------------------------
+
+test("SB-ASK-1:confirm → true;cancel → false;内容带中文日期", async function () {
+  var prevWx = globalThis.wx;
+  var seen = [];
+  globalThis.wx = {
+    showModal: function (o) {
+      seen.push(o.content);
+      o.success({ confirm: true, cancel: false });
+    }
+  };
+  try {
+    var yes = await subscribe.askNotifyIntent("2026-10-20");
+    assert.equal(yes, true, "确认=要提醒");
+    assert.equal(seen.length, 1);
+    assert.ok(
+      seen[0].indexOf("2026年10月20日") !== -1,
+      "内容含去前导零的中文日期:" + seen[0]
+    );
+    globalThis.wx = {
+      showModal: function (o) {
+        o.success({ confirm: false, cancel: true });
+      }
+    };
+    var no = await subscribe.askNotifyIntent("2026-10-20");
+    assert.equal(no, false, "取消=不要提醒(保存时跳过订阅询问)");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-ASK-2:modal fail / 无 showModal / 非法日期 → 保守 true(不漏订阅机会)", async function () {
+  var prevWx = globalThis.wx;
+  var modals = 0;
+  globalThis.wx = {
+    showModal: function (o) {
+      modals++;
+      o.fail({ errMsg: "showModal:fail" });
+    }
+  };
+  try {
+    assert.equal(await subscribe.askNotifyIntent("2026-10-20"), true, "fail 保守 true");
+    globalThis.wx = {};
+    assert.equal(await subscribe.askNotifyIntent("2026-10-20"), true, "无组件保守 true");
+    globalThis.wx = {
+      showModal: function () {
+        modals++;
+      }
+    };
+    assert.equal(await subscribe.askNotifyIntent("不是日期"), true, "非法日期不弹直接 true");
+    assert.equal(modals, 1, "非法日期那次没弹 modal(全程只 fail 那次弹过)");
   } finally {
     restoreWx(prevWx);
   }
