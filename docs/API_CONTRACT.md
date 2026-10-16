@@ -10,10 +10,10 @@
 - project.config.json(miniprogramRoot 为 "miniprogram/",cloudfunctionRoot 为 "cloudfunctions/",appid 占位 "touristappid")
 - miniprogram/:app.ts/app.json/app.wxss、sitemap.json、tsconfig.json、config.ts、types.ts、utils/api.ts、utils/locations-api.ts、pages/index、pages/confirm、pages/item、pages/locations、pages/locationScan(每个页面 4 件套:.ts/.json/.wxml/.wxss)
 - cloudfunctions/itemsApi/:index.js(薄适配层)、lib/handler.js(纯函数,依赖注入)、lib/normalize.js、package.json
-- cloudfunctions/extractDraft/:index.js、lib/handler.js、lib/deepseek.js、lib/validate.js、package.json
+- cloudfunctions/extractDraft/:index.js、lib/handler.js、lib/deepseek.js、lib/local-llm.js、lib/validate.js、package.json
 - cloudfunctions/locations/:index.js(胶水层 + DEEPSEEK_API_KEY 检查)、config.json(超时 60 秒)、lib/handler.js(db 类 action 路由)、lib/parse.js(parseLocation/scanHousehold LLM 编排)、lib/validate.js(LLM 输出校验 + 有序锚定)、lib/tree.js(纯函数:子树收集/path 级联/深度)、lib/normalize.js(与 itemsApi 逐字节同源副本)、lib/deepseek.js(与 extractDraft 逐字节同源副本)、lib/household.js(与 itemsApi 逐字节同源副本)、package.json
 - cloudfunctions/households/(issue #34 P1-A):index.js(胶水层:OPENID→member_key、三向解析、genToken/sha256 注入)、config.json(超时 10 秒)、lib/handler.js(纯函数:生命周期/邀请/成员管理 action 路由)、lib/household.js(与 itemsApi 逐字节同源副本)、package.json
-- tests/:helpers/memoryDb.js、itemsApi.test.js、extractDraft.test.js、locations.test.js、transcribe.test.js、glue.test.js、voice.test.js、household.test.js(解析/写入硬门/副本同源)、households.test.js(生命周期/邀请/修订号/失败关闭/日志脱敏/胶水)、samples-live.js、fixtures/samples/ 下若干 JSON 样例
+- tests/:helpers/memoryDb.js、itemsApi.test.js、extractDraft.test.js、extractDraft-local-llm.test.js(本地主路/降级/围栏剥离/请求契约,零外网)、locations.test.js、transcribe.test.js、glue.test.js、voice.test.js、household.test.js(解析/写入硬门/副本同源)、households.test.js(生命周期/邀请/修订号/失败关闭/日志脱敏/胶水)、samples-live.js、fixtures/samples/ 下若干 JSON 样例
 - docs/:API_CONTRACT.md(本文件)、design/location-tree.md(issue #18 设计合同)、PR1.md(文档阶段编写)
 - 根 package.json:scripts 为 test 等于 "node --test tests/"、typecheck 等于 "tsc -p miniprogram --noEmit"、samples:live 等于 "node tests/samples-live.js";devDependencies 仅 typescript 与 miniprogram-api-typings
 
@@ -90,10 +90,21 @@ event = { text, protocol: 2 }:显式 protocol:2 时走多件拆分;不带 protoc
 - v1 响应零变化(v1 不解析 mount_path);提醒三项与 remind_vague_quote 零变化(互不影响)。
 prompt v2 第 9 条定义该字段与「分层不明确/模糊说法 → null,绝不猜测」纪律;客户端确认页配套由后续客户端阶段实现(「换」=只从家里已有位置逐层选)。**段名剥方位后缀(0.7.0 真机反馈 Fix 2)**:prompt 第 2/9 条要求 location_text 与 mount_path 各段剥掉段尾纯方位后缀(闭集同上),输出裸实体名——「冰箱里面有面条」→ ["冰箱"]、「主卧的柜子上」→ ["主卧","柜子"];剥后的段名仍须是原话逐字子串(冰箱⊂冰箱里面),既有逐字锚定/形状门/纯方位段规则零放松即天然通过。两套口径已对齐:locations/lib/parse.js 的 #21/#22 可比名机制(剥方位后缀作近义比对,不用于存储)保持不动——prompt 侧剥后缀管「AI 提取的实体名」,parse 侧可比名管「既有树近义归并提示」,互不替代。
 
+### 双引擎主备:本地 A3B 主路 + DeepSeek 兜底(issue #36 本地 A3B,2026-10-16)
+架构:macOS 上 mlx_lm.server 跑 Qwen3.6-35B-A3B-4bit(OpenAI 兼容,http://localhost:8306)→ Cloudflare 隧道公网域名(Caddy 层 `Authorization: Bearer <token>` 鉴权)→ 云函数经环境变量访问。三个环境变量(密钥/URL/模型路径一律环境变量,绝不入码):LOCAL_LLM_BASE(含 /v1 的基址)、LOCAL_LLM_TOKEN(Caddy Bearer token)、LOCAL_LLM_MODEL(模型路径);可选 LOCAL_LLM_TIMEOUT_MS(默认 15000)。
+
+主备语义(handler 纯函数,deps 增可选项 callLocalLLM,由 index.js 在 local-llm.isConfigured()=true 时注入):
+- **主路本地**:请求 POST {LOCAL_LLM_BASE}/chat/completions,body 为 { model, messages:[单条 user,与 deepseek 同款组装], temperature:0.1, max_tokens:2000, chat_template_kwargs:{enable_thinking:false} }——不发 response_format(mlx 不支持)与 thinking(DeepSeek 专属);实测该模型不关思考时默认最高档、思考进独立 reasoning 字段而 content 为空,故必须关;请求头带自定义 User-Agent(Cloudflare 边缘机器人检测会 403 默认 UA)。响应内容可能包 markdown 围栏,剥离围栏与首尾空白后返回(评测 runner 同款口径;validate.js 的首 { 末 } 截取是第二道防线)。
+- **降级 DeepSeek**:本地引擎失败(网络错误/超时/HTTP 非 200/空文本)→ 立即换 DeepSeek 重跑**同一既有链路**(调用→校验→坏 JSON 带错误重试一次),内测用户无感;模型质量失败(坏 JSON 重试后仍不合格)**不触发降级**(重试仍走本地,救引擎不救输出)。
+- **双失败** → 既有 AI_UNAVAILABLE(manual_fallback:true)路径不变。
+- **现状锁**:三件套任一缺失时不注入 callLocalLLM,只走 DeepSeek,请求次数与行为与历史逐字节一致;index.js 仅在 DeepSeek key 与本地配置**双双缺失**时才早退 AI_UNAVAILABLE(本地已配置但缺 key 时主路仍可用)。
+- 响应顶层一律增 **engine:"local"|"deepseek"**(客户端忽略未知字段,零客户端改动;INVALID_INPUT 在引擎决策之前,不带 engine);日志只记文本长度/耗时/错误码/engine 计数,降级另记布尔 localFallback——绝不记录 token、prompt 原文、模型输出;local-llm 的错误信息只带错误码(网络层错误统一改写 NETWORK_ERROR,不外泄 Node 原生错误详情)。
+- 质量口径披露:A3B 上轮金标锚定 32/34,差一句未过冻结门槛;本次为用户拍板的真实试用,锚定滑失由服务端既有硬校验(位置锚定/日期纪律/证据锚定)兜底降级,不会静默写错数据。
+
 ### v1 单件协议(旧)
 event = { text },text 去空白后 1-500 字,否则 INVALID_INPUT。服务端调用 DeepSeek Chat Completions(地址 https://api.deepseek.com/chat/completions),model 为 "deepseek-flash",temperature 0.1,请求体显式包含 "thinking":{"type":"disabled"} 禁用思考,要求只输出 JSON,超时 20 秒。API key 只从云函数环境变量 DEEPSEEK_API_KEY 读取,绝不硬编码、绝不出现在小程序端与日志。
 system prompt 要点:家庭物品位置提取器;从一句话提取一件物品的名称与位置;位置必须来自原文,禁止猜测编造,不肯定时 certain 为 false 且 location_text 为空字符串;「右边」「第二个」「最下层」等限定语放 qualifiers;一句话含多件物品时 needs_split 为 true;只输出 JSON,字段:name(≤50)、location_text(≤200,可为空)、certain(布尔)、qualifiers(字符串数组,每项 ≤20 字,最多 5 个)、needs_split(布尔,默认 false)。
-服务端校验 validateDraft:JSON 解析失败则把错误提示回传 LLM 重试一次,仍失败返回 AI_UNAVAILABLE;needs_split 为 true 返回 { ok:true, needs_split:true, message:"一次只记一件物品,请分开说" };certain 为 false 时强制 location_text 为空字符串;certain 为 true 但 location_text 为空则按不肯定处理;name 去空白后为空返回 AI_UNAVAILABLE;长度与类型不符按上述规则拒绝,仅允许对 qualifiers 数量截断。callLLM 抛错、超时、HTTP 非 200 返回 { ok:false, error:"AI_UNAVAILABLE", message:"AI 暂时不可用,可手动录入", manual_fallback:true }。成功返回 { ok:true, draft:{ name, location_text, certain, qualifiers } }。handler 为纯函数,deps = { callLLM(text), logger }。日志只记:文本长度、耗时、错误码;禁止记录原文与提取结果。
+服务端校验 validateDraft:JSON 解析失败则把错误提示回传 LLM 重试一次,仍失败返回 AI_UNAVAILABLE;needs_split 为 true 返回 { ok:true, needs_split:true, message:"一次只记一件物品,请分开说" };certain 为 false 时强制 location_text 为空字符串;certain 为 true 但 location_text 为空则按不肯定处理;name 去空白后为空返回 AI_UNAVAILABLE;长度与类型不符按上述规则拒绝,仅允许对 qualifiers 数量截断。callLLM 抛错、超时、HTTP 非 200 返回 { ok:false, error:"AI_UNAVAILABLE", message:"AI 暂时不可用,可手动录入", manual_fallback:true }。成功返回 { ok:true, draft:{ name, location_text, certain, qualifiers } }。handler 为纯函数,deps = { callLLM(text), callLocalLLM(text)?(本地主备,见上节), logger };LLM 参与后的响应与日志顶层带 engine(local|deepseek)。日志只记:文本长度、耗时、错误码、engine;禁止记录原文与提取结果。
 
 ## locations 集合文档(issue #18)
 字段:_id(等于 "lc_" 加 24 hex)、household_id(服务端派生,客户端不可见不可传)、parent_id(父节点 _id;home 根为空字符串)、name(去首尾空白后 1-30 码点)、name_norm(normalizeName 同款)、type(**历史兼容字段**:"home" | "room" | "furniture" | "container",创建时按深度派生写入:根=home、depth1=room、2=furniture、≥3=container;响应继续返回,供旧客户端展示,新代码不得依赖其语义,业务规则一律用 parent_id/path 的结构事实,issue #30)、path(从根不含 home 根到本节点含的名字数组;home 根为 [])、created_from("bootstrap" | "scan" | "parse" | "manual")、created_at、updated_at(ISO)。

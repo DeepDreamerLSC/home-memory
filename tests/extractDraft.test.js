@@ -372,7 +372,8 @@ test("日志只记文本长度、耗时、错误码,不含原文与提取结果"
   for (const entry of logs) {
     for (const key of Object.keys(entry)) {
       assert.ok(
-        ["textLength", "elapsedMs", "error"].includes(key),
+        // engine 计数(#36 本地 A3B 主备):LLM 参与后的日志附带 engine 字段。
+        ["textLength", "elapsedMs", "error", "engine"].includes(key),
         "日志出现越界字段:" + key
       );
     }
@@ -627,7 +628,8 @@ test("handler 路由:不带 protocol 的旧客户端维持 v1 行为(兼容硬�
       return Promise.resolve(JSON.stringify({ needs_split: true }));
     },
   });
-  assert.deepEqual(result, { ok: true, needs_split: true, message: "一次只记一件物品,请分开说" });
+  // 顶层 engine 字段(#36 本地 A3B):默认引擎 deepseek;其余字段与旧契约一致。
+  assert.deepEqual(result, { ok: true, needs_split: true, message: "一次只记一件物品,请分开说", engine: "deepseek" });
 });
 
 // ---------- has_more 截断提示(评审阻断 1:超 5 件绝不静默) ----------

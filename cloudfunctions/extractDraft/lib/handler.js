@@ -1,12 +1,25 @@
 "use strict";
 
 /*
- * extractDraft 纯函数 handler:event = { text },deps = { callLLM(promptText), logger }。
- * - 构造 system prompt(契约要点)与用户消息,组装成完整提示词交给 callLLM;
+ * extractDraft 纯函数 handler:event = { text },deps = { callLLM(promptText), callLocalLLM(promptText)?, logger }。
+ * - 构造 system prompt(契约要点)与用户消息,组装成完整提示词交给引擎;
  * - 模型输出经 validateDraft 校验;JSON 解析失败会携带错误重试一次,仍失败返回 AI_UNAVAILABLE;
- * - callLLM 抛错(含超时、HTTP 非 200)返回 AI_UNAVAILABLE 且 manual_fallback 为 true;
+ * - 引擎抛错(含超时、HTTP 非 200)返回 AI_UNAVAILABLE 且 manual_fallback 为 true;
  * - text 去空白后不在 1-500 字范围返回 INVALID_INPUT;
- * - 日志只记文本长度、耗时、错误码,绝不记录原文与提取结果。
+ * - 日志只记文本长度、耗时、错误码与 engine 计数(降级另记布尔),绝不记录原文与提取结果。
+ *
+ * 本地主路 + DeepSeek 兜底(issue #36 本地 A3B,2026-10-16):
+ * deps.callLocalLLM 是可选依赖,仅当胶水层判定 lib/local-llm.js isConfigured()
+ * (LOCAL_LLM_BASE/TOKEN/MODEL 三件套齐全)时注入。注入时:
+ *   - 先走本地(家里 mlx 单点,快),成功(返回非空文本)→ 结果进既有解析/校验/
+ *     重试链路,prompt 级重试照旧仍走本地;
+ *   - 本地引擎失败(网络错误/超时/HTTP 非 200/空文本)→ 立即降级 DeepSeek 重跑
+ *     同一既有链路,内测用户无感;
+ *   - 两者都失败 → 既有 AI_UNAVAILABLE 路径不变。
+ * 未注入时只有 DeepSeek 一个引擎,请求次数与行为与历史逐字节一致(回归锁)。
+ * 响应顶层带 engine:"local"|"deepseek"(客户端忽略未知字段,零客户端改动);
+ * AI_UNAVAILABLE 从引擎失败来时 engine 记最后尝试的引擎,模型质量失败(坏 JSON
+ * 两次)记该引擎本身——降级只救「引擎不可用」,不救「模型输出不合格」。
  */
 
 const { validateDraft, validateDrafts, applyRelativeConversion } = require("./validate");
@@ -120,19 +133,24 @@ function invalidInputResult() {
   };
 }
 
-function aiUnavailableResult() {
-  return {
+function aiUnavailableResult(engine) {
+  const result = {
     ok: false,
     error: "AI_UNAVAILABLE",
     message: "AI 暂时不可用,可手动录入",
     manual_fallback: true,
   };
+  if (engine) result.engine = engine;
+  return result;
 }
 
 async function handler(event, deps) {
   const startedAt = Date.now();
   const logger = deps && typeof deps.logger === "function" ? deps.logger : function () {};
   const callLLM = deps ? deps.callLLM : undefined;
+  // 本地主路引擎(可选):未注入时只有 DeepSeek,行为与历史逐字节一致。
+  const callLocalLLM =
+    deps && typeof deps.callLocalLLM === "function" ? deps.callLocalLLM : null;
   const elapsedMs = () => Date.now() - startedAt;
 
   const rawText = event && typeof event.text === "string" ? event.text : null;
@@ -171,31 +189,76 @@ async function handler(event, deps) {
     systemPrompt = SYSTEM_PROMPT;
   }
 
-  let output;
-  try {
-    output = await callLLM(buildPrompt(userText, null, systemPrompt));
-  } catch (e) {
-    logger({ textLength, elapsedMs: elapsedMs(), error: "AI_UNAVAILABLE" });
-    return aiUnavailableResult();
-  }
+  /*
+   * 单引擎执行链:把既有「调用 → 校验 → JSON 解析失败带错误重试一次 → 再校验」
+   * 链路按引擎收敛成可换引擎执行的单元。engineFailed = 引擎层失败(网络错误/
+   * 超时/HTTP 非 200/空文本),由外层决定是否换兜底引擎重跑;模型质量失败
+   * (坏 JSON 重试后仍不合格)不是引擎失败,不触发降级。
+   * emptyOutputIsFailure 仅本地引擎启用(实测:思考档误开时 content 为空,
+   * 视为引擎失败立即降级);DeepSeek 维持历史口径——空文本进解析 → 可重试 →
+   * 重试,保证未配置本地时行为与 main 逐字节一致(回归锁)。
+   */
+  const validateOutput = (output) =>
+    isV2 ? validateDrafts(output, userText, todayYmd) : validateDraft(output, userText);
 
-  let result = isV2 ? validateDrafts(output, userText, todayYmd) : validateDraft(output, userText);
-  if (!result.ok && result.retryable) {
-    // JSON 解析失败:带错误提示回传 LLM,只重试一次。
-    let retryOutput;
+  const runEngineChain = async (callFn, emptyOutputIsFailure) => {
+    const isEmptyFailure = (output) =>
+      emptyOutputIsFailure && (typeof output !== "string" || output.trim() === "");
+    let output;
     try {
-      retryOutput = await callLLM(
-        buildPrompt(userText, { previousOutput: output, reason: result.reason }, systemPrompt)
-      );
+      output = await callFn(buildPrompt(userText, null, systemPrompt));
     } catch (e) {
-      logger({ textLength, elapsedMs: elapsedMs(), error: "AI_UNAVAILABLE" });
-      return aiUnavailableResult();
+      return { engineFailed: true };
     }
-    result = isV2 ? validateDrafts(retryOutput, userText, todayYmd) : validateDraft(retryOutput, userText);
-  }
+    if (isEmptyFailure(output)) {
+      return { engineFailed: true };
+    }
+    let result = validateOutput(output);
+    if (!result.ok && result.retryable) {
+      // JSON 解析失败:带错误提示回传同一引擎,只重试一次。
+      let retryOutput;
+      try {
+        retryOutput = await callFn(
+          buildPrompt(userText, { previousOutput: output, reason: result.reason }, systemPrompt)
+        );
+      } catch (e) {
+        return { engineFailed: true };
+      }
+      if (isEmptyFailure(retryOutput)) {
+        return { engineFailed: true };
+      }
+      result = validateOutput(retryOutput);
+    }
+    return { engineFailed: false, result };
+  };
 
-  if (result.ok) {
-    logger({ textLength, elapsedMs: elapsedMs() });
+  let engine = "deepseek";
+  let localAttempted = false;
+  let chain;
+  if (callLocalLLM) {
+    engine = "local";
+    localAttempted = true;
+    chain = await runEngineChain(callLocalLLM, true);
+    if (chain.engineFailed) {
+      // 本地单点失守(家里机器不在线/超时/网关错误):立即降级 DeepSeek,
+      // 重跑同一既有链路;降级只记布尔标记,不记任何失败详情。
+      engine = "deepseek";
+      chain = await runEngineChain(callLLM, false);
+    }
+  } else {
+    chain = await runEngineChain(callLLM, false);
+  }
+  const fellBackToLocalFailure = localAttempted && engine === "deepseek";
+  // 日志白名单:文本长度、耗时、错误码、engine 计数、降级布尔——仅此而已。
+  const logMeta = (extra) => {
+    const meta = Object.assign({ textLength, elapsedMs: elapsedMs() }, extra, { engine });
+    if (fellBackToLocalFailure) meta.localFallback = true;
+    return meta;
+  };
+
+  let result = chain.result;
+  if (!chain.engineFailed && result.ok) {
+    logger(logMeta({}));
     if (isV2) {
       // #36 真机反馈三件 A(产品拍板:产品换算,用户只确认):组包处逐件对
       // 「未取到绝对日期且带 vague 标记」的 draft 跑闭集换算——成功则
@@ -211,12 +274,14 @@ async function handler(event, deps) {
         drafts,
         original_text: userText,
         truncated: result.truncated === true,
+        engine,
       };
     }
-    return result;
+    // v1 成功形状零变化,仅顶层加 engine(客户端忽略未知字段)。
+    return Object.assign({}, result, { engine });
   }
-  logger({ textLength, elapsedMs: elapsedMs(), error: "AI_UNAVAILABLE" });
-  return aiUnavailableResult();
+  logger(logMeta({ error: "AI_UNAVAILABLE" }));
+  return aiUnavailableResult(engine);
 }
 
 module.exports = { handler, buildPrompt, SYSTEM_PROMPT, SYSTEM_PROMPT_V2 };
