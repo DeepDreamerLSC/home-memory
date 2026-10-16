@@ -661,15 +661,15 @@ function itemSummary() {
   };
 }
 
-// 回归依据(#36 0.9.0 iOS 真机实测):详情页 picker mode=date 的 bindchange
-// (滚轮选完)回调不在用户 tap 手势链内,此处调 wx.requestSubscribeMessage
-// 100% 报「requestSubscribeMessage:fail can only be invoked by user TAP
-// gesture」(真机 toast 被截断只见「…fail c…」),只产生错误 toast 噪音。
-// 本测试改写自旧断言(picker 直写会请求订阅)——按新行为锁定:picker 路径
-// 不请求订阅,授权入口移至保质期行下方「到期时微信提醒我 ›」显式入口
-// (onNotifyChipTap,SB-PAGE-ITEM-4);onSaveTap 的按钮 tap 路径照旧请求
-// (SB-PAGE-ITEM-3 锁定)。
-test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——不请求订阅授权(真机手势规则),remindSet 照常发出", async function () {
+// 0.9.7 合同(#36 用户反馈:点「提醒我」应立即弹授权):picker 选完日子先经
+// askNotifyIntent 询问;答「提醒我」→ 在 modal 确认的激活窗口内**立即尝试
+// 一次**订阅授权(现代基础库保留该窗口;真机若被手势拒绝则失败静默,落回
+// 保存 tap 二次机会与「到期时微信提醒我›」入口双兜底);答「不用了」→
+// 零订阅调用。remindSet 两种答案下都照常写入。历史注记(#36 0.9.0 iOS
+// 实测):picker bindchange 本身无手势,直接调用必报手势错——发请求的是
+// 「提醒我」确认回调的激活窗口,不是 bindchange 本身。
+test("SB-PAGE-ITEM-1:设置到期提醒(picker 直写)——答「提醒我」立即尝试一次授权;答「不用了」零订阅;remindSet 均照常", async function () {
+  // ①答「提醒我」(桩默认 confirm):picker 路径恰好一次订阅尝试,accept 后入口收起
   itemPageResetEnv();
   var page = makePageFrom(itemConfig);
   itemConfig.applySummary.call(page, itemSummary());
@@ -680,16 +680,43 @@ test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——不请求�
   await itemConfig.onRemindDateChange.call(page, { detail: { value: "2026-11-25" } });
   await settle();
 
-  assert.equal(subscribeCalls.length, 0, "picker bindchange 无点击手势:不请求订阅(必然失败的调用已移除)");
+  assert.equal(subscribeCalls.length, 1, "「提醒我」确认窗口内恰好一次订阅尝试");
   assert.ok(
     pageCloudCalls.some(function (c) {
       return c.name === "itemsApi" && c.data.action === "remindSet" && c.data.due_date === "2026-11-25";
     }),
-    "提醒照常写入(订阅入口移走不影响保存)"
+    "提醒照常写入(订阅尝试不影响保存)"
   );
   assert.equal(page.data.remindAt, "2026-11-25", "提醒照常上屏");
-  // 直写成功后显式入口条件成立:有生效提醒且本地未标记已开启(点击流程见 SB-PAGE-ITEM-4)
-  assert.equal(page.data.notifyAccepted, false, "未开启过订阅:显式入口可露出");
+  assert.equal(page.data.notifyAccepted, true, "立即授权 accept:本地标记已开启,入口收起");
+
+  // ②答「不用了」:零订阅调用,写入与意向记录照常
+  itemPageResetEnv();
+  var prevModal = globalThis.wx.showModal;
+  globalThis.wx.showModal = function (o) {
+    if (o.success) {
+      o.success({ confirm: false, cancel: true });
+    }
+  };
+  try {
+    page = makePageFrom(itemConfig);
+    itemConfig.applySummary.call(page, itemSummary());
+    await itemConfig.refreshReminderRow.call(page);
+    await settle();
+    await itemConfig.onRemindDateChange.call(page, { detail: { value: "2026-11-26" } });
+    await settle();
+    assert.equal(subscribeCalls.length, 0, "「不用了」零订阅调用");
+    assert.ok(
+      pageCloudCalls.some(function (c) {
+        return c.name === "itemsApi" && c.data.action === "remindSet" && c.data.due_date === "2026-11-26";
+      }),
+      "拒绝订阅不影响提醒写入"
+    );
+    assert.equal(page.data.wantsNotify, false, "意向已记录(保存路径同样跳过询问)");
+    assert.equal(page.data.notifyAccepted, false, "入口条件不受影响");
+  } finally {
+    globalThis.wx.showModal = prevModal;
+  }
 });
 
 test("SB-PAGE-ITEM-2:清除提醒(onRemindFieldClear)——不请求订阅授权", async function () {

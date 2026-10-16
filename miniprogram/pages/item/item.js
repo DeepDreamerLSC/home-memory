@@ -1355,9 +1355,16 @@ Page({
         }
         // 0.9.6(#36 用户反馈):选完日子先问一句「要不要微信提醒」。此处是
         // picker bindchange,无点击手势,但纯提问的 modal 不受手势限制;答案存
-        // wantsNotify,真正的订阅授权骑在保存按钮/chip 的真实 tap 上(手势纪律,
-        // #36 真机实测教训,绝不在非手势回调里发订阅请求)
+        // wantsNotify。0.9.7:点「提醒我」**立即**尝试授权——骑 modal 确认的
+        // 激活窗口(现代基础库保留);picker 本身无手势,若此处被手势拒绝,落回
+        // 保存 tap 二次机会与 chip 入口(双兜底)。
         const wantsNotify = await (0, subscribe_1.askNotifyIntent)(value);
+        if (wantsNotify) {
+            (0, subscribe_1.requestExpirySubscribe)(() => {
+                (0, notify_accepted_1.markNotifyAccepted)();
+                this.setData({ notifyAccepted: true });
+            }, value);
+        }
         this.setData({ wantsNotify });
         // #36 真机手势规则(0.9.0 iOS 实测):picker bindchange(滚轮选完)不是
         // 用户点击手势,此处调 wx.requestSubscribeMessage 必然报错
@@ -1444,10 +1451,11 @@ Page({
             });
             if (res.reminder) {
                 this.applyReminderRow(res.reminder);
-                if (wantsNotify) {
-                    // 用户想要微信提醒,但 picker 路径无手势可直接发起授权:清「已开启」
-                    // 标记让 chip 露出引导点按(一次性订阅额度随每次发送消耗,新提醒
-                    // 需要新的授权),toast 一并指路
+                if (wantsNotify && !this.data.notifyAccepted) {
+                    // 用户想要提醒且「提醒我」的立即授权没有成功(未 accept/被手势拒):
+                    // 清「已开启」标记让 chip 露出引导点按(一次性订阅额度随每次发送
+                    // 消耗,新提醒需要新的授权),toast 一并指路。notifyAccepted 已为
+                    // true = 立即授权已成功,跳过(入口保持收起,不出多余引导)
                     (0, notify_accepted_1.clearNotifyAccepted)();
                     this.setData({ notifyAccepted: false });
                     wx.showToast({
@@ -1456,7 +1464,7 @@ Page({
                         duration: 2500,
                     });
                 }
-                else {
+                else if (!wantsNotify) {
                     wx.showToast({
                         title: hadReminder
                             ? "提醒已改到 " + (0, remind_ui_1.monthDayText)(res.reminder.due_date)

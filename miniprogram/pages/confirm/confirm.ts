@@ -538,9 +538,16 @@ Page<
     });
     this.persistRows();
     // 0.9.6(#36 用户反馈):选完日子问一句「要不要微信提醒」(picker 回调无
-    // 手势,但纯提问不受限);答案存行内 wantsNotify,保存按钮的真实 tap
-    // 据此决定是否弹订阅授权
+    // 手势,但纯提问不受限);答案存行内 wantsNotify。0.9.7:点「提醒我」
+    // **立即**尝试授权——骑 modal 确认的激活窗口(现代基础库保留);若被
+    // 手势拒绝则落回保存 tap 的二次机会(双兜底),accept 后本行置不再问。
     void askNotifyIntent(value).then((wants) => {
+      if (wants) {
+        requestExpirySubscribe(() => {
+          this.setData({ "rows[0].wantsNotify": false });
+          this.persistRows();
+        }, value);
+      }
       this.setData({ "rows[0].wantsNotify": wants });
       this.persistRows();
     });
