@@ -12,14 +12,18 @@
  *   temperature 0.1 + max_tokens 2000 + 关思考的防退化参数、text+image_url
  *   双 content、无 response_format/thinking)、超时/HTTP 500/缺 content/空 content
  *   失败语义,错误只带错误码(不含 token/地址/base64);
- * - handler.vlRecognize:参数校验 INVALID_INPUT 各形态、>10MB 拒绝、
- *   未注入 callVL(三件套缺任一)→ vl_not_configured(engine unavailable
- *   不抛错)、下载失败 download_failed、成功链(坐标归一/越界丢框物品保留/
- *   confidence 词表外 low/qty_note 截断/非法名丢弃/>10 件截断 truncated)、
- *   坏 JSON 带错误重试一次(仍败 vl_bad_output,无降级引擎)、region 模式
- *   提示词(0-1×1000)、日志纪律(只记计数与错误码);
- * - index.js 胶水(stub wx-server-sdk 真加载):vlRecognize 路由 + downloadFile
- *   注入;VL 未配置返回 vl_not_configured;与 DEEPSEEK/LOCAL_LLM 并存互不影响;
+ * - handler.vlRecognize:参数校验 INVALID_INPUT 各形态(image_base64 缺失/空/
+ *   data: 前缀/含空白/非 base64 字符/解码 0 字节/超长度上界不解码直接拒、img_w/
+ *   img_h/mode/region)、解码 >10MB 拒绝、未注入 callVL(三件套缺任一)→
+ *   vl_not_configured(engine unavailable 不抛错)、成功链(坐标归一/越界丢框
+ *   物品保留/confidence 词表外 low/qty_note 截断/非法名丢弃/>10 件截断 truncated、
+ *   客户端 base64 原样直传不二次编码)、坏 JSON 带错误重试一次(仍败 vl_bad_output,
+ *   无降级引擎)、region 模式提示词(0-1×1000)、日志纪律(只记计数与错误码);
+ * - 隐私红线(#65 V0.4 合同第五项边界):照片在用户最终确认保存之前绝不上传云端——
+ *   识别只收本地压缩图的 image_base64,handler/胶水不读云存储(stub 的
+ *   downloadFile 一旦被调用即抛错,作为红线回归守卫);
+ * - index.js 胶水(stub wx-server-sdk 真加载):vlRecognize 路由、只注入 callVL;
+ *   VL 未配置返回 vl_not_configured;与 DEEPSEEK/LOCAL_LLM 并存互不影响;
  *   config.json timeout 60。
  * 日志纪律:任何输出(日志条目、错误信息)绝不含 token 字符串与图片 base64。
  */
@@ -36,12 +40,14 @@ const vl = require("../cloudfunctions/extractDraft/lib/vl");
 
 const ROOT = path.join(__dirname, "..");
 
-const FILE_ID = "cloud://test-env.1234/photo-evidence/hh-demo/202610/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg";
 const IMG_W = 1024;
 const IMG_H = 768;
 const FAKE_JPEG = Buffer.from("fake-jpeg-bytes-for-offline-test-only");
+/** 客户端本地压缩图的裸 base64(小程序 readFile encoding:"base64" 原样产物) */
+const IMAGE_B64 = FAKE_JPEG.toString("base64");
 const VL_TOKEN = "hm-vl-test-token-9f2c-do-not-log";
 const VL_MODEL = "/Users/…/Qwen3-VL-8B-Instruct-4bit";
+const TEN_MB = 10 * 1024 * 1024;
 
 const GOOD_VL_REPLY = JSON.stringify({
   items: [
@@ -96,19 +102,16 @@ function startStubServer(onRequest) {
   });
 }
 
-/* callVL 脚本 mock:项为 Error 则抛错、为字符串则作为模型输出;记录每次调用。 */
+/* callVL 脚本 mock:项为 Error 则抛错、为字符串则作为模型输出;记录每次调用。
+ * 红线守卫:deps 刻意带一个一旦被调用就抛错的 downloadFile——handler 不得再有任何
+ * 读云存储的路径(识别只收本地压缩图 base64)。 */
 function makeVlDeps(script, opts) {
   opts = opts || {};
   const calls = [];
-  const downloads = [];
   const logs = [];
   const deps = {
-    downloadFile: async (fid) => {
-      downloads.push(fid);
-      if (opts.downloadError) {
-        throw new Error(opts.downloadError);
-      }
-      return { fileID: fid, fileContent: opts.buffer !== undefined ? opts.buffer : FAKE_JPEG };
+    downloadFile: async () => {
+      throw new Error("红线:vlRecognize 不得读云存储(照片确认前不上传)");
     },
     logger: (m) => logs.push(m),
   };
@@ -120,11 +123,11 @@ function makeVlDeps(script, opts) {
       return item;
     };
   }
-  return { deps, calls, downloads, logs };
+  return { deps, calls, logs };
 }
 
 function vlEvent(extra) {
-  return Object.assign({ action: "vlRecognize", file_id: FILE_ID, img_w: IMG_W, img_h: IMG_H }, extra);
+  return Object.assign({ action: "vlRecognize", image_base64: IMAGE_B64, img_w: IMG_W, img_h: IMG_H }, extra);
 }
 
 // ---------- lib/vl.js:isVlConfigured 与未配置语义 ----------
@@ -355,12 +358,17 @@ test("vl:网络层错误统一改写为 NETWORK_ERROR(不外泄 Node 原生错�
 
 // ---------- handler.vlRecognize:参数校验(INVALID_INPUT,引擎未参与) ----------
 
-test("vlRecognize:照片参数校验——file_id/img_w/img_h/mode/region 各非法形态一律 INVALID_INPUT", async () => {
+test("vlRecognize:照片参数校验——image_base64/img_w/img_h/mode/region 各非法形态一律 INVALID_INPUT", async () => {
   const cases = [
-    { label: "file_id 缺失", event: { action: "vlRecognize", img_w: IMG_W, img_h: IMG_H } },
-    { label: "file_id 空串", event: vlEvent({ file_id: "" }) },
-    { label: "file_id 超 512", event: vlEvent({ file_id: "cloud://" + "x".repeat(600) }) },
-    { label: "img_w 缺失", event: { action: "vlRecognize", file_id: FILE_ID, img_h: IMG_H } },
+    { label: "image_base64 缺失", event: { action: "vlRecognize", img_w: IMG_W, img_h: IMG_H } },
+    { label: "image_base64 空串", event: vlEvent({ image_base64: "" }) },
+    { label: "image_base64 非字符串", event: vlEvent({ image_base64: FAKE_JPEG }) },
+    { label: "image_base64 带 data: 前缀(契约是裸 base64)", event: vlEvent({ image_base64: "data:image/jpeg;base64," + IMAGE_B64 }) },
+    { label: "image_base64 含换行/空白", event: vlEvent({ image_base64: IMAGE_B64.slice(0, 8) + "\n" + IMAGE_B64.slice(8) }) },
+    { label: "image_base64 含非 base64 字符", event: vlEvent({ image_base64: IMAGE_B64.slice(0, 8) + "%" + IMAGE_B64.slice(8) }) },
+    { label: "image_base64 仅填充符", event: vlEvent({ image_base64: "==" }) },
+    { label: "image_base64 解码为 0 字节", event: vlEvent({ image_base64: "A" }) },
+    { label: "img_w 缺失", event: { action: "vlRecognize", image_base64: IMAGE_B64, img_h: IMG_H } },
     { label: "img_w 为 0", event: vlEvent({ img_w: 0 }) },
     { label: "img_w 非整数", event: vlEvent({ img_w: 1024.5 }) },
     { label: "img_w 超 10000", event: vlEvent({ img_w: 10001 }) },
@@ -378,33 +386,38 @@ test("vlRecognize:照片参数校验——file_id/img_w/img_h/mode/region 各非
     assert.strictEqual(res.error, "INVALID_INPUT", c.label);
     assert.strictEqual(res.message, "照片参数不合法", c.label);
     assert.strictEqual(t.calls.length, 0, c.label + ":引擎未参与");
-    assert.strictEqual(t.downloads.length, 0, c.label + ":校验失败绝不下载");
     assert.strictEqual(t.logs[t.logs.length - 1].error, "INVALID_INPUT", c.label + ":日志记错误码");
+    assert.ok(!("image_base64" in t.logs[t.logs.length - 1]), c.label + ":日志不落 base64");
   }
 });
 
-// ---------- handler.vlRecognize:下载与引擎可用性 ----------
+// ---------- handler.vlRecognize:图片大小门与引擎可用性 ----------
 
-test("vlRecognize:下载后 Buffer 超 10MB → INVALID_INPUT;恰 10MB 放行", async () => {
-  const t = makeVlDeps([GOOD_VL_REPLY], { buffer: Buffer.alloc(10 * 1024 * 1024 + 1) });
-  const res = await vlRecognize(vlEvent(), t.deps);
+test("vlRecognize:解码后超 10MB → INVALID_INPUT;恰 10MB 放行;超长度上界的 base64 不解码直接拒绝", async () => {
+  const t = makeVlDeps([GOOD_VL_REPLY]);
+  const res = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB + 1).toString("base64") }), t.deps);
   assert.strictEqual(res.ok, false);
   assert.strictEqual(res.error, "INVALID_INPUT");
+  assert.strictEqual(t.calls.length, 0, "超限绝不送引擎");
 
-  const okT = makeVlDeps([GOOD_VL_REPLY], { buffer: Buffer.alloc(10 * 1024 * 1024) });
-  const okRes = await vlRecognize(vlEvent(), okT.deps);
+  const okT = makeVlDeps([GOOD_VL_REPLY]);
+  const okRes = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB).toString("base64") }), okT.deps);
   assert.strictEqual(okRes.ok, true, "恰 10MB 不应拒绝:" + JSON.stringify(okRes));
+
+  // 10MB 对应 base64 长度上界 = ceil(10MB/3)*4;再多 4 个字符即超界,按长度直接拒(不解码)
+  const bound = Math.ceil(TEN_MB / 3) * 4;
+  const hugeT = makeVlDeps([GOOD_VL_REPLY]);
+  const hugeRes = await vlRecognize(vlEvent({ image_base64: "A".repeat(bound + 4) }), hugeT.deps);
+  assert.strictEqual(hugeRes.ok, false);
+  assert.strictEqual(hugeRes.error, "INVALID_INPUT");
+  assert.strictEqual(hugeT.calls.length, 0);
 });
 
-test("vlRecognize:下载失败 → AI_UNAVAILABLE reason=download_failed(manual_fallback)", async () => {
-  const t = makeVlDeps([GOOD_VL_REPLY], { downloadError: "CLOUD_DOWNLOAD_FAILED" });
-  const res = await vlRecognize(vlEvent(), t.deps);
+test("vlRecognize:参数门先于引擎门——callVL 未注入时超限图片仍是 INVALID_INPUT(客户端 bug 不伪装成不可用)", async () => {
+  const t = makeVlDeps([], { noCallVL: true });
+  const res = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB + 1).toString("base64") }), t.deps);
   assert.strictEqual(res.ok, false);
-  assert.strictEqual(res.error, "AI_UNAVAILABLE");
-  assert.strictEqual(res.reason, "download_failed");
-  assert.strictEqual(res.manual_fallback, true);
-  assert.strictEqual(res.engine, "vl-local");
-  assert.strictEqual(t.calls.length, 0, "引擎未参与");
+  assert.strictEqual(res.error, "INVALID_INPUT");
 });
 
 test("vlRecognize:callVL 未注入(三件套缺任一)→ engine unavailable,不抛错", async () => {
@@ -418,7 +431,6 @@ test("vlRecognize:callVL 未注入(三件套缺任一)→ engine unavailable,不
     reason: "vl_not_configured",
     engine: "vl-local",
   });
-  assert.strictEqual(t.downloads.length, 1, "执行链顺序:先下载(步骤 1)再判引擎注入(步骤 2)");
 });
 
 test("vlRecognize:引擎抛错 → AI_UNAVAILABLE vl_call_failed,恰一次调用(无重试、无降级引擎)", async () => {
@@ -434,7 +446,7 @@ test("vlRecognize:引擎抛错 → AI_UNAVAILABLE vl_call_failed,恰一次调用
 
 // ---------- handler.vlRecognize:成功链与输出清洗 ----------
 
-test("vlRecognize:成功——0-1000 框归一 0-1、img 回显、engine=vl-local、base64 逐字传递", async () => {
+test("vlRecognize:成功——0-1000 框归一 0-1、img 回显、engine=vl-local、客户端 base64 原样直传(不二次编码)", async () => {
   const t = makeVlDeps([GOOD_VL_REPLY]);
   const res = await vlRecognize(vlEvent(), t.deps);
   assert.strictEqual(res.ok, true);
@@ -450,10 +462,9 @@ test("vlRecognize:成功——0-1000 框归一 0-1、img 回显、engine=vl-loca
     box: { x1: 0.281, y1: 0.163, x2: 0.394, y2: 0.309 },
   });
   assert.deepStrictEqual(res.items[1].box, { x1: 0.273, y1: 0.389, x2: 0.593, y2: 0.507 });
-  assert.strictEqual(t.downloads.length, 1);
-  assert.strictEqual(t.downloads[0], FILE_ID, "下载应收到 event 的 file_id");
   assert.strictEqual(t.calls.length, 1);
-  assert.strictEqual(t.calls[0].imageBase64, FAKE_JPEG.toString("base64"), "base64 应来自下载 Buffer");
+  assert.strictEqual(t.calls[0].imageBase64, IMAGE_B64, "base64 应为 event.image_base64 原样,不读云存储、不二次编码");
+  assert.ok(!("file_id" in res), "响应不回显任何云存储标识(确认前不存在 file_id)");
   assert.ok(t.calls[0].prompt.indexOf("四个 0-1000 的整数") !== -1, "提示词必须显式声明 0-1000 量纲");
   assert.ok(t.calls[0].prompt.indexOf("(0,0) 在左上角") !== -1);
   assert.ok(t.calls[0].prompt.indexOf("最多输出 10 件") !== -1, "提示词必须含件数上限");
@@ -584,6 +595,7 @@ function loadCloudFunction(entryPath, stubSdk) {
   }
 }
 
+/** stub wx-server-sdk:downloadFile 一旦被调用即记录并抛错(红线守卫:胶水层不得读云存储) */
 function makeExtractDraftStub(downloads) {
   return {
     init: function () {},
@@ -592,13 +604,13 @@ function makeExtractDraftStub(downloads) {
     },
     DYNAMIC_CURRENT_ENV: "env-dynamic",
     downloadFile: function (options) {
-      downloads.push(options.fileID);
-      return Promise.resolve({ fileID: options.fileID, fileContent: FAKE_JPEG });
+      downloads.push(options && options.fileID);
+      return Promise.reject(new Error("红线:vlRecognize 胶水不得读云存储(照片确认前不上传)"));
     },
   };
 }
 
-test("胶水:vlRecognize 路由——VL 三件套指向 127.0.0.1,downloadFile 注入生效,全链 ok", async () => {
+test("胶水:vlRecognize 路由——VL 三件套指向 127.0.0.1,image_base64 直达 VL 端点,云存储零触碰,全链 ok", async () => {
   const seen = {};
   const { server, port } = await startStubServer((req, res) => {
     const chunks = [];
@@ -630,13 +642,23 @@ test("胶水:vlRecognize 路由——VL 三件套指向 127.0.0.1,downloadFile �
         assert.strictEqual(res.ok, true, JSON.stringify(res));
         assert.strictEqual(res.engine, "vl-local");
         assert.strictEqual(res.items.length, 2);
-        assert.strictEqual(downloads.length, 1, "胶水层应注入 cloud.downloadFile 并被调用");
-        assert.strictEqual(downloads[0], FILE_ID);
+        assert.strictEqual(downloads.length, 0, "胶水层不得调用 cloud.downloadFile(确认前照片不在云端)");
         assert.strictEqual(
           seen.body.messages[0].content[1].image_url.url,
-          "data:image/jpeg;base64," + FAKE_JPEG.toString("base64"),
-          "HTTP 端应收到下载 Buffer 的 base64"
+          "data:image/jpeg;base64," + IMAGE_B64,
+          "HTTP 端应收到客户端直传的 base64(原样)"
         );
+
+        // 旧式 file_id 事件(已删除的路径)不再被接受:无 image_base64 即 INVALID_INPUT,且不碰云存储
+        const legacyFileId = await entry.main({
+          action: "vlRecognize",
+          file_id: "cloud://test-env.1234/photo-evidence/x.jpg",
+          img_w: IMG_W,
+          img_h: IMG_H,
+        });
+        assert.strictEqual(legacyFileId.ok, false);
+        assert.strictEqual(legacyFileId.error, "INVALID_INPUT", "file_id 路径已删除,不留红线旁路");
+        assert.strictEqual(downloads.length, 0);
 
         // VL 已配置不改变无 action 事件的现状:key 缺失仍是 missing_api_key(并存互不影响)
         const legacy = await entry.main({ text: "钥匙放玄关抽屉" });

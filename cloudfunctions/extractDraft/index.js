@@ -12,11 +12,13 @@
  *   (manual_fallback 为 true);本地已配置但缺 key 时仍可主路走本地。
  * - 业务逻辑全部在 lib/handler.js(纯函数,依赖注入,便于离线测试)。
  * 拍照识物(#3)新增 action 路由(IMPLEMENTATION §4.2):
- * - event.action === "vlRecognize":走 handler.vlRecognize,注入
- *   downloadFile(cloud.downloadFile 取 fileContent)与 callVL(lib/vl.js);
- *   VL_BASE/VL_TOKEN/VL_MODEL 三件套任一缺失时不注入 callVL,handler 返回
- *   AI_UNAVAILABLE reason:"vl_not_configured"(engine unavailable,不抛错);
- *   VL 链路不接 DeepSeek 降级(无视觉模型),与 DEEPSEEK/LOCAL_LLM 并存互不影响;
+ * - event.action === "vlRecognize":走 handler.vlRecognize,只注入 callVL(lib/vl.js);
+ *   照片以客户端本地压缩图的 image_base64 直传(#65 V0.4 隐私红线:确认保存前
+ *   绝不上传云端,本函数不读云存储、不落任何持久层——与 transcribe 音频 base64
+ *   同款先例);VL_BASE/VL_TOKEN/VL_MODEL 三件套任一缺失时不注入 callVL,
+ *   handler 返回 AI_UNAVAILABLE reason:"vl_not_configured"(engine unavailable,
+ *   不抛错);VL 链路不接 DeepSeek 降级(无视觉模型),与 DEEPSEEK/LOCAL_LLM
+ *   并存互不影响;
  * - event.action === "draftEditParse":走 handler.draftEditParse,与提取共用
  *   local→DeepSeek 双引擎 deps;
  * - 不带 action(旧调用/语音提取)走既有提取,逐字节一致(现状锁)。
@@ -35,8 +37,8 @@ exports.main = async function (event) {
 
   if (action === "vlRecognize") {
     // 视觉识别:只依赖 VL 三件套;未配置时不注入 callVL(handler 返回 vl_not_configured)。
+    // 图片经 event.image_base64 直传(本地压缩图),不读云存储(隐私红线,无 file_id 路径)。
     return vlRecognize(event, {
-      downloadFile: (fileID) => cloud.downloadFile({ fileID: fileID }),
       callVL: vl.isVlConfigured()
         ? (promptText, imageBase64) => vl.callVlModel(promptText, imageBase64)
         : undefined,

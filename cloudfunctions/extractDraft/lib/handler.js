@@ -293,9 +293,12 @@ async function handler(event, deps) {
 // 无 openid 依赖、不引入家庭解析;VL 链路不接 DeepSeek 降级(无视觉模型);
 // 日志只记计数与错误码,绝不落 base64、识别结果、prompt 原文、转写原文、候选名。
 
-const VL_FILE_ID_MAX = 512;
 const VL_IMG_DIM_MAX = 10000;
 const VL_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+/** 解码前的廉价上限:10MB 原始字节的 base64 长度上界(超出直接拒绝,不解码) */
+const VL_MAX_IMAGE_BASE64_CHARS = Math.ceil(VL_MAX_IMAGE_BYTES / 3) * 4;
+/** 裸 base64(无 data: 前缀、无换行/空白;小程序 readFile encoding:"base64" 的原样产物) */
+const VL_BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const VL_MAX_ITEMS = 10;
 const VL_NAME_MAX = 50;
 const VL_QTY_NOTE_MAX = 40;
@@ -417,14 +420,18 @@ function validateVlOutput(rawText) {
 
 /*
  * vlRecognize(§1.1 执行链,依赖全部注入便于离线测试):
- * 1. 形状校验(file_id/img_w/img_h/mode/region,任一不过 → INVALID_INPUT);
- * 2. deps.downloadFile(file_id) 下载 Buffer(wx-server-sdk 形态取 fileContent),
- *    超过 10MB → INVALID_INPUT(客户端提示重拍);
- * 3. deps.callVL 未注入(三件套缺任一,胶水层据此不注入)→ AI_UNAVAILABLE
+ * 隐私红线(#65 V0.4 合同第五项边界):照片在用户最终确认保存之前绝不上传云端——
+ * 识别只收客户端本地压缩图的 base64(与 transcribe 音频 base64 直传同款先例),
+ * 本函数不读云存储、不落任何持久层;上传只发生在用户确认后的保存流程(photoCommit)。
+ * 1. 形状校验(image_base64/img_w/img_h/mode/region,任一不过 → INVALID_INPUT):
+ *    image_base64 须为裸 base64(无 data: 前缀/空白),解码后 1 字节 ~ 10MB
+ *    (超过 → INVALID_INPUT,客户端提示重拍;解码前先按长度上界廉价拒绝);
+ * 2. deps.callVL 未注入(三件套缺任一,胶水层据此不注入)→ AI_UNAVAILABLE
  *    reason:"vl_not_configured" + manual_fallback(engine unavailable,不抛错);
- * 4. 调用 → validateVlOutput 校验 → JSON 失败带错误重试一次(同提取链路口径),
+ * 3. 调用 → validateVlOutput 校验 → JSON 失败带错误重试一次(同提取链路口径),
  *    仍败/引擎抛错 → AI_UNAVAILABLE(engine:"vl-local",无降级引擎)。
- * 日志只记 {action, elapsedMs, engine, itemcount, error?, reason?}(计数与错误码)。
+ * 日志只记 {action, elapsedMs, engine, itemcount, error?, reason?}(计数与错误码),
+ * 绝不落 base64(含长度之外的任何内容)、识别结果、prompt 原文。
  */
 async function vlRecognize(event, deps) {
   const startedAt = Date.now();
@@ -433,8 +440,13 @@ async function vlRecognize(event, deps) {
   const logMeta = (extra) =>
     Object.assign({ action: "vlRecognize", elapsedMs: elapsedMs(), engine: "vl-local" }, extra);
 
-  const fileId = event && typeof event.file_id === "string" ? event.file_id : null;
-  if (fileId === null || fileId.length < 1 || fileId.length > VL_FILE_ID_MAX) {
+  const imageBase64 = event && typeof event.image_base64 === "string" ? event.image_base64 : null;
+  if (
+    imageBase64 === null ||
+    imageBase64.length < 1 ||
+    imageBase64.length > VL_MAX_IMAGE_BASE64_CHARS ||
+    !VL_BASE64_RE.test(imageBase64)
+  ) {
     logger(logMeta({ error: "INVALID_INPUT" }));
     return vlInvalidInputResult();
   }
@@ -465,25 +477,9 @@ async function vlRecognize(event, deps) {
     }
   }
 
-  const downloadFile = deps && typeof deps.downloadFile === "function" ? deps.downloadFile : null;
-  let buffer = null;
-  if (downloadFile) {
-    try {
-      const dl = await downloadFile(fileId);
-      buffer = dl && Buffer.isBuffer(dl.fileContent)
-        ? dl.fileContent
-        : Buffer.isBuffer(dl)
-          ? dl
-          : null;
-    } catch (e) {
-      buffer = null; // 下载失败只记错误码,绝不带 file_id 内容
-    }
-  }
-  if (buffer === null) {
-    logger(logMeta({ error: "AI_UNAVAILABLE", reason: "download_failed" }));
-    return vlUnavailableResult("download_failed");
-  }
-  if (buffer.length > VL_MAX_IMAGE_BYTES) {
+  // 解码只为丈量字节数(10MB 门);上送 VL 的仍是客户端原样 base64,不再二次编码。
+  const imageBytes = Buffer.byteLength(imageBase64, "base64");
+  if (imageBytes < 1 || imageBytes > VL_MAX_IMAGE_BYTES) {
     logger(logMeta({ error: "INVALID_INPUT" }));
     return vlInvalidInputResult();
   }
@@ -494,7 +490,6 @@ async function vlRecognize(event, deps) {
     return vlUnavailableResult("vl_not_configured");
   }
 
-  const imageBase64 = buffer.toString("base64");
   const retryPrompt = (previousOutput, reason) =>
     buildVlPrompt(mode, region) +
     "\n\n" +
