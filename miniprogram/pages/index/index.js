@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const voice_entry_1 = require("../../utils/voice-entry");
 const draft_session_1 = require("../../utils/draft-session");
+const photo_session_1 = require("../../utils/photo-session");
 const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
 const households_api_1 = require("../../utils/households-api");
@@ -53,6 +54,7 @@ Page({
         queryResults: [],
         queryError: "",
         resumeSession: null,
+        photoResume: null,
         dueBanner: null,
         familyShared: false,
         firstUse: false,
@@ -119,7 +121,10 @@ Page({
         // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
         // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
         void (0, households_api_1.ensureScopeVerified)().then(() => {
-            this.setData({ resumeSession: this.currentResumeSession() });
+            this.setData({
+                resumeSession: this.currentResumeSession(),
+                photoResume: this.currentPhotoResume(),
+            });
         });
         // 到期横幅(#36):同样资格复核后拉取;失败静默,不影响地图
         void this.refreshDueBanner();
@@ -291,6 +296,35 @@ Page({
             return null;
         }
         return { sid: unfinished.sid, count: unfinished.payload.drafts.length };
+    },
+    /** 拍照批恢复(#3):按当前家庭作用域键读未完成拍照会话(同硬门 C 口径) */
+    currentPhotoResume() {
+        const unfinished = (0, photo_session_1.getUnfinishedPhotoSession)();
+        if (unfinished === null) {
+            return null;
+        }
+        return { count: unfinished.rows.length };
+    },
+    onPhotoResumeTap() {
+        if (this.data.photoResume === null) {
+            return;
+        }
+        this.setData({ photoResume: null });
+        wx.navigateTo({
+            url: "/pages/photo/photo?resume=1",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    /** 拍照识物入口(#3):新批拍照(确认前照片不上云) */
+    onPhotoRecordTap() {
+        wx.navigateTo({
+            url: "/pages/photo/photo",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
     },
     /* ---------------- 家庭地图(H1:容器视图整页切换,X1/X2 全守卫) ---------------- */
     /**
@@ -929,7 +963,7 @@ Page({
             });
             // 与 onShow 同链刷新:上下文头 → 地图(先骨架屏再按新家重载)→ 未完成批次 → 快到期
             this.refreshFamilyChip();
-            this.setData({ resumeSession: this.currentResumeSession() });
+            this.setData({ resumeSession: this.currentResumeSession(), photoResume: this.currentPhotoResume() });
             void this.loadMapLayer();
             void this.refreshDueBanner();
         }

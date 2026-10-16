@@ -6,6 +6,7 @@ import type {
   LocationNodeSummary,
 } from "../../types";
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
+import { getUnfinishedPhotoSession } from "../../utils/photo-session";
 import {
   countDue,
   dueBannerText,
@@ -108,6 +109,11 @@ Page<
     /** 未完成草稿会话恢复入口(非空时显示横幅) */
     resumeSession: { sid: string; count: number } | null;
     /**
+     * 未完成拍照批恢复入口(#3,非空时显示次行横幅,与 resumeSession 并存):
+     * 点进 photo 页带 ?resume=1;按当前家庭作用域键读取(展示前资格复核同上)。
+     */
+    photoResume: { count: number } | null;
+    /**
      * 到期横幅(#36,仅家里层显示):remindList 有 active 且(已过期或 7 天内)
      * 才非空;加载失败保持 null 静默(横幅属增强,不影响地图),切换家庭随作用域清。
      */
@@ -183,6 +189,11 @@ Page<
     onCollapseResultsTap(): void;
     onResumeTap(): void;
     currentResumeSession(): { sid: string; count: number } | null;
+    /** 拍照批恢复横幅(#3):读当前家庭作用域的未完成拍照会话 */
+    currentPhotoResume(): { count: number } | null;
+    onPhotoResumeTap(): void;
+    /** 拍照识物入口(#3):进 photo 页新批拍照 */
+    onPhotoRecordTap(): void;
     /** 地图当前层加载(X1/X2 与分层缓存、防旧覆盖守卫全在这里) */
     requestSeq: LocationsRequestSeq;
     /** 当前视图层是否已有内容上屏(决定骨架还是轻量刷新) */
@@ -253,6 +264,7 @@ Page<
     queryResults: [],
     queryError: "",
     resumeSession: null as { sid: string; count: number } | null,
+    photoResume: null as { count: number } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
     firstUse: false,
@@ -322,7 +334,10 @@ Page<
     // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
     // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
     void ensureScopeVerified().then(() => {
-      this.setData({ resumeSession: this.currentResumeSession() });
+      this.setData({
+        resumeSession: this.currentResumeSession(),
+        photoResume: this.currentPhotoResume(),
+      });
     });
     // 到期横幅(#36):同样资格复核后拉取;失败静默,不影响地图
     void this.refreshDueBanner();
@@ -509,6 +524,38 @@ Page<
       return null;
     }
     return { sid: unfinished.sid, count: unfinished.payload.drafts.length };
+  },
+
+  /** 拍照批恢复(#3):按当前家庭作用域键读未完成拍照会话(同硬门 C 口径) */
+  currentPhotoResume() {
+    const unfinished = getUnfinishedPhotoSession();
+    if (unfinished === null) {
+      return null;
+    }
+    return { count: unfinished.rows.length };
+  },
+
+  onPhotoResumeTap() {
+    if (this.data.photoResume === null) {
+      return;
+    }
+    this.setData({ photoResume: null });
+    wx.navigateTo({
+      url: "/pages/photo/photo?resume=1",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** 拍照识物入口(#3):新批拍照(确认前照片不上云) */
+  onPhotoRecordTap() {
+    wx.navigateTo({
+      url: "/pages/photo/photo",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
   },
 
   /* ---------------- 家庭地图(H1:容器视图整页切换,X1/X2 全守卫) ---------------- */
@@ -1182,7 +1229,7 @@ Page<
       });
       // 与 onShow 同链刷新:上下文头 → 地图(先骨架屏再按新家重载)→ 未完成批次 → 快到期
       this.refreshFamilyChip();
-      this.setData({ resumeSession: this.currentResumeSession() });
+      this.setData({ resumeSession: this.currentResumeSession(), photoResume: this.currentPhotoResume() });
       void this.loadMapLayer();
       void this.refreshDueBanner();
     } catch (e) {

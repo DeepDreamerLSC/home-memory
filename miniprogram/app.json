@@ -2,6 +2,7 @@
   "pages": [
     "pages/index/index",
     "pages/confirm/confirm",
+    "pages/photo/photo",
     "pages/item/item",
     "pages/locations/locations",
     "pages/locationScan/locationScan",
