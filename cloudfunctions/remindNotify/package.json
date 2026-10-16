@@ -1,0 +1,10 @@
+{
+  "name": "remindNotify",
+  "version": "1.0.0",
+  "description": "家庭物品记忆助手 issue #36 V1.5:到期微信提醒推送(订阅授权落库 recordSubscription + 每日 08:00 扫描发送订阅消息)",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

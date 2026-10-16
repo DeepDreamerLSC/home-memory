@@ -2,8 +2,9 @@
 
 /**
  * issue #34 P0+P1-A(家庭共享 v0)离线合同测试:
- * - HH-SRC:lib/household.js 三副本(itemsApi 源 + locations/households 副本)
- *   逐字节防漂移(照 tests/locations.test.js TS-SRC 模式);
+ * - HH-SRC:lib/household.js 同源副本(itemsApi 源 + locations/households/
+ *   remindNotify 副本,三方同步纪律)逐字节防漂移(照 tests/locations.test.js
+ *   TS-SRC 模式);
  * - HH-RSLV:可信家庭三向验证(活跃指针 → 有效会员 → 家庭未解散)——
  *   active 命中共享家庭 / 无 active 回退个人 / 查询异常失败关闭 / 孤儿指针
  *   失败关闭 / 已解散家庭失败关闭 / households 元数据缺或非法失败关闭(P0-4
@@ -108,7 +109,8 @@ test("HH-SRC:lib/household.js 三副本(locations/households)剥离声明头后�
   var source = fs.readFileSync(path.join(ROOT, "cloudfunctions", "itemsApi", "lib", "household.js"), "utf8");
   var copies = [
     ["locations", path.join(ROOT, "cloudfunctions", "locations", "lib", "household.js")],
-    ["households", path.join(ROOT, "cloudfunctions", "households", "lib", "household.js")]
+    ["households", path.join(ROOT, "cloudfunctions", "households", "lib", "household.js")],
+    ["remindNotify", path.join(ROOT, "cloudfunctions", "remindNotify", "lib", "household.js")]
   ];
   for (var i = 0; i < copies.length; i++) {
     var name = copies[i][0];

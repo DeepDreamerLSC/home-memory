@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
 const batch_save_1 = require("../../utils/batch-save");
+const subscribe_1 = require("../../utils/subscribe");
 const draft_session_1 = require("../../utils/draft-session");
 /** 本地日期 → YYYY-MM-DD( picker mode=date 的 value 形态) */
 function todayYmd(now = new Date()) {
@@ -461,6 +462,13 @@ Page({
         if ((0, batch_save_1.batchSummary)(snapshot).checked === 0) {
             wx.showToast({ title: "没有要保存的物品", icon: "none" });
             return;
+        }
+        // V1.5(#36 到期微信提醒):本次保存会写入到期提醒的行存在时,先在 tap
+        // 手势链内同步请求订阅授权(必须先于下方任何 await;拒绝/失败静默降级
+        // 应用内提醒,绝不阻塞保存流程)。行口径与下方提交一致:勾选且未 saved、
+        // rowReminderInput 会随 create 携带 reminder 的行。
+        if ((0, batch_save_1.rowsToSave)(snapshot).some((r) => (0, batch_save_1.rowReminderInput)(r) !== undefined)) {
+            (0, subscribe_1.requestExpirySubscribe)();
         }
         this.setData({ batchSaving: true });
         let mountFailed = 0;

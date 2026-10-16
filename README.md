@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history` 与 `reminders` 四个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions` 五个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -54,6 +54,13 @@ cloudfunctions/
     index.js             胶水层(OPENID→member_key、三向解析、令牌生成与哈希注入)
     config.json          超时 10 秒
     lib/handler.js       纯函数 action 路由(依赖注入,可离线测试)
+    lib/household.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
+  remindNotify/          到期微信提醒推送(issue #36 V1.5):订阅落库 + 每日 08:00 扫描发送
+    index.js             胶水层(OPENID→member_key、三向解析、cloud.openapi 订阅消息注入)
+    config.json          超时 20 秒;timer 触发器 dailyExpiryNotify(cron 每天 08:00)
+    lib/handler.js       recordSubscription 落库 + 每日扫描(窗口过滤/聚合/资格复核/幂等/发送)
+    lib/aggregate.js     纯函数:上海时区自然日、到期窗口、按家庭聚合卡片四字段(20 码点截断)
+    lib/eligibility.js   纯函数:发送前资格复核(member_key 重算/在册未解散/个人家庭派生)与幂等
     lib/household.js     与 itemsApi 逐字节同源的副本(测试强制不漂移)
 tests/                   离线测试(node:test + node:assert,零外部依赖)
   helpers/memoryDb.js    内存版 CloudBase 语义(含云函数端 get() 单次 100 条上限、唯一索引 E11000 模拟)
@@ -105,7 +112,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history` 与 `reminders`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -148,6 +155,12 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 该集合是独立提醒实体(itemsApi 的 `create` 可选 reminder 参数写入、`remindList`/`remindComplete`/`remindClear`/`remindSet` 读写):每条 active 提醒内部关联一个 item,物品删除时其 active 提醒级联硬删,done 历史行保留;集合内另有每物品一条 `slot_` 前缀的生命周期权威文档(status 固定 "slot",单调轮次权威 rev + 跨操作欠账声明,与提醒行的 active/done 查询天然隔离)。「每 item 至多一条 active、轮次单调绝不重用、清除不复活」由 slot 条件更新(CAS)+ 行级轮次条件更新 + 确定性 _id 三层维持(并发/多设备交错下成立),数据库层无唯一索引。**需要重新部署 `itemsApi` 云函数后这些 action 才存在**(部署方式见步骤 6)。
 
+**⑦ remind_subscriptions 到期提醒订阅记录(issue #36 V1.5;先建集合再部署 remindNotify,缺集合时订阅落库失败,推送不可用)**:
+
+> 按上文创建集合并把权限并入 ③(「所有用户不可读不可写」)即可;**无需建任何索引**(订阅文档用 `"rsub_"+household_id+"_"+member_key` 确定性 _id,集合 _id 唯一性天然防并发双写)。
+
+该集合是「谁授权了到期微信提醒」的记录(仅 `remindNotify` 云函数读写):小程序端在保存带提醒的物品时经 `wx.requestSubscribeMessage` 请求授权,用户同意后 `recordSubscription` 落一条(openid、household_id、member_key、template_id、updated_at、last_sent_date);每日 08:00 timer 扫描「今天/明天到期」的 active 提醒,按家庭聚合成一条订阅消息卡片发送给该家庭全部合格订阅者。**落 openid 的原因**:微信订阅消息 `touser` 只接受 openid,云函数侧无 openid 即无法发送;隔离措施:集合权限对所有用户不可读不可写(仅云函数管理端可访问),云函数日志绝不落 openid/member_key,发送前逐条资格复核(订阅后被移出家庭/家庭解散即停止推送)。安全披露详见对应 PR 描述。
+
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
 云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
@@ -158,11 +171,13 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations` 与 `cloudfunctions/households` →「**上传并部署:云端安装依赖**」。四个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households` 与 `cloudfunctions/remindNotify` →「**上传并部署:云端安装依赖**」。五个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
-issue #34 P1-A 起,`itemsApi`、`locations` 与 `households` 三个函数持有逐字节同源的家庭解析副本,**升级时三者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
+**remindNotify 的 timer 触发器**:部署后到云开发控制台 → 云函数 → remindNotify → 触发器,确认存在 `dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间)。开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建(名称 `dailyExpiryNotify`、类型「定时触发」、cron 同上),并可在控制台「手动执行」一次验证推送链路。
+
+issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` 四个函数持有逐字节同源的家庭解析副本,**升级时四者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
 
 ### 7. 小程序里验证
 
