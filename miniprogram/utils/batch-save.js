@@ -73,18 +73,23 @@ function rowVagueQuoteInput(row) {
 /**
  * 行 → create 的可选 reminder 参数(纯函数,PR #52 B3 下沉便于测试):
  * 行内无日期(服务端因归属不明置空 / 用户清过) → undefined 不带提醒,
- * 绝不写入错误归属的提醒;日期仍是原话提取值时才携带 quote
- * (选择器改过的没有原话锚点)。
+ * 绝不写入错误归属的提醒;日期仍是原话提取值(或换算候选值)时才携带 quote
+ * (选择器改过的没有原话锚点);remind_converted(三件 A 换算标记)与 quote
+ * 同条件携带——仅「行是换算候选且日期没被用户改过」时为 true。
  */
 function rowReminderInput(row) {
     if (row.remindAt === "" || row.remindKind === "") {
         return undefined;
     }
+    const anchored = row.remindAt === row.remindOrigin && row.remindQuote !== "";
     return {
         due_date: row.remindAt,
         kind: row.remindKind,
-        ...(row.remindAt === row.remindOrigin && row.remindQuote !== ""
-            ? { quote: row.remindQuote }
+        ...(anchored
+            ? {
+                quote: row.remindQuote,
+                ...(row.remindConverted ? { remind_converted: true } : {}),
+            }
             : {}),
     };
 }

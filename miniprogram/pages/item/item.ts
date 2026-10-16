@@ -16,6 +16,7 @@ import {
   isScopeGenerationCurrent,
 } from "../../utils/household-scope";
 import {
+  askKeepAfterDone,
   askUseUp,
   expireMainText,
   localTodayYmd,
@@ -137,9 +138,16 @@ Page<
     mountSaving: boolean;
     /**
      * 保质期行(#36):这件有 active 提醒才显示(mainText=有效期+相对天数,
-     * kind=「已处理」时收掉本轮提醒);null=无 active 提醒,整行不渲染
+     * kind=「已处理」时收掉本轮提醒);null=无 active 提醒,整行不渲染;
+     * convertedNote(#36 真机反馈三件 A)= 提醒行是服务端相对时间换算候选时
+     * 携带的换算源原话(如「半年后」),非空时行内小字标注「按『…』换算」
      */
-    expire: { mainText: string; dueDate: string; kind: string } | null;
+    expire: {
+      mainText: string;
+      dueDate: string;
+      kind: string;
+      convertedNote?: string;
+    } | null;
     /** 编辑折叠「提醒」字段的当前日期(YYYY-MM-DD;""=不带提醒) */
     remindAt: string;
     /**
@@ -279,7 +287,12 @@ Page<
     mountNeedConfirm: false,
     mountOrderViolation: false,
     mountSaving: false,
-    expire: null as { mainText: string; dueDate: string; kind: string } | null,
+    expire: null as {
+      mainText: string;
+      dueDate: string;
+      kind: string;
+      convertedNote?: string;
+    } | null,
     remindAt: "",
     remindGeneration: -1,
     today: localTodayYmd(),
@@ -1354,11 +1367,18 @@ Page<
       return;
     }
     this.remindOriginal = row.due_date;
+    // 换算候选标注(三件 A):仅 remind_converted 行携带换算源原话,
+    // 详情页保质期行据此小字标注「按『…』换算」;常规行为空串不渲染
+    const convertedNote =
+      row.remind_converted === true && typeof row.remind_quote === "string"
+        ? row.remind_quote
+        : "";
     this.setData({
       expire: {
         mainText: expireMainText(row.due_date),
         dueDate: row.due_date,
         kind: row.kind,
+        convertedNote,
       },
       remindAt: row.due_date,
       remindGeneration:
@@ -1456,6 +1476,29 @@ Page<
       });
       this.setData({ expire: null, remindAt: "", remindGeneration: 0 });
       this.remindOriginal = "";
+      // #36 真机反馈三件 B(用户功能请求):完成后问「记录还保留吗」——
+      // 保留(确认/dismiss)= 现状(已处理 toast);删除物品(取消)= itemsApi
+      // delete(与 ⋯ 菜单删除先例同款:级联硬删 active 提醒 + 软删物品,api 层
+      // 自动拼装作用域双 marker),成功后返回上一页。dismiss=保留(安全默认,
+      // 误触删除不可逆;服务端虽软删但客户端无恢复入口)。删除失败:如实 toast
+      // 错误文本,物品保留、已处理不回滚(完成已发生),留在本页稍后再删。
+      const keep = await askKeepAfterDone(this.data.name);
+      if (keep === "delete") {
+        try {
+          await callItemsApi({ action: "delete", item_id: this.data.itemId });
+          wx.showToast({ title: "已删除", icon: "success" });
+          setTimeout(() => {
+            this.goBack();
+          }, 800);
+        } catch (delErr) {
+          wx.showToast({
+            title: "没删成:" + errorMessage(delErr),
+            icon: "none",
+            duration: 2500,
+          });
+        }
+        return;
+      }
       // 完成后不弹固定周期选项(#36 真机反馈 Fix 2):下次提醒时间由用户到详情里选日子
       wx.showToast({
         title: "已处理。要下次提醒,到详情里选日子",
