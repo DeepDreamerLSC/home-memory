@@ -11,16 +11,39 @@
  * - 双引擎都未配置(无 key 且本地未配置)才直接返回 AI_UNAVAILABLE
  *   (manual_fallback 为 true);本地已配置但缺 key 时仍可主路走本地。
  * - 业务逻辑全部在 lib/handler.js(纯函数,依赖注入,便于离线测试)。
+ * 拍照识物(#3)新增 action 路由(IMPLEMENTATION §4.2):
+ * - event.action === "vlRecognize":走 handler.vlRecognize,注入
+ *   downloadFile(cloud.downloadFile 取 fileContent)与 callVL(lib/vl.js);
+ *   VL_BASE/VL_TOKEN/VL_MODEL 三件套任一缺失时不注入 callVL,handler 返回
+ *   AI_UNAVAILABLE reason:"vl_not_configured"(engine unavailable,不抛错);
+ *   VL 链路不接 DeepSeek 降级(无视觉模型),与 DEEPSEEK/LOCAL_LLM 并存互不影响;
+ * - event.action === "draftEditParse":走 handler.draftEditParse,与提取共用
+ *   local→DeepSeek 双引擎 deps;
+ * - 不带 action(旧调用/语音提取)走既有提取,逐字节一致(现状锁)。
  */
 
 const cloud = require("wx-server-sdk");
-const { handler } = require("./lib/handler");
+const { handler, vlRecognize, draftEditParse } = require("./lib/handler");
 const { callDeepSeek } = require("./lib/deepseek");
 const localLlm = require("./lib/local-llm");
+const vl = require("./lib/vl");
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 exports.main = async function (event) {
+  const action = event && typeof event === "object" && typeof event.action === "string" ? event.action : null;
+
+  if (action === "vlRecognize") {
+    // 视觉识别:只依赖 VL 三件套;未配置时不注入 callVL(handler 返回 vl_not_configured)。
+    return vlRecognize(event, {
+      downloadFile: (fileID) => cloud.downloadFile({ fileID: fileID }),
+      callVL: vl.isVlConfigured()
+        ? (promptText, imageBase64) => vl.callVlModel(promptText, imageBase64)
+        : undefined,
+      logger: (meta) => console.log(JSON.stringify(meta)),
+    });
+  }
+
   const apiKey = process.env.DEEPSEEK_API_KEY;
   const localConfigured = localLlm.isConfigured();
   if (!apiKey && !localConfigured) {
@@ -34,12 +57,16 @@ exports.main = async function (event) {
       engine: "deepseek",
     };
   }
-  return handler(event, {
+  const deps = {
     callLLM: (promptText) => callDeepSeek(promptText, apiKey, 20000),
     // 本地三件套未配置时不注入,handler 只走 DeepSeek(现状锁)。
     callLocalLLM: localConfigured
       ? (promptText) => localLlm.callLocalLLM(promptText)
       : undefined,
     logger: (meta) => console.log(JSON.stringify(meta)),
-  });
+  };
+  if (action === "draftEditParse") {
+    return draftEditParse(event, deps);
+  }
+  return handler(event, deps);
 };
