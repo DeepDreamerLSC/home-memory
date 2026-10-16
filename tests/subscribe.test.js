@@ -9,7 +9,13 @@
  *   recordSubscription;拒绝/接口失败/低版本基础库一律静默降级应用内提醒,
  *   绝不 toast、绝不阻塞保存流程;SB-FLOW-5:onAccepted 回调(详情页显式
  *   入口用)只在 accept 且记录已发起后同步调用;
- * - SB-CONST:模板 ID 单一常量收敛,与 remindNotify 云函数侧同值。
+ * - SB-CONST:模板 ID 单一常量收敛,与 remindNotify 云函数侧同值;
+ * - SB-GESTURE(#36 0.9.2,请求前置零桥接调用):recording wx(Proxy 记录
+ *   每一次 wx API 调用顺序)——requestExpirySubscribe 内第一条 wx API
+ *   调用必须是 wx.requestSubscribeMessage;getAccountInfoSync(同步桥接
+ *   调用,会破坏 iOS 点击手势上下文)只允许出现在请求之后的回调里;
+ *   低版本提前 return 路径零 wx 调用。这是真回归锁:任何人把「请求前先
+ *   查环境/先 toast/先读存储」加回来,序列断言立刻红。
  * require 的是编译产物 subscribe.js(npm run build:mp 生成,pretest 已先行构建)。
  */
 
@@ -868,12 +874,12 @@ test("SB-PAGE-ITEM-5:显式订阅入口的显示条件——已开启过(本地�
   assert.equal(subscribeCalls.length, 0, "无提醒双保险:不请求订阅");
 });
 
-// ---------- SB-DIAG(#36 真机反馈三件 C + 真机手势规则期增强):订阅授权失败的版本分支诊断 ----------
+// ---------- SB-DIAG(#36 0.9.2 升级):订阅授权失败的版本分支诊断 ----------
 // release 静默(现状);develop/trial 的 fail → console.warn 完整 errMsg +
-// toast「订阅失败:」+ errMsg 前 60 字(#36 真机手势规则期增强:0.9.0 iOS 实测
-// 30 字把关键错误名截掉——真机 toast 只见「requestSubscribeMessage:fail c…」,
-// 即 30 字截断刚好落在 "can only be invoked by user TAP gesture" 的首字母 c 上);
-// duration 4000(共享诊断 toast,3000ms 读不完);success → toast 授权结果状态;
+// wx.showModal 全文(title「订阅失败」/content 完整 errMsg **不截断**/
+// showCancel:false;#36 0.9.1 iOS 实测:toast 的 title 真机无论传多长
+// 只显示约 30 字,三轮真机反馈都只见「fail c…」——modal 多行全文可截图,
+// fail 不再 toast;success → 保留小 toast 授权结果状态(短文本 toast 足够);
 // getAccountInfoSync 异常/缺失 → 保守按 release 静默(测试锁此行为)。
 
 function makeEnvWx(envVersion, opts) {
@@ -890,6 +896,9 @@ function makeEnvWx(envVersion, opts) {
     },
     showToast: function (o) {
       (opts.toasts = opts.toasts || []).push(o);
+    },
+    showModal: function (o) {
+      (opts.modals = opts.modals || []).push(o);
     }
   };
   if (envVersion !== "missing") {
@@ -906,19 +915,19 @@ function makeEnvWx(envVersion, opts) {
   return wxStub;
 }
 
-test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失败:」前 60 字(duration 4000)", async function () {
+test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + modal「订阅失败」全文不截断(showCancel:false),不再 toast", async function () {
   var prevWx = globalThis.wx;
   var prevWarn = console.warn;
   var warns = [];
   console.warn = function () {
     warns.push(Array.prototype.slice.call(arguments).join(" "));
   };
-  var opts = {};
-  // 真机实测同款错误文本:30 字截断正好落在 "…fail c"(关键错误名被截掉),
-  // 60 字起 "can only be invoked by user TAP ge" 可见,足以定位手势规则报错
+  // 真机实测同款错误文本 + 长尾:超过 toast 60 字截断口径,证明 modal 全文
+  // 不截断(#36 0.9.1 三轮真机只见「fail c…」,modal 必须全文可截图)
   var longErr =
-    "requestSubscribeMessage:fail can only be invoked by user TAP gesture 吧啦吧啦很多字很多字";
-  globalThis.wx = makeEnvWx("develop", { failErr: longErr, toasts: opts.toasts || (opts.toasts = []) });
+    "requestSubscribeMessage:fail can only be invoked by user TAP gesture 吧啦吧啦很多字很多字吧啦吧啦很多字很多字吧啦吧啦很多字很多字";
+  var opts = {};
+  globalThis.wx = makeEnvWx("develop", { failErr: longErr, toasts: opts.toasts || (opts.toasts = []), modals: opts.modals || (opts.modals = []) });
   try {
     subscribe.requestExpirySubscribe();
     await new Promise(function (r) {
@@ -926,21 +935,22 @@ test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失�
     });
     assert.equal(warns.length, 1, "warn 恰一次");
     assert.ok(warns[0].indexOf(longErr) !== -1, "warn 携带完整 errMsg(定位用)");
-    assert.equal(opts.toasts.length, 1, "toast 恰一次");
-    assert.equal(opts.toasts[0].title, "订阅失败:" + Array.from(longErr).slice(0, 60).join("") + "…", "errMsg 截断到 60 字(码点)");
+    assert.equal(opts.toasts.length, 0, "fail 不再 toast(真机 toast 只显约 30 字,显示不全没意义)");
+    assert.equal(opts.modals.length, 1, "modal 恰一次");
+    assert.equal(opts.modals[0].title, "订阅失败", "modal 标题");
+    assert.equal(opts.modals[0].content, longErr, "modal content 完整 errMsg 全文(不截断,可截图回报)");
     assert.ok(
-      opts.toasts[0].title.indexOf("can only be invoked by user TA") !== -1,
-      "关键错误名 60 字内可见(30 字时只剩「fail c」)"
+      opts.modals[0].content.indexOf("can only be invoked by user TAP gesture") !== -1,
+      "关键错误名全文可见(0.9.1 toast 只剩「fail c」)"
     );
-    assert.equal(opts.toasts[0].icon, "none");
-    assert.equal(opts.toasts[0].duration, 4000);
+    assert.equal(opts.modals[0].showCancel, false, "单按钮 modal,不打断用户");
   } finally {
     console.warn = prevWarn;
     restoreWx(prevWx);
   }
 });
 
-test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast", async function () {
+test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast、不 modal", async function () {
   var prevWx = globalThis.wx;
   var prevWarn = console.warn;
   var warns = [];
@@ -948,7 +958,8 @@ test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast", 
     warns.push(1);
   };
   var toasts = [];
-  globalThis.wx = makeEnvWx("release", { failErr: "requestSubscribeMessage:fail", toasts: toasts });
+  var modals = [];
+  globalThis.wx = makeEnvWx("release", { failErr: "requestSubscribeMessage:fail", toasts: toasts, modals: modals });
   try {
     subscribe.requestExpirySubscribe();
     await new Promise(function (r) {
@@ -956,17 +967,19 @@ test("SB-DIAG-2:release fail → 静默(现状零变化):不 warn、不 toast", 
     });
     assert.equal(warns.length, 0, "release 不 warn");
     assert.equal(toasts.length, 0, "release 不 toast(现状静默)");
+    assert.equal(modals.length, 0, "release 不 modal(诊断升级只限 develop/trial)");
   } finally {
     console.warn = prevWarn;
     restoreWx(prevWx);
   }
 });
 
-test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release success → 静默(记录照常)", async function () {
+test("SB-DIAG-3:develop success → toast「订阅:accept/reject」(不 modal);release success → 静默(记录照常)", async function () {
   var prevWx = globalThis.wx;
   var toasts = [];
+  var modals = [];
   var calls = [];
-  globalThis.wx = makeEnvWx("develop", { status: "accept", toasts: toasts });
+  globalThis.wx = makeEnvWx("develop", { status: "accept", toasts: toasts, modals: modals });
   globalThis.wx.cloud = {
     callFunction: function (o) {
       calls.push(o.data.action);
@@ -980,7 +993,8 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
     assert.deepEqual(calls, ["recordSubscription"], "accept 记录像常");
     assert.equal(toasts.length, 1, "develop toast 授权结果");
     assert.equal(toasts[0].title, "订阅:accept");
-    assert.equal(toasts[0].duration, 4000, "共享诊断 toast duration(#36 真机手势规则期增强 3000→4000)");
+    assert.equal(toasts[0].duration, 4000, "success 保留小 toast duration 4000");
+    assert.equal(modals.length, 0, "success 不 modal(短状态 toast 足够)");
   } finally {
     restoreWx(prevWx);
   }
@@ -988,8 +1002,9 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
   // reject:不记录,但仍 toast 状态
   prevWx = globalThis.wx;
   toasts = [];
+  modals = [];
   calls = [];
-  globalThis.wx = makeEnvWx("develop", { status: "reject", toasts: toasts });
+  globalThis.wx = makeEnvWx("develop", { status: "reject", toasts: toasts, modals: modals });
   globalThis.wx.cloud = {
     callFunction: function (o) {
       calls.push(o.data.action);
@@ -1002,6 +1017,7 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
     });
     assert.equal(calls.length, 0, "reject 不记录");
     assert.equal(toasts[0].title, "订阅:reject", "拒绝也如实 toast 状态");
+    assert.equal(modals.length, 0, "success 路径不 modal");
   } finally {
     restoreWx(prevWx);
   }
@@ -1009,8 +1025,9 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
   // release success:静默(既有 SB-FLOW 断言同款行为,此处显式锁 envVersion=release)
   prevWx = globalThis.wx;
   toasts = [];
+  modals = [];
   calls = [];
-  globalThis.wx = makeEnvWx("release", { status: "accept", toasts: toasts });
+  globalThis.wx = makeEnvWx("release", { status: "accept", toasts: toasts, modals: modals });
   globalThis.wx.cloud = {
     callFunction: function (o) {
       calls.push(o.data.action);
@@ -1023,12 +1040,13 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
     });
     assert.deepEqual(calls, ["recordSubscription"], "release 记录像常");
     assert.equal(toasts.length, 0, "release 成功不 toast(静默现状)");
+    assert.equal(modals.length, 0, "release 成功不 modal");
   } finally {
     restoreWx(prevWx);
   }
 });
 
-test("SB-DIAG-4:getAccountInfoSync 异常/缺失/形状异常 → 保守按 release 静默(fail 不 toast 不 warn)", async function () {
+test("SB-DIAG-4:getAccountInfoSync 异常/缺失/形状异常 → 保守按 release 静默(fail 不 toast 不 modal 不 warn)", async function () {
   var prevWarn = console.warn;
   var warns = [];
   console.warn = function () {
@@ -1039,16 +1057,166 @@ test("SB-DIAG-4:getAccountInfoSync 异常/缺失/形状异常 → 保守按 rele
     for (var i = 0; i < cases.length; i++) {
       var prevWx = globalThis.wx;
       var toasts = [];
-      globalThis.wx = makeEnvWx(cases[i], { failErr: "requestSubscribeMessage:fail", toasts: toasts });
+      var modals = [];
+      globalThis.wx = makeEnvWx(cases[i], { failErr: "requestSubscribeMessage:fail", toasts: toasts, modals: modals });
       subscribe.requestExpirySubscribe();
       await new Promise(function (r) {
         setTimeout(r, 10);
       });
       assert.equal(toasts.length, 0, cases[i] + ":异常兜底保守静默=release 行为(不 toast)");
+      assert.equal(modals.length, 0, cases[i] + ":不 modal");
       assert.equal(warns.length, 0, cases[i] + ":不 warn");
       restoreWx(prevWx);
     }
   } finally {
     console.warn = prevWarn;
+  }
+});
+
+// ---------- SB-GESTURE(#36 0.9.2,请求前置零桥接调用):wx 调用序列结构断言 ----------
+// 根因推理:0.9.1 真机(iOS)显式 bindtap 入口仍报「fail c…」(can only be
+// invoked by user TAP gesture)——怀疑手势窗口内的同步桥接调用(如
+// getAccountInfoSync)破坏了点击手势上下文。行为约束:wx.requestSubscribeMessage
+// 必须是 requestExpirySubscribe 内**第一条** wx API 调用,环境诊断只能
+// 事后在回调里做。用 Proxy recording wx 记录全部 wx 调用顺序锁死——
+// 任何人把「请求前先查环境/先 toast/先读存储」加回来,这里立刻红。
+
+/**
+ * recording wx:Proxy 记录每一次 wx API 方法调用(属性读取不记录)。
+ * opts.impl:方法名 → 真实行为(如 requestSubscribeMessage 回填 success);
+ * opts.missing:按「API 不存在」处理(get 返回 undefined,模拟低版本基础库);
+ * 返回 { calls: 调用名序列, wx: 可直接赋给 globalThis.wx 的 Proxy }。
+ */
+function makeGestureWx(opts) {
+  opts = opts || {};
+  var impl = opts.impl || {};
+  var missing = opts.missing || [];
+  var calls = [];
+  var proxy = new Proxy(
+    {},
+    {
+      get: function (target, prop) {
+        if (typeof prop === "symbol") {
+          return undefined;
+        }
+        if (prop === "cloud") {
+          return {
+            callFunction: function () {
+              calls.push("cloud.callFunction");
+            }
+          };
+        }
+        if (missing.indexOf(prop) !== -1) {
+          return undefined;
+        }
+        return function () {
+          calls.push(String(prop));
+          if (typeof impl[prop] === "function") {
+            return impl[prop].apply(null, arguments);
+          }
+        };
+      }
+    }
+  );
+  return { calls: calls, wx: proxy };
+}
+
+test("SB-GESTURE-1:develop success 全链路——第一条 wx API 调用必须是 wx.requestSubscribeMessage(getAccountInfoSync 只能在其后)", async function () {
+  var prevWx = globalThis.wx;
+  var acceptRes = {};
+  acceptRes[TEMPLATE_ID] = "accept";
+  var rec = makeGestureWx({
+    impl: {
+      requestSubscribeMessage: function (o) {
+        o.success(acceptRes);
+      },
+      getAccountInfoSync: function () {
+        return { miniProgram: { envVersion: "develop" } };
+      },
+      showToast: function () {},
+      showModal: function () {}
+    }
+  });
+  globalThis.wx = rec.wx;
+  try {
+    subscribe.requestExpirySubscribe(function () {});
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(
+      rec.calls[0],
+      "requestSubscribeMessage",
+      "请求前置零桥接调用:第一条 wx API 调用必须是订阅请求本身(任何先行的 getAccountInfoSync/存储/toast 都会破坏 iOS 点击手势上下文)"
+    );
+    assert.ok(
+      rec.calls.indexOf("requestSubscribeMessage") < rec.calls.indexOf("getAccountInfoSync"),
+      "getAccountInfoSync(同步桥接调用)只能出现在请求之后的回调里,绝不先于请求"
+    );
+    // 全链路仍完整:请求 → 记录(accept)→ 环境诊断 → 状态 toast
+    assert.deepEqual(
+      rec.calls,
+      ["requestSubscribeMessage", "cloud.callFunction", "getAccountInfoSync", "showToast"],
+      "develop accept 全链路调用序列(诊断在请求之后)"
+    );
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-GESTURE-2:develop fail 路径同样请求先行;fail 诊断走 modal 不走 toast", async function () {
+  var prevWx = globalThis.wx;
+  var rec = makeGestureWx({
+    impl: {
+      requestSubscribeMessage: function (o) {
+        o.fail({ errMsg: "requestSubscribeMessage:fail can only be invoked by user TAP gesture" });
+      },
+      getAccountInfoSync: function () {
+        return { miniProgram: { envVersion: "develop" } };
+      },
+      showToast: function () {},
+      showModal: function () {}
+    }
+  });
+  globalThis.wx = rec.wx;
+  try {
+    subscribe.requestExpirySubscribe();
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.equal(rec.calls[0], "requestSubscribeMessage", "fail 路径同样:订阅请求是第一条 wx API 调用");
+    assert.ok(
+      rec.calls.indexOf("requestSubscribeMessage") < rec.calls.indexOf("getAccountInfoSync"),
+      "fail 诊断的环境检查同样只能在请求之后"
+    );
+    assert.deepEqual(
+      rec.calls,
+      ["requestSubscribeMessage", "getAccountInfoSync", "showModal"],
+      "fail 路径序列:请求 → 环境诊断 → modal 全文(toast 已移除)"
+    );
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+test("SB-GESTURE-3:低版本(无 requestSubscribeMessage)提前 return——零 wx API 调用(不发任何桥接调用)", function () {
+  var prevWx = globalThis.wx;
+  var rec = makeGestureWx({
+    missing: ["requestSubscribeMessage"],
+    impl: {
+      getAccountInfoSync: function () {
+        return { miniProgram: { envVersion: "develop" } };
+      },
+      showToast: function () {},
+      showModal: function () {}
+    }
+  });
+  globalThis.wx = rec.wx;
+  try {
+    assert.doesNotThrow(function () {
+      subscribe.requestExpirySubscribe();
+    }, "低版本降级不抛错");
+    assert.equal(rec.calls.length, 0, "不发请求的降级路径同样零桥接调用(getAccountInfoSync 也不该被调)");
+  } finally {
+    restoreWx(prevWx);
   }
 });
