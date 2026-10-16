@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>拍照识物 · 交互原型 V0.3(贴当前设计语言)</title>
+<title>拍照识物 · 交互原型 V0.4(依架构师评审收紧)</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
   body{background:#141414;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",sans-serif;color:#191919;padding:28px 20px 60px}
@@ -31,16 +31,26 @@
   .capsule{position:absolute;top:50px;right:14px;width:88px;height:32px;background:rgba(0,0,0,.12);border-radius:99px;display:flex;align-items:center;justify-content:center;gap:10px;z-index:60}
   .capsule i{width:8px;height:8px;border-radius:50%;background:rgba(0,0,0,.35);display:block}
   .capsule .pill{width:20px;height:8px;border-radius:99px;background:rgba(0,0,0,.35)}
-  .navbar{flex:none;padding:52px 18px 11px;background:var(--bg);border-bottom:1rpx solid var(--line);border-bottom:1px solid var(--line)}
+  .navbar{flex:none;padding:52px 18px 11px;background:var(--bg);border-bottom:1px solid var(--line)}
   .navbar .t{font-size:17px;font-weight:800;color:var(--text)}
   .navbar .s{font-size:11.5px;color:var(--text3);margin-top:2px}
   .content{flex:1;overflow-y:auto;position:relative;background:var(--bg)}
 
-  /* ===== 照片与识别框(App 配色:墨=已确认,黄虚=待确认,红=用户,黄环=搜索) ===== */
-  .photoWrap{position:relative;width:100%;aspect-ratio:4/3;background:#000;overflow:hidden;flex:none}
+  /* ===== 照片=证据区(V0.4:默认折叠成证据条,点开才全幅;等比零裁剪) ===== */
+  .photoWrap{position:relative;width:100%;background:#000;overflow:hidden;flex:none;aspect-ratio:4/3;transition:height .25s ease}
   .photoWrap img{width:100%;height:100%;object-fit:cover;display:block}
+  .photoWrap.collapsed{aspect-ratio:auto;height:150px}
+  .photoWrap.collapsed img{filter:brightness(.55) blur(1px)}
+  .photoWrap.collapsed .bbox{display:none}
+  .photoWrap.collapsed .ask{display:none}
+  .evTap{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:5;cursor:pointer}
+  .photoWrap.collapsed .evTap{display:flex}
+  .evChip{background:rgba(255,255,255:.94);border-radius:99px;padding:9px 16px;font-size:12.5px;font-weight:800;color:var(--text);box-shadow:0 4px 14px rgba(0,0,0,.35)}
+  .evChip .e2{display:block;font-size:10px;color:var(--text3);font-weight:600;text-align:center;margin-top:1px}
+
+  /* ===== 识别框(全部是「候选」,墨=AI预选,黄虚=低可信候选,红=用户圈选,黄环=搜索回放) ===== */
   .bbox{position:absolute;border:2.5px solid var(--go-bg);border-radius:6px;box-shadow:0 0 0 1.5px rgba(255,255,255,.55);cursor:pointer;transition:all .2s}
-  .bbox .tag{position:absolute;top:-11px;left:-2px;background:var(--go-bg);color:var(--go-fg);font-size:10px;line-height:1;padding:4px 7px;border-radius:5px;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+  .bbox .tag{position:absolute;top:-11px;left:-2px;background:var(--go-bg);color:var(--go-fg);font-size:10px;line-height:1;padding:4px 7px;border-radius:5px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;font-weight:700}
   .bbox.amber{border-color:var(--accent-shadow);border-style:dashed}
   .bbox.amber .tag{background:var(--accent);color:var(--text)}
   .bbox.user{border:3px dashed var(--danger);border-radius:8px}
@@ -51,7 +61,7 @@
   @keyframes hitring{0%,100%{box-shadow:0 0 0 3px rgba(255,225,90,.65),0 0 0 1.5px rgba(255,255,255,.55)}50%{box-shadow:0 0 0 11px rgba(255,225,90,0),0 0 0 1.5px rgba(255,255,255,.55)}}
   .ask{position:absolute;right:6px;top:6px;background:rgba(17,17,17,.72);color:#fff;font-size:11px;padding:6px 10px;border-radius:8px;backdrop-filter:blur(4px)}
 
-  /* ===== 位置栏 ===== */
+  /* ===== 位置栏(V0.4:默认继承+逐件可改+保存时最终确认) ===== */
   .locbar{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px 0;padding:12px 13px;display:flex;gap:10px}
   .locbar .ico{font-size:18px;line-height:1.3}
   .locbar .main{flex:1;min-width:0}
@@ -65,40 +75,41 @@
   .locbar .lc .c3{border:1px solid var(--vb-btn-line);color:var(--text2)}
   .locbar .hint{font-size:10.5px;color:var(--text3);margin-top:7px}
 
-  /* ===== 横幅(App 黄底横幅) ===== */
   .warn{background:var(--banner-bg);border:1px solid var(--accent);border-radius:13px;margin:10px 12px 0;padding:10px 12px;font-size:11.5px;color:var(--text2);line-height:1.55}
 
-  /* ===== 清单(App 白卡细描边) ===== */
+  /* ===== 清单(三态:候选 / 保留·待存 / 已确认-入库后) ===== */
   .listhead{display:flex;justify-content:space-between;align-items:center;padding:13px 16px 6px;font-size:12.5px;color:var(--text3);font-weight:700}
   .listhead a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
   .list{padding:4px 12px 16px;display:flex;flex-direction:column;gap:8px}
   .row{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer}
   .row.sel{background:var(--accent-dim);border-color:var(--accent-shadow)}
   .row.hl{border:1.5px solid var(--go-bg)}
-  .ck{width:21px;height:21px;flex:none;border:1.5px solid var(--vb-btn-line);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--go-fg);background:#fff}
+  .ck{width:26px;height:26px;flex:none;border:1.5px solid var(--vb-btn-line);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--go-fg);background:#fff;cursor:pointer}
   .row.sel .ck{background:var(--go-bg);border-color:var(--go-bg)}
   .row .mid{flex:1;min-width:0}
-  .row .nm{font-size:14.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px}
+  .row .nm{font-size:14.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .row .src{font-size:9.5px;padding:2.5px 7px;border-radius:99px;flex:none;font-weight:700}
   .src.ai{background:var(--card-inset);color:var(--text2)}
+  .src.keep{background:var(--accent);color:var(--text)}
   .src.voice{background:var(--accent);color:var(--text)}
   .src.boxsel{background:var(--danger-bg);color:var(--danger)}
   .row .meta{font-size:11px;color:var(--text3);margin-top:2px}
-  .step{flex:none;display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text2)}
+  .row .meta .did{color:var(--text2);font-weight:700}
+  .step{flex:none;display:flex;align-items:center;gap:4px}
   .step b{min-width:26px;text-align:center;font-size:14px;color:var(--text)}
-  .step button{width:24px;height:24px;border-radius:8px;border:1px solid var(--vb-btn-line);background:#fff;color:var(--text2);font-size:14px;line-height:1;cursor:pointer}
+  .step button{width:36px;height:36px;border-radius:11px;border:1px solid var(--vb-btn-line);background:#fff;color:var(--text2);font-size:16px;line-height:1;cursor:pointer}
 
-  /* ===== 按钮(App:墨底黄字+硬投影 / 静默描边) ===== */
+  /* ===== 按钮 ===== */
   .btn{flex:none;border:none;border-radius:13px;font-size:14px;font-weight:800;cursor:pointer}
   .btn.go{background:var(--go-bg);color:var(--go-fg);padding:12px 0;flex:1;box-shadow:0 5px 0 var(--cta-shadow)}
   .btn.go:active{transform:translateY(2px);box-shadow:0 3px 0 var(--cta-shadow)}
   .btn.quiet{background:transparent;color:var(--text2);border:1.5px solid var(--vb-btn-line);padding:12px 0;flex:1}
   .btn.warnGo{background:var(--danger);color:#fff;padding:12px 0;flex:1;box-shadow:0 5px 0 #ecc2c0}
 
-  /* ===== 底部语音条(App voice-bar 复刻:奶油条+米黄胶囊+圆点挖窗) ===== */
+  /* ===== 底部语音条(App voice-bar 复刻) ===== */
   .botbar{flex:none;background:var(--vb-bg);border-top:1px solid var(--vb-line);display:flex;align-items:center;gap:8px;padding:8px 10px 20px}
   .hold{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;background:transparent;cursor:pointer;transition:filter .12s,transform .12s;user-select:none;touch-action:none}
-  .hold-face{flex:1;display:flex;align-items:center;gap:10px;border-radius:15px;background:var(--vb-hold-bg);color:var(--text);min-height:39px;padding:0 14px 0 6px;font-size:13.5px;font-weight:700;line-height:1.2;transition:filter .12s,transform .12s}
+  .hold-face{flex:1;display:flex;align-items:center;gap:10px;border-radius:15px;background:var(--vb-hold-bg);color:var(--text);min-height:44px;padding:0 14px 0 6px;font-size:13.5px;font-weight:700;line-height:1.2}
   .hold:active .hold-face{filter:brightness(.94);transform:scale(.985)}
   .hold.rec .hold-face{filter:brightness(.94)}
   .micdot{width:30px;height:30px;border-radius:50%;background:var(--vb-mic-bg);color:var(--vb-mic-fg);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;gap:1.5px}
@@ -107,9 +118,9 @@
   .mic-base{width:10.5px;height:1.5px;border-radius:1px;background:var(--vb-mic-fg)}
   .hold-label{flex:1;min-width:0}
   .hold-label .l2{display:block;font-size:9.5px;color:var(--text3);font-weight:600;margin-top:1px}
-  .saveSm{flex:none;height:40px;padding:0 15px;border-radius:11px;background:var(--go-bg);color:var(--go-fg);font-size:12.5px;font-weight:800;border:none;box-shadow:0 4px 0 var(--cta-shadow);cursor:pointer}
+  .saveSm{flex:none;height:44px;padding:0 16px;border-radius:12px;background:var(--go-bg);color:var(--go-fg);font-size:13px;font-weight:800;border:none;box-shadow:0 4px 0 var(--cta-shadow);cursor:pointer}
 
-  /* ===== 录音浮层(App recsheet 复刻) ===== */
+  /* ===== 录音浮层(App recsheet 复刻;V0.4:真实松手/上滑取消/最短按压) ===== */
   .recback{position:absolute;inset:0;z-index:45;background:rgba(0,0,0,.22);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
   .recsheet{position:absolute;left:12px;right:12px;bottom:76px;z-index:46;border-radius:22px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(14px) saturate(1.15);backdrop-filter:blur(14px) saturate(1.15);box-shadow:0 10px 30px rgba(0,0,0,.18);padding:16px 16px 14px;display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;animation:recpop .3s cubic-bezier(.2,.9,.3,1.35)}
   @keyframes recpop{0%{transform:translateY(46px) scale(.97);opacity:0}60%{transform:translateY(-4px);opacity:1}100%{transform:translateY(0) scale(1);opacity:1}}
@@ -128,20 +139,27 @@
   .rec-cta{width:100%;max-width:270px;min-height:33px;display:flex;align-items:center;justify-content:center;border-radius:15px;background:var(--go-bg);color:var(--go-fg);font-size:15px;font-weight:800;line-height:1}
   .rec-cancel{min-height:30px;display:flex;align-items:center;justify-content:center;padding:0 8px;font-size:12px;font-weight:600;color:var(--text2);text-decoration:underline;text-underline-offset:3px}
 
-  /* ===== diff 底部弹层(App 卡片风) ===== */
+  /* ===== diff 底部弹层(V0.4:逐项裁决 + 草稿ID锁定 + 原话保留) ===== */
   .dim{position:absolute;inset:0;background:rgba(15,17,20,.4);z-index:40}
   .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg);border-radius:22px 22px 0 0;padding:16px 16px 24px;z-index:41;animation:up .3s ease}
   @keyframes up{from{transform:translateY(55%)}to{transform:translateY(0)}}
   .grip{width:38px;height:4.5px;border-radius:99px;background:var(--line);margin:0 auto 12px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:13px;margin:0 0 10px;padding:11px 13px}
-  .card .ct{font-size:11.5px;color:var(--text3);margin-bottom:6px;font-weight:700}
+  .card .ct{font-size:11.5px;color:var(--text3);margin-bottom:6px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+  .card .ct .audio{font-size:10.5px;color:var(--text2);background:var(--card-inset);border-radius:99px;padding:3px 9px;font-weight:700}
   .trans{font-size:15px;line-height:1.7;font-weight:700;color:var(--text)}
   .trans em{font-style:normal;background:linear-gradient(transparent 62%,var(--accent) 62%)}
-  .diff{display:flex;flex-direction:column;gap:8px}
-  .dline{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+  .lockTip{font-size:11px;color:var(--text2);background:var(--card-inset);border-radius:9px;padding:7px 10px;margin-bottom:10px;line-height:1.5}
+  .drow{display:flex;align-items:flex-start;gap:9px;padding:8px 0;border-bottom:1px dashed var(--line)}
+  .drow:last-child{border-bottom:none;padding-bottom:2px}
+  .drow input{width:20px;height:20px;margin-top:2px;accent-color:#191919;flex:none;cursor:pointer}
+  .drow .dc{flex:1;min-width:0}
+  .drow .df{font-size:10.5px;color:var(--text3);font-weight:700;margin-bottom:3px}
+  .dline{display:flex;align-items:center;gap:7px;font-size:13.5px;flex-wrap:wrap}
   .dline .old{color:var(--danger);text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:rgba(217,48,37,.45)}
   .dline .arr{color:var(--text3)}
   .dline .new{color:var(--text);font-weight:800;background:linear-gradient(transparent 65%,var(--accent) 65%)}
+  .dline .note2{font-size:11px;color:var(--text3);font-weight:400}
   .why{font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5}
   .keepTip{font-size:11.5px;color:var(--text2);background:var(--banner-bg);border:1px solid var(--accent);border-radius:10px;padding:8px 10px;margin-top:10px;line-height:1.55}
 
@@ -153,7 +171,7 @@
   .inp{border:1px solid var(--line);border-radius:12px;padding:11px 12px;font-size:14.5px;display:flex;justify-content:space-between;align-items:center;background:var(--card);color:var(--text)}
   .inp .pen{color:#c1bcae;font-size:13px}
   .cand{display:flex;flex-wrap:wrap;gap:8px}
-  .cand span{border:1.5px solid var(--vb-btn-line);border-radius:99px;padding:7px 13px;font-size:13px;color:var(--text2);cursor:pointer;background:var(--card)}
+  .cand span{border:1.5px solid var(--vb-btn-line);border-radius:99px;padding:8px 14px;font-size:13px;color:var(--text2);cursor:pointer;background:var(--card)}
   .cand span.on{border-color:var(--go-bg);background:var(--go-bg);color:var(--go-fg);font-weight:800}
   .cand span .star{font-size:10px;color:var(--accent);margin-left:3px}
 
@@ -165,119 +183,124 @@
   .result .rt{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--text)}
   .result .rc{font-size:10.5px;color:var(--text);background:var(--accent);border-radius:5px;padding:2.5px 7px;font-weight:700}
   .result .rd{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.55}
-  .addedRow{margin:0 12px 8px;border:1.5px dashed var(--danger);background:var(--danger-bg)}
+  .addedRow{margin:0 12px 8px;border:1.5px dashed var(--danger)}
 
-  /* ===== 搜索屏 ===== */
+  /* ===== 搜索屏(V0.4:照片=历史证据,标拍摄时间/变更提示) ===== */
   .searchbar{margin:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:11px 13px;display:flex;gap:8px;align-items:center;font-size:14.5px;color:var(--text3)}
   .searchbar b{color:var(--text);font-weight:800;background:linear-gradient(transparent 62%,var(--accent) 62%);padding:0 2px}
   .hitcard{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px;overflow:hidden}
-  .hitcard .ph{position:relative;width:100%;aspect-ratio:4/3}
-  .hitcard .ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .hitcard .ph{position:relative;width:100%}
+  .hitcard .ph img{width:100%;display:block}
   .hitcard .body{padding:12px 14px 14px}
-  .hitcard .hn{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--text)}
+  .hitcard .hn{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--text);flex-wrap:wrap}
   .hitcard .hn .where{font-size:12px;color:var(--go-fg);font-weight:800;background:var(--go-bg);padding:4px 10px;border-radius:8px}
-  .hitcard .hm{font-size:11.5px;color:var(--text3);margin-top:5px;line-height:1.5}
+  .hitcard .hn .hist{font-size:10.5px;color:var(--text2);background:var(--card-inset);border-radius:6px;padding:3px 8px;font-weight:700}
+  .hitcard .hm{font-size:11.5px;color:var(--text3);margin-top:5px;line-height:1.6}
   .hitcard .acts{display:flex;gap:10px;margin-top:11px}
-  .hitcard .acts .btn{padding:10px 0;font-size:12.5px}
+  .hitcard .acts .btn{padding:11px 0;font-size:12.5px}
   .nocard{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px;padding:12px 14px;display:flex;gap:10px;align-items:center}
   .nocard .m{flex:1}
-  .nocard .n1{font-size:14px;font-weight:800;color:var(--text)}
-  .nocard .n2{font-size:11px;color:var(--text3);margin-top:2px}
-  .nocard .go2{flex:none;height:32px;padding:0 13px;border-radius:10px;border:1.5px solid var(--vb-btn-line);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer}
-  .toast{position:absolute;left:50%;transform:translateX(-50%);bottom:104px;background:var(--go-bg);color:var(--go-fg);font-size:13px;font-weight:700;padding:10px 16px;border-radius:99px;z-index:55}
+  .nocard .n1{font-size:14px;font-weight:800;color:var(--text);display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .nocard .n2{font-size:11px;color:var(--text3);margin-top:2px;line-height:1.5}
+  .nocard .go2{flex:none;height:36px;padding:0 13px;border-radius:10px;border:1.5px solid var(--vb-btn-line);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer}
+  .toast{position:absolute;left:50%;transform:translateX(-50%);bottom:104px;background:var(--go-bg);color:var(--go-fg);font-size:13px;font-weight:700;padding:10px 16px;border-radius:99px;z-index:55;white-space:nowrap}
 </style>
 </head>
 <body>
 
-<h1>「我靠东西呢」· 拍照识物交互原型 V0.3</h1>
-<div class="sub">已对齐 App 当前设计语言(奶油白/白卡细描边/明黄唯一强调/墨底黄字 CTA/语音条复刻)。原型中的识别框坐标为真实调研数据;真实抽屉照片不随库分发(仓库 public,隐私),缺图自动降级为占位底图,框与交互不受影响。</div>
+<h1>「我靠东西呢」· 拍照识物交互原型 V0.4</h1>
+<div class="sub">依架构师评审收紧:候选三态(不冒充已确认)/数量冻结为备注/照片=证据区/语音逐项裁决+真实按住与上滑取消/找物=历史证据。设计令牌仍取自 app.wxss 与 voice-bar;真实照片不入库,缺图自动降级,框与交互不受影响。</div>
 <div class="legend">
-  <span><b>按住说话</b>·语音条同款胶囊,左边撑满</span>
-  <span><b>位置=批次</b>·填一次全批继承</span>
-  <span><b>找东西=照片+框回放</b></span>
-  <span>数量<b>步进器</b>·计数不可信</span>
-  <span>AI 候选<b>一键改类</b></span>
-  <span><b>圈选补识别</b>·漏检兜底</span>
+  <span><b>三态候选</b>:候选→保留→已确认,AI 只预选</span>
+  <span><b>一条记录</b>=最小建档单位,数量只是备注</span>
+  <span>diff <b>逐项裁决</b>,原话保留可回听</span>
+  <span>照片=<b>证据区</b>,点候选才展开高亮</span>
+  <span>找物:照片是<b>历史证据</b>,标拍摄时间</span>
+  <span>触控热区 <b>≥44px</b>(步进器已放大)</span>
 </div>
 
 <div class="stage">
 
 <!-- ============ 屏1:识别确认 ============ -->
 <div class="shot">
-  <div class="cap">① 识别确认</div>
-  <div class="note"><b>位置栏</b>(批次级)+ <b>底部=现有语音条布局</b>:米黄胶囊按住说话撑满左侧,右侧小号墨底黄字保存,互不重叠。点行→照片定位;点胶囊体验完整「按住→听→改」。</div>
+  <div class="cap">① 识别确认(候选清单为主,照片折叠为证据条)</div>
+  <div class="note">视觉焦点=候选清单+保存数;<b>照片默认折叠</b>,点开或点候选行才展开高亮框。三态:未勾=<b>候选</b>,勾选=<b>保留(待存)</b>,入库成功才是「已确认记住」。AI 预选 3 件如实标注。按住胶囊说话试试(真实松手/上滑取消)。</div>
   <div class="phone" id="p1">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
-    <div class="navbar"><div class="t">拍照识物 · 确认入库</div><div class="s">识别到 7 件 · 高置信 3 件已自动勾选 · 点行可在照片上定位</div></div>
+    <div class="navbar"><div class="t">拍照识物 · 确认入库</div><div class="s">识别到 7 个候选,全部待你核对 · AI 预选了 3 个</div></div>
     <div class="content">
-      <div class="photoWrap" id="photo1">
+      <div class="photoWrap collapsed" id="photo1">
         <img src="real-1-1024.jpg" alt="抽屉照片">
-        <div class="ask">🅐 刚拍的这张</div>
+        <div class="ask">🅐 本批照片(证据)</div>
+        <div class="evTap" onclick="expandPhoto(true)"><div class="evChip">📍 点开照片核对<span class="e2">证据区 · 框在展开后显示</span></div></div>
       </div>
       <div class="locbar">
         <div class="ico">📍</div>
         <div class="main">
-          <div class="lb">这批 7 件都在哪?填一次,全部继承</div>
+          <div class="lb">这批候选默认都在哪?(填一次,逐件可改)</div>
           <div class="lv">玄关柜 · 第二层抽屉 <span class="pen">✎</span></div>
           <div class="lc"><span class="c1">🎤 按住说位置</span><span class="c2">常用:主卧五斗柜</span><span class="c2">常用:电视柜</span><span class="c3">＋新建</span></div>
-          <div class="hint">个别物品位置不同?点行进编辑单独改。</div>
+          <div class="hint">候选默认继承这个位置,例外在编辑里逐件改;保存前会再让你确认一次。</div>
         </div>
       </div>
-      <div class="warn">数量是 AI 估的(它数数不太行),点数核对更稳妥;名称不对,按住下面胶囊说一声就行。</div>
-      <div class="listhead"><span>已选 5 / 7 件</span><a href="javascript:void(0)" onclick="alert('原型:全选/反选')">全选 / 反选</a></div>
+      <div class="warn">一条记录 = 一件可查找的物品:电池×24 也只记一条,数量是备注,不做库存管理。数量为 AI 估计,核对更稳。</div>
+      <div class="listhead"><span id="cntHead">保留 3 / 7(含 AI 预选 3,待核对)</span><a href="javascript:void(0)" onclick="alert('原型:全选/清空')">全选 / 清空</a></div>
       <div class="list" id="list1"></div>
     </div>
     <div class="botbar">
-      <div class="hold" id="micMain" onmousedown="simHold()" ontouchstart="simHold()">
+      <div class="hold" id="micMain">
         <div class="hold-face">
           <div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
           <div class="hold-label">按住说话<span class="l2">补全 · 改数量 · 说位置</span></div>
         </div>
       </div>
-      <button class="saveSm">存 5 件</button>
+      <button class="saveSm" id="saveBtn">存 3 件</button>
     </div>
-    <!-- 录音浮层(App recsheet 同款) -->
+    <!-- 录音浮层 -->
     <div id="recWrap" style="display:none;position:absolute;inset:0;z-index:45;pointer-events:none">
       <div class="recback"></div>
-      <div class="recsheet">
-        <div class="rec-title">说吧,我记着呢。</div>
+      <div class="recsheet" id="recSheet">
+        <div class="rec-title" id="recTitle">说吧,我记着呢。</div>
         <div class="recrow">
           <div class="recmic"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
           <div class="wave"><i style="height:12px"></i><i style="height:24px;animation-delay:.12s"></i><i style="height:30px;animation-delay:.24s"></i><i style="height:20px;animation-delay:.36s"></i><i style="height:14px;animation-delay:.48s"></i><i style="height:26px;animation-delay:.6s"></i><i style="height:11px;animation-delay:.72s"></i></div>
         </div>
         <div class="rec-hint" id="liveTxt">第3个是品…</div>
-        <div class="rec-cta">松开,去核对</div>
-        <div class="rec-cancel">↑ 上滑取消 · 取消就当没说过,什么都不记</div>
+        <div class="rec-cta" id="recCta">松开,去核对</div>
+        <div class="rec-cancel" id="recCancel">↑ 上滑取消 · 取消就当没说过,什么都不记</div>
       </div>
     </div>
-    <!-- diff 浮层 -->
+    <!-- diff 浮层:逐项裁决 -->
     <div class="dim" id="diffDim" style="display:none"></div>
     <div class="sheet" id="diffSheet" style="display:none">
       <div class="grip"></div>
       <div class="card">
-        <div class="ct">你说</div>
-        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em></div>
+        <div class="ct"><span>你说</span><span class="audio">🎧 原话已保留 · 可回听</span></div>
+        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em>,<em>放厨房去</em></div>
       </div>
+      <div class="lockTip">已锁定候选 <b>#d3 黄色薯片罐</b>——按内容锁定,不按行号;你删行、重排都不受影响。没对上就不改,让你点选。</div>
       <div class="card" style="margin-bottom:12px">
-        <div class="ct">我理解为 1 处修改,过目再改</div>
-        <div class="diff"><div class="dline"><span class="old">黄色薯片罐 ×1</span><span class="arr">→</span><span class="new">品客薯片罐(空)×1</span></div></div>
-        <div class="why">依据:「第3个」对上清单第 3 行;「品客的薯片罐」改名称;「空了」记为状态</div>
+        <div class="ct">我理解为 3 处修改,勾选应用</div>
+        <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">名称</div><div class="dline"><span class="old">黄色薯片罐</span><span class="arr">→</span><span class="new">品客薯片罐</span></div></div></div>
+        <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">数量不明</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
+        <div class="drow"><input type="checkbox" class="dck" checked onchange="diffCount()"><div class="dc"><div class="df">位置(例外,不继承批次)</div><div class="dline"><span class="old">玄关柜·第二层</span><span class="arr">→</span><span class="new">厨房</span></div></div></div>
+        <div class="why">解析:内容词「品客的薯片罐」对上 #d3;「空了」进备注;「放厨房去」只改这一件的位置。</div>
       </div>
       <div style="display:flex;gap:10px">
-        <button class="btn quiet">念错了,当我没说</button>
-        <button class="btn go" onclick="applyDiff(this)">就这么改</button>
+        <button class="btn quiet" id="diffCancel">念错了,当我没说</button>
+        <button class="btn go" id="diffApply" onclick="applyDiff()">应用勾选的 3 处</button>
       </div>
-      <div class="keepTip">改完接着按住说下一处就行,不用等我——比如「白色数据线一共3根」。</div>
+      <div class="keepTip">改完接着按住说下一处就行;一句话多项修改会像这样拆开,你可以只应用其中几项。</div>
     </div>
-    <div class="toast" id="toast" style="display:none">✓ 改好了 1 处 · 接着按住说</div>
+    <div class="toast" id="toast" style="display:none"></div>
   </div>
 </div>
 
 <!-- ============ 屏2:按住说话中 ============ -->
 <div class="shot">
   <div class="cap">② 按住说话中(同屏浮层)</div>
-  <div class="note">不跳页——录音小窗浮在确认页上(<b>App 录音浮层同款</b>:页面压暗可见、小窗回弹入场、黄圆麦克风+脉冲环+墨色波形)。</div>
+  <div class="note">按住出浮层,<b>松手</b>→去核对;<b>上滑</b>→「好,当我没听见。」可滑回继续说(屏①的胶囊已实现真实手势,可操作)。</div>
   <div class="phone">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
@@ -289,17 +312,17 @@
         <div class="recmic"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
         <div class="wave"><i style="height:12px"></i><i style="height:24px;animation-delay:.12s"></i><i style="height:30px;animation-delay:.24s"></i><i style="height:20px;animation-delay:.36s"></i><i style="height:14px;animation-delay:.48s"></i><i style="height:26px;animation-delay:.6s"></i><i style="height:11px;animation-delay:.72s"></i></div>
       </div>
-      <div class="rec-hint">第3个是品客的薯片罐,已经空了<span style="opacity:.35">▍</span><br><b>松手后先给你核对一遍,确认了才算记住。</b></div>
+      <div class="rec-hint">第3个是品客的薯片罐,已经空了,放厨房去<span style="opacity:.35">▍</span><br><b>松手后逐项核对,勾几项改几项。</b></div>
       <div class="rec-cta">松开,去核对</div>
       <div class="rec-cancel">↑ 上滑取消 · 取消就当没说过,什么都不记</div>
     </div>
   </div>
 </div>
 
-<!-- ============ 屏3:松手→diff 过目 ============ -->
+<!-- ============ 屏3:松手→逐项裁决 ============ -->
 <div class="shot">
-  <div class="cap">③ 松手 → 改动过目</div>
-  <div class="note">diff 卡从底部弹出:旧值红划线、新值黄荧光,过目才改——<b>语音再快,裁决权在人</b>。应用后不收流程,接着按住连改。</div>
+  <div class="cap">③ 松手 → 逐项裁决</div>
+  <div class="note">一句话可能同时改名称/数量/位置——<b>按字段拆开,勾几项应用几项</b>;原话保留可回听;绑定候选 #d3(按内容,不按行号)。</div>
   <div class="phone">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
@@ -308,19 +331,22 @@
     <div class="sheet">
       <div class="grip"></div>
       <div class="card">
-        <div class="ct">你说</div>
-        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em></div>
+        <div class="ct"><span>你说</span><span class="audio">🎧 原话已保留 · 可回听</span></div>
+        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em>,<em>放厨房去</em></div>
       </div>
+      <div class="lockTip">已锁定候选 <b>#d3 黄色薯片罐</b>——按内容锁定,不按行号;没对上就不改,让你点选。</div>
       <div class="card" style="margin-bottom:12px">
-        <div class="ct">我理解为 1 处修改,过目再改</div>
-        <div class="diff"><div class="dline"><span class="old">黄色薯片罐 ×1</span><span class="arr">→</span><span class="new">品客薯片罐(空)×1</span></div></div>
-        <div class="why">依据:「第3个」对上清单第 3 行;「品客的薯片罐」改名称;「空了」记为状态</div>
+        <div class="ct">我理解为 3 处修改,勾选应用</div>
+        <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">名称</div><div class="dline"><span class="old">黄色薯片罐</span><span class="arr">→</span><span class="new">品客薯片罐</span></div></div></div>
+        <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">数量备注</div><div class="dline"><span class="old">数量不明</span><span class="arr">→</span><span class="new">×1(空罐)</span></div></div></div>
+        <div class="drow"><input type="checkbox" checked><div class="dc"><div class="df">位置(例外,不继承批次)</div><div class="dline"><span class="old">玄关柜·第二层</span><span class="arr">→</span><span class="new">厨房</span></div></div></div>
+        <div class="why">解析:内容词「品客的薯片罐」对上 #d3;「空了」进备注;「放厨房去」只改这一件的位置。</div>
       </div>
       <div style="display:flex;gap:10px">
         <button class="btn quiet">念错了,当我没说</button>
-        <button class="btn go">就这么改</button>
+        <button class="btn go">应用勾选的 3 处</button>
       </div>
-      <div class="keepTip">改完接着按住说下一处就行,不用等我——比如「白色数据线一共3根」。</div>
+      <div class="keepTip">改完接着按住说下一处就行;一句话多项修改会拆开,可只应用其中几项。</div>
     </div>
   </div>
 </div>
@@ -328,33 +354,31 @@
 <!-- ============ 屏4:手动编辑 ============ -->
 <div class="shot">
   <div class="cap">④ 手动编辑(点行进入)</div>
-  <div class="note">细分类错误修复现场:模型认出包装文字「米朵恋」但判成卫生棉条,你实测是棉柔巾——<b>候选词点一下就改</b>。位置默认继承批次位置。</div>
+  <div class="note">细分类错修复现场(棉柔巾真实案例);数量只作备注;位置默认继承批次,例外在此逐件改。</div>
   <div class="phone">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
-    <div class="navbar"><div class="t">识别确认</div><div class="s">主卧五斗柜 · 第一层(9 件)</div></div>
+    <div class="navbar"><div class="t">识别确认</div><div class="s">主卧五斗柜 · 第一层(9 个候选)</div></div>
     <div class="content" style="filter:grayscale(.3) brightness(.94)">
-      <div class="photoWrap"><img src="real-2-1024.jpg" alt="抽屉照片">
-        <div class="bbox user" style="left:73.1%;top:55.5%;width:26.9%;height:37.7%"><span class="tag">正在编辑</span></div>
-      </div>
+      <div class="photoWrap collapsed"><img src="real-2-1024.jpg" alt="抽屉照片" style="filter:brightness(.45)"><div class="evTap"><div class="evChip">📍 点开照片核对</div></div></div>
       <div class="list">
-        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">湿巾 <span class="src ai">AI</span></div><div class="meta">×2 · 置信度高</div></div></div>
-        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">创口贴 <span class="src ai">AI</span></div><div class="meta">×1 · 置信度高</div></div></div>
-        <div class="row sel hl"><div class="ck">✓</div><div class="mid"><div class="nm">卫生棉条 <span class="src ai">AI</span></div><div class="meta">×9 · 置信度 62% ← 正在编辑</div></div></div>
+        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">湿巾 <span class="src keep">保留</span></div><div class="meta"><span class="did">#d1</span> · ×2 备注 · 置信度高</div></div></div>
+        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">创口贴 <span class="src keep">保留</span></div><div class="meta"><span class="did">#d2</span> · ×1 备注 · 置信度高</div></div></div>
+        <div class="row sel hl"><div class="ck">✓</div><div class="mid"><div class="nm">卫生棉条 <span class="src ai">候选</span></div><div class="meta"><span class="did">#d3</span> · ×9 备注 · 置信度 62% ← 正在编辑</div></div></div>
       </div>
     </div>
     <div class="dim"></div>
     <div class="sheet">
       <div class="grip"></div>
-      <h3>改一下</h3>
+      <h3>改一下 · #d3</h3>
       <div class="conf">来源:照片识别 · 认出了包装文字「米朵恋」· 置信度 62%</div>
       <div class="fld"><label>名称 · 候选点选即改</label>
         <div class="cand"><span class="on">棉柔巾<span class="star">★最像</span></span><span>湿巾</span><span>卸妆棉</span><span>保持:卫生棉条</span></div>
       </div>
-      <div class="fld"><label>数量(按包装排面估的,建议核一眼)</label>
-        <div class="inp"><span style="color:var(--text3)">步进器</span><span class="step" style="display:flex;gap:9px;align-items:center"><button>−</button><b>9</b><button>+</button></span></div>
+      <div class="fld"><label>数量备注(一条记录,不做库存管理)</label>
+        <div class="inp"><span style="color:var(--text3)">备注 ×</span><span class="step" style="display:flex;gap:9px;align-items:center"><button>−</button><b>9</b><button>+</button></span></div>
       </div>
-      <div class="fld"><label>位置(默认继承本批,不同才改)</label><div class="inp"><span>主卧五斗柜 · 第一层</span><span class="pen">✎</span></div></div>
+      <div class="fld"><label>位置(默认继承批次,不同才改)</label><div class="inp"><span>主卧五斗柜 · 第一层</span><span class="pen">✎</span></div></div>
       <div class="fld"><label>提醒日期(可选)</label><div class="inp"><span style="color:#c1bcae">不设提醒</span><span class="pen">✎</span></div></div>
       <button class="btn go" style="width:100%">就这么改</button>
     </div>
@@ -363,22 +387,22 @@
 
 <!-- ============ 屏5:圈选补识别 ============ -->
 <div class="shot">
-  <div class="cap">⑤ 圈选补识别(漏检兜底)</div>
-  <div class="note">清单里没有的,照片上圈一下问它——<b>全图+坐标</b>一起送审(调研结论:比裁剪再问稳)。结果带置信度,入清单标「圈选」。</div>
+  <div class="cap">⑤ 圈选补识别(先确认,后入列)</div>
+  <div class="note">圈一下问它是什么(全图+坐标送审);<b>点了「加进清单」才入列</b>,且入列为未勾选候选,由你决定保留与否。</div>
   <div class="phone">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
-    <div class="navbar"><div class="t">圈一下,问它是什么</div><div class="s">清单漏了?圈出它 → 补识别 → 入清单</div></div>
+    <div class="navbar"><div class="t">圈一下,问它是什么</div><div class="s">清单漏了?圈出它 → 补识别 → 你确认才入列</div></div>
     <div class="content">
       <div class="hintbar"><span class="dot"></span>用手指在照片上画一个框,框住想知道的东西</div>
       <div class="photoWrap" id="photo5"><img src="real-1-1024.jpg" alt="抽屉照片"></div>
-      <div style="text-align:center;margin:14px 0 4px"><button class="btn warnGo" style="padding:11px 26px;flex:none" onclick="fakeCircle()">👆 模拟:圈左下角白色盒子</button></div>
+      <div style="text-align:center;margin:14px 0 4px"><button class="btn warnGo" style="padding:12px 26px;flex:none" onclick="fakeCircle()">👆 模拟:圈左下角白色盒子</button></div>
       <div class="result" id="askResult" style="display:none">
         <div class="rt">PlayStation 游戏盒 <span class="rc">置信度中</span></div>
         <div class="rd">白底彩印盒装,可见 PlayStation 标志与人物封面,此前清单没收录(漏检了)。<br>依据:你圈的框 + 整张抽屉照片一起看的</div>
         <div style="display:flex;gap:10px;margin-top:12px">
           <button class="btn quiet" onclick="resetCircle()">不是,重圈</button>
-          <button class="btn go" onclick="this.textContent='✓ 加进清单了'">加进清单</button>
+          <button class="btn go" id="circleAdd" onclick="addCircled()">加进清单(候选)</button>
         </div>
       </div>
       <div class="list" id="list5"></div>
@@ -387,15 +411,15 @@
       <div class="hold" style="pointer-events:none">
         <div class="hold-face"><div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div><div class="hold-label">按住说话</div></div>
       </div>
-      <button class="saveSm">存 8 件</button>
+      <button class="saveSm">存 3 件</button>
     </div>
   </div>
 </div>
 
 <!-- ============ 屏6:找东西 ============ -->
 <div class="shot">
-  <div class="cap">⑥ 找东西 · 照片+框回放</div>
-  <div class="note">闭环:录入时存的框,找的时候放给你看——<b>「电池在哪」→ 抽屉照片+黄环在闪,指给你看</b>。没照片的降级为文字+「去补拍」。</div>
+  <div class="cap">⑥ 找东西 · 照片是历史证据</div>
+  <div class="note">照片+框回放,但明示<b>「拍摄于某日,当时记录在这里」</b>;物品已移动时旧照片仍可回看、不算现址;无照片降级文字+补拍。</div>
   <div class="phone">
     <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
     <div class="capsule"><i></i><i></i><span class="pill"></span></div>
@@ -405,11 +429,11 @@
       <div class="hitcard">
         <div class="ph" id="photo6">
           <img src="real-3-1024.jpg" alt="文具抽屉">
-          <div class="ask">📍 客厅电视柜 · 第一层</div>
+          <div class="ask">📷 拍摄于 10-17 · 当时记录:客厅电视柜 · 第一层</div>
         </div>
         <div class="body">
-          <div class="hn">7号电池 <span class="where">客厅电视柜 · 第一层</span></div>
-          <div class="hm">×24(你核对过的)· 照片拍于 10-17 · 框住的就是它,点照片放大看</div>
+          <div class="hn">7号电池 <span class="where">客厅电视柜 · 第一层</span> <span class="hist">历史照片</span></div>
+          <div class="hm">×24 备注(你核对过)· 框住的是照片里的它;若之后挪了地方,以文字位置为准,照片供回看定位</div>
           <div class="acts">
             <button class="btn quiet" onclick="alert('原型:大图查看,黄环闪烁定位')">🔍 看大图</button>
             <button class="btn quiet">📸 重拍更新</button>
@@ -423,8 +447,8 @@
       </div>
       <div class="nocard">
         <div style="font-size:20px">🧣</div>
-        <div class="m"><div class="n1">围巾 · 玄关柜 · 第二层</div><div class="n2">×1 · 来自拍照入库(10-17)· 照片里没框到它(手动补的)</div></div>
-        <button class="go2">看抽屉照片</button>
+        <div class="m"><div class="n1">围巾 <span class="hist" style="font-size:10.5px;color:var(--text2);background:var(--card-inset);border-radius:6px;padding:3px 8px;font-weight:700">位置已变更</span></div><div class="n2">现在:玄关柜 · 第一层(文字记录);旧照片(10-17·第二层)仍可回看作证据</div></div>
+        <button class="go2">看旧照片</button>
       </div>
     </div>
     <div class="botbar">
@@ -447,13 +471,17 @@ document.querySelectorAll('.photoWrap img').forEach(img=>{
     d.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa0a6;font-size:12px;text-align:center;padding:0 34px;line-height:1.8';
     d.textContent='示意底图未随库分发(真实家庭照片不入 public 仓库)。本地放置 real-{1,2,3}-1024.jpg 即出完整演示,识别框与交互不受影响。';
     w.appendChild(d);};
+  /* 等比零裁剪:容器比例跟随原图(V0.4 坐标合同:禁 object-fit 裁切错位) */
+  img.onload=()=>{ if(img.naturalWidth) img.parentElement.style.aspectRatio=img.naturalWidth+'/'+img.naturalHeight; };
 });
-/* ===== real-1 grounding 实测坐标(0-1000 归一化,/10=%) ===== */
+
+/* ===== real-1 grounding 实测坐标(0-1000 归一化;/10=%,容器等比不裁切故直接映射) =====
+   生产合同:模型适配层显式声明量纲 → 统一存 0-1 相对原图 + 原图宽高 → 前端按缩放/裁剪变换;不可信框不显示 */
 const R1 = [
   {id:"zelda",  box:[230,485,379,868], name:"塞尔达传说:旷野之息", sub:"Switch 卡盒", n:1, ok:true},
   {id:"hakutan",box:[361,480,562,883], name:"煤矿镇的小白", sub:"Switch 卡盒 · AI 猜全名:蜡笔小新:煤炭镇的小白", n:1, ok:true},
-  {id:"chips",  box:[273,389,593,507], name:"黄色薯片罐", sub:"置信度中 · 按住说「第3个是品客薯片罐,空了」", n:1, ok:false},
-  {id:"cable",  box:[614,521,897,879], name:"白色数据线", sub:"数量为估计,请核对", n:2, ok:false},
+  {id:"chips",  box:[273,389,593,507], name:"黄色薯片罐", sub:"置信度中 · 按住说「第3个是品客薯片罐…」", n:1, ok:false},
+  {id:"cable",  box:[614,521,897,879], name:"白色数据线", sub:"数量为估计备注,请核对", n:2, ok:false},
   {id:"adap",   box:[682,163,960,428], name:"黑色电源适配器", sub:"置信度中", n:1, ok:false},
   {id:"earph",  box:[281,163,394,309], name:"黑色耳机", sub:"置信度高", n:1, ok:true},
   {id:"bbox868",box:[868,790,982,873], name:"黑色小盒子", sub:"置信度低 · 看不清可删", n:1, ok:false},
@@ -465,54 +493,123 @@ function renderBoxes(){
     d.className="bbox"+(it.ok?"":" amber"); d.id="bx-"+it.id;
     d.style.left=(x1/10)+"%"; d.style.top=(y1/10)+"%";
     d.style.width=((x2-x1)/10)+"%"; d.style.height=((y2-y1)/10)+"%";
-    d.innerHTML=`<span class="tag">${it.name}</span>`;
+    d.innerHTML=`<span class="tag">${it.ok?"预选":"候选"}·${it.name}</span>`;
     d.onclick=()=>flashRow(it.id);
     p.appendChild(d);
   });
 }
 function renderList(){
   const l=document.getElementById("list1");
-  R1.forEach(it=>{
+  R1.forEach((it,i)=>{
     const r=document.createElement("div");
     r.className="row"+(it.ok?" sel":""); r.id="rw-"+it.id;
-    r.innerHTML=`<div class="ck">${it.ok?"✓":""}</div>
-      <div class="mid"><div class="nm">${it.name} <span class="src ai">AI</span></div>
-      <div class="meta">${it.sub}</div></div>
+    r.innerHTML=`<div class="ck" onclick="toggleRow('${it.id}');event.stopPropagation()">${it.ok?"✓":""}</div>
+      <div class="mid"><div class="nm">${it.name} <span class="src ${it.ok?"keep":"ai"}">${it.ok?"保留":"候选"}</span></div>
+      <div class="meta"><span class="did">#d${i+1}</span> · ×${it.n} 备注 · ${it.sub}</div></div>
       <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${it.n}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
-    r.onclick=()=>flashBox(it.id);
+    r.onclick=()=>{expandPhoto(true);flashBox(it.id);};
     l.appendChild(r);
   });
+  updateCounts();
 }
+function toggleRow(id){const r=document.getElementById("rw-"+id);
+  r.classList.toggle("sel");
+  r.querySelector(".ck").textContent=r.classList.contains("sel")?"✓":"";
+  const src=r.querySelector(".src"); src.textContent=r.classList.contains("sel")?"保留":"候选";
+  src.className="src "+(r.classList.contains("sel")?"keep":"ai");
+  updateCounts();}
+function updateCounts(){
+  const n=document.querySelectorAll("#list1 .row.sel").length;
+  document.getElementById("cntHead").textContent=`保留 ${n} / 7(待核对)`;
+  document.getElementById("saveBtn").textContent=`存 ${n} 件`;}
 function flashBox(id){const b=document.getElementById("bx-"+id),r=document.getElementById("rw-"+id);
   document.querySelectorAll(".bbox").forEach(e=>e.classList.remove("pulse"));
   document.querySelectorAll(".row").forEach(e=>e.classList.remove("hl"));
   if(b){b.classList.add("pulse");b.scrollIntoView({block:"center",behavior:"smooth"});}
   if(r)r.classList.add("hl");}
 function step(btn,d){const b=btn.parentElement.querySelector("b");b.textContent=Math.max(1,+b.textContent+d);}
+function expandPhoto(open){const p=document.getElementById("photo1");
+  if(open)p.classList.remove("collapsed");
+  else p.classList.add("collapsed");}
 renderBoxes();renderList();
 
-/* ===== 屏① 按住说话完整演示(点按=模拟按住1.5秒) ===== */
-function simHold(){
-  const mic=document.getElementById("micMain"), wrap=document.getElementById("recWrap"),
-        live=document.getElementById("liveTxt");
-  wrap.style.display="block"; mic.classList.add("rec"); live.innerHTML="第3个是品…";
-  setTimeout(()=>{live.innerHTML="第3个是品客的薯…"},550);
-  setTimeout(()=>{live.innerHTML="第3个是品客的薯片罐,已经空了"},1000);
-  setTimeout(()=>{
-    wrap.style.display="none"; mic.classList.remove("rec");
-    document.getElementById("diffDim").style.display="block";
-    document.getElementById("diffSheet").style.display="block";
-  },1500);
+/* ===== 屏① 按住说话:真实按住/松手/上滑取消/最短按压(演示为模拟转写) ===== */
+const micEl=document.getElementById("micMain");
+let holding=false, cancelled=false, startY=0, t0=0, timers=[];
+function bindHold(){
+  const dn=e=>{e.preventDefault();startHold(e);};
+  const mv=e=>{moveHold(e);};
+  const up=e=>{endHold();};
+  micEl.addEventListener("mousedown",dn); micEl.addEventListener("touchstart",dn,{passive:false});
+  window.addEventListener("mousemove",mv); window.addEventListener("mouseup",up);
+  window.addEventListener("touchmove",mv,{passive:false}); window.addEventListener("touchend",up);
 }
-function applyDiff(){
+function liveSeq(){
+  const live=document.getElementById("liveTxt");
+  live.innerHTML="第3个是品…";
+  timers.push(setTimeout(()=>live.innerHTML="第3个是品客的薯…",550));
+  timers.push(setTimeout(()=>live.innerHTML="第3个是品客的薯片罐,已经空了,放厨房去",1050));
+}
+function startHold(e){
+  holding=true; cancelled=false; t0=Date.now();
+  startY=(e.touches?e.touches[0].clientY:e.clientY);
+  document.getElementById("recWrap").style.display="block";
+  micEl.classList.add("rec");
+  document.getElementById("recTitle").textContent="说吧,我记着呢。";
+  document.getElementById("recCta").textContent="松开,去核对";
+  document.getElementById("recCancel").textContent="↑ 上滑取消 · 取消就当没说过,什么都不记";
+  liveSeq();
+}
+function moveHold(e){
+  if(!holding)return;
+  const y=(e.touches?e.touches[0].clientY:e.clientY);
+  const up50=startY-y>50;
+  if(up50&&!cancelled){cancelled=true;
+    document.getElementById("recTitle").textContent="好,当我没听见。";
+    document.getElementById("recCta").textContent="(松手即取消)";
+    document.getElementById("recCancel").textContent="↓ 滑回来就继续说";}
+  else if(!up50&&cancelled){cancelled=false;
+    document.getElementById("recTitle").textContent="说吧,我记着呢。";
+    document.getElementById("recCta").textContent="松开,去核对";
+    document.getElementById("recCancel").textContent="↑ 上滑取消 · 取消就当没说过,什么都不记";}
+}
+function endHold(){
+  if(!holding)return; holding=false;
+  timers.forEach(clearTimeout); timers=[];
+  document.getElementById("recWrap").style.display="none";
+  micEl.classList.remove("rec");
+  if(Date.now()-t0<250){toast("按太快了,不算数");return;}   /* 最短按压阈值 */
+  if(cancelled){toast("好,当我没听见。");return;}           /* 上滑取消 */
+  document.getElementById("diffDim").style.display="block";
+  document.getElementById("diffSheet").style.display="block";
+  diffCount();
+}
+function toast(msg){const t=document.getElementById("toast");
+  t.textContent=msg; t.style.display="block";
+  setTimeout(()=>t.style.display="none",1800);}
+bindHold();
+document.getElementById("diffCancel").onclick=()=>{
   document.getElementById("diffDim").style.display="none";
   document.getElementById("diffSheet").style.display="none";
-  const t=document.getElementById("toast"); t.style.display="block";
+  toast("好,当我没说。");};
+function diffCount(){
+  const n=document.querySelectorAll("#diffSheet .dck:checked").length;
+  document.getElementById("diffApply").textContent=`应用勾选的 ${n} 处`;}
+function applyDiff(){
+  const cks=[...document.querySelectorAll("#diffSheet .dck")];
+  document.getElementById("diffDim").style.display="none";
+  document.getElementById("diffSheet").style.display="none";
   const row=document.getElementById("rw-chips");
-  if(row){row.classList.add("sel");row.querySelector(".ck").textContent="✓";
-    row.querySelector(".nm").innerHTML='品客薯片罐(空) <span class="src voice">语音</span>';}
-  setTimeout(()=>t.style.display="none",2200);
-}
+  if(row){
+    if(cks[0]&&cks[0].checked){row.classList.add("sel");row.querySelector(".ck").textContent="✓";
+      row.querySelector(".nm").innerHTML='品客薯片罐 <span class="src voice">语音</span>';
+      row.querySelector(".src")&&0;}
+    else{row.classList.add("sel");row.querySelector(".ck").textContent="✓";}
+    if(cks[2]&&cks[2].checked)row.querySelector(".meta").innerHTML='<span class="did">#d3</span> · ×1 备注 · 位置例外:厨房(语音)';
+    updateCounts();
+  }
+  toast(`改好了 ${cks.filter(c=>c.checked).length} 处 · 接着按住说`);}
+
 /* ===== 克隆屏①到屏②③ ===== */
 document.querySelectorAll(".cloneSlot").forEach(slot=>{
   const src=document.getElementById(slot.dataset.from);
@@ -521,7 +618,8 @@ document.querySelectorAll(".cloneSlot").forEach(slot=>{
   });
 });
 
-/* ===== 屏⑤ 模拟圈选 ===== */
+/* ===== 屏⑤ 圈选:先识别,确认才入列(未勾选候选) ===== */
+let circled=false;
 function fakeCircle(){
   const p=document.getElementById("photo5");
   document.querySelectorAll("#photo5 .bbox.user").forEach(e=>e.remove());
@@ -529,15 +627,21 @@ function fakeCircle(){
   d.style.left="6%";d.style.top="69%";d.style.width="23%";d.style.height="24%";
   d.innerHTML='<span class="tag">你圈的框</span>'; p.appendChild(d);
   document.getElementById("askResult").style.display="block";
+  circled=false; document.getElementById("circleAdd").textContent="加进清单(候选)";
+}
+function addCircled(){
+  if(circled)return; circled=true;
+  document.getElementById("circleAdd").textContent="✓ 已加为候选(未勾选)";
   const l5=document.getElementById("list5");
-  const r=document.createElement("div"); r.className="row sel addedRow";
-  r.innerHTML='<div class="ck">✓</div><div class="mid"><div class="nm">PlayStation 游戏盒 <span class="src boxsel">圈选</span></div><div class="meta">×1 · 刚刚由圈选补入</div></div><div class="step"><button>−</button><b>1</b><button>+</button></div>';
+  const r=document.createElement("div"); r.className="row addedRow";
+  r.innerHTML='<div class="ck"></div><div class="mid"><div class="nm">PlayStation 游戏盒 <span class="src boxsel">圈选·候选</span></div><div class="meta"><span class="did">#d8</span> · ×1 备注 · 刚由圈选补入,勾选才保留</div></div><div class="step"><button>−</button><b>1</b><button>+</button></div>';
+  r.onclick=()=>{r.classList.toggle("sel");r.querySelector(".ck").textContent=r.classList.contains("sel")?"✓":"";};
   l5.appendChild(r);
 }
 function resetCircle(){
   document.querySelectorAll("#photo5 .bbox.user").forEach(e=>e.remove());
   document.getElementById("askResult").style.display="none";
-  document.getElementById("list5").innerHTML="";
+  document.getElementById("list5").innerHTML=""; circled=false;
 }
 
 /* ===== 屏⑥ 电池高亮框(real-3 实测 [605,248,997,731]) ===== */
@@ -547,7 +651,7 @@ function resetCircle(){
   d.className="bbox hit";
   d.style.left=(b[0]/10)+"%";d.style.top=(b[1]/10)+"%";
   d.style.width=((b[2]-b[0])/10)+"%";d.style.height=((b[3]-b[1])/10)+"%";
-  d.innerHTML='<span class="tag">🔋 电池在这里</span>';
+  d.innerHTML='<span class="tag">🔋 照片里它在这里</span>';
   p.appendChild(d);
 })();
 </script>
