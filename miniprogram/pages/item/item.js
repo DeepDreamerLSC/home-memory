@@ -6,6 +6,7 @@ const locations_api_1 = require("../../utils/locations-api");
 const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
+const subscribe_1 = require("../../utils/subscribe");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -381,6 +382,12 @@ Page({
             retry.changes.location_text === changes.location_text &&
             retry.changes.note === changes.note;
         const updateId = samePayload ? retry.updateId : (0, api_1.uuid)();
+        // V1.5(#36 到期微信提醒):本次保存会写入到期提醒(remindSet,含冲突选边
+        // 「保留我的修改」与遗留待补写)时,在 tap 手势链内同步请求订阅授权
+        //(必须先于下方任何 await;清除提醒不请求;拒绝/失败静默降级应用内提醒)
+        if (remindWrite !== null && remindWrite.action === "remindSet") {
+            (0, subscribe_1.requestExpirySubscribe)();
+        }
         this.setData({ saving: true });
         try {
             if (hasTextChanges) {
@@ -1264,6 +1271,12 @@ Page({
         if (problem !== "") {
             wx.showToast({ title: problem, icon: "none" });
             return;
+        }
+        if (!this.hasRemindConflict() && this.pendingRemindWrite() === null) {
+            // V1.5(#36 到期微信提醒):直写路径本次将写入提醒 → 在 picker 确认手势链内
+            // 同步请求订阅授权(必须先于下方任何 await);冲突/待补写路径不在此请求
+            //(保存修改时 onSaveTap 会请求,避免连弹两次)。
+            (0, subscribe_1.requestExpirySubscribe)();
         }
         if (this.hasRemindConflict() || this.pendingRemindWrite() !== null) {
             // 冲突面板已把「提醒」列为待选字段,或冲突刷新后提醒远端不可得、选择还

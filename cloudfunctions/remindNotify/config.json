@@ -1,0 +1,10 @@
+{
+  "timeout": 20,
+  "triggers": [
+    {
+      "name": "dailyExpiryNotify",
+      "type": "timer",
+      "config": "0 0 8 * * * *"
+    }
+  ]
+}
