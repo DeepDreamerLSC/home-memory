@@ -11,13 +11,20 @@
  *   一律不回调——不传回调的既有调用点行为零变化;
  * - 静默降级:任何失败(拒绝授权 / 低版本基础库 / 无云能力 / 云函数失败)
  *   一律吞掉不阻塞:降级为应用内提醒页,绝不阻塞保存流程;
- * - 诊断分支(#36 真机反馈三件 C:定位「真机不弹窗」):release 保持静默;
- *   develop/trial 的 fail 回调 console.warn 完整 errMsg + toast
- *   「订阅失败:」+ errMsg 前 60 字(duration 4000;#36 真机手势规则期增强:
- *   0.9.0 iOS 实测 30 字/3000ms 把关键错误名截掉——真机 toast 只见
- *   「requestSubscribeMessage:fail c…」,恰为 30 字截断落在错误名首字母上)、
- *   success 回调 toast 授权结果状态;getAccountInfoSync 异常/缺失时保守按
- *   release 静默;
+ * - 手势上下文不变式(#36 0.9.2,修 iOS「fail c…」):requestExpirySubscribe
+ *   内 wx.requestSubscribeMessage 必须是**第一条 wx API 调用**——请求之前
+ *   零桥接调用(isReleaseEnv 的 wx.getAccountInfoSync 属同步桥接调用,
+ *   只允许出现在 success/fail 回调内部,诊断决定事后做;任何「请求前先查
+ *   环境/先读存储/先 toast」的改动都会破坏 iOS 点击手势上下文,测试
+ *   SB-GESTURE 系列按 wx 调用序列锁死此顺序);
+ * - 诊断分支(#36 真机反馈三件 C 起,0.9.2 升级):release 保持静默;
+ *   develop/trial 的 fail 回调 console.warn 完整 errMsg + wx.showModal
+ *   全文展示(title「订阅失败」/content 完整 errMsg 不截断/showCancel:false;
+ *   #36 0.9.1 iOS 实测:toast 的 title 真机无论传多长只显示约 30 字,
+ *   三轮真机反馈都只见「fail c…」,关键错误名永远看不全——modal 支持多行
+ *   全文且可截图,toast 只留给 success 的短状态)、success 回调小 toast
+ *   授权结果状态(订阅:accept/reject/…);getAccountInfoSync 异常/缺失时
+ *   保守按 release 静默(它在回调内,异常只影响诊断展示不影响请求);
  * - isSubscribeAccepted(res):授权结果映射的纯函数(accept → 记录,
  *   reject/ban/filter/形状异常 → 不记录),下沉便于测试(tests/subscribe.test.js)。
  * 模板 ID 与云函数 remindNotify/lib/handler.js 的 TEMPLATE_ID 同值同源
@@ -90,10 +97,8 @@ function isReleaseEnv(): boolean {
 }
 
 /**
- * 码点截断(诊断 toast 的 errMsg 只保留前 60 字,其余省略号;#36 真机手势
- * 规则期增强:0.9.0 iOS 实测 30 字把关键错误名截掉——真机 toast 只见
- * 「requestSubscribeMessage:fail c…」,30 字截断恰落在 "can only be invoked
- * by user TAP gesture" 的首字母 c 上)
+ * 码点截断(success 诊断 toast 的授权状态只保留前 60 字,其余省略号;
+ * 0.9.2 起 fail 诊断不再用 toast——改 diagnoseModal 完整 errMsg 全文)
  */
 function clampCodePoints(text: string, max: number): string {
   const chars = Array.from(text);
@@ -104,9 +109,9 @@ function clampCodePoints(text: string, max: number): string {
 }
 
 /**
- * 诊断 toast(develop/trial 专用;release 由调用方拦下,绝不打扰正式用户)。
- * 截断 60 字、duration 4000(#36 真机手势规则期增强:3000ms 内读不完关键
- * 错误名;fail 与 success 共用同一诊断口径)。
+ * 诊断 toast(仅 success 回调的授权结果短状态:develop/trial 专用,release
+ * 由调用方拦下,绝不打扰正式用户)。截断 60 字、duration 4000。fail 诊断
+ * 0.9.2 起改走 diagnoseModal(toast 真机只显约 30 字,错误全文看不全)。
  */
 function diagnoseToast(titlePrefix: string, detail: string): void {
   if (typeof wx.showToast !== "function") {
@@ -120,23 +125,50 @@ function diagnoseToast(titlePrefix: string, detail: string): void {
 }
 
 /**
+ * 诊断 modal(#36 0.9.2,fail 回调专用;develop/trial,release 由调用方
+ * 拦下):content 放**完整 errMsg 不截断**——#36 0.9.1 iOS 实测 toast 的
+ * title 无论传多长真机只显示约 30 字,三轮真机反馈都只见「fail c…」,
+ * 手势规则类错误的关键错误名永远看不全;modal 的 content 支持多行长文本、
+ * 不会视觉截断且可截图回报。showCancel:false 单按钮,不打断用户。
+ */
+function diagnoseModal(errMsg: string): void {
+  if (typeof wx.showModal !== "function") {
+    return; // 极低版本兜底:诊断展示缺失时静默(诊断代码绝不抛错)
+  }
+  wx.showModal({
+    title: "订阅失败",
+    content: errMsg,
+    showCancel: false,
+  });
+}
+
+/**
  * 请求「保质期到期提醒」订阅授权。
- * 硬性约束:必须在用户 tap 手势链内同步调用(调用方在 tap 回调开头第一
- * 时间调用,绝不 await 之后再调;picker 的 bindchange 滚轮选完回调不算
- * 点击手势,真机必报「requestSubscribeMessage:fail can only be invoked
- * by user TAP gesture」——#36 0.9.0 iOS 实测,授权入口须是真实 tap)。
+ * 硬性约束 1(tap 手势链):必须在用户 tap 手势链内同步调用(调用方在 tap
+ * 回调开头第一时间调用,绝不 await 之后再调;picker 的 bindchange 滚轮选完
+ * 回调不算点击手势,真机必报「requestSubscribeMessage:fail can only be
+ * invoked by user TAP gesture」——#36 0.9.0 iOS 实测,授权入口须是真实 tap)。
+ * 硬性约束 2(#36 0.9.2,请求前置零桥接调用):函数内 wx.requestSubscribeMessage
+ * 必须是第一条 wx API 调用——请求之前零 wx 调用(isReleaseEnv 的
+ * getAccountInfoSync 属同步桥接调用,只能在 success/fail 回调内事后做;
+ * iOS 点击手势上下文会被手势窗口内的其他桥接调用破坏,SB-GESTURE 测试
+ * 按 wx 调用序列锁死)。低版本提前 return(无 requestSubscribeMessage)是
+ * 不发请求的降级,保留。
  * onAccepted(#36 真机手势规则):可选回调,授权 accept 且 recordSubscription
  * 已发起后同步调用(不 await 云函数结果;reject/fail/低版本/无云能力——
  * 记录未发起——一律不调用)。现有调用点(确认卡保存/详情保存修改)不传
  * 回调,行为零变化。
  * 失败口径(#36 真机反馈三件 C 起):release 一律静默——提醒仍有应用内
  * 「提醒页」兜底,保存流程照旧;develop/trial(开发者工具/体验版)可见诊断:
- * - fail 回调:console.warn 完整 errMsg + toast「订阅失败:」+ errMsg 前 60 字
- *   (#36 真机手势规则期增强:0.9.0 iOS 实测 30 字把关键错误名截掉,60 字起
- *   手势规则类错误的关键错误名可见;体验版复现后回报 toast 内容即可定位);
+ * - fail 回调:console.warn 完整 errMsg + wx.showModal 全文(title「订阅失败」/
+ *   content 完整 errMsg 不截断/showCancel:false;#36 0.9.2 起——0.9.1 iOS
+ *   实测 toast 真机只显约 30 字,「fail c…」看不全没法定位,modal 全文
+ *   多行可截图,体验版复现后截图回报即可定位);
  * - success 回调:toast 该模板的授权结果状态(「订阅:accept/reject/ban/filter」)。
  */
 export function requestExpirySubscribe(onAccepted?: () => void): void {
+  // 请求前零 wx API 调用:此处只做属性存在性检查(不发桥接调用),诊断的
+  // getAccountInfoSync 一律推迟到 success/fail 回调内(SB-GESTURE 锁序)
   if (!wx.requestSubscribeMessage) {
     return; // 低版本基础库:静默降级应用内提醒
   }
@@ -162,7 +194,7 @@ export function requestExpirySubscribe(onAccepted?: () => void): void {
       }
       const errMsg = err && typeof err.errMsg === "string" ? err.errMsg : "";
       console.warn("[subscribe] requestSubscribeMessage fail:", errMsg);
-      diagnoseToast("订阅失败:", errMsg || "unknown");
+      diagnoseModal(errMsg || "unknown");
     },
   });
 }
