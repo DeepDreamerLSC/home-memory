@@ -44,6 +44,19 @@
     <view class="r-done {{ remindBusy || conflictPending ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>
   </view>
 
+  <!-- 到期微信提醒显式入口(#36 真机手势规则):picker bindchange 无点击手势,订阅授权
+       必须由真实 tap 发起;有生效提醒且本地未标记「已开启」才显示,accept 后收起
+       (本地标记是展示启发式,权威记录在服务端 remind_subscriptions) -->
+  <view
+    wx:if="{{ remindAt && !notifyAccepted }}"
+    class="notify-chip"
+    hover-class="notify-chip-hover"
+    hover-stay-time="80"
+    bindtap="onNotifyChipTap"
+  >
+    <view class="notify-chip-face">到期时微信提醒我 ›</view>
+  </view>
+
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
   <view
     class="fold {{ editPanelOpen ? 'open' : '' }}"

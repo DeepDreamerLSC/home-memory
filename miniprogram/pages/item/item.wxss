@@ -288,6 +288,38 @@
 /* 「已处理」(原型 .r1-done):视觉/热区分层样式统一收在 app.wxss
    (.r-done + .r-done-face,#36 真机反馈 Fix 1:热区 88 = 面 66) */
 
+/* ============ 到期微信提醒显式入口(#36 真机手势规则:订阅授权只能由真实 tap 发起;
+     picker bindchange 无点击手势,授权入口收在这里)。小号次级触点,贴「已处理/⋯」
+   的次级规范:热区 ≥88(透明上下延伸)、视觉面 60;全用主题变量,浅深两套主题通用 ============ */
+.notify-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88rpx;
+  padding: 14rpx 0;
+  margin: 0 36rpx;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.notify-chip-face {
+  min-height: 60rpx;
+  display: flex;
+  align-items: center;
+  border: 1rpx solid var(--line);
+  border-radius: 30rpx;
+  padding: 0 26rpx;
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.notify-chip-hover .notify-chip-face {
+  background: var(--card-inset);
+}
+
 /* ============ 编辑折叠「提醒」字段(#36 十五轮:picker mode=date + ✕ 清除) ============ */
 .remind-field {
   display: flex;

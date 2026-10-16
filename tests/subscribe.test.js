@@ -7,7 +7,8 @@
  * - SB-FLOW:requestExpirySubscribe 全流程(stub globalThis.wx)——在手势链内
  *   同步发起 wx.requestSubscribeMessage、accept 才调 remindNotify
  *   recordSubscription;拒绝/接口失败/低版本基础库一律静默降级应用内提醒,
- *   绝不 toast、绝不阻塞保存流程;
+ *   绝不 toast、绝不阻塞保存流程;SB-FLOW-5:onAccepted 回调(详情页显式
+ *   入口用)只在 accept 且记录已发起后同步调用;
  * - SB-CONST:模板 ID 单一常量收敛,与 remindNotify 云函数侧同值。
  * require 的是编译产物 subscribe.js(npm run build:mp 生成,pretest 已先行构建)。
  */
@@ -213,6 +214,130 @@ test("SB-FLOW-4:云函数失败(callFunction fail / 返回 ok:false)静默吞掉
       setTimeout(r, 10);
     });
     assert.equal(toasts.length, 0, "落库失败不 toast:提醒仍有应用内提醒页兜底");
+  } finally {
+    restoreWx(prevWx);
+  }
+});
+
+// SB-FLOW-5(#36 真机手势规则:详情页显式入口 onNotifyChipTap 的回调扩展):
+// accept 且 recordSubscription 已发起 → 发起后同步回调(不 await 云函数结果);
+// reject/fail/低版本/无云能力(记录未发起)一律不回调。现有调用点
+// (确认卡保存/详情保存修改)不传回调,行为零变化(SB-FLOW-1..4 同款路径)。
+test("SB-FLOW-5:onAccepted——accept 且记录已发起 → 发起后同步调用;reject/fail/低版本/无云能力 → 不调用", async function () {
+  // accept + 云函数记录发起:回调在记录发起之后同步调用(顺序锁定)
+  var prevWx = globalThis.wx;
+  var order = [];
+  globalThis.wx = {
+    requestSubscribeMessage: function (o) {
+      var res = {};
+      res[TEMPLATE_ID] = "accept";
+      o.success(res);
+    },
+    cloud: {
+      callFunction: function () {
+        order.push("record");
+      }
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe(function () {
+      order.push("onAccepted");
+    });
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(order, ["record", "onAccepted"], "accept:记录发起后同步回调一次");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // accept 但无云能力:记录未发起 → 不回调(显式入口保留,可稍后重试)
+  order = [];
+  globalThis.wx = {
+    requestSubscribeMessage: function (o) {
+      var res = {};
+      res[TEMPLATE_ID] = "accept";
+      o.success(res);
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe(function () {
+      order.push("onAccepted");
+    });
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(order, [], "无云能力:记录未发起,不回调");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // reject:授权未通过 → 不回调
+  order = [];
+  globalThis.wx = {
+    requestSubscribeMessage: function (o) {
+      var res = {};
+      res[TEMPLATE_ID] = "reject";
+      o.success(res);
+    },
+    cloud: {
+      callFunction: function () {
+        order.push("record");
+      }
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe(function () {
+      order.push("onAccepted");
+    });
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(order, [], "reject:不回调");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // fail(如手势规则拒绝):不回调、不抛错
+  order = [];
+  globalThis.wx = {
+    requestSubscribeMessage: function (o) {
+      o.fail({ errMsg: "requestSubscribeMessage:fail can only be invoked by user TAP gesture" });
+    },
+    cloud: {
+      callFunction: function () {
+        order.push("record");
+      }
+    }
+  };
+  try {
+    assert.doesNotThrow(function () {
+      subscribe.requestExpirySubscribe(function () {
+        order.push("onAccepted");
+      });
+    }, "fail 静默吞掉");
+    await new Promise(function (r) {
+      setTimeout(r, 10);
+    });
+    assert.deepEqual(order, [], "fail:不回调");
+  } finally {
+    restoreWx(prevWx);
+  }
+
+  // 低版本基础库(无 requestSubscribeMessage):不回调
+  order = [];
+  globalThis.wx = {
+    cloud: {
+      callFunction: function () {
+        order.push("record");
+      }
+    }
+  };
+  try {
+    subscribe.requestExpirySubscribe(function () {
+      order.push("onAccepted");
+    });
+    assert.deepEqual(order, [], "低版本基础库:不回调");
   } finally {
     restoreWx(prevWx);
   }
@@ -486,7 +611,9 @@ test("SB-PAGE-CONF-2:无提醒行保存——不请求订阅,保存照旧;拒绝
   }).length, 1, "拒绝授权后保存照旧完成");
 });
 
-/* ---------------- 详情页:onRemindDateChange / onSaveTap 写提醒时请求,清除不请求 ---------------- */
+/* ---------------- 详情页:onSaveTap 写提醒时请求(真实按钮 tap);picker 直写不请求
+   (bindchange 无点击手势,#36 真机手势规则);显式入口「到期时微信提醒我 ›」承接 picker
+   路径的授权;清除不请求 ---------------- */
 
 var itemRemindListRow = null;
 function itemRouter(name, data) {
@@ -530,7 +657,15 @@ function itemSummary() {
   };
 }
 
-test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——手势链内同步请求订阅,remindSet 照常发出", async function () {
+// 回归依据(#36 0.9.0 iOS 真机实测):详情页 picker mode=date 的 bindchange
+// (滚轮选完)回调不在用户 tap 手势链内,此处调 wx.requestSubscribeMessage
+// 100% 报「requestSubscribeMessage:fail can only be invoked by user TAP
+// gesture」(真机 toast 被截断只见「…fail c…」),只产生错误 toast 噪音。
+// 本测试改写自旧断言(picker 直写会请求订阅)——按新行为锁定:picker 路径
+// 不请求订阅,授权入口移至保质期行下方「到期时微信提醒我 ›」显式入口
+// (onNotifyChipTap,SB-PAGE-ITEM-4);onSaveTap 的按钮 tap 路径照旧请求
+// (SB-PAGE-ITEM-3 锁定)。
+test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——不请求订阅授权(真机手势规则),remindSet 照常发出", async function () {
   itemPageResetEnv();
   var page = makePageFrom(itemConfig);
   itemConfig.applySummary.call(page, itemSummary());
@@ -541,13 +676,16 @@ test("SB-PAGE-ITEM-1:设置到期提醒(picker 选日子直写)——手势链�
   await itemConfig.onRemindDateChange.call(page, { detail: { value: "2026-11-25" } });
   await settle();
 
-  assert.equal(subscribeCalls.length, 1, "选日子保存提醒:请求订阅授权");
+  assert.equal(subscribeCalls.length, 0, "picker bindchange 无点击手势:不请求订阅(必然失败的调用已移除)");
   assert.ok(
     pageCloudCalls.some(function (c) {
       return c.name === "itemsApi" && c.data.action === "remindSet" && c.data.due_date === "2026-11-25";
     }),
-    "提醒照常写入(订阅被拒绝也不阻塞)"
+    "提醒照常写入(订阅入口移走不影响保存)"
   );
+  assert.equal(page.data.remindAt, "2026-11-25", "提醒照常上屏");
+  // 直写成功后显式入口条件成立:有生效提醒且本地未标记已开启(点击流程见 SB-PAGE-ITEM-4)
+  assert.equal(page.data.notifyAccepted, false, "未开启过订阅:显式入口可露出");
 });
 
 test("SB-PAGE-ITEM-2:清除提醒(onRemindFieldClear)——不请求订阅授权", async function () {
@@ -624,9 +762,118 @@ test("SB-PAGE-ITEM-3:保存修改补写提醒(remindSet)请求订阅;补清除(r
   );
 });
 
-// ---------- SB-DIAG(#36 真机反馈三件 C):订阅授权失败的版本分支诊断 ----------
+/* ---------------- 详情页:「到期时微信提醒我 ›」显式入口(#36 真机手势规则) ---------------- */
+
+/** 给 pageInstallWx 装好的 wx 换成可查验的 storage(其余桩不动),返回 store */
+function patchPageStorage() {
+  var store = {};
+  globalThis.wx.getStorageSync = function (k) {
+    return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : "";
+  };
+  globalThis.wx.setStorageSync = function (k, v) {
+    store[k] = v;
+  };
+  globalThis.wx.removeStorageSync = function (k) {
+    delete store[k];
+  };
+  return store;
+}
+
+test("SB-PAGE-ITEM-4:显式订阅入口——有提醒未开启才露出;真实 tap 请求授权,accept 后写本地标记并收起", async function () {
+  // 前置:远端已有生效提醒,本地未标记「已成功开启」→ 入口显示条件成立
+  itemPageResetEnv();
+  var store = patchPageStorage();
+  itemRemindListRow = {
+    item_id: "it-sub",
+    name: "降压药",
+    location_text: "厨房第二个抽屉",
+    due_date: "2026-11-01",
+    kind: "有效期",
+    generation: 5
+  };
+  var page = makePageFrom(itemConfig);
+  itemConfig.applySummary.call(page, itemSummary());
+  await itemConfig.refreshReminderRow.call(page); // 作用域经服务端复核后重读本地标记
+  await settle();
+  assert.equal(page.data.remindAt, "2026-11-01", "前置:有生效提醒");
+  assert.equal(page.data.notifyAccepted, false, "本地未标记已开启:入口显示(remindAt && !notifyAccepted)");
+
+  // 真实 tap:请求订阅授权;accept 且记录发起后 → 写本地标记 + 收起入口
+  await itemConfig.onNotifyChipTap.call(page);
+  await settle();
+  assert.equal(subscribeCalls.length, 1, "显式入口 tap:恰好一次订阅授权请求");
+  assert.deepEqual(subscribeCalls[0], [TEMPLATE_ID], "弹窗模板即单一常量");
+  assert.ok(
+    pageCloudCalls.some(function (c) {
+      return c.name === "remindNotify" && c.data.action === "recordSubscription";
+    }),
+    "accept 后记录订阅照常发起"
+  );
+  assert.equal(store["wx-notify-accepted"], true, "本地标记写入家庭作用域键(标记=展示启发式)");
+  assert.equal(page.data.notifyAccepted, true, "入口收起(不再显示)");
+
+  // 拒绝授权:不写标记、入口保留(可再点),不阻塞任何流程
+  itemPageResetEnv();
+  var store2 = patchPageStorage();
+  subscribeDecision = "reject";
+  itemRemindListRow = {
+    item_id: "it-sub",
+    name: "降压药",
+    location_text: "厨房第二个抽屉",
+    due_date: "2026-11-01",
+    kind: "有效期",
+    generation: 5
+  };
+  var page2 = makePageFrom(itemConfig);
+  itemConfig.applySummary.call(page2, itemSummary());
+  await itemConfig.refreshReminderRow.call(page2);
+  await settle();
+  await itemConfig.onNotifyChipTap.call(page2);
+  await settle();
+  assert.equal(subscribeCalls.length, 1, "拒绝路径同样请求过授权");
+  assert.equal(store2["wx-notify-accepted"], undefined, "拒绝:不写本地标记");
+  assert.equal(page2.data.notifyAccepted, false, "拒绝:入口保留可再点");
+});
+
+test("SB-PAGE-ITEM-5:显式订阅入口的显示条件——已开启过(本地标记在)或无提醒都不露出", async function () {
+  // 本地已标记「已成功开启」:即使有生效提醒,入口也不显示(notifyAccepted=true)
+  itemPageResetEnv();
+  var store = patchPageStorage();
+  store["wx-notify-accepted"] = true; // 上次 accept 留下的家庭作用域标记
+  itemRemindListRow = {
+    item_id: "it-sub",
+    name: "降压药",
+    location_text: "厨房第二个抽屉",
+    due_date: "2026-11-01",
+    kind: "有效期",
+    generation: 5
+  };
+  var page = makePageFrom(itemConfig);
+  itemConfig.applySummary.call(page, itemSummary());
+  await itemConfig.refreshReminderRow.call(page);
+  await settle();
+  assert.equal(page.data.remindAt, "2026-11-01", "前置:有生效提醒");
+  assert.equal(page.data.notifyAccepted, true, "已开启过:入口不显示");
+
+  // 无生效提醒:remindAt 为空,入口条件不成立(双保险门禁同样不请求)
+  itemPageResetEnv();
+  patchPageStorage();
+  var page2 = makePageFrom(itemConfig);
+  itemConfig.applySummary.call(page2, itemSummary());
+  await itemConfig.refreshReminderRow.call(page2); // 远端确认无提醒
+  await settle();
+  assert.equal(page2.data.remindAt, "", "前置:无生效提醒");
+  await itemConfig.onNotifyChipTap.call(page2);
+  await settle();
+  assert.equal(subscribeCalls.length, 0, "无提醒双保险:不请求订阅");
+});
+
+// ---------- SB-DIAG(#36 真机反馈三件 C + 真机手势规则期增强):订阅授权失败的版本分支诊断 ----------
 // release 静默(现状);develop/trial 的 fail → console.warn 完整 errMsg +
-// toast「订阅失败:」+ errMsg 前 30 字;success → toast 授权结果状态;
+// toast「订阅失败:」+ errMsg 前 60 字(#36 真机手势规则期增强:0.9.0 iOS 实测
+// 30 字把关键错误名截掉——真机 toast 只见「requestSubscribeMessage:fail c…」,
+// 即 30 字截断刚好落在 "can only be invoked by user TAP gesture" 的首字母 c 上);
+// duration 4000(共享诊断 toast,3000ms 读不完);success → toast 授权结果状态;
 // getAccountInfoSync 异常/缺失 → 保守按 release 静默(测试锁此行为)。
 
 function makeEnvWx(envVersion, opts) {
@@ -659,7 +906,7 @@ function makeEnvWx(envVersion, opts) {
   return wxStub;
 }
 
-test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失败:」前 30 字(duration 3000)", async function () {
+test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失败:」前 60 字(duration 4000)", async function () {
   var prevWx = globalThis.wx;
   var prevWarn = console.warn;
   var warns = [];
@@ -667,8 +914,10 @@ test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失�
     warns.push(Array.prototype.slice.call(arguments).join(" "));
   };
   var opts = {};
+  // 真机实测同款错误文本:30 字截断正好落在 "…fail c"(关键错误名被截掉),
+  // 60 字起 "can only be invoked by user TAP ge" 可见,足以定位手势规则报错
   var longErr =
-    "requestSubscribeMessage:fail 吧啦吧啦很多字很多字很多字很多字很多字很多字很多字";
+    "requestSubscribeMessage:fail can only be invoked by user TAP gesture 吧啦吧啦很多字很多字";
   globalThis.wx = makeEnvWx("develop", { failErr: longErr, toasts: opts.toasts || (opts.toasts = []) });
   try {
     subscribe.requestExpirySubscribe();
@@ -678,9 +927,13 @@ test("SB-DIAG-1:develop fail → console.warn 完整 errMsg + toast「订阅失�
     assert.equal(warns.length, 1, "warn 恰一次");
     assert.ok(warns[0].indexOf(longErr) !== -1, "warn 携带完整 errMsg(定位用)");
     assert.equal(opts.toasts.length, 1, "toast 恰一次");
-    assert.equal(opts.toasts[0].title, "订阅失败:" + Array.from(longErr).slice(0, 30).join("") + "…", "errMsg 截断到 30 字(码点)");
+    assert.equal(opts.toasts[0].title, "订阅失败:" + Array.from(longErr).slice(0, 60).join("") + "…", "errMsg 截断到 60 字(码点)");
+    assert.ok(
+      opts.toasts[0].title.indexOf("can only be invoked by user TA") !== -1,
+      "关键错误名 60 字内可见(30 字时只剩「fail c」)"
+    );
     assert.equal(opts.toasts[0].icon, "none");
-    assert.equal(opts.toasts[0].duration, 3000);
+    assert.equal(opts.toasts[0].duration, 4000);
   } finally {
     console.warn = prevWarn;
     restoreWx(prevWx);
@@ -727,7 +980,7 @@ test("SB-DIAG-3:develop success → toast「订阅:accept/reject」;release succ
     assert.deepEqual(calls, ["recordSubscription"], "accept 记录像常");
     assert.equal(toasts.length, 1, "develop toast 授权结果");
     assert.equal(toasts[0].title, "订阅:accept");
-    assert.equal(toasts[0].duration, 3000);
+    assert.equal(toasts[0].duration, 4000, "共享诊断 toast duration(#36 真机手势规则期增强 3000→4000)");
   } finally {
     restoreWx(prevWx);
   }
