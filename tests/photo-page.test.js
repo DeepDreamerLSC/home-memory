@@ -951,6 +951,47 @@ test("PP-EDIT-2:手动加一件名称必填;「保持:现名」chip 一键回原
   assert.equal(page.data.edit.nameInput, "黑色小盒子", "保持 chip 回到现名");
 });
 
+test("PP-EDIT-3:done 终态行不得提供看似生效的修改路径(#65 边界三)", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  // 造终态:全批成功后面板路径 + 部分失败会话恢复后同形(rowsRaw[0] 落「已确认记住」)
+  page.rowsRaw[0] = intakeDraft.markRowSaved(page.rowsRaw[0]);
+  page.rebuildRows();
+
+  // 点终态行:仍展开照片+脉冲高亮(只读查看),但绝不打开编辑面板
+  page.onRowTap({ currentTarget: { dataset: { index: 0 } } });
+  assert.equal(page.data.photoCollapsed, false, "终态行点开仍展开照片(只读查看)");
+  assert.equal(page.data.highlightId, page.rowsRaw[0].draftId, "框脉冲高亮照常");
+  assert.equal(page.data.edit, null, "终态行不打开手动编辑面板");
+
+  // 防御门:openEditSheet 直调同样不开
+  page.openEditSheet(page.rowsRaw[0].draftId);
+  assert.equal(page.data.edit, null);
+
+  // 防御门:非终态行面板开着时落终态 →「就这么改」关面板、行零改动、绝不 toast「改好了」
+  page.openEditSheet(page.rowsRaw[1].draftId);
+  assert.notEqual(page.data.edit, null, "非终态行照常打开");
+  page.onEditNameInput({ detail: { value: "改名试探" } });
+  page.rowsRaw[1] = intakeDraft.markRowSaved(page.rowsRaw[1]);
+  page.rebuildRows();
+  var toastsBefore = ctx.env.toasts.length;
+  page.onEditConfirmTap();
+  assert.equal(page.data.edit, null, "面板关闭");
+  assert.equal(page.rowsRaw[1].name, "黑色小盒子", "终态行零改动(改了也永不进保存)");
+  assert.equal(ctx.env.toasts.length, toastsBefore, "绝不 toast「改好了」假回执");
+
+  // 对照:新增非终态行,点行/编辑/确认照常生效(门只拦终态)
+  page.onManualAddTap();
+  page.onEditNameInput({ detail: { value: "胶带" } });
+  page.onEditConfirmTap();
+  var tape = page.rowsRaw.length - 1;
+  page.onRowTap({ currentTarget: { dataset: { index: tape } } });
+  assert.notEqual(page.data.edit, null, "非终态行点行照常打开编辑面板");
+  page.onEditConfirmTap();
+  assert.equal(page.rowsRaw[tape].name, "胶带");
+  assert.ok(toastTexts(ctx.env).indexOf("改好了") !== -1, "非终态行照常回执");
+});
+
 /* ---------------- PP-RESUME:会话恢复 ---------------- */
 
 test("PP-RESUME-1:中途退出保留会话;?resume=1 恢复(draftId/幂等键/位置不变)", async function () {

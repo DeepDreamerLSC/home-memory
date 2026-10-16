@@ -644,7 +644,9 @@ Page<
 
   /* ---------------- 候选清单(三态) ---------------- */
 
-  /** 点行(非勾选区/步进器):展开照片 + 该框脉冲高亮 + 打开手动编辑面板(屏①+屏④) */
+  /** 点行(非勾选区/步进器):展开照片 + 该框脉冲高亮 + 打开手动编辑面板(屏①+屏④);
+   *  done 是终态:只读查看(展开照片+高亮),不打开编辑面板(同 onCheckTap/onStepTap 的 done 门,
+   *  改了也永不进保存,不得提供看似生效的修改路径) */
   onRowTap(e) {
     const index = Number(e.currentTarget.dataset.index);
     const row = this.rowsRaw[index];
@@ -653,6 +655,9 @@ Page<
     }
     this.setData({ photoCollapsed: false, highlightId: row.draftId });
     this.rebuildRows();
+    if (row.done) {
+      return;
+    }
     this.openEditSheet(row.draftId);
   },
 
@@ -1188,6 +1193,10 @@ Page<
     if (!row) {
       return;
     }
+    if (row.done) {
+      // 终态行不开编辑面板(防御门:onRowTap 已拦,此处兜底)
+      return;
+    }
     const seen = new Set<string>();
     const nameChips: EditNameChip[] = [];
     this.rowsRaw.forEach((r) => {
@@ -1346,6 +1355,12 @@ Page<
       return;
     }
     const prev = this.rowsRaw[index];
+    if (prev.done) {
+      // 终态行防御:面板开着时该行已落「已确认记住」(保存完成/会话恢复后)→
+      // 关面板零改动、绝不 toast「改好了」假回执(done 行永不进保存)
+      this.setData({ edit: null });
+      return;
+    }
     // 手动编辑绝不改勾选(保留)状态;draftId/operationId/box/src 原样(§8 屏④)
     this.rowsRaw = this.rowsRaw.map((r, i) =>
       i === index ? { ...prev, name, qty: ed.qty, exc, remind } : r,
