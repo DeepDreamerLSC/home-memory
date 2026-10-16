@@ -59,6 +59,10 @@
     <view class="notify-chip-face">到期时微信提醒我 ›</view>
   </button>
 
+  <!-- 订阅手势诊断入口(#36 鸿蒙真机手势排查,仅 develop 环境显示):素按钮二分实验页,
+       正式版/体验版用户不可见 -->
+  <view wx:if="{{ diagEntryVisible }}" class="diag-entry" bindtap="onDiagEntryTap">订阅手势诊断 ›</view>
+
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
   <view
     class="fold {{ editPanelOpen ? 'open' : '' }}"

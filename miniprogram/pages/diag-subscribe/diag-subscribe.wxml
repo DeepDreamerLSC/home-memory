@@ -1,0 +1,16 @@
+<view class="diag">
+  <view class="diag-title">订阅手势诊断</view>
+
+  <view class="diag-env">
+    <view wx:for="{{ envLines }}" wx:key="*this" class="diag-envline">{{ item }}</view>
+  </view>
+
+  <button class="diag-btn" bindtap="onRawTap">裸调用订阅授权</button>
+  <view class="diag-hint">素按钮零封装;可连续点多次,结果记录在下方(最新在上),截一张图即可</view>
+
+  <view class="diag-results">
+    <view wx:for="{{ results }}" wx:key="index" class="diag-r {{ item.ok ? 'ok' : 'fail' }}">
+      #{{ index + 1 }} {{ item.time }} {{ item.text }}
+    </view>
+  </view>
+</view>

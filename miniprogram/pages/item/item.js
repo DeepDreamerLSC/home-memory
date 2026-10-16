@@ -115,6 +115,7 @@ Page({
         today: (0, remind_ui_1.localTodayYmd)(),
         remindBusy: false,
         notifyAccepted: false,
+        diagEntryVisible: false,
         vagueQuote: "",
         conflicts: [],
         conflictPending: false,
@@ -132,6 +133,17 @@ Page({
             spacePath: parseSpacePath(options.path),
             familyShared: (0, household_scope_1.isHouseholdScopeShared)(),
         });
+        // 诊断入口仅 develop 显示(预览/开发版);getAccountInfoSync 不在任何 tap
+        // 手势链上(onLoad 时调用),不影响订阅手势纪律
+        try {
+            const acc = wx.getAccountInfoSync();
+            this.setData({
+                diagEntryVisible: !!acc.miniProgram && acc.miniProgram.envVersion === "develop",
+            });
+        }
+        catch (e) {
+            this.setData({ diagEntryVisible: false });
+        }
         const rawItemId = options.item_id;
         if (rawItemId) {
             // 按 id 直接打开(生成向导的 skipped 件、结果页跳转):get 单查不受 list 分页影响
@@ -1336,6 +1348,9 @@ Page({
             writeNotifyAccepted();
             this.setData({ notifyAccepted: true });
         });
+    },
+    onDiagEntryTap() {
+        wx.navigateTo({ url: "/pages/diag-subscribe/diag-subscribe" });
     },
     /**
      * 编辑折叠「提醒」选日子(#36:picker mode=date 弹层,唯一手动日期来源):

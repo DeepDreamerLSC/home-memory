@@ -204,6 +204,11 @@ Page<
      */
     notifyAccepted: boolean;
     /**
+     * 订阅手势诊断页入口是否显示(#36 鸿蒙真机手势排查):仅 develop 环境为
+     * true(onLoad 计算);正式版/体验版恒 false,诊断页不进入用户视野
+     */
+    diagEntryVisible: boolean;
+    /**
      * 当时提到时间但没换算的原话子串(0.6.0 真机反馈 Fix 4,来自 itemsApi.get
      * 的 remind_vague_quote):录入时「说了时间但没换算成日期」的如实留痕,
      * 只展示、不产生任何提醒;已有 active 提醒(到期行在屏)时不再显示。
@@ -308,6 +313,8 @@ Page<
      * 订阅授权;accept 且记录发起后写本地「已开启」标记并收起入口
      */
     onNotifyChipTap(): void;
+    /** 打开订阅手势诊断页(#36 排查,仅 develop 显示) */
+    onDiagEntryTap(): void;
     /** 编辑折叠「提醒」:picker mode=date 选日子 → remindSet 设提醒(无则补录,有则改期) */
     onRemindDateChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): Promise<void>;
     /** 编辑折叠「提醒」:✕ 连日期一起清除(remindClear;不存在存日期但不提醒) */
@@ -345,6 +352,7 @@ Page<
     today: localTodayYmd(),
     remindBusy: false,
     notifyAccepted: false,
+    diagEntryVisible: false,
     vagueQuote: "",
     conflicts: [] as ConflictEntry[],
     conflictPending: false,
@@ -371,6 +379,16 @@ Page<
       spacePath: parseSpacePath(options.path),
       familyShared: isHouseholdScopeShared(),
     });
+    // 诊断入口仅 develop 显示(预览/开发版);getAccountInfoSync 不在任何 tap
+    // 手势链上(onLoad 时调用),不影响订阅手势纪律
+    try {
+      const acc = wx.getAccountInfoSync();
+      this.setData({
+        diagEntryVisible: !!acc.miniProgram && acc.miniProgram.envVersion === "develop",
+      });
+    } catch (e) {
+      this.setData({ diagEntryVisible: false });
+    }
     const rawItemId = options.item_id;
     if (rawItemId) {
       // 按 id 直接打开(生成向导的 skipped 件、结果页跳转):get 单查不受 list 分页影响
@@ -1610,6 +1628,10 @@ Page<
       writeNotifyAccepted();
       this.setData({ notifyAccepted: true });
     });
+  },
+
+  onDiagEntryTap() {
+    wx.navigateTo({ url: "/pages/diag-subscribe/diag-subscribe" });
   },
 
   /**
