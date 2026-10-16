@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拍照识物 · 交互原型 V0.3(贴当前设计语言)</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{background:#141414;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",sans-serif;color:#191919;padding:28px 20px 60px}
+  h1{color:#f5f4f0;font-size:20px;font-weight:800;margin-bottom:6px}
+  .sub{color:#9a978e;font-size:13px;margin-bottom:6px;line-height:1.6}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 26px}
+  .legend span{background:#242424;color:#cfcabb;font-size:12px;padding:5px 10px;border-radius:99px}
+  .legend b{color:#ffe15a;font-weight:600}
+  .stage{display:flex;gap:34px;overflow-x:auto;padding-bottom:20px;align-items:flex-start}
+  .shot{flex:none}
+  .shot .cap{color:#e8e5da;font-size:14px;font-weight:700;margin:0 0 4px 2px}
+  .shot .note{color:#8f8c81;font-size:12px;margin:0 0 10px 2px;line-height:1.5;max-width:375px}
+  .shot .note b{color:#c9c5b6}
+
+  /* ===== App 设计令牌(取自 app.wxss,浅色) ===== */
+  .phone{
+    --bg:#faf8f2; --card:#fff; --card-inset:#f1ede0; --text:#191919; --text2:#4c483e;
+    --text3:#a39d8d; --line:#e8e3d6; --accent:#ffe15a; --accent-shadow:#e5c431;
+    --accent-dim:#f3edd9; --go-bg:#191919; --go-fg:#ffe15a; --danger:#d93025; --danger-bg:#fdecec;
+    --banner-bg:#fff3bf; --vb-bg:#fffdf4; --vb-line:#e8e3d6; --vb-hold-bg:#f3edd9;
+    --vb-mic-bg:#fffdf4; --vb-mic-fg:#f3edd9; --vb-btn-line:#ddd6c2; --cta-shadow:#ece6d6;
+  }
+  .phone{width:375px;height:812px;border-radius:46px;border:11px solid #000;background:var(--bg);overflow:hidden;position:relative;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  .statusbar{height:44px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 4px;font-size:13px;font-weight:600;color:var(--text)}
+  .capsule{position:absolute;top:50px;right:14px;width:88px;height:32px;background:rgba(0,0,0,.12);border-radius:99px;display:flex;align-items:center;justify-content:center;gap:10px;z-index:60}
+  .capsule i{width:8px;height:8px;border-radius:50%;background:rgba(0,0,0,.35);display:block}
+  .capsule .pill{width:20px;height:8px;border-radius:99px;background:rgba(0,0,0,.35)}
+  .navbar{flex:none;padding:52px 18px 11px;background:var(--bg);border-bottom:1rpx solid var(--line);border-bottom:1px solid var(--line)}
+  .navbar .t{font-size:17px;font-weight:800;color:var(--text)}
+  .navbar .s{font-size:11.5px;color:var(--text3);margin-top:2px}
+  .content{flex:1;overflow-y:auto;position:relative;background:var(--bg)}
+
+  /* ===== 照片与识别框(App 配色:墨=已确认,黄虚=待确认,红=用户,黄环=搜索) ===== */
+  .photoWrap{position:relative;width:100%;aspect-ratio:4/3;background:#000;overflow:hidden;flex:none}
+  .photoWrap img{width:100%;height:100%;object-fit:cover;display:block}
+  .bbox{position:absolute;border:2.5px solid var(--go-bg);border-radius:6px;box-shadow:0 0 0 1.5px rgba(255,255,255,.55);cursor:pointer;transition:all .2s}
+  .bbox .tag{position:absolute;top:-11px;left:-2px;background:var(--go-bg);color:var(--go-fg);font-size:10px;line-height:1;padding:4px 7px;border-radius:5px;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+  .bbox.amber{border-color:var(--accent-shadow);border-style:dashed}
+  .bbox.amber .tag{background:var(--accent);color:var(--text)}
+  .bbox.user{border:3px dashed var(--danger);border-radius:8px}
+  .bbox.user .tag{background:var(--danger);color:#fff}
+  .bbox.pulse{box-shadow:0 0 0 5px rgba(255,225,90,.75);transform:scale(1.02)}
+  .bbox.hit{border:3.5px solid var(--go-bg);animation:hitring 1.5s infinite}
+  .bbox.hit .tag{font-size:11px;padding:5px 8px}
+  @keyframes hitring{0%,100%{box-shadow:0 0 0 3px rgba(255,225,90,.65),0 0 0 1.5px rgba(255,255,255,.55)}50%{box-shadow:0 0 0 11px rgba(255,225,90,0),0 0 0 1.5px rgba(255,255,255,.55)}}
+  .ask{position:absolute;right:6px;top:6px;background:rgba(17,17,17,.72);color:#fff;font-size:11px;padding:6px 10px;border-radius:8px;backdrop-filter:blur(4px)}
+
+  /* ===== 位置栏 ===== */
+  .locbar{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px 0;padding:12px 13px;display:flex;gap:10px}
+  .locbar .ico{font-size:18px;line-height:1.3}
+  .locbar .main{flex:1;min-width:0}
+  .locbar .lb{font-size:11px;color:var(--text3);font-weight:600}
+  .locbar .lv{font-size:15px;font-weight:800;margin:3px 0 2px;color:var(--text);display:flex;align-items:center;gap:6px}
+  .locbar .lv .pen{color:#c1bcae;font-size:13px;font-weight:400}
+  .locbar .lc{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .locbar .lc span{border-radius:99px;padding:5px 11px;font-size:11.5px;cursor:pointer}
+  .locbar .lc .c1{background:var(--vb-hold-bg);color:var(--text);font-weight:700}
+  .locbar .lc .c2{background:var(--card-inset);color:var(--text2)}
+  .locbar .lc .c3{border:1px solid var(--vb-btn-line);color:var(--text2)}
+  .locbar .hint{font-size:10.5px;color:var(--text3);margin-top:7px}
+
+  /* ===== 横幅(App 黄底横幅) ===== */
+  .warn{background:var(--banner-bg);border:1px solid var(--accent);border-radius:13px;margin:10px 12px 0;padding:10px 12px;font-size:11.5px;color:var(--text2);line-height:1.55}
+
+  /* ===== 清单(App 白卡细描边) ===== */
+  .listhead{display:flex;justify-content:space-between;align-items:center;padding:13px 16px 6px;font-size:12.5px;color:var(--text3);font-weight:700}
+  .listhead a{color:var(--text);text-decoration:underline;text-underline-offset:3px}
+  .list{padding:4px 12px 16px;display:flex;flex-direction:column;gap:8px}
+  .row{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer}
+  .row.sel{background:var(--accent-dim);border-color:var(--accent-shadow)}
+  .row.hl{border:1.5px solid var(--go-bg)}
+  .ck{width:21px;height:21px;flex:none;border:1.5px solid var(--vb-btn-line);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--go-fg);background:#fff}
+  .row.sel .ck{background:var(--go-bg);border-color:var(--go-bg)}
+  .row .mid{flex:1;min-width:0}
+  .row .nm{font-size:14.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px}
+  .row .src{font-size:9.5px;padding:2.5px 7px;border-radius:99px;flex:none;font-weight:700}
+  .src.ai{background:var(--card-inset);color:var(--text2)}
+  .src.voice{background:var(--accent);color:var(--text)}
+  .src.boxsel{background:var(--danger-bg);color:var(--danger)}
+  .row .meta{font-size:11px;color:var(--text3);margin-top:2px}
+  .step{flex:none;display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text2)}
+  .step b{min-width:26px;text-align:center;font-size:14px;color:var(--text)}
+  .step button{width:24px;height:24px;border-radius:8px;border:1px solid var(--vb-btn-line);background:#fff;color:var(--text2);font-size:14px;line-height:1;cursor:pointer}
+
+  /* ===== 按钮(App:墨底黄字+硬投影 / 静默描边) ===== */
+  .btn{flex:none;border:none;border-radius:13px;font-size:14px;font-weight:800;cursor:pointer}
+  .btn.go{background:var(--go-bg);color:var(--go-fg);padding:12px 0;flex:1;box-shadow:0 5px 0 var(--cta-shadow)}
+  .btn.go:active{transform:translateY(2px);box-shadow:0 3px 0 var(--cta-shadow)}
+  .btn.quiet{background:transparent;color:var(--text2);border:1.5px solid var(--vb-btn-line);padding:12px 0;flex:1}
+  .btn.warnGo{background:var(--danger);color:#fff;padding:12px 0;flex:1;box-shadow:0 5px 0 #ecc2c0}
+
+  /* ===== 底部语音条(App voice-bar 复刻:奶油条+米黄胶囊+圆点挖窗) ===== */
+  .botbar{flex:none;background:var(--vb-bg);border-top:1px solid var(--vb-line);display:flex;align-items:center;gap:8px;padding:8px 10px 20px}
+  .hold{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;background:transparent;cursor:pointer;transition:filter .12s,transform .12s;user-select:none;touch-action:none}
+  .hold-face{flex:1;display:flex;align-items:center;gap:10px;border-radius:15px;background:var(--vb-hold-bg);color:var(--text);min-height:39px;padding:0 14px 0 6px;font-size:13.5px;font-weight:700;line-height:1.2;transition:filter .12s,transform .12s}
+  .hold:active .hold-face{filter:brightness(.94);transform:scale(.985)}
+  .hold.rec .hold-face{filter:brightness(.94)}
+  .micdot{width:30px;height:30px;border-radius:50%;background:var(--vb-mic-bg);color:var(--vb-mic-fg);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;gap:1.5px}
+  .mic-cap{width:7.5px;height:11px;border-radius:4px;background:var(--vb-mic-fg)}
+  .mic-stand{width:1.5px;height:4px;background:var(--vb-mic-fg)}
+  .mic-base{width:10.5px;height:1.5px;border-radius:1px;background:var(--vb-mic-fg)}
+  .hold-label{flex:1;min-width:0}
+  .hold-label .l2{display:block;font-size:9.5px;color:var(--text3);font-weight:600;margin-top:1px}
+  .saveSm{flex:none;height:40px;padding:0 15px;border-radius:11px;background:var(--go-bg);color:var(--go-fg);font-size:12.5px;font-weight:800;border:none;box-shadow:0 4px 0 var(--cta-shadow);cursor:pointer}
+
+  /* ===== 录音浮层(App recsheet 复刻) ===== */
+  .recback{position:absolute;inset:0;z-index:45;background:rgba(0,0,0,.22);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+  .recsheet{position:absolute;left:12px;right:12px;bottom:76px;z-index:46;border-radius:22px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(14px) saturate(1.15);backdrop-filter:blur(14px) saturate(1.15);box-shadow:0 10px 30px rgba(0,0,0,.18);padding:16px 16px 14px;display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;animation:recpop .3s cubic-bezier(.2,.9,.3,1.35)}
+  @keyframes recpop{0%{transform:translateY(46px) scale(.97);opacity:0}60%{transform:translateY(-4px);opacity:1}100%{transform:translateY(0) scale(1);opacity:1}}
+  .rec-title{font-size:16.5px;font-weight:800;color:var(--text)}
+  .recrow{display:flex;align-items:center;gap:12px}
+  .recmic{width:58px;height:58px;border-radius:50%;background:var(--accent);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;animation:recpulse 1.6s infinite}
+  .recmic .mic-cap{width:15px;height:22px;border-radius:8px;background:#191919}
+  .recmic .mic-stand{width:3px;height:7px;background:#191919}
+  .recmic .mic-base{width:20px;height:3px;border-radius:2px;background:#191919}
+  @keyframes recpulse{0%{box-shadow:0 0 0 10px var(--accent-dim)}70%{box-shadow:0 0 0 26px transparent}100%{box-shadow:0 0 0 10px transparent}}
+  .wave{display:flex;gap:4px;align-items:center;height:30px}
+  .wave i{width:5px;border-radius:3px;background:var(--go-bg);animation:wv 1s infinite ease-in-out}
+  @keyframes wv{0%,100%{transform:scaleY(.55)}50%{transform:scaleY(1)}}
+  .rec-hint{max-width:270px;font-size:12.5px;color:var(--text2);line-height:1.6}
+  .rec-hint b{font-weight:800}
+  .rec-cta{width:100%;max-width:270px;min-height:33px;display:flex;align-items:center;justify-content:center;border-radius:15px;background:var(--go-bg);color:var(--go-fg);font-size:15px;font-weight:800;line-height:1}
+  .rec-cancel{min-height:30px;display:flex;align-items:center;justify-content:center;padding:0 8px;font-size:12px;font-weight:600;color:var(--text2);text-decoration:underline;text-underline-offset:3px}
+
+  /* ===== diff 底部弹层(App 卡片风) ===== */
+  .dim{position:absolute;inset:0;background:rgba(15,17,20,.4);z-index:40}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--bg);border-radius:22px 22px 0 0;padding:16px 16px 24px;z-index:41;animation:up .3s ease}
+  @keyframes up{from{transform:translateY(55%)}to{transform:translateY(0)}}
+  .grip{width:38px;height:4.5px;border-radius:99px;background:var(--line);margin:0 auto 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;margin:0 0 10px;padding:11px 13px}
+  .card .ct{font-size:11.5px;color:var(--text3);margin-bottom:6px;font-weight:700}
+  .trans{font-size:15px;line-height:1.7;font-weight:700;color:var(--text)}
+  .trans em{font-style:normal;background:linear-gradient(transparent 62%,var(--accent) 62%)}
+  .diff{display:flex;flex-direction:column;gap:8px}
+  .dline{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+  .dline .old{color:var(--danger);text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:rgba(217,48,37,.45)}
+  .dline .arr{color:var(--text3)}
+  .dline .new{color:var(--text);font-weight:800;background:linear-gradient(transparent 65%,var(--accent) 65%)}
+  .why{font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5}
+  .keepTip{font-size:11.5px;color:var(--text2);background:var(--banner-bg);border:1px solid var(--accent);border-radius:10px;padding:8px 10px;margin-top:10px;line-height:1.55}
+
+  /* ===== 编辑面板 ===== */
+  .sheet h3{font-size:16px;font-weight:800;margin-bottom:2px;color:var(--text)}
+  .sheet .conf{font-size:11px;color:var(--text3);margin-bottom:13px}
+  .fld{margin-bottom:13px}
+  .fld label{display:block;font-size:11.5px;color:var(--text3);font-weight:700;margin-bottom:7px}
+  .inp{border:1px solid var(--line);border-radius:12px;padding:11px 12px;font-size:14.5px;display:flex;justify-content:space-between;align-items:center;background:var(--card);color:var(--text)}
+  .inp .pen{color:#c1bcae;font-size:13px}
+  .cand{display:flex;flex-wrap:wrap;gap:8px}
+  .cand span{border:1.5px solid var(--vb-btn-line);border-radius:99px;padding:7px 13px;font-size:13px;color:var(--text2);cursor:pointer;background:var(--card)}
+  .cand span.on{border-color:var(--go-bg);background:var(--go-bg);color:var(--go-fg);font-weight:800}
+  .cand span .star{font-size:10px;color:var(--accent);margin-left:3px}
+
+  /* ===== 圈选 ===== */
+  .hintbar{background:var(--bg);border-bottom:1px solid var(--line);padding:9px 14px;font-size:12px;color:var(--text2);display:flex;align-items:center;gap:7px}
+  .hintbar .dot{width:8px;height:8px;border-radius:50%;background:var(--danger);flex:none;animation:blink 1.2s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .result{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:12px;padding:13px 14px}
+  .result .rt{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--text)}
+  .result .rc{font-size:10.5px;color:var(--text);background:var(--accent);border-radius:5px;padding:2.5px 7px;font-weight:700}
+  .result .rd{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.55}
+  .addedRow{margin:0 12px 8px;border:1.5px dashed var(--danger);background:var(--danger-bg)}
+
+  /* ===== 搜索屏 ===== */
+  .searchbar{margin:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:11px 13px;display:flex;gap:8px;align-items:center;font-size:14.5px;color:var(--text3)}
+  .searchbar b{color:var(--text);font-weight:800;background:linear-gradient(transparent 62%,var(--accent) 62%);padding:0 2px}
+  .hitcard{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px;overflow:hidden}
+  .hitcard .ph{position:relative;width:100%;aspect-ratio:4/3}
+  .hitcard .ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .hitcard .body{padding:12px 14px 14px}
+  .hitcard .hn{font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--text)}
+  .hitcard .hn .where{font-size:12px;color:var(--go-fg);font-weight:800;background:var(--go-bg);padding:4px 10px;border-radius:8px}
+  .hitcard .hm{font-size:11.5px;color:var(--text3);margin-top:5px;line-height:1.5}
+  .hitcard .acts{display:flex;gap:10px;margin-top:11px}
+  .hitcard .acts .btn{padding:10px 0;font-size:12.5px}
+  .nocard{background:var(--card);border:1px solid var(--line);border-radius:16px;margin:10px 12px;padding:12px 14px;display:flex;gap:10px;align-items:center}
+  .nocard .m{flex:1}
+  .nocard .n1{font-size:14px;font-weight:800;color:var(--text)}
+  .nocard .n2{font-size:11px;color:var(--text3);margin-top:2px}
+  .nocard .go2{flex:none;height:32px;padding:0 13px;border-radius:10px;border:1.5px solid var(--vb-btn-line);background:transparent;color:var(--text2);font-size:12px;font-weight:700;cursor:pointer}
+  .toast{position:absolute;left:50%;transform:translateX(-50%);bottom:104px;background:var(--go-bg);color:var(--go-fg);font-size:13px;font-weight:700;padding:10px 16px;border-radius:99px;z-index:55}
+</style>
+</head>
+<body>
+
+<h1>「我靠东西呢」· 拍照识物交互原型 V0.3</h1>
+<div class="sub">已对齐 App 当前设计语言(奶油白/白卡细描边/明黄唯一强调/墨底黄字 CTA/语音条复刻)。原型中的识别框坐标为真实调研数据;真实抽屉照片不随库分发(仓库 public,隐私),缺图自动降级为占位底图,框与交互不受影响。</div>
+<div class="legend">
+  <span><b>按住说话</b>·语音条同款胶囊,左边撑满</span>
+  <span><b>位置=批次</b>·填一次全批继承</span>
+  <span><b>找东西=照片+框回放</b></span>
+  <span>数量<b>步进器</b>·计数不可信</span>
+  <span>AI 候选<b>一键改类</b></span>
+  <span><b>圈选补识别</b>·漏检兜底</span>
+</div>
+
+<div class="stage">
+
+<!-- ============ 屏1:识别确认 ============ -->
+<div class="shot">
+  <div class="cap">① 识别确认</div>
+  <div class="note"><b>位置栏</b>(批次级)+ <b>底部=现有语音条布局</b>:米黄胶囊按住说话撑满左侧,右侧小号墨底黄字保存,互不重叠。点行→照片定位;点胶囊体验完整「按住→听→改」。</div>
+  <div class="phone" id="p1">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="navbar"><div class="t">拍照识物 · 确认入库</div><div class="s">识别到 7 件 · 高置信 3 件已自动勾选 · 点行可在照片上定位</div></div>
+    <div class="content">
+      <div class="photoWrap" id="photo1">
+        <img src="real-1-1024.jpg" alt="抽屉照片">
+        <div class="ask">🅐 刚拍的这张</div>
+      </div>
+      <div class="locbar">
+        <div class="ico">📍</div>
+        <div class="main">
+          <div class="lb">这批 7 件都在哪?填一次,全部继承</div>
+          <div class="lv">玄关柜 · 第二层抽屉 <span class="pen">✎</span></div>
+          <div class="lc"><span class="c1">🎤 按住说位置</span><span class="c2">常用:主卧五斗柜</span><span class="c2">常用:电视柜</span><span class="c3">＋新建</span></div>
+          <div class="hint">个别物品位置不同?点行进编辑单独改。</div>
+        </div>
+      </div>
+      <div class="warn">数量是 AI 估的(它数数不太行),点数核对更稳妥;名称不对,按住下面胶囊说一声就行。</div>
+      <div class="listhead"><span>已选 5 / 7 件</span><a href="javascript:void(0)" onclick="alert('原型:全选/反选')">全选 / 反选</a></div>
+      <div class="list" id="list1"></div>
+    </div>
+    <div class="botbar">
+      <div class="hold" id="micMain" onmousedown="simHold()" ontouchstart="simHold()">
+        <div class="hold-face">
+          <div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
+          <div class="hold-label">按住说话<span class="l2">补全 · 改数量 · 说位置</span></div>
+        </div>
+      </div>
+      <button class="saveSm">存 5 件</button>
+    </div>
+    <!-- 录音浮层(App recsheet 同款) -->
+    <div id="recWrap" style="display:none;position:absolute;inset:0;z-index:45;pointer-events:none">
+      <div class="recback"></div>
+      <div class="recsheet">
+        <div class="rec-title">说吧,我记着呢。</div>
+        <div class="recrow">
+          <div class="recmic"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
+          <div class="wave"><i style="height:12px"></i><i style="height:24px;animation-delay:.12s"></i><i style="height:30px;animation-delay:.24s"></i><i style="height:20px;animation-delay:.36s"></i><i style="height:14px;animation-delay:.48s"></i><i style="height:26px;animation-delay:.6s"></i><i style="height:11px;animation-delay:.72s"></i></div>
+        </div>
+        <div class="rec-hint" id="liveTxt">第3个是品…</div>
+        <div class="rec-cta">松开,去核对</div>
+        <div class="rec-cancel">↑ 上滑取消 · 取消就当没说过,什么都不记</div>
+      </div>
+    </div>
+    <!-- diff 浮层 -->
+    <div class="dim" id="diffDim" style="display:none"></div>
+    <div class="sheet" id="diffSheet" style="display:none">
+      <div class="grip"></div>
+      <div class="card">
+        <div class="ct">你说</div>
+        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em></div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="ct">我理解为 1 处修改,过目再改</div>
+        <div class="diff"><div class="dline"><span class="old">黄色薯片罐 ×1</span><span class="arr">→</span><span class="new">品客薯片罐(空)×1</span></div></div>
+        <div class="why">依据:「第3个」对上清单第 3 行;「品客的薯片罐」改名称;「空了」记为状态</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn quiet">念错了,当我没说</button>
+        <button class="btn go" onclick="applyDiff(this)">就这么改</button>
+      </div>
+      <div class="keepTip">改完接着按住说下一处就行,不用等我——比如「白色数据线一共3根」。</div>
+    </div>
+    <div class="toast" id="toast" style="display:none">✓ 改好了 1 处 · 接着按住说</div>
+  </div>
+</div>
+
+<!-- ============ 屏2:按住说话中 ============ -->
+<div class="shot">
+  <div class="cap">② 按住说话中(同屏浮层)</div>
+  <div class="note">不跳页——录音小窗浮在确认页上(<b>App 录音浮层同款</b>:页面压暗可见、小窗回弹入场、黄圆麦克风+脉冲环+墨色波形)。</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="cloneSlot" data-from="p1"></div>
+    <div class="recback"></div>
+    <div class="recsheet">
+      <div class="rec-title">说吧,我记着呢。</div>
+      <div class="recrow">
+        <div class="recmic"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div>
+        <div class="wave"><i style="height:12px"></i><i style="height:24px;animation-delay:.12s"></i><i style="height:30px;animation-delay:.24s"></i><i style="height:20px;animation-delay:.36s"></i><i style="height:14px;animation-delay:.48s"></i><i style="height:26px;animation-delay:.6s"></i><i style="height:11px;animation-delay:.72s"></i></div>
+      </div>
+      <div class="rec-hint">第3个是品客的薯片罐,已经空了<span style="opacity:.35">▍</span><br><b>松手后先给你核对一遍,确认了才算记住。</b></div>
+      <div class="rec-cta">松开,去核对</div>
+      <div class="rec-cancel">↑ 上滑取消 · 取消就当没说过,什么都不记</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 屏3:松手→diff 过目 ============ -->
+<div class="shot">
+  <div class="cap">③ 松手 → 改动过目</div>
+  <div class="note">diff 卡从底部弹出:旧值红划线、新值黄荧光,过目才改——<b>语音再快,裁决权在人</b>。应用后不收流程,接着按住连改。</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="cloneSlot" data-from="p1"></div>
+    <div class="dim"></div>
+    <div class="sheet">
+      <div class="grip"></div>
+      <div class="card">
+        <div class="ct">你说</div>
+        <div class="trans">第3个是<em>品客的薯片罐</em>,已经<em>空了</em></div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="ct">我理解为 1 处修改,过目再改</div>
+        <div class="diff"><div class="dline"><span class="old">黄色薯片罐 ×1</span><span class="arr">→</span><span class="new">品客薯片罐(空)×1</span></div></div>
+        <div class="why">依据:「第3个」对上清单第 3 行;「品客的薯片罐」改名称;「空了」记为状态</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn quiet">念错了,当我没说</button>
+        <button class="btn go">就这么改</button>
+      </div>
+      <div class="keepTip">改完接着按住说下一处就行,不用等我——比如「白色数据线一共3根」。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 屏4:手动编辑 ============ -->
+<div class="shot">
+  <div class="cap">④ 手动编辑(点行进入)</div>
+  <div class="note">细分类错误修复现场:模型认出包装文字「米朵恋」但判成卫生棉条,你实测是棉柔巾——<b>候选词点一下就改</b>。位置默认继承批次位置。</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="navbar"><div class="t">识别确认</div><div class="s">主卧五斗柜 · 第一层(9 件)</div></div>
+    <div class="content" style="filter:grayscale(.3) brightness(.94)">
+      <div class="photoWrap"><img src="real-2-1024.jpg" alt="抽屉照片">
+        <div class="bbox user" style="left:73.1%;top:55.5%;width:26.9%;height:37.7%"><span class="tag">正在编辑</span></div>
+      </div>
+      <div class="list">
+        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">湿巾 <span class="src ai">AI</span></div><div class="meta">×2 · 置信度高</div></div></div>
+        <div class="row sel"><div class="ck">✓</div><div class="mid"><div class="nm">创口贴 <span class="src ai">AI</span></div><div class="meta">×1 · 置信度高</div></div></div>
+        <div class="row sel hl"><div class="ck">✓</div><div class="mid"><div class="nm">卫生棉条 <span class="src ai">AI</span></div><div class="meta">×9 · 置信度 62% ← 正在编辑</div></div></div>
+      </div>
+    </div>
+    <div class="dim"></div>
+    <div class="sheet">
+      <div class="grip"></div>
+      <h3>改一下</h3>
+      <div class="conf">来源:照片识别 · 认出了包装文字「米朵恋」· 置信度 62%</div>
+      <div class="fld"><label>名称 · 候选点选即改</label>
+        <div class="cand"><span class="on">棉柔巾<span class="star">★最像</span></span><span>湿巾</span><span>卸妆棉</span><span>保持:卫生棉条</span></div>
+      </div>
+      <div class="fld"><label>数量(按包装排面估的,建议核一眼)</label>
+        <div class="inp"><span style="color:var(--text3)">步进器</span><span class="step" style="display:flex;gap:9px;align-items:center"><button>−</button><b>9</b><button>+</button></span></div>
+      </div>
+      <div class="fld"><label>位置(默认继承本批,不同才改)</label><div class="inp"><span>主卧五斗柜 · 第一层</span><span class="pen">✎</span></div></div>
+      <div class="fld"><label>提醒日期(可选)</label><div class="inp"><span style="color:#c1bcae">不设提醒</span><span class="pen">✎</span></div></div>
+      <button class="btn go" style="width:100%">就这么改</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 屏5:圈选补识别 ============ -->
+<div class="shot">
+  <div class="cap">⑤ 圈选补识别(漏检兜底)</div>
+  <div class="note">清单里没有的,照片上圈一下问它——<b>全图+坐标</b>一起送审(调研结论:比裁剪再问稳)。结果带置信度,入清单标「圈选」。</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="navbar"><div class="t">圈一下,问它是什么</div><div class="s">清单漏了?圈出它 → 补识别 → 入清单</div></div>
+    <div class="content">
+      <div class="hintbar"><span class="dot"></span>用手指在照片上画一个框,框住想知道的东西</div>
+      <div class="photoWrap" id="photo5"><img src="real-1-1024.jpg" alt="抽屉照片"></div>
+      <div style="text-align:center;margin:14px 0 4px"><button class="btn warnGo" style="padding:11px 26px;flex:none" onclick="fakeCircle()">👆 模拟:圈左下角白色盒子</button></div>
+      <div class="result" id="askResult" style="display:none">
+        <div class="rt">PlayStation 游戏盒 <span class="rc">置信度中</span></div>
+        <div class="rd">白底彩印盒装,可见 PlayStation 标志与人物封面,此前清单没收录(漏检了)。<br>依据:你圈的框 + 整张抽屉照片一起看的</div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn quiet" onclick="resetCircle()">不是,重圈</button>
+          <button class="btn go" onclick="this.textContent='✓ 加进清单了'">加进清单</button>
+        </div>
+      </div>
+      <div class="list" id="list5"></div>
+    </div>
+    <div class="botbar">
+      <div class="hold" style="pointer-events:none">
+        <div class="hold-face"><div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div><div class="hold-label">按住说话</div></div>
+      </div>
+      <button class="saveSm">存 8 件</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 屏6:找东西 ============ -->
+<div class="shot">
+  <div class="cap">⑥ 找东西 · 照片+框回放</div>
+  <div class="note">闭环:录入时存的框,找的时候放给你看——<b>「电池在哪」→ 抽屉照片+黄环在闪,指给你看</b>。没照片的降级为文字+「去补拍」。</div>
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+    <div class="capsule"><i></i><i></i><span class="pill"></span></div>
+    <div class="navbar"><div class="t">找东西</div><div class="s">语音或输入,例:「电池在哪」「棉柔巾」</div></div>
+    <div class="content">
+      <div class="searchbar">🔍 <b>电池</b> 在哪</div>
+      <div class="hitcard">
+        <div class="ph" id="photo6">
+          <img src="real-3-1024.jpg" alt="文具抽屉">
+          <div class="ask">📍 客厅电视柜 · 第一层</div>
+        </div>
+        <div class="body">
+          <div class="hn">7号电池 <span class="where">客厅电视柜 · 第一层</span></div>
+          <div class="hm">×24(你核对过的)· 照片拍于 10-17 · 框住的就是它,点照片放大看</div>
+          <div class="acts">
+            <button class="btn quiet" onclick="alert('原型:大图查看,黄环闪烁定位')">🔍 看大图</button>
+            <button class="btn quiet">📸 重拍更新</button>
+          </div>
+        </div>
+      </div>
+      <div class="nocard">
+        <div style="font-size:20px">🧴</div>
+        <div class="m"><div class="n1">牙膏 · 洗手台镜柜</div><div class="n2">这件还没拍过照片,只有文字位置</div></div>
+        <button class="go2">去补拍</button>
+      </div>
+      <div class="nocard">
+        <div style="font-size:20px">🧣</div>
+        <div class="m"><div class="n1">围巾 · 玄关柜 · 第二层</div><div class="n2">×1 · 来自拍照入库(10-17)· 照片里没框到它(手动补的)</div></div>
+        <button class="go2">看抽屉照片</button>
+      </div>
+    </div>
+    <div class="botbar">
+      <div class="hold" style="pointer-events:none">
+        <div class="hold-face"><div class="micdot"><div class="mic-cap"></div><div class="mic-stand"></div><div class="mic-base"></div></div><div class="hold-label">问问在哪<span class="l2">如:充电器在哪</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+/* ===== 缺图降级:真实照片不入库,占位底图照样演示框与交互 ===== */
+document.querySelectorAll('.photoWrap img').forEach(img=>{
+  img.onerror=()=>{img.style.display='none';
+    const w=img.parentElement;
+    w.style.background='linear-gradient(135deg,#3c4046,#22252a)';
+    const d=document.createElement('div');
+    d.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa0a6;font-size:12px;text-align:center;padding:0 34px;line-height:1.8';
+    d.textContent='示意底图未随库分发(真实家庭照片不入 public 仓库)。本地放置 real-{1,2,3}-1024.jpg 即出完整演示,识别框与交互不受影响。';
+    w.appendChild(d);};
+});
+/* ===== real-1 grounding 实测坐标(0-1000 归一化,/10=%) ===== */
+const R1 = [
+  {id:"zelda",  box:[230,485,379,868], name:"塞尔达传说:旷野之息", sub:"Switch 卡盒", n:1, ok:true},
+  {id:"hakutan",box:[361,480,562,883], name:"煤矿镇的小白", sub:"Switch 卡盒 · AI 猜全名:蜡笔小新:煤炭镇的小白", n:1, ok:true},
+  {id:"chips",  box:[273,389,593,507], name:"黄色薯片罐", sub:"置信度中 · 按住说「第3个是品客薯片罐,空了」", n:1, ok:false},
+  {id:"cable",  box:[614,521,897,879], name:"白色数据线", sub:"数量为估计,请核对", n:2, ok:false},
+  {id:"adap",   box:[682,163,960,428], name:"黑色电源适配器", sub:"置信度中", n:1, ok:false},
+  {id:"earph",  box:[281,163,394,309], name:"黑色耳机", sub:"置信度高", n:1, ok:true},
+  {id:"bbox868",box:[868,790,982,873], name:"黑色小盒子", sub:"置信度低 · 看不清可删", n:1, ok:false},
+];
+function renderBoxes(){
+  const p = document.getElementById("photo1");
+  R1.forEach(it=>{
+    const [x1,y1,x2,y2]=it.box, d=document.createElement("div");
+    d.className="bbox"+(it.ok?"":" amber"); d.id="bx-"+it.id;
+    d.style.left=(x1/10)+"%"; d.style.top=(y1/10)+"%";
+    d.style.width=((x2-x1)/10)+"%"; d.style.height=((y2-y1)/10)+"%";
+    d.innerHTML=`<span class="tag">${it.name}</span>`;
+    d.onclick=()=>flashRow(it.id);
+    p.appendChild(d);
+  });
+}
+function renderList(){
+  const l=document.getElementById("list1");
+  R1.forEach(it=>{
+    const r=document.createElement("div");
+    r.className="row"+(it.ok?" sel":""); r.id="rw-"+it.id;
+    r.innerHTML=`<div class="ck">${it.ok?"✓":""}</div>
+      <div class="mid"><div class="nm">${it.name} <span class="src ai">AI</span></div>
+      <div class="meta">${it.sub}</div></div>
+      <div class="step"><button onclick="step(this,-1);event.stopPropagation()">−</button><b>${it.n}</b><button onclick="step(this,1);event.stopPropagation()">+</button></div>`;
+    r.onclick=()=>flashBox(it.id);
+    l.appendChild(r);
+  });
+}
+function flashBox(id){const b=document.getElementById("bx-"+id),r=document.getElementById("rw-"+id);
+  document.querySelectorAll(".bbox").forEach(e=>e.classList.remove("pulse"));
+  document.querySelectorAll(".row").forEach(e=>e.classList.remove("hl"));
+  if(b){b.classList.add("pulse");b.scrollIntoView({block:"center",behavior:"smooth"});}
+  if(r)r.classList.add("hl");}
+function step(btn,d){const b=btn.parentElement.querySelector("b");b.textContent=Math.max(1,+b.textContent+d);}
+renderBoxes();renderList();
+
+/* ===== 屏① 按住说话完整演示(点按=模拟按住1.5秒) ===== */
+function simHold(){
+  const mic=document.getElementById("micMain"), wrap=document.getElementById("recWrap"),
+        live=document.getElementById("liveTxt");
+  wrap.style.display="block"; mic.classList.add("rec"); live.innerHTML="第3个是品…";
+  setTimeout(()=>{live.innerHTML="第3个是品客的薯…"},550);
+  setTimeout(()=>{live.innerHTML="第3个是品客的薯片罐,已经空了"},1000);
+  setTimeout(()=>{
+    wrap.style.display="none"; mic.classList.remove("rec");
+    document.getElementById("diffDim").style.display="block";
+    document.getElementById("diffSheet").style.display="block";
+  },1500);
+}
+function applyDiff(){
+  document.getElementById("diffDim").style.display="none";
+  document.getElementById("diffSheet").style.display="none";
+  const t=document.getElementById("toast"); t.style.display="block";
+  const row=document.getElementById("rw-chips");
+  if(row){row.classList.add("sel");row.querySelector(".ck").textContent="✓";
+    row.querySelector(".nm").innerHTML='品客薯片罐(空) <span class="src voice">语音</span>';}
+  setTimeout(()=>t.style.display="none",2200);
+}
+/* ===== 克隆屏①到屏②③ ===== */
+document.querySelectorAll(".cloneSlot").forEach(slot=>{
+  const src=document.getElementById(slot.dataset.from);
+  [src.querySelector(".navbar"),src.querySelector(".content"),src.querySelector(".botbar")].forEach(el=>{
+    const c=el.cloneNode(true); c.querySelectorAll("[id]").forEach(e=>e.removeAttribute("id")); slot.appendChild(c);
+  });
+});
+
+/* ===== 屏⑤ 模拟圈选 ===== */
+function fakeCircle(){
+  const p=document.getElementById("photo5");
+  document.querySelectorAll("#photo5 .bbox.user").forEach(e=>e.remove());
+  const d=document.createElement("div"); d.className="bbox user";
+  d.style.left="6%";d.style.top="69%";d.style.width="23%";d.style.height="24%";
+  d.innerHTML='<span class="tag">你圈的框</span>'; p.appendChild(d);
+  document.getElementById("askResult").style.display="block";
+  const l5=document.getElementById("list5");
+  const r=document.createElement("div"); r.className="row sel addedRow";
+  r.innerHTML='<div class="ck">✓</div><div class="mid"><div class="nm">PlayStation 游戏盒 <span class="src boxsel">圈选</span></div><div class="meta">×1 · 刚刚由圈选补入</div></div><div class="step"><button>−</button><b>1</b><button>+</button></div>';
+  l5.appendChild(r);
+}
+function resetCircle(){
+  document.querySelectorAll("#photo5 .bbox.user").forEach(e=>e.remove());
+  document.getElementById("askResult").style.display="none";
+  document.getElementById("list5").innerHTML="";
+}
+
+/* ===== 屏⑥ 电池高亮框(real-3 实测 [605,248,997,731]) ===== */
+(function(){
+  const p=document.getElementById("photo6"); if(!p)return;
+  const b=[605,248,997,731], d=document.createElement("div");
+  d.className="bbox hit";
+  d.style.left=(b[0]/10)+"%";d.style.top=(b[1]/10)+"%";
+  d.style.width=((b[2]-b[0])/10)+"%";d.style.height=((b[3]-b[1])/10)+"%";
+  d.innerHTML='<span class="tag">🔋 电池在这里</span>';
+  p.appendChild(d);
+})();
+</script>
+</body>
+</html>
