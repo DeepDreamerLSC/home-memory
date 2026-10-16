@@ -4,6 +4,7 @@ const api_1 = require("../../utils/api");
 const voice_entry_1 = require("../../utils/voice-entry");
 const draft_session_1 = require("../../utils/draft-session");
 const photo_session_1 = require("../../utils/photo-session");
+const evidence_view_1 = require("../../utils/evidence-view");
 const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
 const households_api_1 = require("../../utils/households-api");
@@ -248,6 +249,8 @@ Page({
                 queryKeyword: q,
                 queryResults: toDisplayItems(res.items),
             });
+            // 证据缩略(#3):结果先以纯文字上屏,缩略异步补(失败静默不补)
+            void this.attachQueryEvidence(res.items.map((it) => it.item_id), scopeGen);
         }
         catch (e) {
             if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
@@ -263,6 +266,36 @@ Page({
         }
         finally {
             this.setData({ querying: false });
+        }
+    },
+    /**
+     * 搜索/找物结果行的证据缩略(#3 §6,结构现成的低成本增强):按需批量
+     * photoEvidenceGet(单次 ≤10,超出的行保持纯文字——结果按相关度排序,
+     * 前排优先),每件取最新一张换链成功的临时链接。守卫与查询同源:
+     * 在途家庭切换、用户已收起结果或已发起下一次搜索(queriedScopeGen 变了)
+     * 时绝不回写 queryResults。缩略只是「有留证」的示意,行内位置仍以
+     * 文字记录为准(语义在详情页证据卡展开说明)。
+     */
+    async attachQueryEvidence(ids, scopeGen) {
+        const top = ids.slice(0, 10);
+        if (top.length === 0) {
+            return;
+        }
+        try {
+            const res = await (0, api_1.callItemsApi)({
+                action: "photoEvidenceGet",
+                item_ids: top,
+            });
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen) ||
+                this.queriedScopeGen !== scopeGen) {
+                return; // 在途家庭切换 / 结果已收起或已换新:不回写
+            }
+            const urls = (0, evidence_view_1.pickEvidenceUrls)(res.evidence, top);
+            const rows = this.data.queryResults.map((r) => urls[r.item_id] !== undefined ? { ...r, evidenceUrl: urls[r.item_id] } : r);
+            this.setData({ queryResults: rows });
+        }
+        catch (e) {
+            // 静默:缩略属增强露出,拉不到就保持纯文字行,绝不出错提示
         }
     },
     onResultTap(e) {

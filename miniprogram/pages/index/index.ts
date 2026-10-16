@@ -7,6 +7,7 @@ import type {
 } from "../../types";
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
 import { getUnfinishedPhotoSession } from "../../utils/photo-session";
+import { pickEvidenceUrls } from "../../utils/evidence-view";
 import {
   countDue,
   dueBannerText,
@@ -63,8 +64,12 @@ function toUnmountedRows(
   }));
 }
 
-/** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用) */
-type DisplayItem = ItemSummary & { updated_at_short: string };
+/** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用;
+    evidenceUrl = 证据缩略临时链接(#3),有证据的照片行才携带) */
+type DisplayItem = ItemSummary & {
+  updated_at_short: string;
+  evidenceUrl?: string;
+};
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
 interface ViewLayer {
@@ -184,6 +189,12 @@ Page<
     onTextRecordTap(): void;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
+    /**
+     * 搜索/找物结果行的证据缩略(#3):结果上屏后按需批量拉一次
+     * photoEvidenceGet(≤10,API 单次上限),有证据的行以照片缩略替代
+     * 首字图标;失败/无证据静默保持纯文字行(增强露出,绝不出错提示)。
+     */
+    attachQueryEvidence(ids: string[], scopeGen: number): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     /** 收起搜索结果,回家里地图 */
     onCollapseResultsTap(): void;
@@ -474,6 +485,11 @@ Page<
         queryKeyword: q,
         queryResults: toDisplayItems(res.items),
       });
+      // 证据缩略(#3):结果先以纯文字上屏,缩略异步补(失败静默不补)
+      void this.attachQueryEvidence(
+        res.items.map((it) => it.item_id),
+        scopeGen,
+      );
     } catch (e) {
       if (!isScopeGenerationCurrent(scopeGen)) {
         return; // 同上:旧家庭的失败提示也不上屏
@@ -487,6 +503,40 @@ Page<
       });
     } finally {
       this.setData({ querying: false });
+    }
+  },
+
+  /**
+   * 搜索/找物结果行的证据缩略(#3 §6,结构现成的低成本增强):按需批量
+   * photoEvidenceGet(单次 ≤10,超出的行保持纯文字——结果按相关度排序,
+   * 前排优先),每件取最新一张换链成功的临时链接。守卫与查询同源:
+   * 在途家庭切换、用户已收起结果或已发起下一次搜索(queriedScopeGen 变了)
+   * 时绝不回写 queryResults。缩略只是「有留证」的示意,行内位置仍以
+   * 文字记录为准(语义在详情页证据卡展开说明)。
+   */
+  async attachQueryEvidence(ids: string[], scopeGen: number) {
+    const top = ids.slice(0, 10);
+    if (top.length === 0) {
+      return;
+    }
+    try {
+      const res = await callItemsApi({
+        action: "photoEvidenceGet",
+        item_ids: top,
+      });
+      if (
+        !isScopeGenerationCurrent(scopeGen) ||
+        this.queriedScopeGen !== scopeGen
+      ) {
+        return; // 在途家庭切换 / 结果已收起或已换新:不回写
+      }
+      const urls = pickEvidenceUrls(res.evidence, top);
+      const rows = this.data.queryResults.map((r) =>
+        urls[r.item_id] !== undefined ? { ...r, evidenceUrl: urls[r.item_id] } : r,
+      );
+      this.setData({ queryResults: rows });
+    } catch (e) {
+      // 静默:缩略属增强露出,拉不到就保持纯文字行,绝不出错提示
     }
   },
 
