@@ -188,6 +188,20 @@ export type ItemsApiEvent =
   | ({ action: "remindClear"; item_id: string; expected_generation?: number } & ScopeWriteBinding)
   | (
       {
+        /**
+         * 拍照识物批量建档(#3,IMPLEMENTATION.md §1.3):逐件复用 create 语义
+         * (operation_id 幂等/提醒 slot);进 WRITE_ACTIONS,api 层自动拼双 marker。
+         */
+        action: "photoCommit";
+        /** 客户端 uuid(8-64),仅日志聚合口径 */
+        batch_id: string;
+        /** 1-10 件;任一件参数非法服务端整批零写入 */
+        items: PhotoCommitItem[];
+      } & ScopeWriteBinding
+    )
+  | { action: "photoEvidenceGet"; item_ids: string[] }
+  | (
+      {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
         action: "remindSet";
         item_id: string;
@@ -312,7 +326,9 @@ export type ItemsApiOkResponse =
   | RemindListResponse
   | RemindCompleteResponse
   | RemindClearResponse
-  | RemindSetResponse;
+  | RemindSetResponse
+  | PhotoCommitResponse
+  | PhotoEvidenceGetResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -828,8 +844,12 @@ export interface PhotoCandidate {
   suffix: string;
   /** 位置例外(null=继承批次默认位置;非空=该件单独位置,保存确认只汇总已勾选件的例外) */
   exc: string | null;
-  /** 行来源:照片识别 / 语音补录 / 圈选补识别 */
-  src: "ai" | "voice" | "circle";
+  /**
+   * 行来源:照片识别 / 语音补录 / 圈选补识别 / 手动补录。
+   * "manual" = VL 不可用降级或用户点「＋手动添加物品」补的行(§7.1:box=null
+   * 整照关联,保存时才首次上传,photoCommit 照常);无 VL 依据,置信度恒 "low"。
+   */
+  src: "ai" | "voice" | "circle" | "manual";
   /** VL 置信度(voice 行无 VL 依据,恒 "low" 且无框,不参与框样式) */
   confidence: VlConfidence;
   /** 0-1 相对原图;null = 无框(手动/语音行,整照关联) */
@@ -838,4 +858,135 @@ export interface PhotoCandidate {
   checked: boolean;
   /** 入列即生成的 photoCommit 幂等键(uuid):内容改后仍沿用,服务端同键同内容幂等 */
   operationId: string;
+  /**
+   * 提醒日期(可选,屏④手动编辑面板的 picker;YYYY-MM-DD)。null/缺省=不设提醒;
+   * 保存时映射为 photoCommit 的 reminder {due_date, kind}(kind 冻结词表,缺省「下次维护」)。
+   */
+  remind?: { due_date: string; kind: RemindKind } | null;
 }
+
+/* ---------------- 拍照识物:photoCommit / photoEvidenceGet(§1.3/§1.4) ---------------- */
+
+/** photoCommit 单件的 photo 证据绑定(该行绑了照片证据才携带) */
+export interface PhotoCommitPhoto {
+  /** 用户点「确认,记住了」后 wx.cloud.uploadFile 得到的云存储 fileID(确认前不存在) */
+  file_id: string;
+  /** 压缩图实测宽高(与 vlRecognize 上送值一致,坐标反算基准) */
+  img_w: number;
+  img_h: number;
+  /** 0-1 相对原图;null = 无框(整照关联的手动/语音行) */
+  box: Box | null;
+  /** "vl" = AI 识别框 | "circle" = 用户圈选 */
+  source: "vl" | "circle";
+}
+
+/** photoCommit 单件(与 create 同形状的建档参数 + 可选 photo) */
+export interface PhotoCommitItem {
+  /** 行内固定幂等键(重试沿用;内容改后仍沿用,服务端同键同内容幂等/异内容冲突) */
+  operation_id: string;
+  name: string;
+  /** 批次位置或该件例外(客户端已合成) */
+  location_text: string;
+  /** 数量备注,客户端拼 "×{qty} {suffix}" */
+  note?: string;
+  /** 可选提醒,与 create 完全同形状 */
+  reminder?: ReminderInput;
+  photo?: PhotoCommitPhoto;
+}
+
+export interface PhotoCommitResultRow {
+  /** items 内 0-based 下标回执 */
+  index: number;
+  ok: boolean;
+  item_id?: string;
+  duplicated?: boolean;
+  evidence_saved?: boolean;
+  /** ok:false 时携带 */
+  error?: string;
+  message?: string;
+}
+
+export interface PhotoCommitResponse {
+  ok: true;
+  results: PhotoCommitResultRow[];
+}
+
+/** photoEvidenceGet 的证据行投影(§1.4) */
+export interface PhotoEvidenceRow {
+  item_id: string;
+  file_id: string;
+  /** getTempFileURL 临时链接;换链失败为 ""(file_id 仍在,客户端可重试) */
+  photo_url: string;
+  box: Box | null;
+  img_w: number;
+  img_h: number;
+  captured_location_text: string;
+  source: "vl" | "circle";
+  created_at: string;
+}
+
+export interface PhotoEvidenceGetResponse {
+  ok: true;
+  household_id?: string;
+  scope_revision?: number;
+  evidence: PhotoEvidenceRow[];
+}
+
+/* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */
+
+export interface DraftEditParseEvent {
+  action: "draftEditParse";
+  /** 用户原话(去空白后 1-200 码点) */
+  text: string;
+  /** 当前批次默认位置(给模型看) */
+  batch_location: string;
+  /** 当前候选清单(1-12 项;draft_id 页面侧为 IntakeRow.draftId) */
+  candidates: { draft_id: string; name: string }[];
+}
+
+export type DraftEditIntent = "edit" | "add" | "batch_location" | "none";
+
+export interface DraftEditRow {
+  /** 服务端白名单 {"name","qty_note","location"} */
+  field: "name" | "qty_note" | "location";
+  /** 仅展示用 */
+  old?: string;
+  new: string;
+}
+
+export interface DraftEditPick {
+  draft_id: string;
+  name: string;
+}
+
+/**
+ * 五分支响应(intent 是判别字段;needs_pick=true 时 edits 必空、target 必 null,
+ * 服务端硬门已保证,客户端不做二次判断)。
+ */
+export type DraftEditParseResponse =
+  | {
+      ok: true;
+      engine: string;
+      intent: "edit";
+      target: { draft_id: string; matched_word?: string } | null;
+      edits: DraftEditRow[];
+      needs_pick: boolean;
+      picks: DraftEditPick[];
+    }
+  | {
+      ok: true;
+      engine: string;
+      intent: "add";
+      added: { name: string; qty_note?: string };
+      needs_pick: false;
+      picks: DraftEditPick[];
+    }
+  | {
+      ok: true;
+      engine: string;
+      intent: "batch_location";
+      new_location: string;
+      needs_pick: false;
+      picks: DraftEditPick[];
+    }
+  | { ok: true; engine: string; intent: "none"; needs_pick: false; picks: DraftEditPick[] };

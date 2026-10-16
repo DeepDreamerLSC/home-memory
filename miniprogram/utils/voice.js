@@ -159,7 +159,7 @@ function createVoiceController(callbacks, deps) {
                     at: new Date().toISOString(),
                 });
                 if (result.ok) {
-                    callbacks.onStop(text);
+                    callbacks.onStop(text, res.tempFilePath);
                 }
                 else if (result.error === "INVALID_INPUT") {
                     callbacks.onError("RECORD_TOO_SHORT", voiceErrorMessage("RECORD_TOO_SHORT"));

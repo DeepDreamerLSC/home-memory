@@ -24,6 +24,7 @@ exports.composeNote = composeNote;
 exports.makeAiRow = makeAiRow;
 exports.makeVoiceAddedRow = makeVoiceAddedRow;
 exports.makeCircleRow = makeCircleRow;
+exports.makeManualRow = makeManualRow;
 exports.rowStateOf = rowStateOf;
 exports.rowStateLabel = rowStateLabel;
 exports.boxTagPrefix = boxTagPrefix;
@@ -142,6 +143,28 @@ function makeCircleRow(item, circledBox, genId) {
         src: "circle",
         confidence: item.confidence,
         box: circledBox,
+        checked: false,
+        done: false,
+        failMsg: "",
+        operationId: idOf(genId),
+    };
+}
+/**
+ * 手动补录入列(§7.1 VL 不可用降级 / 「＋手动添加物品」行):未勾选候选、
+ * 无框(box=null 整照关联)、src="manual"。confidence 恒 "low"——无 VL 依据,
+ * 仅保持形状完整;保存时照常绑本批照片(source="vl",box=null)。
+ */
+function makeManualRow(name, qtyNote, genId) {
+    const { qty, suffix } = parseIntakeQtyNote(qtyNote);
+    return {
+        draftId: idOf(genId),
+        name,
+        qty,
+        suffix,
+        exc: null,
+        src: "manual",
+        confidence: "low",
+        box: null,
         checked: false,
         done: false,
         failMsg: "",

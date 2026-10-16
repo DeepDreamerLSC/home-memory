@@ -453,3 +453,93 @@ test("⑩ B1:正常路径(家庭未切换)提取返回仍建草稿跳确认页,�
     householdScope.__resetHouseholdScopeForTest();
   }
 });
+
+/* ---------------- #3 拍照识物:routeExtract 可选旁路(现状锁的双向验证) ---------------- */
+
+test("⑪ routeExtract:声明了旁路的宿主走自己的管线——不建草稿、不跳页,onTranscript 收到原话路径", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup();
+    var routed = [];
+    var host = makeHost("photo 页");
+    host.routeExtract = function (text, binding) {
+      routed.push({ text: text, binding: binding });
+      return Promise.resolve();
+    };
+    host.transcriptsRaw = [];
+    host.onTranscript = function (t, audioPath) {
+      host.transcriptsRaw.push([t, audioPath]);
+    };
+    var handle = voiceEntry.attachVoiceEntry(host);
+
+    await pressAndWait(handle, 500);
+    ctx.deps.recorder.__fireStart();
+    handle.pressEnd();
+    ctx.deps.recorder.__fireStop({ tempFilePath: "/tmp/photo-edit.mp3" });
+    await settle();
+
+    assert.equal(routed.length, 1, "有效转写移交宿主自带管线(photo 页接 draftEditParse)");
+    assert.equal(routed[0].text, "降压药在厨房第二个抽屉", "原话逐字移交");
+    assert.equal(typeof routed[0].binding.scopeGen, "number", "发起绑定随移(宿主自做迟到复核)");
+    assert.equal(typeof routed[0].binding.abortEpoch, "number");
+    assert.equal(ctx.stub.cloudCalls.length, 0, "旁路不走 extractText:零提取调用");
+    assert.equal(ctx.stub.navs.length, 0, "旁路不建 confirm 会话、不跳页");
+    assert.equal(draftSession.getUnfinishedDraftSession(), null, "旁路绝不建草稿");
+    assert.deepEqual(
+      host.transcriptsRaw,
+      [["降压药在厨房第二个抽屉", "/tmp/photo-edit.mp3"]],
+      "onTranscript 第二参透传本次录音临时文件路径(diff sheet 回听用)",
+    );
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});
+
+test("⑫ routeExtract:未声明旁路的宿主走既有 extractText(现状锁,行为逐字节一致)", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup();
+    var handle = voiceEntry.attachVoiceEntry(makeHost("普通宿主")); // 无 routeExtract
+    await pressAndWait(handle, 500);
+    ctx.deps.recorder.__fireStart();
+    handle.pressEnd();
+    ctx.deps.recorder.__fireStop({ tempFilePath: "/tmp/a.mp3" });
+    await settle();
+
+    assert.equal(ctx.stub.cloudCalls.length, 1, "未声明旁路照常进 AI 提取");
+    assert.equal(ctx.stub.navs.length, 1, "照常跳确认页");
+    assert.ok(draftSession.getUnfinishedDraftSession() !== null, "照常建草稿会话");
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});
+
+test("⑬ routeExtract:家庭切换在途 → 绑定复核先拦,旁路不收迟到语音", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  try {
+    var ctx = setup();
+    var routed = [];
+    var host = makeHost("photo 页");
+    host.routeExtract = function (text) {
+      routed.push(text);
+      return Promise.resolve();
+    };
+    var handle = voiceEntry.attachVoiceEntry(host);
+
+    await pressAndWait(handle, 500);
+    ctx.deps.recorder.__fireStart();
+    handle.pressEnd();
+    householdScope.captureHouseholdId("hh_switched_mid_voice"); // 转写在途切家庭
+    ctx.deps.recorder.__fireStop({ tempFilePath: "/tmp/b.mp3" });
+    await settle();
+
+    assert.equal(routed.length, 0, "迟到的语音绝不进旁路管线(不属于现在的家庭)");
+    var toasts = toastTitles(ctx.stub);
+    assert.ok(toasts.indexOf("家里刚切换过") !== -1, "如实提示:" + toasts);
+    handle.detach();
+  } finally {
+    householdScope.__resetHouseholdScopeForTest();
+  }
+});

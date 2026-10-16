@@ -166,6 +166,29 @@ export function makeCircleRow(item: VlCandidate, circledBox: Box, genId?: GenId)
   };
 }
 
+/**
+ * 手动补录入列(§7.1 VL 不可用降级 / 「＋手动添加物品」行):未勾选候选、
+ * 无框(box=null 整照关联)、src="manual"。confidence 恒 "low"——无 VL 依据,
+ * 仅保持形状完整;保存时照常绑本批照片(source="vl",box=null)。
+ */
+export function makeManualRow(name: string, qtyNote: string, genId?: GenId): IntakeRow {
+  const { qty, suffix } = parseIntakeQtyNote(qtyNote);
+  return {
+    draftId: idOf(genId),
+    name,
+    qty,
+    suffix,
+    exc: null,
+    src: "manual",
+    confidence: "low",
+    box: null,
+    checked: false,
+    done: false,
+    failMsg: "",
+    operationId: idOf(genId),
+  };
+}
+
 // ---------- 三态流转(原型 toggleRow / updateCounts / syncTag) ----------
 
 /** 行的归一化状态:candidate=候选(未勾)keep=保留(勾选)done=已确认记住 */
