@@ -47,11 +47,11 @@ var TEMPLATE_ID = "WUVZmS47BT46ukwbRhlLAqS6JoygTNXutI0KN-U5NR4C";
 /** 卡片点击进入的落地页(提醒页三分组:已过期/这几天/再往后) */
 var TEMPLATE_PAGE = "pages/reminders/reminders";
 /**
- * 模板四字段关键词 key(按申请模板时的关键词顺序 thing/date/thing/thing;
- * 若控制台模板的关键词 key 与此不同,只需改这一处映射,聚合语义字段
- * name/date/location/tip 不变)。
+ * 模板四字段关键词 key(2026-10-16 控制台模板详情核实:物品名称 thing1/到期日期
+ * date2/存放位置 thing4/温馨提醒 thing8——编号是选题顺序非展示顺序,勿按展示位推断);
+ * 如控制台再变,只需改这一处映射,聚合语义字段 name/date/location/tip 不变。
  */
-var TEMPLATE_FIELDS = { name: "thing1", date: "date2", location: "thing3", tip: "thing4" };
+var TEMPLATE_FIELDS = { name: "thing1", date: "date2", location: "thing4", tip: "thing8" };
 
 var ERROR_MESSAGES = {
   INVALID_INPUT: "输入不合法,请检查后重试",

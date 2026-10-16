@@ -46,8 +46,10 @@
 
   <!-- 到期微信提醒显式入口(#36 真机手势规则):picker bindchange 无点击手势,订阅授权
        必须由真实 tap 发起;有生效提醒且本地未标记「已开启」才显示,accept 后收起
-       (本地标记是展示启发式,权威记录在服务端 remind_subscriptions) -->
-  <view
+       (本地标记是展示启发式,权威记录在服务端 remind_subscriptions)。
+       0.9.3(鸿蒙真机反馈):view+bindtap 在鸿蒙微信上丢手势令牌(requestSubscribeMessage
+       报 can only be invoked by user TAP gesture),换原生 button+bindtap 直接触发 -->
+  <button
     wx:if="{{ remindAt && !notifyAccepted }}"
     class="notify-chip"
     hover-class="notify-chip-hover"
@@ -55,7 +57,7 @@
     bindtap="onNotifyChipTap"
   >
     <view class="notify-chip-face">到期时微信提醒我 ›</view>
-  </view>
+  </button>
 
   <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
   <view
