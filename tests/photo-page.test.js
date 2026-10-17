@@ -1841,9 +1841,11 @@ test("PP-EPOCH-5:圈选识别在途 onUnload → 迟到结果不上屏零 setDat
 test("PP-PHOTO-2:竖构图展开限高居中 + 点图本体切换展开/收起", async function () {
   var ctx = await boot({});
   var page = ctx.page;
-  assert.ok(page.data.photoExpandStyle.indexOf("46vh") !== -1, "展开样式含 46vh 限高");
-  assert.ok(page.data.photoExpandStyle.indexOf("margin: 0 auto") !== -1, "展开样式居中");
-  assert.ok(page.data.photoExpandStyle.indexOf("1.3333") !== -1, "boot 环境横构图 1024/768≈1.3333");
+  // JS 像素方案(不依赖 aspect-ratio/min/calc/vh):stub 窗口 375×667,
+  // 横构图 1024/768 → 宽撑满 375、高 281(< 46%×667=307 不截断);纵向绝不超 307
+  assert.ok(page.data.photoExpandStyle.indexOf("width:375px") !== -1, "横构图宽撑满 375px");
+  assert.ok(page.data.photoExpandStyle.indexOf("height:281px") !== -1, "高等比 281px");
+  assert.ok(page.data.photoExpandStyle.indexOf("margin:0 auto") !== -1, "居中");
   assert.equal(page.data.photoCollapsed, true, "默认折叠");
   page.onPhotoTap();
   assert.equal(page.data.photoCollapsed, false, "点图展开");

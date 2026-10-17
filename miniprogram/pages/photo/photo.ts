@@ -218,10 +218,19 @@ interface CircleState {
 
 /* ---------------- 页面 ---------------- */
 
-const PHOTO_EXPAND_VH = 46;
-function photoExpandStyleOf(imgW: number, imgH: number): string {
-  const r = imgW > 0 && imgH > 0 ? Math.round((imgW / imgH) * 10000) / 10000 : 1.3333;
-  return "aspect-ratio: " + r + "; width: min(100%, calc(" + PHOTO_EXPAND_VH + "vh * " + r + ")); margin: 0 auto;";
+/** 展开态尺寸(真机 2026-10-17 二次反馈:aspect-ratio/min/calc/vh 在部分内核未全生效,
+ * 照片曾放大至 300%+;改为 JS 直接算像素——横向或纵向先撑满即停,样式只吃 px)。
+ * 规则:先按宽撑满;高超过屏高 46% 则按高截断、宽同比例回缩,居中留黑边,零裁剪。 */
+function photoExpandStyleOf(imgW: number, imgH: number, winW: number, winH: number): string {
+  const r = imgW > 0 && imgH > 0 ? imgW / imgH : 4 / 3;
+  let w = winW;
+  let h = winW / r;
+  const capH = Math.round(winH * 0.46);
+  if (h > capH) {
+    h = capH;
+    w = Math.round(capH * r);
+  }
+  return "width:" + Math.round(w) + "px;height:" + Math.round(h) + "px;margin:0 auto;";
 }
 
 Page<
@@ -237,11 +246,14 @@ Page<
     imgH: number;
     /** 等比容器:aspect-ratio 值("1024 / 768"),从根上避免裁切错位 */
     photoAspect: string;
-    /** 展开态样式:aspect-ratio + 竖构图限高 46vh 居中(两侧留黑边,零裁剪保框对齐) */
+    /** 展开态样式:JS 算好的像素宽高(横/纵先撑满即停,零裁剪保框对齐) */
     photoExpandStyle: string;
     photoCollapsed: boolean;
     /** 语音胶囊动态文案:位置未填=引导说位置;已填=引导改物品 */
     voiceCtaText: string;
+    /** 窗口逻辑尺寸(onLoad 读取;stub 环境失败用 375×667) */
+    winW: number;
+    winH: number;
     /** 高可信未定件数(快速核实「只留高可信」档标签) */
     qkHigh: number;
     /** 脉冲高亮的框/行 draftId(""=无;原型 flashBox/flashRow) */
@@ -418,9 +430,12 @@ Page<
     imgW: 0,
     imgH: 0,
     photoAspect: "4 / 3",
-    photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
+    photoExpandStyle: "width:375px;height:281px;margin:0 auto;",
     photoCollapsed: true,
     qkHigh: 0,
+    /** 窗口逻辑尺寸(onLoad 读取;stub 环境失败用 375×667) */
+    winW: 375,
+    winH: 667,
     voiceCtaText: "这些物品位置在哪,请告诉我",
     highlightId: "",
     boxViews: [] as BoxView[],
@@ -481,6 +496,14 @@ Page<
   vlAuthAsked: false,
 
   onLoad(options) {
+    try {
+      const si = wx.getSystemInfoSync();
+      if (si && si.windowWidth > 0) {
+        this.setData({ winW: si.windowWidth, winH: si.windowHeight || 667 });
+      }
+    } catch (e) {
+      /* stub/异常:保持默认 375×667 */
+    }
     // 实例态重建(Page options 被浅拷贝共享,index 页同款防护)
     this.rowsRaw = [];
     this.prepared = null;
@@ -655,7 +678,7 @@ Page<
       imgW: prepared.imgW,
       imgH: prepared.imgH,
       photoAspect: prepared.imgW + " / " + prepared.imgH,
-      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH),
+      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH, this.data.winW, this.data.winH),
     });
     // B4:识别=把照片临时发送到云端处理——首次需用户授权;拒绝则本次不调识别,
     // 照片仍留在本机作证据,页面照常进手动/语音建候选
@@ -764,7 +787,7 @@ Page<
       imgW: prepared.imgW,
       imgH: prepared.imgH,
       photoAspect: prepared.imgW + " / " + prepared.imgH,
-      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH),
+      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH, this.data.winW, this.data.winH),
     });
     this.refreshRecentLocations();
     this.rebuildRows();
@@ -793,7 +816,7 @@ Page<
         imgW: session.file.imgW,
         imgH: session.file.imgH,
         photoAspect: session.file.imgW + " / " + session.file.imgH,
-      photoExpandStyle: photoExpandStyleOf(session.file.imgW, session.file.imgH),
+      photoExpandStyle: photoExpandStyleOf(session.file.imgW, session.file.imgH, this.data.winW, this.data.winH),
         batchLocation: session.batchLocation,
         navSubtitle:
           "继续核对上次的 " + session.rows.length + " 个候选(已确认记住 " + counts.done + " 件)",
