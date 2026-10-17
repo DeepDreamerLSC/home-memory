@@ -848,3 +848,26 @@
   transform: translateY(2rpx);
   box-shadow: 0 4rpx 0 var(--vb-cta-shadow);
 }
+
+/* ---- 微交互复用包(2026-10-17):房间格子首次浮现 stagger(纯 CSS,刷层重放=进入感) ---- */
+.roomtile {
+  animation: tileup 0.34s cubic-bezier(0.2, 0.9, 0.3, 1.35) backwards;
+}
+.roomtile:nth-child(2) { animation-delay: 30ms; }
+.roomtile:nth-child(3) { animation-delay: 60ms; }
+.roomtile:nth-child(4) { animation-delay: 90ms; }
+.roomtile:nth-child(5) { animation-delay: 120ms; }
+.roomtile:nth-child(6) { animation-delay: 150ms; }
+.roomtile:nth-child(7) { animation-delay: 180ms; }
+.roomtile:nth-child(8) { animation-delay: 210ms; }
+.roomtile:nth-child(n + 9) { animation-delay: 240ms; }
+@keyframes tileup {
+  from {
+    opacity: 0;
+    transform: translateY(24rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

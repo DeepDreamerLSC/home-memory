@@ -788,7 +788,7 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
   assert.equal(page.data.saveText, "✓ 已入库");
   assert.equal(page.data.saveDisabled, true);
   assert.equal(page.data.saveSheet, null);
-  assert.ok(toastTexts(ctx.env).indexOf("都记住了 · 1 件已入库") !== -1);
+  assert.ok((page.data.celebrateText || "").indexOf("都记住了 · 1 件已入库") !== -1, "保存成功=庆祝胶囊(微交互包)");
   assert.equal(photoSession.getUnfinishedPhotoSession(), null, "全部入库清 photo 会话");
   assert.equal(page.data.boxViews[0].tag, "已记住·黄色薯片罐", "框标签同步已记住");
   assert.equal(page.data.boxViews[1].tag, "候选·黑色小盒子", "未勾选行仍是候选");
@@ -1912,7 +1912,7 @@ test("PP-MOUNT-1:保存成功 → 批次位置与逐件例外按去重位置挂�
   assert.deepEqual(batch.path, ["玄关柜", "第二层抽屉"], "批次位置按「·」拆层");
   assert.equal(batch.update_id, "photo:" + page.rowsRaw[1].operationId);
   assert.ok(toastTexts(ctx.env).indexOf("位置树没挂上") === -1, "全部挂上零打扰");
-  assert.ok(toastTexts(ctx.env).indexOf("都记住了 · 2 件已入库") !== -1);
+  assert.ok((page.data.celebrateText || "").indexOf("都记住了 · 2 件已入库") !== -1, "保存成功=庆祝胶囊");
 });
 
 test("PP-MOUNT-2:挂树失败 → 终态不受影响(不回滚不阻断)+ 轻提示「主界面可补」", async function () {
@@ -1927,7 +1927,7 @@ test("PP-MOUNT-2:挂树失败 → 终态不受影响(不回滚不阻断)+ 轻提
   assert.equal(page.batchFinished, true);
   assert.equal(page.data.saveSheet, null);
   assert.equal(photoSession.getUnfinishedPhotoSession(), null, "会话照常终局清理");
-  assert.ok(toastTexts(ctx.env).indexOf("都记住了 · 1 件已入库") !== -1, "成功终态提示在前");
+  assert.ok((page.data.celebrateText || "").indexOf("都记住了 · 1 件已入库") !== -1, "成功终态=庆祝胶囊在前");
   assert.ok(toastTexts(ctx.env).indexOf("1 件的位置树没挂上,主界面可补") !== -1, "挂树失败只轻提示");
 });
 
@@ -2082,7 +2082,7 @@ test("PP-LOCPATH-3:慢解析在途 → 保存不阻塞,挂树走规则兜底单�
   assert.equal(page.rowsRaw[0].done, true, "入库照常(不被在途拆分阻塞)");
   assert.equal(ctx.env.mountCalls.length, 1);
   assert.deepEqual(ctx.env.mountCalls[0].path, ["书房桌子右边抽屉"], "无缓存 → 规则兜底整串单段");
-  assert.ok(toastTexts(ctx.env).indexOf("都记住了") !== -1);
+  assert.ok((page.data.celebrateText || "").indexOf("都记住了") !== -1, "保存成功=庆祝胶囊");
 
   // 慢回包到达:只回填缓存与位置栏预览,绝不重挂/重保存
   defer.resolve({ ok: true, engine: "local", path: ["书房", "桌子", "右边抽屉"], fallback: false });

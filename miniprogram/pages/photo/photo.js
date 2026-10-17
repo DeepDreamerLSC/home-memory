@@ -89,6 +89,7 @@ Page({
         winW: 375,
         winH: 667,
         voiceCtaText: "这些物品位置在哪,请告诉我",
+        celebrateText: null,
         highlightId: "",
         boxViews: [],
         rows: [],
@@ -133,6 +134,7 @@ Page({
     captureEpoch: 0,
     committing: false,
     pendingEvidence: null,
+    celebrateTimer: null,
     evidenceRetryBusy: false,
     lastAudioPath: "",
     audioPlayed: false,
@@ -211,6 +213,10 @@ Page({
         }
         // R2:页面销毁——在途异步(识别/授权/降级弹窗/圈选)的迟到回包全部失效
         this.captureEpoch += 1;
+        if (this.celebrateTimer !== null) {
+            clearTimeout(this.celebrateTimer);
+            this.celebrateTimer = null;
+        }
         // 全部入库(或空批)**且无证据待关联**才清会话;否则中途退出保留恢复入口
         // (§4.1 photo-session)。pendingEvidence 非空(C3:evidence_failed 待重试关联)
         // 时一律 persistSession——用户离开绝不删会话与续联载荷,跨页恢复重试不断链
@@ -615,6 +621,17 @@ Page({
         this.rowsRaw = (0, intake_draft_1.quickVerifyRows)(this.rowsRaw, mode);
         this.rebuildRows();
         this.persistSession();
+    },
+    /** 保存庆祝胶囊(微交互包 2026-10-17):弹入 1.4s 自动收;连续触发重置计时 */
+    showCelebrate(text) {
+        if (this.celebrateTimer !== null) {
+            clearTimeout(this.celebrateTimer);
+        }
+        this.setData({ celebrateText: text });
+        this.celebrateTimer = setTimeout(() => {
+            this.celebrateTimer = null;
+            this.setData({ celebrateText: null });
+        }, 1400);
     },
     onManualAddTap() {
         this.openNewRowSheet();
@@ -1500,7 +1517,7 @@ Page({
             this.batchFinished = true;
             if (this.pendingEvidence === null) {
                 (0, photo_session_1.clearPhotoSession)();
-                wx.showToast({ title: "都记住了 · " + pending.length + " 件已入库", icon: "none", duration: 2500 });
+                this.showCelebrate("✓ 都记住了 · " + pending.length + " 件已入库");
             }
             else {
                 // C3:建档全部成功但部分证据待关联——会话保留续联载荷,终态提示 + 重试入口

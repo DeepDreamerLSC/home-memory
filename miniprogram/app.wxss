@@ -472,3 +472,16 @@ button.btn.block {
   color: var(--text-3);
   margin-bottom: 20rpx;
 }
+
+/* ============ 微交互复用包(2026-10-17,A 档六项之「全局统一」) ============
+ * 原则:精致感=一致的物理隐喻(按下会陷、弹出会过冲、成功会庆祝),不加任何信息。
+ * 全站仅两个缓动:弹簧(0.2,0.9,0.3,1.35,与语音录音窗同款)与 ease-out。 */
+page {
+  --spring: cubic-bezier(0.2, 0.9, 0.3, 1.35);
+}
+
+/* 统一按压三件套:缩 0.97+变暗+投影下沉(所有主按钮 hover 类挂 btn-press) */
+.btn-press {
+  filter: brightness(0.94);
+  transform: scale(0.97);
+}

@@ -83,7 +83,7 @@
           bindinput="onQueryInput"
           bindconfirm="onQueryTap"
         />
-        <view class="search-go-hit" bindtap="onQueryTap">
+        <view class="search-go-hit" hover-class="btn-press" hover-stay-time="80" bindtap="onQueryTap">
           <view class="search-go {{ querying ? 'busy' : '' }}">
             {{ querying ? '…' : '找' }}
           </view>
@@ -108,7 +108,7 @@
           bindinput="onQueryInput"
           bindconfirm="onQueryTap"
         />
-        <view class="search-go-hit" bindtap="onQueryTap">
+        <view class="search-go-hit" hover-class="btn-press" hover-stay-time="80" bindtap="onQueryTap">
           <view class="search-go {{ querying ? 'busy' : '' }}">
             {{ querying ? '…' : '找' }}
           </view>
