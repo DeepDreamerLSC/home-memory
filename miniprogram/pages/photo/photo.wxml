@@ -104,6 +104,17 @@
 
   <view class="warn">一条记录 = 一件可查找的物品:电池×24 也只记一条,数量是备注,不做库存管理。数量为 AI 估计,核对更稳。</view>
 
+  <!-- C3:终态「照片待关联」提示 + 幂等重试关联入口(样式沿用 warn/btn) -->
+  <view wx:if="{{ evidencePending }}" class="warn evretry">
+    <view class="evretry-line">已入库 {{ evidencePending.savedCount }} 件,其中 {{ evidencePending.count }} 件照片待关联(物品已记住,补关联照片即可)。</view>
+    <view
+      class="btn go {{ evidenceRetryBusy ? 'disabled' : '' }} evretry-btn"
+      hover-class="{{ evidenceRetryBusy ? 'none' : 'btn-hover' }}"
+      hover-stay-time="80"
+      bindtap="onEvidenceRetryTap"
+    ><view class="btn-face">{{ evidenceRetryBusy ? '关联中…' : '重试关联' }}</view></view>
+  </view>
+
   <view class="listhead">
     <text>{{ headText }}</text>
     <text class="selall" bindtap="onToggleAllTap">全选 / 清空</text>

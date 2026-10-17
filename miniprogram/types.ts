@@ -202,6 +202,23 @@ export type ItemsApiEvent =
   | { action: "photoEvidenceGet"; item_ids: string[] }
   | (
       {
+        /**
+         * 证据幂等重试关联(#3,PR #67 C3,IMPLEMENTATION.md §1.5):photoCommit
+         * 响应 evidence_failed 非空后的收敛出口;进 WRITE_ACTIONS,api 层自动拼
+         * 双 marker。服务端重验 file_id 归属(B2 同款)与逐件作用域内存活后补插
+         * photo_evidence,唯一索引冲突=已存在=成功。
+         */
+        action: "photoEvidenceRetry";
+        /** photoCommit 已取得的云存储 fileID(证据待关联的照片) */
+        file_id: string;
+        img_w: number;
+        img_h: number;
+        /** 1-10 件;每件 { item_id, box?(null=整照关联), source?("vl"|"circle") } */
+        items: PhotoEvidenceRetryItem[];
+      } & ScopeWriteBinding
+    )
+  | (
+      {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
         action: "remindSet";
         item_id: string;
@@ -328,7 +345,8 @@ export type ItemsApiOkResponse =
   | RemindClearResponse
   | RemindSetResponse
   | PhotoCommitResponse
-  | PhotoEvidenceGetResponse;
+  | PhotoEvidenceGetResponse
+  | PhotoEvidenceRetryResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -909,6 +927,38 @@ export interface PhotoCommitResultRow {
 export interface PhotoCommitResponse {
   ok: true;
   results: PhotoCommitResultRow[];
+  /**
+   * 证据写入失败的 item_id 列表(PR #67 C3,部分成功语义):这些件物品已建、
+   * 照片待关联——客户端走 photoEvidenceRetry 幂等重试;缺省/空 = 全部关联成功
+   */
+  evidence_failed?: string[];
+}
+
+/** photoEvidenceRetry 单件(C3):item_id + 该行的框与来源(照片宽高在事件顶层) */
+export interface PhotoEvidenceRetryItem {
+  item_id: string;
+  /** 0-1 相对原图;null/缺省 = 无框(整照关联) */
+  box?: Box | null;
+  /** "vl" = AI 识别框 | "circle" = 用户圈选;缺省 "vl" */
+  source?: "vl" | "circle";
+}
+
+/** photoEvidenceRetry 逐件回执(C3) */
+export interface PhotoEvidenceRetryResultRow {
+  /** items 内 0-based 下标回执 */
+  index: number;
+  item_id: string;
+  ok: boolean;
+  /** ok:true 时:true=本次新写入,false=已存在(唯一索引幂等) */
+  evidence_saved?: boolean;
+  /** ok:false 时携带(NOT_FOUND / EVIDENCE_WRITE_FAILED) */
+  error?: string;
+  message?: string;
+}
+
+export interface PhotoEvidenceRetryResponse {
+  ok: true;
+  results: PhotoEvidenceRetryResultRow[];
 }
 
 /** photoEvidenceGet 的证据行投影(§1.4) */

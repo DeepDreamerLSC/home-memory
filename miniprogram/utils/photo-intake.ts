@@ -9,7 +9,9 @@
  * - commitPhotoBatch():用户点「确认,记住了」后**先** wx.cloud.uploadFile 同一张
  *   压缩图(本批首次且唯一的上云动作;fileId 已取得则复用,绝不重复上传),
  *   **再**调 itemsApi.photoCommit 逐件落行;上传失败 → 整批不提交、如实提示可
- *   重试、云端零残留;
+ *   重试、云端零残留;PR #67 C3:photoCommit 回带 evidence_failed(证据写入失败
+ *   的 item_id,物品已建)→ 页面提示「已入库 N 件,其中 M 件照片待关联」并经
+ *   retryPhotoEvidence(itemsApi.photoEvidenceRetry)幂等重试关联;
  * - 上传路径规则(§10.4,PR #67 B2 修订):photo-evidence/{会话家庭}/{时间戳}-{随机}.jpg
  *   ——scopeId 段是服务端 file_id 归属验证依据;会话家庭未捕获时回退 "default"。
  *
@@ -25,6 +27,7 @@ import { callItemsApi, isApiError, uuid } from "./api";
 import { householdScopeId } from "./household-scope";
 import { composeNote } from "./intake-draft";
 import type { IntakeRow } from "./intake-draft";
+import type { Box } from "./photo-box";
 import { recognizePhotoFile } from "./photo-vl";
 import type { PhotoVlFileOutcome } from "./photo-vl";
 import type {
@@ -32,9 +35,12 @@ import type {
   PhotoCommitItem,
   PhotoCommitResponse,
   PhotoCommitResultRow,
+  PhotoEvidenceRetryResponse,
+  PhotoEvidenceRetryResultRow,
 } from "../types";
 
 type PhotoCommitEvent = Extract<ItemsApiEvent, { action: "photoCommit" }>;
+type PhotoEvidenceRetryEvent = Extract<ItemsApiEvent, { action: "photoEvidenceRetry" }>;
 
 /** 注入面:页面/测试只需覆盖关心的成员,其余落回 wx 默认实现 */
 export interface PhotoIntakeDeps {
@@ -67,6 +73,7 @@ export interface PhotoIntakeDeps {
   }): void;
   recognize(tempPath: string): Promise<PhotoVlFileOutcome>;
   commit(event: PhotoCommitEvent): Promise<PhotoCommitResponse>;
+  evidenceRetry(event: PhotoEvidenceRetryEvent): Promise<PhotoEvidenceRetryResponse>;
   uuid(): string;
   now(): Date;
 }
@@ -158,6 +165,7 @@ const defaultDeps: PhotoIntakeDeps = {
   },
   recognize: (tempPath) => recognizePhotoFile(tempPath),
   commit: (event) => callItemsApi(event),
+  evidenceRetry: (event) => callItemsApi(event),
   uuid: () => uuid(),
   now: () => new Date(),
 };
@@ -329,7 +337,16 @@ export interface CommitPhotoBatchInput {
 }
 
 export type CommitPhotoBatchOutcome =
-  | { ok: true; fileId: string; results: PhotoCommitResultRow[] }
+  | {
+      ok: true;
+      fileId: string;
+      results: PhotoCommitResultRow[];
+      /**
+       * 证据写入失败的 item_id 列表(PR #67 C3,部分成功语义):这些件物品已建、
+       * 照片待关联——页面保留续联载荷并提示重试关联(retryPhotoEvidence)
+       */
+      evidenceFailed: string[];
+    }
   /** 上传失败:整批不提交、云端零残留、会话保留可重试 */
   | { ok: false; stage: "upload"; message: string }
   /** photoCommit 调用失败(网络/服务错误):fileId 已取得并回带,重试不再上传;
@@ -398,12 +415,59 @@ export async function commitPhotoBatch(
   }
   try {
     const res = await d.commit(event);
-    return { ok: true, fileId, results: res.results };
+    // C3:证据写入失败如实回带(物品已建、照片待关联),页面据此提供幂等重试关联
+    const evidenceFailed = Array.isArray(res.evidence_failed)
+      ? res.evidence_failed.filter((id): id is string => typeof id === "string" && id !== "")
+      : [];
+    return { ok: true, fileId, results: res.results, evidenceFailed };
   } catch (e) {
     const message =
       e instanceof Error && e.message ? e.message : "保存失败,请稍后重试";
     const code = isApiError(e) ? e.code : undefined;
     return { ok: false, stage: "commit", message, fileId, error: code };
+  }
+}
+
+// ---------- 证据幂等重试关联(§7.9,PR #67 C3) ----------
+
+/** retryPhotoEvidence 入参:photoCommit 回带的 fileId + 待关联件(item_id 与行框/来源) */
+export interface RetryPhotoEvidenceInput {
+  fileId: string;
+  imgW: number;
+  imgH: number;
+  items: { item_id: string; box: Box | null; source: "vl" | "circle" }[];
+}
+
+export type RetryPhotoEvidenceOutcome =
+  | { ok: true; results: PhotoEvidenceRetryResultRow[] }
+  /** 调用失败(网络/服务错误):载荷保留,可再点重试 */
+  | { ok: false; message: string; error?: string };
+
+/**
+ * 证据待关联件的幂等重试(itemsApi.photoEvidenceRetry):服务端重验 file_id
+ * 归属(B2 同款)与逐件作用域内存活后补插 photo_evidence,唯一索引冲突=已存在=
+ * 成功——重复点击、中断重放都收敛,绝不重复落证据行。任何失败如实回带,
+ * 由页面保留续联载荷供再试,绝不静默吞。
+ */
+export async function retryPhotoEvidence(
+  input: RetryPhotoEvidenceInput,
+  deps?: Partial<PhotoIntakeDeps>,
+): Promise<RetryPhotoEvidenceOutcome> {
+  const d = resolveDeps(deps);
+  const event: PhotoEvidenceRetryEvent = {
+    action: "photoEvidenceRetry",
+    file_id: input.fileId,
+    img_w: input.imgW,
+    img_h: input.imgH,
+    items: input.items.map((it) => ({ item_id: it.item_id, box: it.box, source: it.source })),
+  };
+  try {
+    const res = await d.evidenceRetry(event);
+    return { ok: true, results: res.results };
+  } catch (e) {
+    const message = e instanceof Error && e.message ? e.message : "照片关联失败,请稍后重试";
+    const code = isApiError(e) ? e.code : undefined;
+    return { ok: false, message, error: code };
   }
 }
 

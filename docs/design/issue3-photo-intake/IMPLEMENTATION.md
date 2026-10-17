@@ -197,14 +197,18 @@
   "results": [
     { "index": 0, "ok": true, "item_id": "it_…", "duplicated": false, "evidence_saved": true },
     { "index": 1, "ok": false, "error": "OPERATION_CONFLICT", "message": "…" }
-  ] }
+  ],
+  "evidence_failed": ["it_…"]   // PR #67 C3:证据写入失败(物品已建)的 item_id 列表;
+                                // 缺省/空 = 全部证据关联成功。证据写失败不回滚不掩盖、
+                                // 不废整批——部分成功语义,客户端走 photoEvidenceRetry 幂等重试(§1.5/§7.9)
+}
 ```
 
 **实现**(lib/handler.js 新增 `photoCommitItem`,~80 行):
 1. 整体校验:items 数组 1-10、batch_id 形状;逐件先做**纯参数校验**(name/location_text/note/reminder 与 photo 形状,复用 `cleanRequired`/`cleanOptional`/`parseReminderInput`,photo.box 四值 ∈[0,1] 且 x2>x1/y2>y1 或 null)——任一件参数非法 → **整批 INVALID_INPUT,零写入**(与服务端「校验失败绝不写入」纪律一致;参数错误是客户端 bug,不是运行期冲突)⚖️;**file_id 归属验证(PR #67 B2)**:解析 fileID 携带的云存储路径,前缀 ≠ `photo-evidence/<当前派生家庭>/` → **FILE_NOT_OWNED 整批零写入**;路径解析不出的 file_id(非 cloud:// 形态/无路径段/路径穿越)一律 INVALID_INPUT;
 2. 逐件执行:构造 `{operation_id, name, location_text, note, reminder, remind_vague_quote: undefined}` **直接调用既有 `createItem(event, deps)`**(`lib/handler.js:892`)——幂等(operation_id 同键同内容 duplicated)、并发重放收敛、提醒 slot 全套语义白拿;
 3. createItem 返回 ok → 若带 photo:查 `photo_evidence` 已有 `(household_id, item_id, file_id)` 行,有 → 跳过(`evidence_saved:false`,重放幂等);无 → add 证据行(§2 schema,`_id = "pe_" + deps.genId()`),`captured_location_text` 取**本件刚提交的 location_text**;
-4. createItem 返回 ok:false(OPERATION_CONFLICT 等)→ 该件进 results 的失败项,**不拦其余件**(「一次确认不是数据库原子事务」,与 `miniprogram/utils/batch-save.ts` 逐行哲学一致;原型保存前已有最终确认弹层过目);
+4. createItem 返回 ok:false(OPERATION_CONFLICT 等)→ 该件进 results 的失败项,**不拦其余件**(「一次确认不是数据库原子事务」,与 `miniprogram/utils/batch-save.ts` 逐行哲学一致;原型保存前已有最终确认弹层过目);**证据写入失败同理(PR #67 C3)**:savePhotoEvidence 抛错(非唯一索引冲突的基础设施错误)→ 物品**不回滚**、失败不掩盖、不拦其余件,该 item_id 进响应 `evidence_failed`,全部建完后整体 `ok:true` 返回——重试整批 photoCommit 虽会撞同键 duplicated 不重建物品,但 evidence_failed 才是如实的收敛出口;
 5. 证据行 add 抛唯一索引冲突(E11000)→ 回查确认存在即当已保存(并发孪生收敛,同 createItem 的 isDuplicateKeyError 模式);
 6. 日志:`{action:"photoCommit", error, ms, count}`(count=成功件数),绝不落物品名/位置/batch 内明细。
 
@@ -229,6 +233,38 @@
 - 逐 item_id 等值查询 `where({household_id, item_id, })`(AND 等值,**不引入 `db.command.in`**——保持与 `tests/helpers/memoryDb.js` 的等值匹配语义兼容,离线测试零改动;≤10 次查询成本可忽略),每件取 created_at 降序前 3(全量拉回内存排序,同 itemsApi list 的 `byUpdatedDesc` 模式,`lib/handler.js:235-240`);
 - 汇总去重 file_id 后 `deps.getTempFileUrls(fileIds)`(index.js 注入 `cloud.getTempFileURL({ fileList })`)换临时链接;单文件换链失败 → 该行 `photo_url:""`(file_id 照返,客户端可重试),**绝不因换链失败废整个查询**;
 - 投影绝不包含 household_id 内部字段之外的任何内部态。
+
+### 1.5 `itemsApi` · `photoEvidenceRetry`(证据幂等重试关联,PR #67 C3)
+
+**event**(写类 action,进 `WRITE_ACTIONS`,api 层自动拼双 marker):
+
+```jsonc
+{
+  "action": "photoEvidenceRetry",
+  "file_id": "cloud://…",              // photoCommit 已取得的本批照片 fileID(不再上传)
+  "img_w": 1024, "img_h": 768,          // 与 photoCommit 同一组宽高(坐标反算基准)
+  "items": [                            // 1-10 件:photoCommit 响应 evidence_failed 里的 item_id
+    { "item_id": "it_…", "box": { "x1":0.27,"y1":0.39,"x2":0.59,"y2":0.51 }, "source": "vl" }
+  ]                                     // box 可 null(整照关联);source 缺省 "vl"
+}
+```
+
+**响应**:
+
+```jsonc
+{ "ok": true,
+  "results": [
+    { "index": 0, "item_id": "it_…", "ok": true, "evidence_saved": true },   // false=已存在(唯一索引幂等)
+    { "index": 1, "item_id": "it_…", "ok": false, "error": "NOT_FOUND", "message": "…" }  // 跨家/已删/不存在
+  ] }
+```
+
+**实现**(lib/handler.js `photoEvidenceRetryItem`):
+1. **file_id 归属验证**(B2 同款,任何写入之前):路径前缀 ≠ `photo-evidence/<当前派生家庭>/` → FILE_NOT_OWNED 整批零写入;路径解析不出 → INVALID_INPUT;items 形状(item_id 非空、box 四值 ∈[0,1] 或 null、source 词表、1-10 件)非法 → 整批 INVALID_INPUT 零写入;
+2. **逐件重验作用域内存活**:item 在当前派生家庭且 deleted:false 才继续,否则该件 NOT_FOUND 失败项(不拦其余件);`captured_location_text` 取该件当前 items.location_text(重验时已读到,客户端无须重传);
+3. **逐条插 photo_evidence**(复用 savePhotoEvidence:唯一索引 `(household_id, item_id, file_id)` 冲突 E11000 回查收敛 = 已存在 = 成功,幂等——重复点击、中断重放都收敛,绝不重复落证据行);
+4. 单件证据写入失败(非唯一索引冲突的基础设施错误)只进该件失败项(`EVIDENCE_WRITE_FAILED`),不拦其余件;整体 `ok:true` 逐件返回。
+无新集合/索引/环境变量(§10 部署清单不变;photo_evidence 唯一索引即幂等依据)。
 
 ---
 
@@ -379,8 +415,9 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 4. **图片超限/压缩失败(PR #67 B5 修订)**:`wx.compressImage` 失败 → 原图 base64 原样直传识别(如实);大小门两侧对齐 **4,000,000 字符**(callFunction 事件整体上限 5MB 留外壳余量):客户端压缩后仍超限 → 直接失败提示「照片过大,请靠近重拍」不发起 callFunction;服务端字符门超出 → INVALID_INPUT → 同款提示并留在入口;目标压缩:长边 ≤1280 JPEG quality 70(§4.1)。`wx.getImageInfo` 失败 → 中止本次拍照并 toast(没有宽高就没有坐标契约,不猜)。
 5. **圈选识别失败** → 结果卡显示失败文案+「不是,重圈」重试;已有候选零影响(原型 resetCircle 语义,prototype.html:733-738)。
 6. **确认后上传失败 / 部分保存失败**:确认后首先 `wx.cloud.uploadFile` 同一张压缩图(本批唯一上云动作),失败 → 整批不提交 photoCommit、如实 toast 可重试(云端零残留,会话保留);上传成功后 photoCommit 逐件结果:失败行标红+可单行重试(operation_id 沿用,同键同内容幂等收敛;内容改过仍沿用原键,服务端异内容 OPERATION_CONFLICT 兜底),已成功行不动(§1.3,batch-save 哲学);file_id 一旦取得随会话保留,重试不重复上传。
-7. **家庭切换在途 + 会话归属家庭(PR #67 B1 修订)**:photo 会话存储键带作用域后缀(§4.1 photo-session),换家庭后旧批不可达、回切恢复(F3 同款);photo 页所有上屏前作用域代数复核(§6.1 同款);photoCommit 经 api.ts 自动双 marker,共享家庭 FAMILY_SWITCHED/FAMILY_STALE_SCOPE 由服务端硬门拦下,客户端如实 toast 服务端文案。**会话归属家庭在开批时捕获**(photo-session 载荷 `scope` 字段):保存时把该 `expected_household_id` 随 photoCommit 上送(api 层显式携带优先于自动 marker),服务端与当前派生家庭不一致 → **SCOPE_MISMATCH 零写入**(先于通用双 marker 硬门裁定);客户端保存前置复核漂移、收到 SCOPE_MISMATCH 同款终局:终止会话(按会话自己的作用域键清除)、toast「家庭已切换,本批未保存」、返回首页,**绝不重试写另一个家**。服务端拒绝路径上照片文件可能已在云存储(用户确认后先上传再 commit):该孤儿文件不产生任何 items/证据行,与「确认后上传失败整批不提交」的取消路径同语义(云存储无事务,孤儿文件可接受),不回收。
+7. **家庭切换在途 + 会话归属家庭(PR #67 B1 修订)**:photo 会话存储键带作用域后缀(§4.1 photo-session),换家庭后旧批不可达、回切恢复(F3 同款);photo 页所有上屏前作用域代数复核(§6.1 同款);photoCommit 经 api.ts 自动双 marker,共享家庭 FAMILY_SWITCHED/FAMILY_STALE_SCOPE 由服务端硬门拦下,客户端如实 toast 服务端文案。**会话归属家庭在开批时捕获**(photo-session 载荷 `scope` 字段):保存时把该 `expected_household_id` 随 photoCommit 上送(api 层显式携带优先于自动 marker),服务端与当前派生家庭不一致 → **SCOPE_MISMATCH 零写入**(先于通用双 marker 硬门裁定);客户端保存前置复核漂移、收到 SCOPE_MISMATCH 同款终局:终止会话(按会话自己的作用域键清除)、toast「家庭已切换,本批未保存」、返回首页,**绝不重试写另一个家**。服务端拒绝路径上照片文件可能已在云存储(用户确认后先上传再 commit):该孤儿文件不产生任何 items/证据行,与「确认后上传失败整批不提交」的取消路径同语义(云存储无事务,孤儿文件可接受),不回收。**会话绑定时序(C1 修订)**:会话作用域在**拍照流程入口**(照片在手、发起识别前)捕获——识别/授权等待期间家庭从 A 切到 B 时,识别返回后复核入口作用域与当前不一致 → 不建会话、候选不上屏,toast「家庭已切换,本次拍照未保存」返回首页(与 SCOPE_MISMATCH 终局同款语义);同 householdId 仅作用域代数/修订前进不算漂移照常;保存时的 B1 漂移复核与服务端硬门保持最后防线。
 8. **页面生命周期**:photo 页 onHide/onUnload → `voiceEntry.invalidate()`(作废在途录音/识别/编辑解析,防幽灵录音与迟到 diff 上屏;与 index 页同纪律,`pages/index/index.ts:331-343`)。
+9. **证据写入失败=部分成功语义+幂等重试(PR #67 C3)**:photoCommit 里 createItem 成功后 savePhotoEvidence 抛错(基础设施错误)→ **物品不回滚、失败不掩盖、不拦其余件**:该 item_id 进响应 `evidence_failed`(§1.3),全部建完后整体 ok:true 返回——重试整批 photoCommit 会撞同键 duplicated(物品不重建)但可能再次证据失败,入库件数口径只认 results+evidence_failed。客户端:evidence_failed 非空 → 行照常落 done 终态,终态提示「已入库 N 件,其中 M 件照片待关联」+「重试关联」入口(结果区按钮),点击调 `photoEvidenceRetry`(§1.5):服务端重验 file_id 归属(B2 同款)与逐件作用域内存活后补插证据行,唯一索引冲突=已存在=成功(幂等);全部关联成功 → 清提示;部分失败/调用失败 → 载荷保留可再点(NOT_FOUND 的件=item 已删,读取侧本就过滤,不再无意义重试)。续联载荷 `{fileId, imgW, imgH, items:[{item_id, box, source}]}` 随 photo 会话保留(§2 同款持久化),**直至重试成功或用户离开**;重试不再上传照片(fileId 复用)。
 
 ---
 

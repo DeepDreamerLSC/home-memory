@@ -99,7 +99,72 @@ function parseScope(v) {
     }
     return { householdId: s.householdId, generation: s.generation };
 }
-/** 读取后归一:无 scope(旧版本残留)按未捕获回退;scope 损坏则整条视为不存在 */
+/** box 形状门(0-1 四值,x2>x1、y2>y1);损坏返回 null(该行按整照关联收敛) */
+function parseEvidenceBox(v) {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) {
+        return null;
+    }
+    const b = v;
+    const vals = [b.x1, b.y1, b.x2, b.y2];
+    for (const n of vals) {
+        if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1) {
+            return null;
+        }
+    }
+    if (!(b.x2 > b.x1) || !(b.y2 > b.y1)) {
+        return null;
+    }
+    return { x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 };
+}
+/**
+ * pendingEvidence 字段形状门(C3):附属字段,损坏只丢续联入口(按无待关联件
+ * 收敛),绝不像 scope 那样判整条载荷损坏——恢复既有批次的入口比续联入口重要,
+ * 且证据行可由用户在物品详情侧另行核对。
+ */
+function parsePendingEvidence(v) {
+    if (v === undefined || v === null) {
+        return null;
+    }
+    if (typeof v !== "object" || Array.isArray(v)) {
+        return null;
+    }
+    const p = v;
+    if (typeof p.fileId !== "string" || p.fileId === "") {
+        return null;
+    }
+    if (typeof p.imgW !== "number" ||
+        !Number.isInteger(p.imgW) ||
+        p.imgW < 1 ||
+        typeof p.imgH !== "number" ||
+        !Number.isInteger(p.imgH) ||
+        p.imgH < 1) {
+        return null;
+    }
+    if (!Array.isArray(p.items) || p.items.length === 0 || p.items.length > 10) {
+        return null;
+    }
+    const items = [];
+    for (const raw of p.items) {
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+            return null;
+        }
+        const it = raw;
+        if (typeof it.item_id !== "string" || it.item_id === "") {
+            return null;
+        }
+        if (it.source !== "vl" && it.source !== "circle") {
+            return null;
+        }
+        items.push({
+            item_id: it.item_id,
+            box: it.box === null || it.box === undefined ? null : parseEvidenceBox(it.box),
+            source: it.source,
+        });
+    }
+    return { fileId: p.fileId, imgW: p.imgW, imgH: p.imgH, items };
+}
+/** 读取后归一:无 scope(旧版本残留)按未捕获回退;scope 损坏则整条视为不存在;
+ *  pendingEvidence 缺省/损坏按 null(附属字段,只丢续联入口不丢恢复入口) */
 function normalizePayload(v) {
     if (!isUsablePayload(v)) {
         return null;
@@ -112,6 +177,7 @@ function normalizePayload(v) {
     return {
         ...raw,
         scope: scope !== null ? scope : { householdId: null, generation: 0 },
+        pendingEvidence: parsePendingEvidence(raw.pendingEvidence),
     };
 }
 function readPersisted() {
@@ -179,6 +245,7 @@ function startPhotoSession(file, rows, batchLocation, scope) {
         batchLocation,
         rows,
         scope: scope !== undefined ? scope : capturePhotoSessionScope(),
+        pendingEvidence: null,
         createdAt: Date.now(),
     };
     writePersisted(payload);

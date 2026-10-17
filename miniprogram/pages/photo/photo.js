@@ -90,6 +90,8 @@ Page({
             result: null,
         },
         vlAuthDenied: false,
+        evidencePending: null,
+        evidenceRetryBusy: false,
     },
     rowsRaw: [],
     prepared: null,
@@ -101,6 +103,8 @@ Page({
     batchFinished: false,
     capturing: false,
     committing: false,
+    pendingEvidence: null,
+    evidenceRetryBusy: false,
     lastAudioPath: "",
     audioPlayed: false,
     diffEditsRaw: [],
@@ -128,6 +132,8 @@ Page({
         this.vlAuthAsked = this.vlAuthGranted;
         this.capturing = false;
         this.committing = false;
+        this.pendingEvidence = null;
+        this.evidenceRetryBusy = false;
         this.lastAudioPath = "";
         this.audioPlayed = false;
         this.diffEditsRaw = [];
@@ -368,6 +374,7 @@ Page({
             this.sessionScope = session.scope;
             this.fileId = session.file.fileId;
             this.prepared = null; // base64 绝不入会话;圈选时按 localPath 重新 prepare
+            this.pendingEvidence = session.pendingEvidence; // C3:续联载荷随会话恢复
             const counts = (0, intake_draft_1.intakeCounts)(session.rows);
             this.setData({
                 entryReady: true,
@@ -381,6 +388,7 @@ Page({
             });
             this.refreshRecentLocations();
             this.rebuildRows();
+            this.buildEvidencePendingView();
         };
         // 小程序临时文件可能被系统回收:恢复前复核文件是否还在
         if (typeof wx !== "undefined" &&
@@ -1286,7 +1294,7 @@ Page({
         // 逐件落行:成功 → done(终态);失败 → 标红可重试(其余件不拦)
         this.fileId = outcome.fileId;
         const byIndex = new Map();
-        outcome.results.forEach((rr) => byIndex.set(rr.index, { ok: rr.ok, message: rr.message }));
+        outcome.results.forEach((rr) => byIndex.set(rr.index, { ok: rr.ok, item_id: rr.item_id, message: rr.message }));
         pending.forEach((row, i) => {
             const rr = byIndex.get(i) || { ok: false, message: "结果未知" };
             this.rowsRaw = this.rowsRaw.map((r) => r.draftId === row.draftId
@@ -1295,18 +1303,116 @@ Page({
                     : (0, intake_draft_1.markRowFailed)(r, rr.message || "保存失败,可重试")
                 : r);
         });
+        // C3:物品已建但证据写入失败的件 → 续联载荷(行框/来源随行),终态提示 + 重试入口
+        const evidenceFailedIds = new Set(outcome.evidenceFailed);
+        if (evidenceFailedIds.size > 0) {
+            const retryItems = [];
+            pending.forEach((row, i) => {
+                const rr = byIndex.get(i);
+                if (rr && rr.ok && rr.item_id !== undefined && evidenceFailedIds.has(rr.item_id)) {
+                    retryItems.push({
+                        item_id: rr.item_id,
+                        box: row.box === undefined ? null : row.box,
+                        source: row.src === "circle" ? "circle" : "vl",
+                    });
+                }
+            });
+            if (retryItems.length > 0) {
+                this.pendingEvidence = {
+                    fileId: outcome.fileId,
+                    imgW: this.data.imgW,
+                    imgH: this.data.imgH,
+                    items: retryItems,
+                };
+            }
+        }
         this.rebuildRows();
         this.setData({ saveBusy: false, saveSheet: null });
+        this.buildEvidencePendingView(pending.length);
         const fails = outcome.results.filter((rr) => !rr.ok).length;
         if (fails === 0) {
             this.batchFinished = true;
-            (0, photo_session_1.clearPhotoSession)();
-            wx.showToast({ title: "都记住了 · " + pending.length + " 件已入库", icon: "none", duration: 2500 });
+            if (this.pendingEvidence === null) {
+                (0, photo_session_1.clearPhotoSession)();
+                wx.showToast({ title: "都记住了 · " + pending.length + " 件已入库", icon: "none", duration: 2500 });
+            }
+            else {
+                // C3:建档全部成功但部分证据待关联——会话保留续联载荷,终态提示 + 重试入口
+                this.persistSession();
+                wx.showToast({
+                    title: "已入库 " + pending.length + " 件,其中 " + this.pendingEvidence.items.length + " 件照片待关联",
+                    icon: "none",
+                    duration: 2500,
+                });
+            }
         }
         else {
             this.persistSession();
             wx.showToast({ title: fails + " 件没存上,失败行可重试", icon: "none", duration: 2500 });
         }
+    },
+    /* ---------------- 证据待关联重试(C3:photoEvidenceRetry 幂等收敛) ---------------- */
+    /** 终态「照片待关联」提示视图:有续联载荷才显示(计数单一来源=载荷件数) */
+    buildEvidencePendingView(savedCount) {
+        const count = this.pendingEvidence !== null ? this.pendingEvidence.items.length : 0;
+        if (count === 0) {
+            if (this.data.evidencePending !== null) {
+                this.setData({ evidencePending: null });
+            }
+            return;
+        }
+        const saved = savedCount !== undefined ? savedCount : this.rowsRaw.filter((r) => r.done).length;
+        this.setData({ evidencePending: { count, savedCount: saved } });
+    },
+    /**
+     * 重试关联(C3):photoEvidenceRetry 幂等(唯一索引冲突=已存在=成功),点击可
+     * 重复直至成功。全部关联成功 → 清提示清载荷(批已终局则顺带清会话);部分失败
+     * → 只保留仍待关联的件(NOT_FOUND 的件=item 已删,证据读取侧本就过滤,不再
+     * 无意义重试),提示后可再点;调用失败 → 载荷原样保留可再点。
+     */
+    async onEvidenceRetryTap() {
+        if (this.committing || this.evidenceRetryBusy || this.pendingEvidence === null) {
+            return;
+        }
+        this.evidenceRetryBusy = true;
+        this.setData({ evidenceRetryBusy: true });
+        const payload = this.pendingEvidence;
+        const outcome = await (0, photo_intake_1.retryPhotoEvidence)({
+            fileId: payload.fileId,
+            imgW: payload.imgW,
+            imgH: payload.imgH,
+            items: payload.items,
+        });
+        this.evidenceRetryBusy = false;
+        if (!outcome.ok) {
+            this.setData({ evidenceRetryBusy: false });
+            wx.showToast({ title: outcome.message, icon: "none", duration: 2500 });
+            return;
+        }
+        const remaining = outcome.results
+            .filter((rr) => !rr.ok && rr.error !== "NOT_FOUND")
+            .map((rr) => payload.items[rr.index])
+            .filter((it) => it !== undefined);
+        if (remaining.length === 0) {
+            this.pendingEvidence = null;
+            this.setData({ evidenceRetryBusy: false });
+            this.buildEvidencePendingView();
+            if (this.batchFinished) {
+                (0, photo_session_1.clearPhotoSession)();
+            }
+            else {
+                this.persistSession();
+            }
+            wx.showToast({ title: "照片都关联好了", icon: "none", duration: 2500 });
+            return;
+        }
+        this.pendingEvidence = { fileId: payload.fileId, imgW: payload.imgW, imgH: payload.imgH, items: remaining };
+        this.setData({ evidenceRetryBusy: false });
+        this.buildEvidencePendingView();
+        if (!this.batchFinished) {
+            this.persistSession();
+        }
+        wx.showToast({ title: "还有 " + remaining.length + " 件照片没关联上,可再点重试", icon: "none", duration: 2500 });
     },
     /* ---------------- 圈选模式(屏⑤) ---------------- */
     onEnterCircle() {
@@ -1502,6 +1608,8 @@ Page({
             batchLocation: this.data.batchLocation,
             rows: this.rowsRaw,
             scope: this.sessionScope !== null ? this.sessionScope : { householdId: null, generation: 0 },
+            // C3:续联载荷随会话保留(直至重试成功或用户离开);null 序列化前归一
+            pendingEvidence: this.pendingEvidence,
             createdAt: this.sessionCreatedAt,
         });
     },

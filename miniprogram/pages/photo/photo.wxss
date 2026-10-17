@@ -249,6 +249,15 @@
   line-height: 1.55;
 }
 
+/* C3:证据待关联提示(沿用 warn 容器与 btn go 按钮,样式令牌不新造) */
+.evretry {
+  display: flex;
+  flex-direction: column;
+}
+.evretry .evretry-btn {
+  margin-top: 14rpx;
+}
+
 /* ================ 清单(三态) ================ */
 .listhead {
   display: flex;

@@ -74,12 +74,32 @@ function makeRouter(opts) {
         return { ok: false, error: "SCOPE_MISMATCH", message: "家庭已切换,本批未保存" };
       }
       var fails = opts.commitFailIndexes || [];
+      // PR #67 C3:opts.commitEvidenceFailedIndexes 模拟「物品已建但证据写入失败」
+      var evFailedIdx = opts.commitEvidenceFailedIndexes || [];
       return {
         ok: true,
         results: data.items.map(function (it, i) {
           return fails.indexOf(i) !== -1
             ? { index: i, ok: false, error: "OPERATION_CONFLICT", message: "这条已保存过且内容与当前填写不同" }
-            : { index: i, ok: true, item_id: "it-" + i, duplicated: false, evidence_saved: true };
+            : { index: i, ok: true, item_id: "it-" + i, duplicated: false, evidence_saved: evFailedIdx.indexOf(i) === -1 };
+        }),
+        evidence_failed: evFailedIdx.map(function (i) {
+          return "it-" + i;
+        }),
+      };
+    }
+    if (name === "itemsApi" && data.action === "photoEvidenceRetry") {
+      if (opts.retryThrow) {
+        return Promise.reject(new Error(opts.retryThrow));
+      }
+      if (opts.retryError) {
+        // PR #67 C3:服务端错误(如 EVIDENCE_WRITE_FAILED / FAMILY_SWITCHED)
+        return { ok: false, error: opts.retryError, message: opts.retryMessage || "照片关联失败,请重试" };
+      }
+      return {
+        ok: true,
+        results: data.items.map(function (it, i) {
+          return { index: i, item_id: it.item_id, ok: true, evidence_saved: true };
         }),
       };
     }
@@ -97,6 +117,7 @@ function makeEnv(opts) {
     vlCalls: [],
     editCalls: [],
     commitCalls: [],
+    retryCalls: [],
     audioCtx: [],
     router: makeRouter(opts),
   };
@@ -178,6 +199,8 @@ function makeEnv(opts) {
           env.editCalls.push(data);
         } else if (data.action === "photoCommit") {
           env.commitCalls.push(data);
+        } else if (data.action === "photoEvidenceRetry") {
+          env.retryCalls.push(data);
         }
         Promise.resolve()
           .then(function () {
@@ -1354,6 +1377,118 @@ test("PP-C1-5:识别正常返回且未切换 → 照常开批(回归)", async fu
   assert.equal(ctx.env.vlCalls.length, 1);
   assert.equal(ctx.env.uploads.length, 0, "确认前零上传(回归)");
   assert.equal(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") === -1, true);
+});
+
+/* ---------------- PP-C3:证据待关联终态提示 + 幂等重试关联(PR #67 C3) ---------------- */
+
+test("PP-C3-1:部分证据失败 → 终态提示+重试入口 → 重试成功清提示、清会话", async function () {
+  var ctx = await boot({ commitEvidenceFailedIndexes: [0] });
+  var page = ctx.page;
+  await readyToSave(ctx, page); // #1 勾选(high 预选)→ 1 件提交
+  await page.onSaveGoTap();
+  await settle();
+
+  assert.equal(ctx.env.uploads.length, 1, "确认后本批唯一上云动作");
+  assert.equal(page.rowsRaw[0].done, true, "物品已建,行落终态");
+  assert.equal(page.batchFinished, true, "建档全部成功,批终局");
+  assert.notEqual(page.data.evidencePending, null, "终态提示出现");
+  assert.equal(page.data.evidencePending.count, 1);
+  assert.equal(page.data.evidencePending.savedCount, 1);
+  assert.ok(toastTexts(ctx.env).indexOf("已入库 1 件,其中 1 件照片待关联") !== -1, "C3 终态文案");
+  assert.notEqual(photoSession.getUnfinishedPhotoSession(), null, "续联载荷随会话保留(C3)");
+  var persisted = photoSession.getUnfinishedPhotoSession();
+  assert.notEqual(persisted.pendingEvidence, null, "会话载荷含 pendingEvidence");
+  assert.equal(persisted.pendingEvidence.items.length, 1);
+
+  // wxml 契约:重试入口在册
+  var fs = require("node:fs");
+  var wxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/photo/photo.wxml"), "utf8");
+  assert.ok(wxml.indexOf("重试关联") !== -1, "终态结果区应有「重试关联」入口");
+
+  // 点重试关联:photoEvidenceRetry(file_id 复用 + 待关联件)
+  await page.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx.env.retryCalls.length, 1);
+  var ev = ctx.env.retryCalls[0];
+  assert.equal(ev.action, "photoEvidenceRetry");
+  assert.equal(ev.file_id, "cloud://test-bucket/evidence-1.jpg", "fileId 复用,不再上传");
+  assert.equal(ctx.env.uploads.length, 1, "重试绝不重复上传");
+  assert.equal(ev.img_w, 1024);
+  assert.equal(ev.img_h, 768);
+  assert.equal(ev.items.length, 1);
+  assert.equal(ev.items[0].item_id, "it-0");
+  assert.deepEqual(ev.items[0].box, { x1: 0.273, y1: 0.389, x2: 0.593, y2: 0.507 }, "行框随行");
+  assert.equal(ev.items[0].source, "vl");
+
+  assert.equal(page.data.evidencePending, null, "成功清提示");
+  assert.equal(page.pendingEvidence, null);
+  assert.equal(page.data.evidenceRetryBusy, false);
+  assert.ok(toastTexts(ctx.env).indexOf("照片都关联好了") !== -1);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "批终局+关联完成 → 会话清除");
+});
+
+test("PP-C3-2:重试失败 → 提示保留、入口可再点;再试成功后清提示", async function () {
+  var ctx = await boot({ commitEvidenceFailedIndexes: [0], retryError: "EVIDENCE_WRITE_FAILED" });
+  var page = ctx.page;
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+  assert.notEqual(page.data.evidencePending, null);
+
+  await page.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx.env.retryCalls.length, 1, "发起过一次重试");
+  assert.notEqual(page.data.evidencePending, null, "失败不清提示");
+  assert.equal(page.data.evidenceRetryBusy, false, "可再点");
+  assert.notEqual(page.pendingEvidence, null, "续联载荷保留");
+  assert.ok(toastTexts(ctx.env).indexOf("照片关联失败") !== -1, "如实提示失败");
+
+  // 换成功桩再点:可再点收敛
+  ctx.env.router = makeRouter({});
+  await page.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx.env.retryCalls.length, 2, "失败后可再点");
+  assert.equal(page.data.evidencePending, null, "再试成功清提示");
+  assert.ok(toastTexts(ctx.env).indexOf("照片都关联好了") !== -1);
+});
+
+test("PP-C3-3:重试部分失败(NOT_FOUND 的件不再等)→ 只留仍待关联件,提示后可再点", async function () {
+  var ctx = await boot({ commitEvidenceFailedIndexes: [0] });
+  var page = ctx.page;
+  // 造两件待关联:第二件也勾选提交,commit 桩按 it-0/it-1 返回
+  page.onCheckTap({ currentTarget: { dataset: { index: 1 } } });
+  await readyToSave(ctx, page);
+  ctx.env.router = makeRouter({ commitEvidenceFailedIndexes: [0, 1] });
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(page.data.evidencePending.count, 2, "两件待关联");
+
+  // 重试桩:第一件证据写失败(保留可再试),第二件 NOT_FOUND(item 已删,不再等)
+  ctx.env.router = function (name, data) {
+    if (name === "itemsApi" && data.action === "photoEvidenceRetry") {
+      return {
+        ok: true,
+        results: data.items.map(function (it, i) {
+          return i === 0
+            ? { index: i, item_id: it.item_id, ok: false, error: "EVIDENCE_WRITE_FAILED", message: "照片关联失败,请重试" }
+            : { index: i, item_id: it.item_id, ok: false, error: "NOT_FOUND", message: "没有找到这条记录" };
+        }),
+      };
+    }
+    return makeRouter({})(name, data);
+  };
+  await page.onEvidenceRetryTap();
+  await settle();
+  assert.equal(page.data.evidencePending.count, 1, "NOT_FOUND 的件不再无意义重试,只剩仍待关联件");
+  assert.equal(page.pendingEvidence.items[0].item_id, "it-0", "留下的是证据写失败件");
+  assert.ok(toastTexts(ctx.env).indexOf("还有 1 件照片没关联上,可再点重试") !== -1);
+
+  // 再点一次:剩余件成功收敛
+  ctx.env.router = makeRouter({});
+  await page.onEvidenceRetryTap();
+  await settle();
+  assert.equal(page.data.evidencePending, null);
+  assert.ok(toastTexts(ctx.env).indexOf("照片都关联好了") !== -1);
 });
 
 /* ---------------- PP-AUTH:首次识别授权(PR #67 B4) ---------------- */

@@ -10,7 +10,9 @@
  * - commitPhotoBatch():用户点「确认,记住了」后**先** wx.cloud.uploadFile 同一张
  *   压缩图(本批首次且唯一的上云动作;fileId 已取得则复用,绝不重复上传),
  *   **再**调 itemsApi.photoCommit 逐件落行;上传失败 → 整批不提交、如实提示可
- *   重试、云端零残留;
+ *   重试、云端零残留;PR #67 C3:photoCommit 回带 evidence_failed(证据写入失败
+ *   的 item_id,物品已建)→ 页面提示「已入库 N 件,其中 M 件照片待关联」并经
+ *   retryPhotoEvidence(itemsApi.photoEvidenceRetry)幂等重试关联;
  * - 上传路径规则(§10.4,PR #67 B2 修订):photo-evidence/{会话家庭}/{时间戳}-{随机}.jpg
  *   ——scopeId 段是服务端 file_id 归属验证依据;会话家庭未捕获时回退 "default"。
  *
@@ -27,6 +29,7 @@ exports.ensurePhotoAuth = ensurePhotoAuth;
 exports.photoCloudPath = photoCloudPath;
 exports.buildPhotoCommitItems = buildPhotoCommitItems;
 exports.commitPhotoBatch = commitPhotoBatch;
+exports.retryPhotoEvidence = retryPhotoEvidence;
 exports.__setPhotoIntakeDepsForTest = __setPhotoIntakeDepsForTest;
 const api_1 = require("./api");
 const household_scope_1 = require("./household-scope");
@@ -116,6 +119,7 @@ const defaultDeps = {
     },
     recognize: (tempPath) => (0, photo_vl_1.recognizePhotoFile)(tempPath),
     commit: (event) => (0, api_1.callItemsApi)(event),
+    evidenceRetry: (event) => (0, api_1.callItemsApi)(event),
     uuid: () => (0, api_1.uuid)(),
     now: () => new Date(),
 };
@@ -288,12 +292,41 @@ async function commitPhotoBatch(input, deps) {
     }
     try {
         const res = await d.commit(event);
-        return { ok: true, fileId, results: res.results };
+        // C3:证据写入失败如实回带(物品已建、照片待关联),页面据此提供幂等重试关联
+        const evidenceFailed = Array.isArray(res.evidence_failed)
+            ? res.evidence_failed.filter((id) => typeof id === "string" && id !== "")
+            : [];
+        return { ok: true, fileId, results: res.results, evidenceFailed };
     }
     catch (e) {
         const message = e instanceof Error && e.message ? e.message : "保存失败,请稍后重试";
         const code = (0, api_1.isApiError)(e) ? e.code : undefined;
         return { ok: false, stage: "commit", message, fileId, error: code };
+    }
+}
+/**
+ * 证据待关联件的幂等重试(itemsApi.photoEvidenceRetry):服务端重验 file_id
+ * 归属(B2 同款)与逐件作用域内存活后补插 photo_evidence,唯一索引冲突=已存在=
+ * 成功——重复点击、中断重放都收敛,绝不重复落证据行。任何失败如实回带,
+ * 由页面保留续联载荷供再试,绝不静默吞。
+ */
+async function retryPhotoEvidence(input, deps) {
+    const d = resolveDeps(deps);
+    const event = {
+        action: "photoEvidenceRetry",
+        file_id: input.fileId,
+        img_w: input.imgW,
+        img_h: input.imgH,
+        items: input.items.map((it) => ({ item_id: it.item_id, box: it.box, source: it.source })),
+    };
+    try {
+        const res = await d.evidenceRetry(event);
+        return { ok: true, results: res.results };
+    }
+    catch (e) {
+        const message = e instanceof Error && e.message ? e.message : "照片关联失败,请稍后重试";
+        const code = (0, api_1.isApiError)(e) ? e.code : undefined;
+        return { ok: false, message, error: code };
     }
 }
 /** 测试钩子:注入 wx API 依赖(partial 覆盖;null = 还原生产依赖) */

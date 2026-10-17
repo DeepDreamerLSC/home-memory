@@ -241,3 +241,70 @@ test("PS-8b:未捕获作用域开批 → scope.householdId=null;旧版残留(无
   storage.setStorageSync("home-memory:photo-session", legacy);
   assert.equal(ps.getUnfinishedPhotoSession(), null, "非法 generation → 整条载荷视同不存在");
 });
+
+/* ---------------- PS-9:入口作用域显式传入 + 续联载荷(PR #67 C1/C3) ---------------- */
+
+test("PS-9:startPhotoSession 显式 scope(入口作用域)优先于当前捕获;缺省按当前捕获(C1)", function () {
+  var storage = setup();
+  householdScope.captureHouseholdId("hh_c1pp111111111111111111111111111111", null);
+  var entryScope = ps.capturePhotoSessionScope();
+  // 识别等待期间切到 B(C1 场景):显式传入口作用域开批,会话仍绑 A
+  householdScope.captureHouseholdId("hh_c1qq222222222222222222222222222222", null);
+  var payload = ps.startPhotoSession(
+    { localPath: "wxfile://tmp/e.jpg", imgW: 1, imgH: 1, fileId: null },
+    [makeRow("入口批", true)],
+    "书房",
+    entryScope,
+  );
+  assert.deepEqual(payload.scope, entryScope, "会话绑定显式传入的入口作用域");
+  // 缺省:按当前捕获(边路行为与旧版一致)
+  var payload2 = ps.startPhotoSession(
+    { localPath: "wxfile://tmp/f.jpg", imgW: 1, imgH: 1, fileId: null },
+    [],
+    "",
+  );
+  assert.equal(payload2.scope.householdId, "hh_c1qq222222222222222222222222222222", "缺省按当前捕获");
+});
+
+test("PS-9b:pendingEvidence 续联载荷持久/恢复往返;损坏容忍为 null,不废整条会话(C3)", function () {
+  var storage = setup();
+  var payload = ps.startPhotoSession(
+    { localPath: "wxfile://tmp/g.jpg", imgW: 1024, imgH: 768, fileId: "cloud://f" },
+    [makeRow("续联批", true)],
+    "客厅",
+  );
+  assert.equal(payload.pendingEvidence, null, "开批默认无待关联件");
+  // photoCommit 回带 evidence_failed 后回写续联载荷
+  payload.pendingEvidence = {
+    fileId: "cloud://bucket/photo-evidence/hh_x/f.jpg",
+    imgW: 1024,
+    imgH: 768,
+    items: [
+      { item_id: "it_1", box: { x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.6 }, source: "vl" },
+      { item_id: "it_2", box: null, source: "circle" },
+    ],
+  };
+  ps.updatePhotoSession(payload);
+  var restored = ps.getUnfinishedPhotoSession();
+  assert.deepEqual(restored.pendingEvidence, payload.pendingEvidence, "续联载荷往返逐字段一致");
+
+  // 损坏的 pendingEvidence:只丢续联入口,会话本体仍可恢复
+  restored.pendingEvidence = { fileId: "", imgW: 1, imgH: 1, items: [] };
+  storage.setStorageSync("home-memory:photo-session", restored);
+  var afterCorrupt = ps.getUnfinishedPhotoSession();
+  assert.notEqual(afterCorrupt, null, "损坏续联载荷不废恢复入口");
+  assert.equal(afterCorrupt.pendingEvidence, null, "损坏按无待关联件收敛");
+
+  // box 损坏:该行按整照关联收敛(box=null),其余字段保留
+  restored.pendingEvidence = null;
+  payload.pendingEvidence = {
+    fileId: "cloud://ok/f.jpg",
+    imgW: 1,
+    imgH: 1,
+    items: [{ item_id: "it_9", box: { x1: 9, y1: 0, x2: 1, y2: 1 }, source: "vl" }],
+  };
+  ps.updatePhotoSession(payload);
+  var afterBox = ps.getUnfinishedPhotoSession();
+  assert.notEqual(afterBox.pendingEvidence, null);
+  assert.equal(afterBox.pendingEvidence.items[0].box, null, "box 越界按整照关联收敛");
+});

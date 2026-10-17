@@ -871,3 +871,336 @@ test("PE-VALID:已删除/不存在的 item 证据行静默过滤;存活 item 照
   assert.equal(res.evidence[0].item_id, "it_alive", "存活物品的证据照常返回");
   assert.equal(res.evidence[0].photo_url, "https://t/cloud://fv1");
 });
+
+// ---------- PC-EVID / PE-RETRY:证据写入失败=部分成功 + photoEvidenceRetry 幂等重试(PR #67 C3) ----------
+
+/* 让 photo_evidence 的 add 对指定 file_id 抛基础设施错误(非 E11000):
+ * photoCommit/重试的 savePhotoEvidence 在该 file 上必失败,其余照常 */
+function makeEvidenceBoomDb(db, boomFileId) {
+  var realCollection = db.collection.bind(db);
+  return {
+    collection: function (name) {
+      var coll = realCollection(name);
+      if (name !== "photo_evidence") {
+        return coll;
+      }
+      return {
+        add: function (options) {
+          if (options && options.data && options.data.file_id === boomFileId) {
+            return Promise.reject(new Error("collection.add:fail -502001 database request fail"));
+          }
+          return coll.add(options);
+        },
+        where: coll.where,
+        doc: coll.doc
+      };
+    }
+  };
+}
+
+/* 让 photo_evidence 的第一次 add 抛基础设施错误(单件失败,其余件照常落地) */
+function makeFirstAddBoomDb(db) {
+  var realCollection = db.collection.bind(db);
+  var addCalls = 0;
+  return {
+    collection: function (name) {
+      var coll = realCollection(name);
+      if (name !== "photo_evidence") {
+        return coll;
+      }
+      return {
+        add: function (options) {
+          addCalls += 1;
+          if (addCalls === 1) {
+            return Promise.reject(new Error("collection.add:fail -502001 database request fail"));
+          }
+          return coll.add(options);
+        },
+        where: coll.where,
+        doc: coll.doc
+      };
+    }
+  };
+}
+
+test("PC-EVID-1:证据写入失败 → 物品保留+evidence_failed 如实返回+其余件继续(部分成功语义)", async function () {
+  var db = freshDb();
+  var boomFile = "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-boom.jpg";
+  var deps = makeDeps(makeEvidenceBoomDb(db, boomFile), HOUSEHOLD_A);
+  var res = await handler(
+    commitEvent([
+      item("op-ev1", "护照", "书房抽屉", { photo: photo("f-boom") }), // 证据写失败
+      item("op-ev2", "户口本", "卧室", { photo: photo("f-ok") }), // 照常
+      item("op-ev3", "钥匙", "玄关") // 无照片件照常
+    ]),
+    deps
+  );
+  assert.equal(res.ok, true, "证据写失败不废整批,整体成功返回");
+  assert.equal(res.results.length, 3);
+  assert.equal(res.results[0].ok, true, "物品已建,绝不因证据失败回滚");
+  assert.equal(res.results[0].evidence_saved, false, "该件证据未落");
+  assert.equal(res.results[1].ok, true);
+  assert.equal(res.results[1].evidence_saved, true, "其余件证据照常写入");
+  assert.equal(res.results[2].ok, true);
+  assert.deepEqual(res.evidence_failed, [res.results[0].item_id], "evidence_failed 如实携带失败件 item_id");
+
+  var items = await rawDocs(db, "items");
+  assert.equal(items.length, 3, "物品全部保留");
+  var evidence = await rawDocs(db, "photo_evidence");
+  assert.equal(evidence.length, 1, "只有成功件的证据行");
+  assert.equal(evidence[0].item_id, res.results[1].item_id);
+});
+
+test("PC-EVID-2:全部件证据失败 → 仍整体 ok:true,evidence_failed 全量如实", async function () {
+  var db = freshDb();
+  var boomFile = "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-all.jpg";
+  var deps = makeDeps(makeEvidenceBoomDb(db, boomFile), HOUSEHOLD_A);
+  var res = await handler(
+    commitEvent([
+      item("op-ev-a", "甲", "客厅", { photo: photo("f-all") }),
+      item("op-ev-b", "乙", "客厅", { photo: photo("f-all") }) // 同一照片两件都失败
+    ]),
+    deps
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.results.every(function (r) { return r.ok; }), true, "物品全建");
+  assert.equal(res.results.every(function (r) { return r.evidence_saved === false; }), true);
+  assert.equal(res.evidence_failed.length, 2);
+  assert.equal((await rawDocs(db, "items")).length, 2);
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零证据行");
+});
+
+test("PE-RETRY-1:photoEvidenceRetry 补写成功——captured_location_text 取该件当前 items.location_text", async function () {
+  var db = freshDb();
+  var boomFile = "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-retry.jpg";
+  // 第一步:photoCommit 证据失败(boom 桩),拿到 evidence_failed 的 item_id
+  var commitRes = await handler(
+    commitEvent([item("op-rt1", "护照", "书房抽屉", { photo: photo("f-retry") })]),
+    makeDeps(makeEvidenceBoomDb(db, boomFile), HOUSEHOLD_A)
+  );
+  assert.equal(commitRes.ok, true);
+  assert.equal(commitRes.evidence_failed.length, 1);
+  var itemId = commitRes.evidence_failed[0];
+
+  // 第二步:重试关联(正常 db)补写成功
+  var res = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: boomFile,
+      img_w: 1024,
+      img_h: 768,
+      items: [{ item_id: itemId, box: { x1: 0.27, y1: 0.39, x2: 0.59, y2: 0.51 }, source: "vl" }]
+    },
+    makeDeps(db, HOUSEHOLD_A)
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.results.length, 1);
+  assert.equal(res.results[0].ok, true);
+  assert.equal(res.results[0].item_id, itemId);
+  assert.equal(res.results[0].evidence_saved, true, "本次新写入");
+
+  var evidence = await rawDocs(db, "photo_evidence");
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].item_id, itemId);
+  assert.equal(evidence[0].file_id, boomFile);
+  assert.deepEqual(evidence[0].box, { x1: 0.27, y1: 0.39, x2: 0.59, y2: 0.51 });
+  assert.equal(evidence[0].source, "vl");
+  assert.equal(evidence[0].captured_location_text, "书房抽屉", "取该件当前 items.location_text");
+});
+
+test("PE-RETRY-2:幂等——已存在(pre-check)返回 evidence_saved:false 仍成功;E11000 孪生回查收敛", async function () {
+  var db = freshDb();
+  await db.collection("items").add({
+    data: {
+      _id: "it_rt2",
+      household_id: HOUSEHOLD_A,
+      name: "护照",
+      location_text: "书房",
+      deleted: false,
+      created_at: T0,
+      updated_at: T0
+    }
+  });
+  var fileId = "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-idem.jpg";
+  var ev = {
+    action: "photoEvidenceRetry",
+    file_id: fileId,
+    img_w: 800,
+    img_h: 600,
+    items: [{ item_id: "it_rt2", box: null, source: "circle" }]
+  };
+  // 第一次:写入
+  var first = await handler(ev, makeDeps(db, HOUSEHOLD_A));
+  assert.equal(first.results[0].ok, true);
+  assert.equal(first.results[0].evidence_saved, true);
+
+  // 第二次:同参重放,pre-check 已存在 → 幂等成功,不重复落行
+  var second = await handler(ev, makeDeps(db, HOUSEHOLD_A));
+  assert.equal(second.ok, true);
+  assert.equal(second.results[0].ok, true);
+  assert.equal(second.results[0].evidence_saved, false, "已存在=成功(幂等)");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 1, "证据行绝不重复");
+
+  // E11000 孪生窗口:add 撞唯一索引但回查见行 → 收敛当已保存
+  // (makeTwinRaceDb:第一次 where 查询回空 + add 恒抛 E11000;回查走真实数据,
+  //  能看到 first 已落的同键行)
+  var twinDb = makeTwinRaceDb(db);
+  var third = await handler(ev, makeDeps(twinDb, HOUSEHOLD_A));
+  assert.equal(third.results[0].ok, true, "E11000=已存在=成功");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 1, "证据行绝不重复");
+});
+
+test("PE-RETRY-3:跨家 item 拒(NOT_FOUND 逐件)+ 已删 item 拒;不拦其余件", async function () {
+  var db = freshDb();
+  // A 家存活件 / A 家已删件 / B 家件(跨家)
+  await db.collection("items").add({
+    data: { _id: "it_a_ok", household_id: HOUSEHOLD_A, name: "甲", location_text: "客厅", deleted: false, created_at: T0, updated_at: T0 }
+  });
+  await db.collection("items").add({
+    data: { _id: "it_a_del", household_id: HOUSEHOLD_A, name: "乙", location_text: "客厅", deleted: true, created_at: T0, updated_at: T0 }
+  });
+  await db.collection("items").add({
+    data: { _id: "it_b_x", household_id: HOUSEHOLD_B, name: "丙", location_text: "客厅", deleted: false, created_at: T0, updated_at: T0 }
+  });
+  var res = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-mix.jpg",
+      img_w: 1024,
+      img_h: 768,
+      items: [
+        { item_id: "it_b_x", box: null }, // 跨家
+        { item_id: "it_a_del", box: null }, // 已删
+        { item_id: "it_a_ok", box: null } // 存活
+      ]
+    },
+    makeDeps(db, HOUSEHOLD_A)
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.results[0].ok, false, "跨家 item 拒");
+  assert.equal(res.results[0].error, "NOT_FOUND");
+  assert.equal(res.results[1].ok, false, "已删 item 拒");
+  assert.equal(res.results[1].error, "NOT_FOUND");
+  assert.equal(res.results[2].ok, true, "不拦其余件");
+  var evidence = await rawDocs(db, "photo_evidence");
+  assert.equal(evidence.length, 1, "只有存活件的证据行落地");
+  assert.equal(evidence[0].item_id, "it_a_ok");
+});
+
+test("PE-RETRY-4:跨家 file_id 拒 → FILE_NOT_OWNED 整批零写入", async function () {
+  var db = freshDb();
+  await db.collection("items").add({
+    data: { _id: "it_ow", household_id: HOUSEHOLD_A, name: "甲", location_text: "客厅", deleted: false, created_at: T0, updated_at: T0 }
+  });
+  var foreign = "cloud://bucket/photo-evidence/" + HOUSEHOLD_B + "/1697000000000-forged.jpg";
+  var res = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: foreign,
+      img_w: 1024,
+      img_h: 768,
+      items: [{ item_id: "it_ow", box: null }]
+    },
+    makeDeps(db, HOUSEHOLD_A)
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "FILE_NOT_OWNED");
+  assert.equal(res.message, "照片文件不属于当前家庭,本批未保存");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零写入");
+
+  // 解析不出路径的 file_id → INVALID_INPUT
+  var bad = await handler(
+    { action: "photoEvidenceRetry", file_id: "https://cdn.example.com/x.jpg", img_w: 1, img_h: 1, items: [{ item_id: "it_ow" }] },
+    makeDeps(db, HOUSEHOLD_A)
+  );
+  assert.equal(bad.error, "INVALID_INPUT");
+});
+
+test("PE-RETRY-5:参数形状非法 → 整批 INVALID_INPUT 零写入", async function () {
+  var db = freshDb();
+  var deps = makeDeps(db, HOUSEHOLD_A);
+  var goodFile = "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-v.jpg";
+  var cases = [
+    { label: "file_id 空", ev: { action: "photoEvidenceRetry", file_id: "", img_w: 1, img_h: 1, items: [{ item_id: "it" }] } },
+    { label: "img_w 非整数", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1.5, img_h: 1, items: [{ item_id: "it" }] } },
+    { label: "img_h 缺失", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, items: [{ item_id: "it" }] } },
+    { label: "items 空数组", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: [] } },
+    { label: "items 11 件", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: Array.from({ length: 11 }, function (_, i) { return { item_id: "it" + i }; }) } },
+    { label: "item_id 空", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: [{ item_id: "" }] } },
+    { label: "box 越界", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: [{ item_id: "it", box: { x1: 0, y1: 0, x2: 1.5, y2: 1 } }] } },
+    { label: "source 非法", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: [{ item_id: "it", source: "guess" }] } },
+    { label: "件非对象", ev: { action: "photoEvidenceRetry", file_id: goodFile, img_w: 1, img_h: 1, items: ["it"] } }
+  ];
+  for (var c = 0; c < cases.length; c++) {
+    var res = await handler(cases[c].ev, deps);
+    assert.equal(res.ok, false, cases[c].label);
+    assert.equal(res.error, "INVALID_INPUT", cases[c].label);
+  }
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零写入");
+});
+
+test("PE-RETRY-6:共享家庭缺双 marker → FAMILY_SWITCHED 零写入(写硬门同款)", async function () {
+  var db = freshDb();
+  var deps = makeDeps(db, HOUSEHOLD_A, { shared: true, scopeRevision: 4 });
+  var blocked = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-gate.jpg",
+      img_w: 1,
+      img_h: 1,
+      items: [{ item_id: "it_x" }]
+    },
+    deps
+  );
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, "FAMILY_SWITCHED");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0);
+
+  var deps2 = makeDeps(db, HOUSEHOLD_A, { shared: true, scopeRevision: 4 });
+  var ok = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-gate.jpg",
+      img_w: 1,
+      img_h: 1,
+      items: [{ item_id: "it_x" }],
+      expected_household_id: HOUSEHOLD_A,
+      expected_scope_revision: 4
+    },
+    deps2
+  );
+  assert.equal(ok.ok, true, "带齐 marker 放行(逐件 NOT_FOUND 是运行期结果)");
+  assert.equal(ok.results[0].ok, false);
+  assert.equal(ok.results[0].error, "NOT_FOUND");
+});
+
+test("PE-RETRY-7:单件证据写入失败(EVIDENCE_WRITE_FAILED)只进该件失败项,不拦其余件", async function () {
+  var db = freshDb();
+  await db.collection("items").add({
+    data: { _id: "it_r7a", household_id: HOUSEHOLD_A, name: "甲", location_text: "客厅", deleted: false, created_at: T0, updated_at: T0 }
+  });
+  await db.collection("items").add({
+    data: { _id: "it_r7b", household_id: HOUSEHOLD_A, name: "乙", location_text: "客厅", deleted: false, created_at: T0, updated_at: T0 }
+  });
+  var res = await handler(
+    {
+      action: "photoEvidenceRetry",
+      file_id: "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-partial.jpg",
+      img_w: 1024,
+      img_h: 768,
+      items: [
+        { item_id: "it_r7a", box: null },
+        { item_id: "it_r7b", box: null }
+      ]
+    },
+    makeDeps(makeFirstAddBoomDb(db), HOUSEHOLD_A)
+  );
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.results[0].ok, false, "第一件写失败");
+  assert.equal(res.results[0].error, "EVIDENCE_WRITE_FAILED");
+  assert.ok(typeof res.results[0].message === "string" && res.results[0].message !== "");
+  assert.equal(res.results[1].ok, true, "不拦其余件");
+  var evidence = await rawDocs(db, "photo_evidence");
+  assert.equal(evidence.length, 1);
+  assert.equal(evidence[0].item_id, "it_r7b");
+});

@@ -49,6 +49,8 @@ const ITEMS_API_MESSAGES = {
     HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
     /** PR #67 B1:photoCommit 会话家庭与当前派生家庭不一致(服务端 message 优先) */
     SCOPE_MISMATCH: "家庭已切换,本批未保存",
+    /** PR #67 C3:photoEvidenceRetry 单件证据写入失败(服务端 message 优先) */
+    EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
 };
 const EXTRACT_DRAFT_MESSAGES = {
     AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
@@ -168,10 +170,27 @@ function validateItemsOkResponse(action, r) {
             break;
         case "photoCommit":
             // 拍照识物批量建档(#3):逐行回执形状门——index 数值 + ok 布林必须齐,
-            // 失败行 error 文案可选;残缺响应整次抛错,绝不半带部分件
+            // 失败行 error 文案可选;残缺响应整次抛错,绝不半带部分件。
+            // PR #67 C3:evidence_failed(证据写入失败的 item_id 列表)可选携带,
+            // 携带时必须是字符串数组
             if (!Array.isArray(r.results) ||
                 !r.results.every((row) => isRecord(row) &&
                     typeof row.index === "number" &&
+                    typeof row.ok === "boolean" &&
+                    (row.error === undefined || typeof row.error === "string")) ||
+                (r.evidence_failed !== undefined &&
+                    (!Array.isArray(r.evidence_failed) ||
+                        !r.evidence_failed.every((id) => typeof id === "string")))) {
+                throw bad();
+            }
+            break;
+        case "photoEvidenceRetry":
+            // 证据幂等重试关联(PR #67 C3):逐行回执形状门——index/item_id/ok 必须
+            // 齐,error 可选;残缺响应整次抛错
+            if (!Array.isArray(r.results) ||
+                !r.results.every((row) => isRecord(row) &&
+                    typeof row.index === "number" &&
+                    typeof row.item_id === "string" &&
                     typeof row.ok === "boolean" &&
                     (row.error === undefined || typeof row.error === "string"))) {
                 throw bad();
@@ -216,7 +235,7 @@ function validateItemsOkResponse(action, r) {
             break;
     }
 }
-/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定;#36 提醒写操作同走硬门;#3 photoCommit 同走) */
+/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定;#36 提醒写操作同走硬门;#3 photoCommit/photoEvidenceRetry 同走) */
 const ITEMS_MUTATING_ACTIONS = new Set([
     "create",
     "update",
@@ -225,6 +244,7 @@ const ITEMS_MUTATING_ACTIONS = new Set([
     "remindClear",
     "remindSet",
     "photoCommit",
+    "photoEvidenceRetry",
 ]);
 async function callItemsApi(event) {
     // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision

@@ -52,7 +52,10 @@ var ERROR_MESSAGES = {
   SCOPE_MISMATCH: "家庭已切换,本批未保存",
   // PR #67 B2:photo 的 file_id 云存储路径前缀不属于当前派生家庭——零写入,
   // 他家/来路不明的照片绝不落进本家庭的证据行
-  FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存"
+  FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存",
+  // PR #67 C3:photoEvidenceRetry 单件证据写入失败(非唯一索引冲突的基础设施
+  // 错误)——物品已建、证据行未落,可幂等重试
+  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试"
 };
 
 function fail(error) {
@@ -2030,20 +2033,25 @@ async function claimNextForSet(deps, itemId, reminder) {
 
 // ---------- 拍照识物(#3):photo_evidence 证据集合 + photoCommit/photoEvidenceGet ----------
 //
-// 语义(IMPLEMENTATION §1.3/§1.4/§2):
+// 语义(IMPLEMENTATION §1.3/§1.4/§1.5/§2):
 // - photoCommit:批量建档——逐件直接复用既有 createItem(幂等/提醒 slot 全套
 //   白拿)+ 落 photo_evidence 证据行(item_id/photo file_id/0-1 box/原图宽高/
 //   拍摄时位置文本)。**部分成功语义**:纯参数校验失败整批 INVALID_INPUT 零写入;
 //   运行期单件失败(OPERATION_CONFLICT 等)只进该件 results 失败项,不拦其余件
 //   (一次确认不是数据库原子事务,与 miniprogram/utils/batch-save.ts 逐行哲学一致,
-//   保存前已有最终确认弹层过目);
+//   保存前已有最终确认弹层过目);PR #67 C3:证据写入失败不回滚不掩盖——item_id
+//   进响应 evidence_failed,物品保留、其余件继续,客户端走 photoEvidenceRetry
+//   幂等重试关联;
+// - photoEvidenceRetry(C3):{file_id, img_w, img_h, items:[{item_id, box?, source?}]}
+//   ——file_id 归属验证(B2 同款)+ 逐件作用域内存活重验后补插证据行,唯一索引
+//   冲突(E11000)=已存在=成功,幂等;
 // - photoEvidenceGet:按 item_ids 批量查证据(AND 等值查询,不引入 db.command.in,
 //   与 tests/helpers/memoryDb 的等值匹配语义兼容),每件 created_at 降序前 3,
 //   汇总去重 file_id 经 deps.getTempFileUrls 换临时链接(跨成员读一律走云函数,
 //   云存储默认仅创建者可读写);单文件换链失败该行 photo_url:"" 绝不废整个查询;
 // - 证据行不做删除/编辑(证据只增;物品删除不级联清证据——证据是历史事实);
-// - household_id 一律来自服务端解析(deps),绝不来自 event;photoCommit 进
-//   WRITE_ACTIONS(共享家庭双 marker 硬门与 create 同款)。
+// - household_id 一律来自服务端解析(deps),绝不来自 event;photoCommit 与
+//   photoEvidenceRetry 进 WRITE_ACTIONS(共享家庭双 marker 硬门与 create 同款)。
 
 var PHOTO_EVIDENCE_COLLECTION = "photo_evidence";
 var PHOTO_COMMIT_ITEMS_MAX = 10;
@@ -2069,6 +2077,33 @@ function byCreatedDesc(a, b) {
 }
 
 /**
+ * box 入参校验(§1.3 形状门,photoCommit 与 photoEvidenceRetry 共用):
+ * 未携带 → null(合法,无框/手动行);携带时四值有限数 ∈[0,1] 且 x2>x1、y2>y1;
+ * 非法 → "INVALID"。
+ */
+function parseBoxInput(box) {
+  if (box === undefined || box === null) {
+    return null;
+  }
+  if (typeof box !== "object" || Array.isArray(box)) {
+    return "INVALID";
+  }
+  var keys = ["x1", "y1", "x2", "y2"];
+  var cleaned = {};
+  for (var i = 0; i < keys.length; i++) {
+    var v = box[keys[i]];
+    if (typeof v !== "number" || !isFinite(v) || v < 0 || v > 1) {
+      return "INVALID";
+    }
+    cleaned[keys[i]] = v;
+  }
+  if (!(cleaned.x2 > cleaned.x1) || !(cleaned.y2 > cleaned.y1)) {
+    return "INVALID";
+  }
+  return cleaned;
+}
+
+/**
  * 校验 photoCommit 单件的 photo 入参(§1.3 形状门,纯参数校验):
  * 返回 null(未带照片,合法)/ "INVALID" / 规范化对象 { file_id, img_w, img_h, box|null, source }。
  * box 为 null 合法(无框/手动行);携带时四值有限数 ∈[0,1] 且 x2>x1、y2>y1。
@@ -2089,24 +2124,9 @@ function parsePhotoInput(photo) {
   if (!Number.isInteger(photo.img_h) || photo.img_h < 1 || photo.img_h > PHOTO_IMG_DIM_MAX) {
     return "INVALID";
   }
-  var box = null;
-  if (photo.box !== undefined && photo.box !== null) {
-    if (typeof photo.box !== "object" || Array.isArray(photo.box)) {
-      return "INVALID";
-    }
-    var keys = ["x1", "y1", "x2", "y2"];
-    var cleaned = {};
-    for (var i = 0; i < keys.length; i++) {
-      var v = photo.box[keys[i]];
-      if (typeof v !== "number" || !isFinite(v) || v < 0 || v > 1) {
-        return "INVALID";
-      }
-      cleaned[keys[i]] = v;
-    }
-    if (!(cleaned.x2 > cleaned.x1) || !(cleaned.y2 > cleaned.y1)) {
-      return "INVALID";
-    }
-    box = cleaned;
+  var box = parseBoxInput(photo.box);
+  if (box === "INVALID") {
+    return "INVALID";
   }
   if (PHOTO_SOURCES.indexOf(photo.source) === -1) {
     return "INVALID";
@@ -2198,6 +2218,12 @@ async function savePhotoEvidence(deps, itemId, photo, locationText) {
  * 同内容 duplicated)、并发重放收敛、提醒 slot 全套语义白拿;createItem 失败只进
  * 该件 results 失败项,不拦其余件。photo_evidence 唯一索引 (household_id,
  * item_id, file_id) 保证重放/并发不重(证据只增)。
+ * PR #67 C3:证据写入失败=部分成功语义——createItem 成功后 savePhotoEvidence
+ * 抛错(非唯一索引冲突的基础设施错误)不回滚物品、不掩盖、不废整批:该 item_id
+ * 进响应 evidence_failed 列表,其余件照常推进,全部建完后整体成功返回;客户端
+ * 凭 evidence_failed 走 photoEvidenceRetry 幂等重试关联。重试整批 photoCommit 会
+ * 撞同键 duplicated(物品不重建),但会再次尝试证据行——evidence_failed 是唯一
+ * 如实的收敛出口。
  */
 async function photoCommitItem(event, deps) {
   var batchId = event.batch_id;
@@ -2260,8 +2286,9 @@ async function photoCommitItem(event, deps) {
     });
   }
 
-  // 第二步:逐件建档 + 证据行(部分失败不拦其余件)
+  // 第二步:逐件建档 + 证据行(部分失败不拦其余件;C3:证据写失败同样不拦不掩盖)
   var results = [];
+  var evidenceFailed = [];
   for (var j = 0; j < prepared.length; j++) {
     var p = prepared[j];
     var createRes = await createItem(
@@ -2292,9 +2319,118 @@ async function photoCommitItem(event, deps) {
       evidence_saved: false
     };
     if (p.photo) {
-      row.evidence_saved = await savePhotoEvidence(deps, createRes.item.item_id, p.photo, p.locationText);
+      try {
+        row.evidence_saved = await savePhotoEvidence(deps, createRes.item.item_id, p.photo, p.locationText);
+      } catch (e) {
+        // C3:证据写入失败不回滚不掩盖——物品已建,如实进 evidence_failed 供
+        // photoEvidenceRetry 幂等重试;其余件照常推进,整批仍成功返回
+        evidenceFailed.push(createRes.item.item_id);
+        row.evidence_saved = false;
+      }
     }
     results.push(row);
+  }
+  var res = { ok: true, results: results };
+  if (evidenceFailed.length > 0) {
+    res.evidence_failed = evidenceFailed;
+  }
+  return res;
+}
+
+/**
+ * photoEvidenceRetry(PR #67 C3):入参 { action, file_id, img_w, img_h,
+ * items: [{ item_id, box?, source? }] }(写类 action,进 WRITE_ACTIONS 走通用
+ * 双 marker 硬门)——photoCommit 证据写入失败(evidence_failed)后的幂等重试关联。
+ * ①file_id 归属验证(B2 同款,任何写入之前):路径前缀 ≠ photo-evidence/<当前
+ *   派生家庭>/ → FILE_NOT_OWNED 整批零写入;路径解析不出 → INVALID_INPUT;
+ * ②逐件重验 item 在作用域内存在且未删除(跨家/已删/不存在 → 该件 NOT_FOUND
+ *   失败项,不拦其余件);captured_location_text 取该件当前 items.location_text
+ *   (重验时已读到,不要求客户端重传);
+ * ③逐条插 photo_evidence(复用 savePhotoEvidence:唯一索引冲突 E11000 回查
+ *   收敛=已存在=成功,幂等);
+ * ④单件证据写入失败(非唯一索引冲突的基础设施错误)只进该件失败项
+ *   (EVIDENCE_WRITE_FAILED),不拦其余件;返回逐件结果,整体 ok:true。
+ */
+async function photoEvidenceRetryItem(event, deps) {
+  if (!isString(event.file_id) || event.file_id.length < 1 || event.file_id.length > PHOTO_FILE_ID_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  if (!Number.isInteger(event.img_w) || event.img_w < 1 || event.img_w > PHOTO_IMG_DIM_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  if (!Number.isInteger(event.img_h) || event.img_h < 1 || event.img_h > PHOTO_IMG_DIM_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  var items = event.items;
+  if (!Array.isArray(items) || items.length < 1 || items.length > PHOTO_COMMIT_ITEMS_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  // ①file_id 归属验证(B2 同款,任何写入之前)
+  var ownership = checkPhotoFileIdOwnership(deps, event.file_id);
+  if (ownership === "INVALID") {
+    return fail("INVALID_INPUT");
+  }
+  if (ownership === "FILE_NOT_OWNED") {
+    return fail("FILE_NOT_OWNED");
+  }
+  // 参数形状预校验(任何查询/写入之前):item_id 非空字符串、box 形状、source 词表
+  var prepared = [];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it === null || typeof it !== "object" || Array.isArray(it)) {
+      return fail("INVALID_INPUT");
+    }
+    if (!validItemId(it.item_id)) {
+      return fail("INVALID_INPUT");
+    }
+    var box = parseBoxInput(it.box);
+    if (box === "INVALID") {
+      return fail("INVALID_INPUT");
+    }
+    var source = it.source === undefined || it.source === null ? "vl" : it.source;
+    if (PHOTO_SOURCES.indexOf(source) === -1) {
+      return fail("INVALID_INPUT");
+    }
+    prepared.push({ itemId: it.item_id, box: box, source: source });
+  }
+  var photo = { file_id: event.file_id, img_w: event.img_w, img_h: event.img_h };
+  var results = [];
+  for (var j = 0; j < prepared.length; j++) {
+    var q = prepared[j];
+    // ②逐件重验:作用域内存在且未删除(跨家 item 的 household_id 不等值,
+    // 天然查不到)
+    var got = await collection(deps)
+      .where({ _id: q.itemId, household_id: deps.householdId, deleted: false })
+      .get();
+    if (!got.data || got.data.length === 0) {
+      results.push({
+        index: j,
+        item_id: q.itemId,
+        ok: false,
+        error: "NOT_FOUND",
+        message: ERROR_MESSAGES.NOT_FOUND
+      });
+      continue;
+    }
+    var itemDoc = got.data[0];
+    try {
+      var saved = await savePhotoEvidence(
+        deps,
+        q.itemId,
+        Object.assign({}, photo, { box: q.box, source: q.source }),
+        isString(itemDoc.location_text) ? itemDoc.location_text : ""
+      );
+      results.push({ index: j, item_id: q.itemId, ok: true, evidence_saved: saved });
+    } catch (e) {
+      // ④基础设施错误:只废该件,可再重试
+      results.push({
+        index: j,
+        item_id: q.itemId,
+        ok: false,
+        error: "EVIDENCE_WRITE_FAILED",
+        message: ERROR_MESSAGES.EVIDENCE_WRITE_FAILED
+      });
+    }
   }
   return { ok: true, results: results };
 }
@@ -2424,7 +2560,8 @@ var ACTIONS = {
   remindClear: remindClearItem,
   remindSet: remindSetItem,
   photoCommit: photoCommitItem,
-  photoEvidenceGet: photoEvidenceGetItem
+  photoEvidenceGet: photoEvidenceGetItem,
+  photoEvidenceRetry: photoEvidenceRetryItem
 };
 
 /**
@@ -2440,7 +2577,8 @@ var ACTIONS = {
  *   以前客户端单人零回归。
  * 提醒写操作(issue #36):remindComplete/remindClear/remindSet 与
  * create/update/delete 同走此硬门,不另起炉灶。
- * 拍照识物(#3):photoCommit(批量建档+证据行)同走此硬门,与 create 同款。
+ * 拍照识物(#3):photoCommit(批量建档+证据行)与 photoEvidenceRetry(C3 证据
+ * 幂等重试关联)同走此硬门,与 create 同款。
  * 两参数仅做一致性校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
  */
 var WRITE_ACTIONS = {
@@ -2450,7 +2588,8 @@ var WRITE_ACTIONS = {
   remindComplete: true,
   remindClear: true,
   remindSet: true,
-  photoCommit: true
+  photoCommit: true,
+  photoEvidenceRetry: true
 };
 
 /**

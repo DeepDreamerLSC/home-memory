@@ -17,6 +17,7 @@
  */
 
 import { uuid } from "./api";
+import type { Box } from "./photo-box";
 import {
   captureScopeGeneration,
   householdScopeId,
@@ -44,6 +45,20 @@ export interface PhotoSessionScope {
   generation: number;
 }
 
+/**
+ * 证据待关联续联载荷(PR #67 C3):photoCommit 全部建档但部分证据写入失败
+ * (响应 evidence_failed)时随会话保留,供 photoEvidenceRetry 幂等重试关联,
+ * 直至重试成功或用户离开(会话清除)。null = 无待关联件。
+ */
+export interface PhotoPendingEvidence {
+  /** 本批照片的云存储 fileID(已上传,重试不再上传) */
+  fileId: string;
+  imgW: number;
+  imgH: number;
+  /** 待关联件(1-10):item_id 与该行框/来源 */
+  items: { item_id: string; box: Box | null; source: "vl" | "circle" }[];
+}
+
 export interface PhotoSessionPayload {
   /** 批 id(uuid):photoCommit 的 batch_id(仅日志聚合口径) */
   batchId: string;
@@ -54,6 +69,8 @@ export interface PhotoSessionPayload {
   rows: IntakeRow[];
   /** 开批时捕获的家庭作用域(B1:保存一致性绑定的唯一来源) */
   scope: PhotoSessionScope;
+  /** 证据待关联续联载荷(C3:null=无;随会话保留直至重试成功或用户离开) */
+  pendingEvidence: PhotoPendingEvidence | null;
   createdAt: number;
 }
 
@@ -145,12 +162,81 @@ function parseScope(v: unknown): PhotoSessionScope | null {
   return { householdId: s.householdId, generation: s.generation };
 }
 
-/** 读取后归一:无 scope(旧版本残留)按未捕获回退;scope 损坏则整条视为不存在 */
+/** box 形状门(0-1 四值,x2>x1、y2>y1);损坏返回 null(该行按整照关联收敛) */
+function parseEvidenceBox(v: unknown): Box | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) {
+    return null;
+  }
+  const b = v as { x1?: unknown; y1?: unknown; x2?: unknown; y2?: unknown };
+  const vals = [b.x1, b.y1, b.x2, b.y2];
+  for (const n of vals) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1) {
+      return null;
+    }
+  }
+  if (!((b.x2 as number) > (b.x1 as number)) || !((b.y2 as number) > (b.y1 as number))) {
+    return null;
+  }
+  return { x1: b.x1 as number, y1: b.y1 as number, x2: b.x2 as number, y2: b.y2 as number };
+}
+
+/**
+ * pendingEvidence 字段形状门(C3):附属字段,损坏只丢续联入口(按无待关联件
+ * 收敛),绝不像 scope 那样判整条载荷损坏——恢复既有批次的入口比续联入口重要,
+ * 且证据行可由用户在物品详情侧另行核对。
+ */
+function parsePendingEvidence(v: unknown): PhotoPendingEvidence | null {
+  if (v === undefined || v === null) {
+    return null;
+  }
+  if (typeof v !== "object" || Array.isArray(v)) {
+    return null;
+  }
+  const p = v as { fileId?: unknown; imgW?: unknown; imgH?: unknown; items?: unknown };
+  if (typeof p.fileId !== "string" || p.fileId === "") {
+    return null;
+  }
+  if (
+    typeof p.imgW !== "number" ||
+    !Number.isInteger(p.imgW) ||
+    p.imgW < 1 ||
+    typeof p.imgH !== "number" ||
+    !Number.isInteger(p.imgH) ||
+    p.imgH < 1
+  ) {
+    return null;
+  }
+  if (!Array.isArray(p.items) || p.items.length === 0 || p.items.length > 10) {
+    return null;
+  }
+  const items: PhotoPendingEvidence["items"] = [];
+  for (const raw of p.items) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return null;
+    }
+    const it = raw as { item_id?: unknown; box?: unknown; source?: unknown };
+    if (typeof it.item_id !== "string" || it.item_id === "") {
+      return null;
+    }
+    if (it.source !== "vl" && it.source !== "circle") {
+      return null;
+    }
+    items.push({
+      item_id: it.item_id,
+      box: it.box === null || it.box === undefined ? null : parseEvidenceBox(it.box),
+      source: it.source,
+    });
+  }
+  return { fileId: p.fileId, imgW: p.imgW, imgH: p.imgH, items };
+}
+
+/** 读取后归一:无 scope(旧版本残留)按未捕获回退;scope 损坏则整条视为不存在;
+ *  pendingEvidence 缺省/损坏按 null(附属字段,只丢续联入口不丢恢复入口) */
 function normalizePayload(v: unknown): PhotoSessionPayload | null {
   if (!isUsablePayload(v)) {
     return null;
   }
-  const raw = v as PhotoSessionPayload & { scope?: unknown };
+  const raw = v as PhotoSessionPayload & { scope?: unknown; pendingEvidence?: unknown };
   const scope = parseScope(raw.scope);
   if (raw.scope !== undefined && scope === null) {
     return null;
@@ -158,6 +244,7 @@ function normalizePayload(v: unknown): PhotoSessionPayload | null {
   return {
     ...raw,
     scope: scope !== null ? scope : { householdId: null, generation: 0 },
+    pendingEvidence: parsePendingEvidence(raw.pendingEvidence),
   };
 }
 
@@ -233,6 +320,7 @@ export function startPhotoSession(
     batchLocation,
     rows,
     scope: scope !== undefined ? scope : capturePhotoSessionScope(),
+    pendingEvidence: null,
     createdAt: Date.now(),
   };
   writePersisted(payload);
