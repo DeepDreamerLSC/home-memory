@@ -195,7 +195,9 @@
 ```jsonc
 { "ok": true,
   "results": [
-    { "index": 0, "ok": true, "item_id": "it_…", "duplicated": false, "evidence_saved": true },
+    { "index": 0, "ok": true, "item_id": "it_…", "duplicated": false, "evidence_saved": true,
+      "version": 1 },                    // #65 ③:建档后版本(duplicated 重放时为既有文档当前版本),
+                                        // 客户端随后 ensureAndLink 挂树的 expected_version 取它;旧客户端忽略
     { "index": 1, "ok": false, "error": "OPERATION_CONFLICT", "message": "…" }
   ],
   "evidence_failed": ["it_…"]   // PR #67 C3:证据写入失败(物品已建)的 item_id 列表;
@@ -265,6 +267,31 @@
 3. **逐条插 photo_evidence**(复用 savePhotoEvidence:唯一索引 `(household_id, item_id, file_id)` 冲突 E11000 回查收敛 = 已存在 = 成功,幂等——重复点击、中断重放都收敛,绝不重复落证据行);
 4. 单件证据写入失败(非唯一索引冲突的基础设施错误)只进该件失败项(`EVIDENCE_WRITE_FAILED`),不拦其余件;整体 `ok:true` 逐件返回。
 无新集合/索引/环境变量(§10 部署清单不变;photo_evidence 唯一索引即幂等依据)。
+
+### 1.6 保存成功后的位置挂树(issue #65 V0.4 第③条;复用 locations.ensureAndLink,无新云函数动作)
+
+**需求**:拍照识物确认位置后,批次位置与逐件例外**像语音录入确认流程一样**挂到位置节点树,用户不必再去主界面二次确认归属。**不新建位置模型/集合**:完全衔接现有 `location_text` / `locations.ensureAndLink` 机制;照片本身不产生位置事实(位置来源仍是用户在确认页明示的文本)。
+
+**机制**(与语音流程同源):语音链路里确认页保存时,`utils/batch-save.ts` 的 `saveRowWithMount` 在 create 成功后对该行调 `locations.ensureAndLink`(建缺失路径 + 按版本条件更新挂上,`created_from="parse"`——路径段逐字取自原话提取的 mount_path)。拍照流程复用**同一个 ensureAndLink API**(`utils/photo-intake.ts` 新增 `mountPhotoItems`,经 `callLocationsApi` 走同一封装/超时/作用域 marker/缓存失效),差异只有两点:
+
+1. **路径段来源**:拍照流程没有 extractDraft 的 mount_path 提取环节,位置是用户手输文本(确认页手动改位置在语音链路 = 清空路径不挂靠;`parseLocation` 是 LLM 候选 + 逐段人工核对的交互式机制)——两处都不是「文本→路径段」的确定性机制,故**新增最小确定性分段工具 `splitLocationSegments`**(新增决策,`utils/photo-intake.ts`):按 `·` `/` `-` `的` 与空白切分,逐段 trim、空段丢弃,**单段=单层**(如「玄关」直接挂根下房间节点);
+2. **`created_from="manual"`**(不是 `parse`):路径段来自用户手输位置的确定性拆分,不是原话提取;建出的节点与手动整理位置同源。
+
+**分段形状门**(与 batch-save/服务端 `cleanPathSegments` 同限,限值常量从 batch-save 导出共用):切分后 1-6 段、每段 1-30 码点;超限(如 7 段、单段 31 字)**一律不挂**——返回空数组,绝不静默丢段/截断改名造错误路径(`location_text` 原文已随 photoCommit 落库,查件不受影响)。
+
+**编排**(`pages/photo/photo.ts` `onSaveGoTap` 成功路径 → `runPhotoMounts`,`utils/photo-intake.ts` `planPhotoMounts` 纯函数下沉):
+1. 本批唯一位置清单 = 批次位置 + 各已保存件的例外位置(按 trim 后文本去重);每件有效位置 = 例外优先、批次兜底(与 `buildPhotoCommitItems` 的 `location_text` 合成完全同款);
+2. 逐位置分段一次,对该位置下**本轮 photoCommit 成功的件**(item_id + version 齐备)逐件 `ensureAndLink`:`{ item_id, path, expected_version: 回执 version, update_id: "photo:"+行内 operationId, created_from: "manual" }`;
+3. fire-and-forget:终态(已记住/证据链路)先落,挂树在后,不阻塞任何 UI。
+
+**幂等**(绝不重复挂):
+- `update_id = "photo:" + 行内 operationId`——行内 operationId 失败重试/会话恢复全程沿用,同一件无论多少轮都用同一挂树键;服务端 ensureAndLink 本身幂等(tests/locations.test.js TS-EAL-1 锁定:重复同路径 `already:true` 且 version 不再 +1,同 update_id 重放收敛),客户端再以稳定键 + 稳定版本双保险;
+- 已 done 行绝不重挂:挂树只发生在保存成功路径、只针对**本轮**回执;会话恢复后 `pending = checked && !done` 天然排除已入库件(PP-MOUNT-3 锁定);`evidenceRetry`(photoEvidenceRetry)与挂树无关,不触发挂树;
+- 回执缺 `version`(旧云函数窗口)→ 该件**跳过挂树不误报失败**,计入未挂件数如实轻提示。
+
+**失败语义**(挂树失败**不回滚不阻断**):网络/VERSION_CONFLICT(他人在主界面同时整理)/跨家庭 NOT_FOUND 等任何挂树失败——物品已保存、`location_text` 已落库、行仍是「已确认记住」终态,件照常在「尚未归类」;只轻提示「N 件的位置树没挂上,主界面可补」(N = 失败件 + 无法挂树件),绝不影响保存流程与证据关联。跨家庭安全:ensureAndLink 服务端按当前派生家庭解析物品,他家的 item_id → NOT_FOUND 零写入,共享家庭另受双 marker 硬门。
+
+**测试**:PI-14/15(分段:分隔符/空段/单段/恰 6 段/超 6 段/超 30 码点/空文本)、PI-16(计划:去重分组/例外优先/幂等键确定性/失败件与缺版本件不进/形状不合法计入 skipped)、PI-17(逐件 ensureAndLink 参数与失败计数不抛)、PP-MOUNT-1..4(页面级:参数逐项正确/失败终态不受影响+轻提示/恢复会话已 done 不重挂/旧窗口零调用)、PC-COMMIT-1 与 PC-IDEM(回执 version 字段与重放稳定)。
 
 ---
 
@@ -455,6 +482,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 - `npm run typecheck`。
 
 新测试清单见 §4.1 表格(4 个新文件 + voice-entry.test.js 补 2 例:声明 routeExtract 的宿主走自己的管线 / 未声明走 confirm 链现状锁;onTranscript 第二参透传)。
+位置挂树(#65 ③,机制见 §1.6):PI-14/15/16/17(photo-intake.test.js:分段/计划/幂等键/挂树编排)、PP-MOUNT-1..4(photo-page.test.js:页面级参数/失败语义/恢复不重挂/旧窗口)、PC-COMMIT-1 与 PC-IDEM 补验回执 `version` 字段。
 离线纪律:零网络、零外部依赖、绝不 require wx-server-sdk(各测试文件头注释声明,`tests/remind-notify.test.js:19-20` 同款);VL 的 HTTP 集成用例走 127.0.0.1 stub server(`tests/extractDraft-local-llm.test.js` 同款);itemsApi 侧用 `tests/helpers/memoryDb.js` 并配置 photo_evidence 唯一索引(§2)。
 
 验收门槛:全绿 + typecheck 通过 + 人工走查 §8 清单(开发者工具真机预览,拍照→识别→语音改→圈选→保存→详情回放全链)。

@@ -81,11 +81,35 @@ function makeRouter(opts) {
         results: data.items.map(function (it, i) {
           return fails.indexOf(i) !== -1
             ? { index: i, ok: false, error: "OPERATION_CONFLICT", message: "这条已保存过且内容与当前填写不同" }
-            : { index: i, ok: true, item_id: "it-" + i, duplicated: false, evidence_saved: evFailedIdx.indexOf(i) === -1 };
+            : {
+                index: i,
+                ok: true,
+                item_id: "it-" + i,
+                duplicated: false,
+                evidence_saved: evFailedIdx.indexOf(i) === -1,
+                // #65 ③:建档后版本回执(挂树 expected_version 来源);
+                // opts.commitVersionless=true 模拟旧云函数窗口(缺省 → 客户端跳过挂树)
+                ...(opts.commitVersionless ? {} : { version: 1 }),
+              };
         }),
         evidence_failed: evFailedIdx.map(function (i) {
           return "it-" + i;
         }),
+      };
+    }
+    if (name === "locations" && data.action === "ensureAndLink") {
+      // #65 ③:拍照位置挂树桩——默认成功;opts.mountError 模拟挂树失败
+      // (VERSION_CONFLICT/网络等;失败不回滚不阻断,只轻提示)
+      if (opts.mountError) {
+        return Promise.reject(new Error(opts.mountError));
+      }
+      return {
+        ok: true,
+        already: false,
+        item: { item_id: data.item_id, version: data.expected_version + 1, updated_at: "2026-10-16T00:00:00.000Z" },
+        path: data.path,
+        created: data.path.map(function () { return false; }),
+        location_ids: data.path.map(function (_, i) { return "loc-" + i; }),
       };
     }
     if (name === "itemsApi" && data.action === "photoEvidenceRetry") {
@@ -118,6 +142,7 @@ function makeEnv(opts) {
     editCalls: [],
     commitCalls: [],
     retryCalls: [],
+    mountCalls: [], // #65 ③:locations.ensureAndLink 挂树调用
     audioCtx: [],
     router: makeRouter(opts),
   };
@@ -201,6 +226,8 @@ function makeEnv(opts) {
           env.commitCalls.push(data);
         } else if (data.action === "photoEvidenceRetry") {
           env.retryCalls.push(data);
+        } else if (data.action === "ensureAndLink") {
+          env.mountCalls.push(data);
         }
         Promise.resolve()
           .then(function () {
@@ -1825,4 +1852,94 @@ test("PP-PHOTO-2:竖构图展开限高居中 + 点图本体切换展开/收起",
   assert.equal(page.data.photoCollapsed, true, "展开态再点图本体=收起(真机反馈)");
   page.onPhotoTap();
   assert.equal(page.data.photoCollapsed, false, "再点又展开(开关语义)");
+});
+
+/* ---------------- PP-MOUNT:保存成功后位置挂树(issue #65 V0.4 第③条) ---------------- */
+
+test("PP-MOUNT-1:保存成功 → 批次位置与逐件例外按去重位置挂树,ensureAndLink 参数逐项正确", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  page.onCheckTap({ currentTarget: { dataset: { index: 1 } } }); // 两件都勾选
+  page.rowsRaw[0] = { ...page.rowsRaw[0], exc: "厨房" }; // #1 例外;#2 继承批次
+  page.rebuildRows();
+  await readyToSave(ctx, page); // 批次位置「玄关柜 · 第二层抽屉」
+  await page.onSaveGoTap();
+  await settle();
+
+  assert.equal(page.rowsRaw.every(function (r) { return r.done || !r.checked; }), true);
+  assert.equal(ctx.env.mountCalls.length, 2, "例外一件 + 批次一件,逐件各一次 ensureAndLink");
+  var exc = ctx.env.mountCalls[0];
+  assert.equal(exc.item_id, "it-0");
+  assert.deepEqual(exc.path, ["厨房"], "例外位置分段(单段=单层)");
+  assert.equal(exc.expected_version, 1, "photoCommit 回执版本");
+  assert.equal(exc.update_id, "photo:" + page.rowsRaw[0].operationId, "行内幂等键派生的挂树幂等键");
+  assert.equal(exc.created_from, "manual", "手输位置拆层记 manual(不是原话 parse)");
+  var batch = ctx.env.mountCalls[1];
+  assert.equal(batch.item_id, "it-1");
+  assert.deepEqual(batch.path, ["玄关柜", "第二层抽屉"], "批次位置按「·」拆层");
+  assert.equal(batch.update_id, "photo:" + page.rowsRaw[1].operationId);
+  assert.ok(toastTexts(ctx.env).indexOf("位置树没挂上") === -1, "全部挂上零打扰");
+  assert.ok(toastTexts(ctx.env).indexOf("都记住了 · 2 件已入库") !== -1);
+});
+
+test("PP-MOUNT-2:挂树失败 → 终态不受影响(不回滚不阻断)+ 轻提示「主界面可补」", async function () {
+  var ctx = await boot({ mountError: "VERSION_CONFLICT" });
+  var page = ctx.page;
+  await readyToSave(ctx, page); // 默认 #1 勾选 → 1 件
+  await page.onSaveGoTap();
+  await settle();
+
+  assert.equal(ctx.env.mountCalls.length, 1, "发起过一次挂树(失败)");
+  assert.equal(page.rowsRaw[0].done, true, "已确认记住终态绝不回滚");
+  assert.equal(page.batchFinished, true);
+  assert.equal(page.data.saveSheet, null);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "会话照常终局清理");
+  assert.ok(toastTexts(ctx.env).indexOf("都记住了 · 1 件已入库") !== -1, "成功终态提示在前");
+  assert.ok(toastTexts(ctx.env).indexOf("1 件的位置树没挂上,主界面可补") !== -1, "挂树失败只轻提示");
+});
+
+test("PP-MOUNT-3:部分失败重试/会话恢复 → 已 done 件不重挂,只挂本轮新入库件", async function () {
+  var sessionStorage = makeFakeStorage();
+  var ctx = await boot({ sessionStorage: sessionStorage, commitFailIndexes: [1] });
+  var page = ctx.page;
+  page.onCheckTap({ currentTarget: { dataset: { index: 1 } } });
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(page.rowsRaw[0].done, true);
+  assert.equal(page.rowsRaw[1].done, false, "第二件失败可重试");
+  assert.equal(ctx.env.mountCalls.length, 1, "第一轮只挂成功件 it-0");
+  assert.equal(ctx.env.mountCalls[0].item_id, "it-0");
+  var opIds = page.rowsRaw.map(function (r) { return r.operationId; });
+  page.onUnload(); // 中途离开:会话保留(存在未完成行)
+
+  // 恢复会话(进程回收场景):done 行不再进保存 → 不重挂;失败行重试成功后挂上
+  var ctx2 = await boot({ sessionStorage: sessionStorage }, { resume: "1" });
+  var page2 = ctx2.page;
+  assert.equal(page2.rowsRaw[0].done, true, "已入库行恢复为终态");
+  await readyToSave(ctx2, page2);
+  await page2.onSaveGoTap();
+  await settle();
+  assert.equal(ctx2.env.commitCalls[0].items.length, 1, "只提交失败行(done 行绝不重提)");
+  assert.equal(page2.rowsRaw[1].done, true);
+  assert.equal(ctx2.env.mountCalls.length, 1, "恢复后只挂本轮新入库件(桩 id 按本次提交序号编)");
+  assert.equal(
+    ctx2.env.mountCalls[0].update_id,
+    "photo:" + opIds[1],
+    "挂树的是重试行(幂等键随行内 operationId 恢复稳定)",
+  );
+  assert.notEqual(ctx2.env.mountCalls[0].update_id, ctx.env.mountCalls[0].update_id, "与第一轮的 it-0 不是同一件");
+  assert.ok(toastTexts(ctx2.env).indexOf("位置树没挂上") === -1);
+});
+
+test("PP-MOUNT-4:旧云函数窗口(回执无 version)→ 零挂树调用,计入轻提示不误报失败", async function () {
+  var ctx = await boot({ commitVersionless: true });
+  var page = ctx.page;
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+
+  assert.equal(page.rowsRaw[0].done, true, "入库照常");
+  assert.equal(ctx.env.mountCalls.length, 0, "无版本回执绝不发起注定失败的挂树");
+  assert.ok(toastTexts(ctx.env).indexOf("1 件的位置树没挂上,主界面可补") !== -1, "如实计入未挂件数");
 });

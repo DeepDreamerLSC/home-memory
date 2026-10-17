@@ -137,8 +137,11 @@ test("PC-COMMIT-1:逐件建档走既有 createItem 路径,证据行形状与位�
     ok: true,
     item_id: res.results[0].item_id,
     duplicated: false,
-    evidence_saved: true
+    evidence_saved: true,
+    version: 1
   });
+  assert.equal(res.results[1].version, 1, "#65 ③:成功件回带建档后版本(挂树 expected_version 来源)");
+  assert.equal(res.results[2].version, 1);
   assert.equal(res.results[1].evidence_saved, true);
   assert.equal(res.results[2].evidence_saved, false, "不带 photo 的件不落证据行");
 
@@ -203,6 +206,7 @@ test("PC-IDEM:原键原内容重放 → duplicated:true、items 不增、证据�
   assert.equal(second.results[0].duplicated, true, "同键同内容 → duplicated");
   assert.equal(second.results[0].item_id, first.results[0].item_id, "稳定返回同一 item_id");
   assert.equal(second.results[0].evidence_saved, false, "证据行已存在 → 跳过(幂等)");
+  assert.equal(second.results[0].version, first.results[0].version, "#65 ③:重放回带既有文档当前版本,重试挂树据此幂等收敛");
 
   assert.equal((await rawDocs(db, "items")).length, 1);
   assert.equal((await rawDocs(db, "photo_evidence")).length, 1);

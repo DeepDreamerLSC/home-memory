@@ -30,10 +30,15 @@ exports.photoCloudPath = photoCloudPath;
 exports.buildPhotoCommitItems = buildPhotoCommitItems;
 exports.commitPhotoBatch = commitPhotoBatch;
 exports.retryPhotoEvidence = retryPhotoEvidence;
+exports.splitLocationSegments = splitLocationSegments;
+exports.planPhotoMounts = planPhotoMounts;
+exports.mountPhotoItems = mountPhotoItems;
 exports.__setPhotoIntakeDepsForTest = __setPhotoIntakeDepsForTest;
 const api_1 = require("./api");
 const household_scope_1 = require("./household-scope");
 const intake_draft_1 = require("./intake-draft");
+const batch_save_1 = require("./batch-save");
+const locations_api_1 = require("./locations-api");
 const photo_vl_1 = require("./photo-vl");
 function wxAvailable() {
     return typeof wx !== "undefined" && wx !== null;
@@ -120,6 +125,7 @@ const defaultDeps = {
     recognize: (tempPath) => (0, photo_vl_1.recognizePhotoFile)(tempPath),
     commit: (event) => (0, api_1.callItemsApi)(event),
     evidenceRetry: (event) => (0, api_1.callItemsApi)(event),
+    ensureAndLink: (event) => (0, locations_api_1.callLocationsApi)(event),
     uuid: () => (0, api_1.uuid)(),
     now: () => new Date(),
 };
@@ -328,6 +334,118 @@ async function retryPhotoEvidence(input, deps) {
         const code = (0, api_1.isApiError)(e) ? e.code : undefined;
         return { ok: false, message, error: code };
     }
+}
+// ---------- 位置挂树(issue #65 V0.4 第③条:批次位置 + 逐件例外挂到节点树) ----------
+/**
+ * 确定性分段(#65 ③,新增决策):拍照流程的位置是用户手输文本(如「玄关柜 · 第二层
+ * 抽屉」),没有语音链路 extractDraft v2 的 mount_path 提取环节;确认页手动改位置
+ * = 清空路径不挂靠,locations 侧的 parseLocation 是 LLM 候选+逐段人工核对(交互式),
+ * 都不是「文本→路径段」的确定性机制——故新增本最小确定性分段:按「·」「/」「-」
+ * 「的」与空白切分,逐段 trim、空段丢弃,单段=单层。切分后仍须满足挂树路径形状门
+ * (与 batch-save / 服务端 cleanPathSegments 同限:1-6 段、每段 1-30 码点);
+ * 超限一律返回空数组 = 该位置不挂(location_text 已随 photoCommit 落库,绝不猜
+ * 路径、绝不截断改名)。
+ */
+function splitLocationSegments(text) {
+    const segments = (typeof text === "string" ? text : "")
+        .split(/[·/\-的\s]+/)
+        .map((seg) => seg.trim())
+        .filter((seg) => seg !== "");
+    if (segments.length < 1 || segments.length > batch_save_1.MOUNT_PATH_MAX_SEGMENTS) {
+        return [];
+    }
+    if (segments.some((seg) => Array.from(seg).length > batch_save_1.MOUNT_SEGMENT_MAX_CODEPOINTS)) {
+        return [];
+    }
+    return segments;
+}
+/**
+ * 生成本轮挂树计划(纯函数):
+ * - 有效位置 = 例外优先、批次位置兜底(与 buildPhotoCommitItems 的
+ *   location_text 合成完全同款),按文本去重收集;
+ * - 只收本轮 photoCommit 成功(item_id + version 齐)的件;失败件不挂(重试
+ *   成功后由那轮回执挂),回执缺 version(旧云函数窗口)计入 skipped;
+ * - 分段形状不合法的位置(超 6 段/超 30 码点段)不进 entries,该位置下的件
+ *   全部计入 skipped——location_text 已落库,绝不猜路径。
+ */
+function planPhotoMounts(rows, results, batchLocation) {
+    const batch = (typeof batchLocation === "string" ? batchLocation : "").trim();
+    const byLocation = new Map();
+    const order = [];
+    let skipped = 0;
+    for (const rr of results) {
+        if (!rr.ok || rr.item_id === undefined) {
+            continue; // 失败件不挂(行未终态,重试成功后由那轮回执挂)
+        }
+        if (typeof rr.version !== "number" || !Number.isInteger(rr.version) || rr.version < 1) {
+            skipped += 1; // 旧云函数窗口:无版本回执,挂不了也不误报
+            continue;
+        }
+        const row = rows[rr.index];
+        if (!row) {
+            continue;
+        }
+        const exc = typeof row.exc === "string" ? row.exc.trim() : "";
+        const locationText = exc !== "" ? exc : batch;
+        if (locationText === "") {
+            continue; // 理论边路(保存门已要求批次位置非空):不挂不猜
+        }
+        let entry = byLocation.get(locationText);
+        if (entry === undefined) {
+            entry = { locationText, path: splitLocationSegments(locationText), items: [] };
+            byLocation.set(locationText, entry);
+            order.push(locationText);
+        }
+        entry.items.push({
+            item_id: rr.item_id,
+            expected_version: rr.version,
+            update_id: "photo:" + row.operationId,
+        });
+    }
+    let invalidPathItems = 0;
+    const entries = [];
+    for (const locationText of order) {
+        const entry = byLocation.get(locationText);
+        if (entry.path.length === 0) {
+            invalidPathItems += entry.items.length; // 分段形状不合法:该位置下全部件不挂
+            continue;
+        }
+        entries.push(entry);
+    }
+    return { entries, skipped: skipped + invalidPathItems };
+}
+/**
+ * 执行挂树计划:逐位置逐件调 locations.ensureAndLink——与语音确认流程
+ * (batch-save.saveRowWithMount → confirm 页)完全相同的 API 与语义:
+ * 建缺失路径 + 版本条件更新挂上;created_from="manual"(路径段来自用户手输
+ * 位置的确定性拆分,不是原话 parse)。挂树失败**不回滚不阻断不重试**:物品已
+ * 保存、location_text 已落库,失败件由调用方轻提示「主界面可补」(该件在
+ * 「尚未归类」)。顺序执行(与语音流程逐行串行同款),一件失败不影响其余件。
+ */
+async function mountPhotoItems(plan, deps) {
+    const d = resolveDeps(deps);
+    let attempted = 0;
+    let failed = 0;
+    for (const entry of plan.entries) {
+        for (const item of entry.items) {
+            attempted += 1;
+            try {
+                await d.ensureAndLink({
+                    action: "ensureAndLink",
+                    item_id: item.item_id,
+                    path: entry.path,
+                    expected_version: item.expected_version,
+                    update_id: item.update_id,
+                    created_from: "manual",
+                });
+            }
+            catch (e) {
+                // 不回滚、不重试、不抛错:物品已记住,如实计数由调用方轻提示
+                failed += 1;
+            }
+        }
+    }
+    return { attempted, failed };
 }
 /** 测试钩子:注入 wx API 依赖(partial 覆盖;null = 还原生产依赖) */
 function __setPhotoIntakeDepsForTest(partial) {

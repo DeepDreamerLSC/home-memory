@@ -5,7 +5,9 @@
  * - 证据条:默认折叠(压暗缩略),点开或点候选行展开全幅并高亮该候选框;
  *   容器等比跟随原图(aspect-ratio = img_w/img_h,零裁切,§3.2 纪律);
  * - 候选清单三态(候选/保留/已确认记住)+ 计数单一来源(utils/intake-draft);
- * - 位置栏:批次位置(手动/常用快选/按住说位置),逐件例外在编辑面板改;
+ * - 位置栏:批次位置(手动/常用快选/按住说位置),逐件例外在编辑面板改;保存
+ *   成功后批次位置与各件例外像语音确认流程一样挂到位置节点树(issue #65 V0.4
+ *   第③条:同一 ensureAndLink 机制,失败不回滚不阻断,只轻提示「主界面可补」);
  * - 按住说话:utils/voice-entry 单例的真实手势机(按住/松手/上滑取消/最短按压),
  *   本页只渲染 recsheet 浮层并经 routeExtract 旁路接 draftEditParse → diff 弹层
  *   (逐字段勾选应用,0 勾选禁用;原话保留可回听);
@@ -48,8 +50,11 @@ import {
 } from "../../utils/photo-vl";
 import {
   commitPhotoBatch,
+  mountPhotoItems,
+  planPhotoMounts,
   retryPhotoEvidence,
   takePhoto,
+  type PhotoMountPlan,
 } from "../../utils/photo-intake";
 import {
   capturePhotoSessionScope,
@@ -374,6 +379,11 @@ Page<
     onSaveTap(): void;
     onSaveBackTap(): void;
     onSaveGoTap(): Promise<void>;
+    /**
+     * 保存成功后的位置挂树(issue #65 ③):批次位置/例外像语音确认流程一样
+     * 挂上位置树;fire-and-forget——挂树失败不回滚不阻断,只轻提示
+     */
+    runPhotoMounts(plan: PhotoMountPlan): Promise<void>;
     /* ---- 证据待关联重试(C3) ---- */
     buildEvidencePendingView(savedCount?: number): void;
     onEvidenceRetryTap(): Promise<void>;
@@ -1810,6 +1820,30 @@ Page<
     } else {
       this.persistSession();
       wx.showToast({ title: fails + " 件没存上,失败行可重试", icon: "none", duration: 2500 });
+    }
+    // 位置挂树(issue #65 V0.4 第③条):本批唯一位置清单(批次位置+各已保存件
+    // 例外,去重)→ 逐件挂上位置树。终态与提示先落,挂树在后(fire-and-forget);
+    // 挂树失败不回滚不阻断,由 runPhotoMounts 轻提示。会话恢复/失败重试只带
+    // 未 done 行,已 done 件不会重挂(update_id 又按行幂等键收敛)。
+    void this.runPhotoMounts(planPhotoMounts(pending, outcome.results, this.data.batchLocation));
+  },
+
+  /**
+   * 保存成功后的位置挂树(issue #65 V0.4 第③条):拍照批次位置与逐件例外像
+   * 语音录入确认流程一样挂到位置节点树(同一个 locations.ensureAndLink API
+   * 与幂等语义),用户不必再去主界面二次确认归属。挂树失败**不回滚不阻断**:
+   * location_text 已随 photoCommit 落库,件照常在「尚未归类」,只轻提示
+   * 「N 件的位置树没挂上,主界面可补」;全部挂上则零打扰。
+   */
+  async runPhotoMounts(plan: PhotoMountPlan) {
+    const outcome = await mountPhotoItems(plan);
+    const notMounted = outcome.failed + plan.skipped;
+    if (notMounted > 0) {
+      wx.showToast({
+        title: notMounted + " 件的位置树没挂上,主界面可补",
+        icon: "none",
+        duration: 2500,
+      });
     }
   },
 

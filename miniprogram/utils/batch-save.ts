@@ -175,9 +175,12 @@ export interface DraftMountFields {
   mount_path?: unknown;
 }
 
-/** 与 locations 节点名同限:1-6 段,每段去空白 1-30 码点 */
-const MOUNT_PATH_MAX_SEGMENTS = 6;
-const MOUNT_SEGMENT_MAX_CODEPOINTS = 30;
+/**
+ * 与 locations 节点名同限:1-6 段,每段去空白 1-30 码点。
+ * 导出供拍照流程的确定性分段共用(issue #65 ③:同一份限值,单一来源)
+ */
+export const MOUNT_PATH_MAX_SEGMENTS = 6;
+export const MOUNT_SEGMENT_MAX_CODEPOINTS = 30;
 
 function codePointLength(s: string): number {
   return Array.from(s).length;

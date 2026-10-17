@@ -373,3 +373,123 @@ test("PI-13:photoCommit 抛 ApiError(带 code,如 SCOPE_MISMATCH)→ outcome.err
   var r2 = await pi.commitPhotoBatch(commitInput());
   assert.equal(r2.error, undefined);
 });
+
+/* ---------------- PI-MOUNT:位置挂树(issue #65 V0.4 第③条) ---------------- */
+
+test("PI-14:splitLocationSegments——分隔符「·」「/」「-」「的」与空白切分;空段丢弃;单段=单层", function () {
+  assert.deepEqual(pi.splitLocationSegments("玄关柜 · 第二层抽屉"), ["玄关柜", "第二层抽屉"]);
+  assert.deepEqual(pi.splitLocationSegments("客厅/电视柜/第一层"), ["客厅", "电视柜", "第一层"]);
+  assert.deepEqual(pi.splitLocationSegments("厨房-吊柜"), ["厨房", "吊柜"]);
+  assert.deepEqual(pi.splitLocationSegments("主卧的床头柜"), ["主卧", "床头柜"]);
+  assert.deepEqual(pi.splitLocationSegments("客厅 电视柜"), ["客厅", "电视柜"], "空白也是分隔符");
+  assert.deepEqual(pi.splitLocationSegments("  ·  玄关柜  ·  "), ["玄关柜"], "首尾/中间空段全部丢弃");
+  assert.deepEqual(pi.splitLocationSegments("玄关柜"), ["玄关柜"], "单段=单层(直接挂根下房间)");
+  assert.deepEqual(pi.splitLocationSegments("玄关柜·第二层·抽屉·深处·左边·里侧"), [
+    "玄关柜", "第二层", "抽屉", "深处", "左边", "里侧",
+  ], "恰好 6 段合法(与服务端路径上限一致)");
+});
+
+test("PI-15:splitLocationSegments——超 6 段 / 超 30 码点段 / 空文本一律空数组(不挂,绝不猜)", function () {
+  assert.deepEqual(pi.splitLocationSegments(""), []);
+  assert.deepEqual(pi.splitLocationSegments("   ·  ·  "), []);
+  assert.deepEqual(
+    pi.splitLocationSegments("a/b/c/d/e/f/g"),
+    [],
+    "7 段超路径上限 → 不挂(绝不静默丢段造错路径)",
+  );
+  var long31 = new Array(31 + 1).join("字"); // 31 码点
+  assert.deepEqual(pi.splitLocationSegments(long31), [], "单段 31 码点超节点名上限 → 不挂(绝不截断改名)");
+  var long30 = new Array(30 + 1).join("字"); // 恰 30 码点
+  assert.deepEqual(pi.splitLocationSegments(long30), [long30], "恰 30 码点合法");
+});
+
+test("PI-16:planPhotoMounts——批次位置+例外去重分组;例外优先;update_id=photo:{operationId} 稳定;失败件/缺版本件不进", function () {
+  var rows = [makeRow(), makeRow(), makeRow(), makeRow()];
+  rows[1] = { ...rows[1], exc: "厨房" };
+  rows[2] = { ...rows[2], exc: "客厅/电视柜" };
+  var results = [
+    { index: 0, ok: true, item_id: "it-0", version: 1 },
+    { index: 1, ok: true, item_id: "it-1", version: 1 },
+    { index: 2, ok: true, item_id: "it-2", version: 1 },
+    { index: 3, ok: false, error: "OPERATION_CONFLICT" },
+  ];
+  var plan = pi.planPhotoMounts(rows, results, "玄关柜 · 第二层抽屉");
+  assert.equal(plan.skipped, 0);
+  assert.equal(plan.entries.length, 3, "批次位置 + 两个例外,按文本去重");
+  var byLoc = {};
+  plan.entries.forEach(function (e) { byLoc[e.locationText] = e; });
+  assert.deepEqual(byLoc["玄关柜 · 第二层抽屉"].path, ["玄关柜", "第二层抽屉"]);
+  assert.deepEqual(byLoc["厨房"].path, ["厨房"], "单段例外=单层");
+  assert.deepEqual(byLoc["客厅/电视柜"].path, ["客厅", "电视柜"]);
+  assert.equal(byLoc["玄关柜 · 第二层抽屉"].items.length, 1, "失败件(index 3)绝不进挂树计划");
+  assert.equal(byLoc["玄关柜 · 第二层抽屉"].items[0].item_id, "it-0");
+  assert.equal(byLoc["玄关柜 · 第二层抽屉"].items[0].expected_version, 1);
+  assert.equal(byLoc["玄关柜 · 第二层抽屉"].items[0].update_id, "photo:" + rows[0].operationId);
+
+  // 幂等键确定性:同一批行再计划一次,update_id 逐字节一致(重试/会话恢复同键收敛)
+  var plan2 = pi.planPhotoMounts(rows, results, "玄关柜 · 第二层抽屉");
+  assert.deepEqual(
+    plan2.entries.map(function (e) { return e.items.map(function (it) { return it.update_id; }); }),
+    plan.entries.map(function (e) { return e.items.map(function (it) { return it.update_id; }); }),
+  );
+
+  // 回执缺 version(旧云函数窗口)→ 不进 entries、计入 skipped;分段形状不合法同样计入
+  var plan3 = pi.planPhotoMounts(
+    [makeRow(), makeRow()],
+    [
+      { index: 0, ok: true, item_id: "it-x" }, // 无 version
+      { index: 1, ok: true, item_id: "it-y", version: 1 },
+    ],
+    "a/b/c/d/e/f/g", // 7 段:形状不合法
+  );
+  assert.equal(plan3.entries.length, 0);
+  assert.equal(plan3.skipped, 2, "无版本件 + 形状不合法位置下的件都如实计入 skipped");
+
+  // exc 空串按批次位置兜底(与 buildPhotoCommitItems 合成口径一致)
+  var plan4 = pi.planPhotoMounts(
+    [{ ...makeRow(), exc: "  " }],
+    [{ index: 0, ok: true, item_id: "it-z", version: 1 }],
+    "玄关柜",
+  );
+  assert.equal(plan4.entries.length, 1);
+  assert.equal(plan4.entries[0].locationText, "玄关柜");
+});
+
+test("PI-17:mountPhotoItems——逐位置逐件 ensureAndLink(created_from=manual);失败不回滚不抛,如实计数", async function () {
+  var calls = [];
+  var plan = {
+    skipped: 0,
+    entries: [
+      {
+        locationText: "玄关柜 · 第二层抽屉",
+        path: ["玄关柜", "第二层抽屉"],
+        items: [
+          { item_id: "it-0", expected_version: 1, update_id: "photo:op-0" },
+          { item_id: "it-1", expected_version: 1, update_id: "photo:op-1" },
+        ],
+      },
+      { locationText: "厨房", path: ["厨房"], items: [{ item_id: "it-2", expected_version: 2, update_id: "photo:op-2" }] },
+    ],
+  };
+  var outcome = await pi.mountPhotoItems(plan, {
+    ensureAndLink: function (event) {
+      calls.push(JSON.parse(JSON.stringify(event)));
+      if (event.item_id === "it-1") {
+        return Promise.reject(new Error("VERSION_CONFLICT"));
+      }
+      return Promise.resolve({ ok: true, already: false, item: { item_id: event.item_id, version: event.expected_version + 1, updated_at: "t" }, path: event.path, created: [], location_ids: [] });
+    },
+  });
+  assert.equal(calls.length, 3, "逐件各一次(位置去重不减少调用次数)");
+  assert.equal(outcome.attempted, 3);
+  assert.equal(outcome.failed, 1, "一件失败如实计数,绝不抛错阻断其余件");
+  assert.deepEqual(
+    { action: calls[0].action, item_id: calls[0].item_id, path: calls[0].path, expected_version: calls[0].expected_version, update_id: calls[0].update_id, created_from: calls[0].created_from },
+    { action: "ensureAndLink", item_id: "it-0", path: ["玄关柜", "第二层抽屉"], expected_version: 1, update_id: "photo:op-0", created_from: "manual" },
+    "与语音确认流程同一 API 形状;手输位置拆层记 manual",
+  );
+
+  // 空计划零调用零失败
+  var empty = await pi.mountPhotoItems({ entries: [], skipped: 0 }, { ensureAndLink: function () { throw new Error("绝不该调"); } });
+  assert.deepEqual(empty, { attempted: 0, failed: 0 });
+});
