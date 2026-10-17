@@ -40,6 +40,12 @@ function makeRouter(opts) {
       if (opts.vlError) {
         return opts.vlError;
       }
+      if (opts.vlDefer) {
+        // C1 测试:识别挂起,由用例在「识别等待窗口」切家庭后再放行
+        return new Promise(function (resolve) {
+          opts.vlDefer.resolve = resolve;
+        });
+      }
       return (
         opts.vlResponse || {
           ok: true,
@@ -1198,6 +1204,156 @@ test("PP-SCOPE-3:会话家庭与当前作用域一致(未切换)→ 保存照常
   );
   assert.equal(ctx.env.uploads[0].cloudPath.indexOf("photo-evidence/hh_pagecccccccccccccccccccccccccccc1/"), 0, "上传前缀=会话家庭");
   assert.equal(page.rowsRaw[0].done, true, "照常入库");
+});
+
+/* ---------------- PP-C1:会话绑定时序竞态(PR #67 C1,识别等待窗口) ---------------- */
+
+var VL_OK_TWO_ITEMS = {
+  ok: true,
+  engine: "vl-local",
+  items: [
+    { name: "黄色薯片罐", qty_note: "", confidence: "high", box: { x1: 0.273, y1: 0.389, x2: 0.593, y2: 0.507 } },
+    { name: "黑色小盒子", qty_note: "", confidence: "low", box: { x1: 0.868, y1: 0.79, x2: 0.982, y2: 0.873 } },
+  ],
+  img_w: 1024,
+  img_h: 768,
+};
+
+/** boot 变体:进入页面前先落在指定家庭(C1:拍照入口作用域必须在 onLoad 前就位,
+ *  boot 的 reset 在 onLoad 之前但无捕获点,这里补捕获)。 */
+async function bootInHousehold(householdId, opts) {
+  opts = opts || {};
+  var env = makeEnv(opts);
+  install(env);
+  photoSession.__resetPhotoSessionForTest();
+  photoSession.__setPhotoSessionStorageForTest(opts.sessionStorage || makeFakeStorage());
+  householdScope.__resetHouseholdScopeForTest();
+  if (householdId) {
+    householdScope.captureHouseholdId(householdId, null);
+  }
+  cache.__resetLocationsCacheForTest();
+  photoIntake.__setPhotoIntakeDepsForTest(null);
+  var page = makePage();
+  page.onLoad(opts.loadOptions === undefined ? {} : opts.loadOptions);
+  await settle();
+  return { page: page, env: env };
+}
+
+test("PP-C1-1:A 家拍照→识别等待期切 B 家→识别返回 → 零会话零候选零上传,终止返回首页", async function () {
+  var A = "hh_c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1";
+  var B = "hh_c1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1";
+  var holder = {};
+  var ctx = await bootInHousehold(A, { vlDefer: holder });
+  var page = ctx.page;
+
+  assert.equal(page.data.recognizing, true, "识别在途(挂起桩)");
+  assert.equal(page.data.entryReady, false);
+  assert.equal(page.entryScope.householdId, A, "照片在手即捕获入口作用域(C1:识别发起前)");
+  assert.equal(page.sessionScope, null, "识别未返回不开会话");
+
+  householdScope.captureHouseholdId(B, null); // 识别等待窗口:家庭 A → B
+  holder.resolve(VL_OK_TWO_ITEMS);
+  await settle();
+
+  assert.equal(page.data.entryReady, false, "候选绝不上屏");
+  assert.equal(page.rowsRaw.length, 0, "零候选");
+  assert.equal(page.sessionScope, null, "零会话(不建会话)");
+  assert.equal(page.batchId, "", "未开批");
+  assert.equal(ctx.env.uploads.length, 0, "零上传");
+  assert.equal(ctx.env.commitCalls.length, 0, "零 photoCommit");
+  assert.ok(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") !== -1, "C1 终局文案(与 B1 同款语义)");
+  assert.ok(ctx.env.backs.length >= 1, "返回首页");
+  assert.equal(page.data.recognizing, false);
+  // A 家键下无会话残留(回 A 家不再出现恢复横幅);B 家键同样零写入
+  householdScope.__resetHouseholdScopeForTest();
+  householdScope.captureHouseholdId(A, null);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "A 家会话键无残留");
+  householdScope.__resetHouseholdScopeForTest();
+  householdScope.captureHouseholdId(B, null);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "B 家会话键无残留");
+});
+
+test("PP-C1-2:同 householdId 作用域代数前进(A→B→A)→ 不算漂移,照常开批", async function () {
+  var A = "hh_c1cccccccccccccccccccccccccccccc1";
+  var holder = {};
+  var ctx = await bootInHousehold(A, { vlDefer: holder });
+  var page = ctx.page;
+  var entryGen = page.entryScope.generation;
+
+  // 识别等待窗口:切 B 再切回 A——householdId 与入口一致,作用域代数已前进
+  householdScope.captureHouseholdId("hh_c1dddddddddddddddddddddddddddddd1", null);
+  householdScope.captureHouseholdId(A, null);
+  assert.ok(
+    householdScope.captureScopeGeneration() > entryGen,
+    "同户代数已前进(同户内作用域版本变化)",
+  );
+  holder.resolve(VL_OK_TWO_ITEMS);
+  await settle();
+
+  assert.equal(page.data.entryReady, true, "同户代数前进不算漂移,照常开批");
+  assert.equal(page.rowsRaw.length, 2, "候选照常上屏");
+  assert.equal(page.sessionScope.householdId, A, "会话绑定拍照入口家庭");
+  assert.equal(page.batchId !== "", true, "会话已开");
+  assert.equal(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") === -1, true, "绝不误杀同户批次");
+  assert.equal(ctx.env.uploads.length, 0, "开批后确认前仍零上传");
+});
+
+test("PP-C1-3:VL 不可用降级弹窗等待期切家 → 手动添加路径同样不开批,零会话终止返回", async function () {
+  var A = "hh_c1eeeeeeeeeeeeeeeeeeeeeeeeeeeeee1";
+  var B = "hh_c1ffffffffffffffffffffffffffffff1";
+  var ctx = await bootInHousehold(A, {
+    vlError: { ok: false, error: "AI_UNAVAILABLE", message: "拍照识别暂不可用,可手动添加", manual_fallback: true },
+    onModal: function (o) {
+      // 降级弹窗「拍照识别暂不可用」开着的时候家庭切到 B(modal 等待窗口)
+      householdScope.captureHouseholdId(B, null);
+      o.success({ confirm: true, cancel: false, content: "" });
+    },
+  });
+  var page = ctx.page;
+
+  assert.equal(page.data.entryReady, false, "降级路径漂移:不开批");
+  assert.equal(page.rowsRaw.length, 0, "零候选");
+  assert.equal(page.sessionScope, null, "零会话");
+  assert.equal(page.batchId, "", "未开批");
+  assert.equal(ctx.env.uploads.length, 0, "零上传");
+  assert.equal(ctx.env.commitCalls.length, 0, "零提交");
+  assert.ok(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") !== -1, "C1 终局文案");
+  assert.ok(ctx.env.backs.length >= 1, "返回首页");
+});
+
+test("PP-C1-4:未授权路径——授权弹窗等待期切家 → 手动/语音建候选路径同样不开批", async function () {
+  var A = "hh_c1gggggggggggggggggggggggggggggg1";
+  var B = "hh_c1hhhhhhhhhhhhhhhhhhhhhhhhhhhh1";
+  var ctx = await bootInHousehold(A, {
+    vlAuthReset: true,
+    onModal: function (o) {
+      // 授权弹窗「云端识别授权」等待窗口切家,然后拒绝
+      householdScope.captureHouseholdId(B, null);
+      o.success({ confirm: false, cancel: true, content: "" });
+    },
+  });
+  var page = ctx.page;
+
+  assert.equal(page.data.entryReady, false, "未授权降级路径漂移:不开批");
+  assert.equal(page.rowsRaw.length, 0, "零候选");
+  assert.equal(page.sessionScope, null, "零会话");
+  assert.equal(page.data.vlAuthDenied, true, "拒绝态照常记录");
+  assert.ok(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") !== -1, "C1 终局文案");
+  assert.ok(ctx.env.backs.length >= 1, "返回首页");
+  assert.equal(ctx.env.uploads.length, 0);
+});
+
+test("PP-C1-5:识别正常返回且未切换 → 照常开批(回归)", async function () {
+  var A = "hh_c1iiiiiiiiiiiiiiiiiiiiiiiiiiiiii1";
+  var ctx = await bootInHousehold(A, {});
+  var page = ctx.page;
+
+  assert.equal(page.data.entryReady, true, "无漂移不拦");
+  assert.equal(page.rowsRaw.length, 2, "候选照常上屏");
+  assert.equal(page.sessionScope.householdId, A, "会话绑定入口家庭");
+  assert.equal(ctx.env.vlCalls.length, 1);
+  assert.equal(ctx.env.uploads.length, 0, "确认前零上传(回归)");
+  assert.equal(toastTexts(ctx.env).indexOf("家庭已切换,本次拍照未保存") === -1, true);
 });
 
 /* ---------------- PP-AUTH:首次识别授权(PR #67 B4) ---------------- */

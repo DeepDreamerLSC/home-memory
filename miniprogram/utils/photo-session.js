@@ -11,9 +11,10 @@
  * - base64 绝不入会话存储(只在页面内存;恢复后按 localPath 重新 prepare);
  * - localPath 为本地临时文件路径(小程序临时文件可能被系统回收:恢复时页面用
  *   wx.getFileSystemManager().access 复核,文件不存在 → 如实提示重拍,不编造);
- * - 会话归属家庭在**开批时**捕获(scope 字段,PR #67 B1):保存时把该
- *   expected_household_id 随 photoCommit 上送,服务端与当前派生家庭不一致 →
- *   SCOPE_MISMATCH 拒绝——中途切换家庭后旧批绝不改投新家庭(客户端也会拦)。
+ * - 会话归属家庭在**拍照流程入口**(照片在手、发起识别前)捕获(scope 字段,
+ *   PR #67 B1+C1):保存时把该 expected_household_id 随 photoCommit 上送,服务端
+ *   与当前派生家庭不一致 → SCOPE_MISMATCH 拒绝——中途切换家庭后旧批绝不改投新
+ *   家庭(客户端入口复核/保存复核双层拦截)。
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.capturePhotoSessionScope = capturePhotoSessionScope;
@@ -163,15 +164,21 @@ function capturePhotoSessionScope() {
         generation: (0, household_scope_1.captureScopeGeneration)(),
     };
 }
-/** 开新一批拍照会话(成为当前会话);batchId 在此生成,此后全程稳定;
- *  会话归属家庭在此时捕获(scope 字段),保存时据此做一致性绑定 */
-function startPhotoSession(file, rows, batchLocation) {
+/**
+ * 开新一批拍照会话(成为当前会话);batchId 在此生成,此后全程稳定;
+ * 会话归属家庭在此时固化(scope 字段),保存时据此做一致性绑定。
+ * C1(PR #67):拍照流程入口(照片在手、发起识别前)已捕获作用域时显式传入——
+ * 会话绑定**拍照入口**的作用域;识别/授权等待期间家庭切换由页面在开批前复核
+ * 拦下(漂移即不建会话),绝不把切换前拍的照片改投切换后的家庭。缺省(边路)
+ * 按当前捕获,行为与旧版一致。
+ */
+function startPhotoSession(file, rows, batchLocation, scope) {
     const payload = {
         batchId: (0, api_1.uuid)(),
         file: { localPath: file.localPath, imgW: file.imgW, imgH: file.imgH, fileId: file.fileId ?? null },
         batchLocation,
         rows,
-        scope: capturePhotoSessionScope(),
+        scope: scope !== undefined ? scope : capturePhotoSessionScope(),
         createdAt: Date.now(),
     };
     writePersisted(payload);

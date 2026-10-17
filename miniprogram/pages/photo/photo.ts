@@ -49,6 +49,7 @@ import {
   takePhoto,
 } from "../../utils/photo-intake";
 import {
+  capturePhotoSessionScope,
   clearPhotoSession,
   clearPhotoSessionForScope,
   getUnfinishedPhotoSession,
@@ -259,6 +260,12 @@ Page<
     sessionCreatedAt: number;
     /** 开批时捕获的会话家庭作用域(B1:保存一致性绑定;null=本页尚无会话) */
     sessionScope: PhotoSessionScope | null;
+    /**
+     * 拍照流程入口作用域(C1:照片在手、发起识别前捕获)——会话一律绑定它,
+     * 识别/授权等待期间的家庭切换不得把本批改投新家庭;识别返回后先复核,
+     * 漂移即不建会话不上屏。null=本次拍照流程未走到照片在手。
+     */
+    entryScope: PhotoSessionScope | null;
     batchFinished: boolean;
     capturing: boolean;
     committing: boolean;
@@ -279,9 +286,11 @@ Page<
     /* ---- 拍照入口 ---- */
     beginCapture(): Promise<void>;
     onEntryShotTap(): void;
-    startEmptyBatch(prepared: PhotoVlPrepared, subtitle: string): void;
+    startEmptyBatch(prepared: PhotoVlPrepared, subtitle: string, entryScope?: PhotoSessionScope): void;
     restoreSession(): void;
     navigateBackSafe(): void;
+    photoEntryScopeDrifted(entryScope: PhotoSessionScope | null): boolean;
+    terminateCaptureForScopeDrift(): void;
     sessionScopeDrifted(): boolean;
     terminateSessionForScopeDrift(): void;
     readVlAuthRemembered(): boolean;
@@ -399,6 +408,7 @@ Page<
   batchId: "",
   sessionCreatedAt: 0,
   sessionScope: null as PhotoSessionScope | null,
+  entryScope: null as PhotoSessionScope | null,
   batchFinished: false,
   capturing: false,
   committing: false,
@@ -423,6 +433,7 @@ Page<
     this.batchId = "";
     this.sessionCreatedAt = 0;
     this.sessionScope = null;
+    this.entryScope = null;
     this.batchFinished = false;
     // B4:授权记忆还原(同意过识别临时传输的不再问;拒绝不落键,重进会再问)
     this.vlAuthGranted = this.readVlAuthRemembered();
@@ -553,6 +564,10 @@ Page<
       });
       return;
     }
+    // C1(PR #67):照片在手 = 最早能确定「用户要拍这张照片」的时机——先捕获入口
+    // 作用域,此后本批会话一律绑定它(识别/授权等待期间家庭切换,不得把本批改投
+    // 切换后的家庭;识别返回后先复核漂移,漂移即不建会话)
+    this.entryScope = capturePhotoSessionScope();
     // 本地压缩 → 宽高 → base64(不写云存储;prepared 只存页面内存,识别传输见下方授权门)
     const prepared = await preparePhotoForVl(shot.tempFilePath);
     if (!prepared.ok) {
@@ -573,18 +588,27 @@ Page<
     const granted = await this.askVlAuthOnce();
     if (!granted) {
       this.capturing = false;
-      this.startEmptyBatch(prepared, "未授权云端识别;可手动添加或语音建候选,照片仍作证据。");
+      this.startEmptyBatch(prepared, "未授权云端识别;可手动添加或语音建候选,照片仍作证据。", this.entryScope);
       return;
     }
     const outcome = await recognizeWithVl(prepared);
     this.capturing = false;
+    // C1:识别返回后、候选上屏/开批之前先复核入口作用域——识别等待期间家庭已切换
+    // → 不建会话、候选不上屏,终局与 B1 的 SCOPE_MISMATCH 同款语义;同 householdId
+    // 仅作用域代数/修订前进(同户内作用域版本变化)不算漂移,照常
+    if (this.photoEntryScopeDrifted(this.entryScope)) {
+      this.terminateCaptureForScopeDrift();
+      return;
+    }
     if (outcome.ok) {
       const rows = outcome.items.map((it) => makeAiRow(it));
       this.rowsRaw = rows;
+      // C1:会话绑定拍照入口作用域(不是识别返回时刻的当前作用域)
       const session = startPhotoSession(
         { localPath: prepared.path, imgW: prepared.imgW, imgH: prepared.imgH, fileId: null },
         rows,
         "",
+        this.entryScope === null ? undefined : this.entryScope,
       );
       this.batchId = session.batchId;
       this.sessionCreatedAt = session.createdAt;
@@ -613,7 +637,11 @@ Page<
         cancelText: "不拍了",
         success: (r) => {
           if (r.confirm) {
-            this.startEmptyBatch(prepared, "拍照识别暂不可用;手动添加的物品照常保存,照片仍作证据。");
+            this.startEmptyBatch(
+              prepared,
+              "拍照识别暂不可用;手动添加的物品照常保存,照片仍作证据。",
+              this.entryScope === null ? undefined : this.entryScope,
+            );
           } else {
             this.navigateBackSafe();
           }
@@ -626,13 +654,20 @@ Page<
     wx.showToast({ title: outcome.message, icon: "none" });
   },
 
-  /** 空候选开批(VL 不可用降级:照片仍作证据,候选为空 + 手动添加) */
-  startEmptyBatch(prepared: PhotoVlPrepared, subtitle: string) {
+  /** 空候选开批(VL 不可用降级/未授权:照片仍作证据,候选为空 + 手动添加);
+   *  C1:开批前复核入口作用域——授权/降级弹窗等待期间切了家,同样不建会话不上屏 */
+  startEmptyBatch(prepared: PhotoVlPrepared, subtitle: string, entryScope?: PhotoSessionScope) {
+    if (entryScope !== undefined && this.photoEntryScopeDrifted(entryScope)) {
+      this.terminateCaptureForScopeDrift();
+      return;
+    }
     this.rowsRaw = [];
+    // C1:会话绑定拍照入口作用域(不是降级开批时刻的当前作用域)
     const session = startPhotoSession(
       { localPath: prepared.path, imgW: prepared.imgW, imgH: prepared.imgH, fileId: null },
       [],
       "",
+      entryScope,
     );
     this.batchId = session.batchId;
     this.sessionCreatedAt = session.createdAt;
@@ -705,6 +740,45 @@ Page<
     wx.navigateBack({
       fail: () => {
         this.setData({ recognizing: false, entryHint: "没拍成。点上面的按钮再来一张。" });
+      },
+    });
+  },
+
+  /**
+   * C1:拍照流程入口作用域漂移判定——入口(照片在手时)捕获的家庭 ≠ 当前作用域家庭。
+   * 只比 householdId:同户内作用域代数/修订前进(scope 版本变化)不算漂移,照常;
+   * null(理论边路:未走到照片在手)不判漂移,由 B1 保存复核与服务端硬门兜底。
+   */
+  photoEntryScopeDrifted(entryScope: PhotoSessionScope | null): boolean {
+    if (entryScope === null) {
+      return false;
+    }
+    const entryId = entryScope.householdId !== null ? entryScope.householdId : "default";
+    return householdScopeId() !== entryId;
+  },
+
+  /**
+   * C1:拍照流程入口漂移的统一终局(与 B1 的 SCOPE_MISMATCH 终局同款语义):
+   * 零会话、零候选、零上传,toast + 返回首页(reLaunch 兜底)。
+   * 绝不在此清任何 photo 会话存储——漂移前的旧批属于其开批家庭的键,当前作用域
+   * 已切走,清当前键既清不到旧键、也不得误伤该家庭既有的未完成批。
+   */
+  terminateCaptureForScopeDrift() {
+    this.capturing = false;
+    this.rowsRaw = [];
+    this.entryScope = null;
+    this.setData({
+      recognizing: false,
+      entryReady: false,
+      entryHint: "",
+      highlightId: "",
+      rows: [],
+      boxViews: [],
+    });
+    wx.showToast({ title: "家庭已切换,本次拍照未保存", icon: "none", duration: 2500 });
+    wx.navigateBack({
+      fail: () => {
+        wx.reLaunch({ url: "/pages/index/index", fail: () => {} });
       },
     });
   },
