@@ -706,6 +706,36 @@ Page({
     onNewLocTap() {
         this.askBatchLocation("新建本批位置");
     },
+    /** 点层级预览手动改拆分(真机反馈 2026-10-18:模型拆错时无法编辑)。
+     * › 连接编辑;确认后写入 locPathCache 直接生效(1-6 层×1-30 码点;非法提示不改)。 */
+    onLocPathEditTap() {
+        const text = this.data.batchLocation.trim();
+        if (text === "") {
+            return;
+        }
+        const cur = this.locPathCache[text];
+        const prefill = cur !== undefined ? cur.join(" › ") : text;
+        wx.showModal({
+            title: "位置层级(用 › 分层)",
+            editable: true,
+            placeholderText: prefill,
+            content: prefill,
+            success: (r) => {
+                if (!r.confirm || typeof r.content !== "string") {
+                    return;
+                }
+                const parts = r.content.split("›").map((x) => x.trim()).filter((x) => x !== "");
+                const uniq = parts.filter((x, i) => parts.indexOf(x) === i);
+                if (uniq.length < 1 || uniq.length > 6 || uniq.some((x) => Array.from(x).length > 30)) {
+                    wx.showToast({ title: "层级须 1-6 层,每层 1-30 字", icon: "none" });
+                    return;
+                }
+                this.locPathCache[text] = uniq;
+                this.setData({ locPathText: this.locPathViewOf(text) });
+                wx.showToast({ title: "层级已改,保存按此挂树", icon: "none" });
+            },
+        });
+    },
     askBatchLocation(title) {
         wx.showModal({
             title,

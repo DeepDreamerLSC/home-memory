@@ -885,9 +885,12 @@ const LOCATION_SPLIT_SYSTEM_PROMPT = [
   "你是家庭位置层级拆分器。用户给一段位置描述,把它拆成从大到小的层级路径。",
   "规则:",
   "1. 每一段必须逐字取自原文(可跳过连接字/空白,但不得改写、缩写、编造)。",
-  "2. 最多 6 段,每段 1-30 字。",
-  "3. 拆不出层级(单实体)就输出单段整串。",
-  '4. 只输出一个 JSON 对象 {"path":["…"]},不要任何其他文字或围栏。',
+  "2. 「的」「了」是连接字,绝不出现在任何段内:它前后的实体要拆开成各自独立的段。",
+  "3. 纯方位词(右边/左边/上面/下面/里面/中间等)不能单独成段,必须与它修饰的名词实体合成一段;但「第二层」「上层」这类本身就是层格实体的可以独立成段。",
+  "4. 最多 6 段,每段 1-30 字。",
+  "5. 拆不出层级(单实体)就输出单段整串。",
+  "例子:「书房桌子的右边抽屉」→ [\"书房\",\"桌子\",\"右边抽屉\"];「厨房冰箱第二层」→ [\"厨房\",\"冰箱\",\"第二层\"];「玄关柜」→ [\"玄关柜\"]。",
+  '6. 只输出一个 JSON 对象 {"path":["…"]},不要任何其他文字或围栏。',
 ].join("\n");
 
 function locationSplitInvalidInputResult() {
@@ -940,13 +943,41 @@ function validateLocationSplitOutput(rawText, userText) {
     }
     segments.push(t);
   }
+  // 方位词修补(真机 2026-10-18 复现:模型把「右边」单独成段):纯方位定语段
+  // 与相邻段确定性合并——优先并入后段(右边+抽屉→右边抽屉),后段不可行再并前段;
+  // 合并结果仍须逐字锚定(拼接恰为原文连续子串),否则维持原判走 fallback。
+  const DIR_WORDS = ["上", "下", "左", "右", "左边", "右边", "上面", "下面", "上边", "下边",
+    "里面", "里边", "中间", "旁边", "附近", "上方", "下方", "里", "内", "中"];
+  const repaired = [];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (DIR_WORDS.indexOf(seg) === -1) {
+      repaired.push(seg);
+      continue;
+    }
+    const next = segments[i + 1];
+    if (next !== undefined && userText.indexOf(seg + next) !== -1) {
+      repaired.push(seg + next);
+      i += 1;
+      continue;
+    }
+    const prev = repaired[repaired.length - 1];
+    if (prev !== undefined && userText.indexOf(prev + seg) !== -1) {
+      repaired[repaired.length - 1] = prev + seg;
+      continue;
+    }
+    return fallback();
+  }
+  if (repaired.some((seg) => codePointLength(seg) > LOC_SPLIT_SEGMENT_MAX)) {
+    return fallback();
+  }
   let searchFrom = 0;
-  for (const seg of segments) {
+  for (const seg of repaired) {
     const idx = userText.indexOf(seg, searchFrom);
     if (idx === -1) return fallback();
     searchFrom = idx + seg.length;
   }
-  return { ok: true, segments: segments };
+  return { ok: true, segments: repaired };
 }
 
 /*

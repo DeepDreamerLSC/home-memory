@@ -400,3 +400,30 @@ test("胶水:locationSplit 路由——本地引擎(127.0.0.1 stub)全链 ok,eng
     server.close();
   }
 });
+
+// 真机复现(2026-10-18):「书房桌子的右边抽屉」被模型拆出独立方位段「右边」。
+// 锁定:①提示词含「的」连接字规则与 worked example ②服务端确定性修补——
+// 纯方位段并入后段(逐字锚定),后段不可行并前段,均不可行走 fallback。
+test("LOC-SPLIT-DIR:方位词段确定性修补(真机回归「书房桌子的右边抽屉」)", async () => {
+  const wxml = require("fs").readFileSync("cloudfunctions/extractDraft/lib/handler.js", "utf8");
+  assert.ok(wxml.indexOf("「的」「了」是连接字") !== -1, "提示词含连接字规则");
+  assert.ok(wxml.indexOf("书房桌子的右边抽屉") !== -1, "提示词含 worked example");
+
+  const run = (script) => locationSplit(
+    { action: "locationSplit", text: "书房桌子的右边抽屉" },
+    { callLocalLLM: async () => script, callLLM: async () => { throw new Error("OFF"); }, logger: () => {} },
+  );
+  // 模型输出四段(右边独立) → 修补为三段
+  const r4 = await run(JSON.stringify({ path: ["书房", "桌子", "右边", "抽屉"] }));
+  assert.deepEqual(r4.path, ["书房", "桌子", "右边抽屉"], "右边并入后段");
+  assert.notEqual(r4.fallback, true, "修补成功非兜底");
+  // 模型输出三段(的粘住第二段,提示词修复目标)→ 现仍逐字锚定通过,靠手动改路径收口
+  const r3 = await run(JSON.stringify({ path: ["书房", "桌子的右边抽屉"] }));
+  assert.deepEqual(r3.path, ["书房", "桌子的右边抽屉"], "含「的」段保持模型原判(锚定合法),由手动编辑收口");
+  // 方位段在末位且与后段拼接不锚定 → 并前段
+  const rTail = await locationSplit(
+    { action: "locationSplit", text: "书房柜子里面" },
+    { callLocalLLM: async () => JSON.stringify({ path: ["书房", "柜子", "里面"] }), callLLM: async () => { throw new Error("OFF"); }, logger: () => {} },
+  );
+  assert.deepEqual(rTail.path, ["书房", "柜子里面"], "末位方位段并入前段");
+});
