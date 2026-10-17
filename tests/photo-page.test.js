@@ -1491,6 +1491,90 @@ test("PP-C3-3:重试部分失败(NOT_FOUND 的件不再等)→ 只留仍待关�
   assert.ok(toastTexts(ctx.env).indexOf("照片都关联好了") !== -1);
 });
 
+/* ---------------- PP-C3(R1):证据待关联的 onUnload 会话生命周期(PR #67 R1) ---------------- */
+
+test("PP-C3-4(R1):evidence_failed 后离开 → 会话连同 pendingEvidence 保留;恢复可见重试入口;重试成功、再离开才清", async function () {
+  var sessionStorage = makeFakeStorage();
+  var ctx = await boot({ sessionStorage: sessionStorage, commitEvidenceFailedIndexes: [0, 1] });
+  var page = ctx.page;
+  page.onCheckTap({ currentTarget: { dataset: { index: 1 } } }); // 两件都勾选提交
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(page.batchFinished, true, "建档全部成功,批终局");
+  assert.equal(page.rowsRaw.every(function (r) { return r.done; }), true, "全部行落终态");
+  assert.notEqual(page.pendingEvidence, null, "两件证据待关联");
+
+  // R1 负例:批已终局但待关联非空 → onUnload 绝不删会话与续联载荷
+  page.onUnload();
+  var kept = photoSession.getUnfinishedPhotoSession();
+  assert.notEqual(kept, null, "会话仍在(恢复入口在)");
+  assert.notEqual(kept.pendingEvidence, null, "续联载荷随会话保留");
+  assert.equal(kept.pendingEvidence.items.length, 2);
+
+  // 跨页恢复(新页面实例 resume):重试入口可见 → 重试成功 → 载荷清空
+  var ctx2 = await boot({ sessionStorage: sessionStorage }, { resume: "1" });
+  var page2 = ctx2.page;
+  assert.notEqual(page2.data.evidencePending, null, "恢复后重试入口可见");
+  assert.equal(page2.data.evidencePending.count, 2);
+  await page2.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx2.env.retryCalls.length, 1);
+  assert.equal(page2.pendingEvidence, null, "重试成功清载荷");
+  assert.equal(page2.data.evidencePending, null);
+
+  // 载荷已空 + 全部行终态 → 再离开:会话被清
+  page2.onUnload();
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "重试收敛后再离开,会话被清");
+});
+
+test("PP-C3-5(R1 回归):正常全成功(无待关联)→ onUnload 会话被清、不复活", async function () {
+  var sessionStorage = makeFakeStorage();
+  var ctx = await boot({ sessionStorage: sessionStorage });
+  var page = ctx.page;
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(page.pendingEvidence, null, "无待关联件");
+  assert.equal(page.batchFinished, true);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "终局当场清会话");
+  page.onUnload();
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "onUnload 不复活已清会话");
+});
+
+test("PP-C3-6(R1 回归):恢复后重试入口仍可再次失败、可再点直至成功", async function () {
+  var sessionStorage = makeFakeStorage();
+  var ctx = await boot({ sessionStorage: sessionStorage, commitEvidenceFailedIndexes: [0, 1] });
+  var page = ctx.page;
+  page.onCheckTap({ currentTarget: { dataset: { index: 1 } } });
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+  assert.notEqual(page.pendingEvidence, null);
+  page.onUnload();
+
+  var ctx2 = await boot(
+    { sessionStorage: sessionStorage, retryError: "EVIDENCE_WRITE_FAILED" },
+    { resume: "1" },
+  );
+  var page2 = ctx2.page;
+  assert.notEqual(page2.data.evidencePending, null, "恢复后重试入口在");
+  await page2.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx2.env.retryCalls.length, 1, "发起过一次重试(失败)");
+  assert.notEqual(page2.data.evidencePending, null, "失败不清提示");
+  assert.equal(page2.data.evidenceRetryBusy, false, "可再点");
+  assert.notEqual(page2.pendingEvidence, null, "续联载荷保留");
+  assert.ok(toastTexts(ctx2.env).indexOf("照片关联失败") !== -1, "如实提示失败");
+
+  ctx2.env.router = makeRouter({});
+  await page2.onEvidenceRetryTap();
+  await settle();
+  assert.equal(ctx2.env.retryCalls.length, 2, "失败后可再点");
+  assert.equal(page2.pendingEvidence, null, "再试成功收敛");
+  assert.ok(toastTexts(ctx2.env).indexOf("照片都关联好了") !== -1);
+});
+
 /* ---------------- PP-AUTH:首次识别授权(PR #67 B4) ---------------- */
 
 function authModalSeen(env) {

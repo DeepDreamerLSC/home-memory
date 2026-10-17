@@ -165,9 +165,13 @@ Page({
             this.voiceEntry.detach();
             this.voiceEntry = null;
         }
-        // 全部入库(或空批)→ 清会话;否则中途退出保留恢复入口(§4.1 photo-session)
+        // 全部入库(或空批)**且无证据待关联**才清会话;否则中途退出保留恢复入口
+        // (§4.1 photo-session)。pendingEvidence 非空(C3:evidence_failed 待重试关联)
+        // 时一律 persistSession——用户离开绝不删会话与续联载荷,跨页恢复重试不断链
+        // (PR #67 R1)。
         const rows = this.rowsRaw;
-        if (this.batchFinished || rows.length === 0 || rows.every((r) => r.done)) {
+        const batchAllDone = this.batchFinished || rows.length === 0 || rows.every((r) => r.done);
+        if (batchAllDone && this.pendingEvidence === null) {
             (0, photo_session_1.clearPhotoSession)();
         }
         else {
@@ -1187,6 +1191,9 @@ Page({
         const scope = this.sessionScope;
         this.batchFinished = true; // onUnload 不再回写复活旧批
         this.sessionScope = null;
+        // 会话被刻意终止,续联载荷一并废弃(onUnload 的 R1 保留门只认 pendingEvidence,
+        // 不清空会借它回写复活已终止的会话)
+        this.pendingEvidence = null;
         // 会话存在开批家庭的存储键下(作用域隔离):按会话自己的键清除,
         // 再按当前键清一次兜底(default 键/未捕获开批两种路径)
         (0, photo_session_1.clearPhotoSessionForScope)(scope);
