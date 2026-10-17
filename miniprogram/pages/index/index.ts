@@ -117,7 +117,7 @@ Page<
      * 未完成拍照批恢复入口(#3,非空时显示次行横幅,与 resumeSession 并存):
      * 点进 photo 页带 ?resume=1;按当前家庭作用域键读取(展示前资格复核同上)。
      */
-    photoResume: { count: number } | null;
+    photoResume: { count: number; mode: "review" | "evidence" } | null;
     /**
      * 到期横幅(#36,仅家里层显示):remindList 有 active 且(已过期或 7 天内)
      * 才非空;加载失败保持 null 静默(横幅属增强,不影响地图),切换家庭随作用域清。
@@ -201,7 +201,7 @@ Page<
     onResumeTap(): void;
     currentResumeSession(): { sid: string; count: number } | null;
     /** 拍照批恢复横幅(#3):读当前家庭作用域的未完成拍照会话 */
-    currentPhotoResume(): { count: number } | null;
+    currentPhotoResume(): { count: number; mode: "review" | "evidence" } | null;
     onPhotoResumeTap(): void;
     /** 拍照识物入口(#3):进 photo 页新批拍照 */
     onPhotoRecordTap(): void;
@@ -275,7 +275,7 @@ Page<
     queryResults: [],
     queryError: "",
     resumeSession: null as { sid: string; count: number } | null,
-    photoResume: null as { count: number } | null,
+    photoResume: null as { count: number; mode: "review" | "evidence" } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
     firstUse: false,
@@ -582,7 +582,16 @@ Page<
     if (unfinished === null) {
       return null;
     }
-    return { count: unfinished.rows.length };
+    // 真实状态分诊(架构评审 2026-10-17:全记完只剩照片待关联时,不再误报「没记完」)
+    const notDone = unfinished.rows.filter((r) => !r.done).length;
+    if (notDone > 0) {
+      return { count: notDone, mode: "review" as const };
+    }
+    const pending = unfinished.pendingEvidence;
+    if (pending !== null && pending !== undefined && pending.items.length > 0) {
+      return { count: pending.items.length, mode: "evidence" as const };
+    }
+    return null;
   },
 
   onPhotoResumeTap() {

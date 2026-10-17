@@ -5,7 +5,7 @@
   <view class="entry">
     <view class="entry-ico">📷</view>
     <view class="entry-title">拍一张抽屉,我帮你列清单</view>
-    <view class="entry-sub">照片先留在本机;你确认保存之前,不会上传云端。</view>
+    <view class="entry-sub">识别会把照片临时发送到云端处理(不保存);你确认保存后,才会存到云端。</view>
     <view class="btn ink block entry-btn" hover-class="btn-hover" hover-stay-time="80" bindtap="onEntryShotTap">
       <view class="btn-face">{{ recognizing ? '识别中…' : '拍照 / 从相册选' }}</view>
     </view>
