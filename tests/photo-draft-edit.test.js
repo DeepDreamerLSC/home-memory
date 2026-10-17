@@ -11,7 +11,7 @@
  *   needs_pick + picks 全量 + edits 清空;edits 字段白名单/长度门/≤3 截断;
  *   needs_pick 与 edits/target 形状互斥;add/batch_location 非法降级 none;
  * - 输入校验:text 去空白 1-200 码点、batch_location 1-200、candidates 1-12、
- *   draft_id ≤32、name 1-50,非法 INVALID_INPUT;
+ *   draft_id ≤64、name 1-50,非法 INVALID_INPUT;
  * - 引擎链:local 成功 engine=local、local 失败/空文本降级 DeepSeek、双失败
  *   AI_UNAVAILABLE、坏 JSON 重试一次仍走同一引擎(质量失败不降级)、未注入
  *   local 只走 DeepSeek 一次(现状锁);
@@ -292,7 +292,7 @@ test("输入校验:text/batch_location/candidates 形状非法一律 INVALID_INP
     { label: "candidates 缺失", event: { action: "draftEditParse", text: TEXT, batch_location: BATCH_LOCATION } },
     { label: "candidates 空", event: editEvent({ candidates: [] }) },
     { label: "candidates 超 12", event: editEvent({ candidates: Array.from({ length: 13 }, (_, i) => ({ draft_id: "d" + i, name: "物" + i })) }) },
-    { label: "draft_id 超 32", event: editEvent({ candidates: [{ draft_id: "d".repeat(33), name: "物品" }] }) },
+    { label: "draft_id 超 64", event: editEvent({ candidates: [{ draft_id: "d".repeat(65), name: "物品" }] }) },
     { label: "候选 name 空", event: editEvent({ candidates: [{ draft_id: "d1", name: " " }] }) },
   ];
   for (const c of cases) {
@@ -491,4 +491,35 @@ test("胶水:draftEditParse 路由——本地引擎(127.0.0.1 stub)全链 ok,en
   } finally {
     server.close();
   }
+});
+
+// 真机回归(0.9.8 事故 2026-10-17):页面候选 id 是 uuid()(36 位 v4),
+// 服务端门曾为 32 → 全量候选 INVALID_INPUT → 客户端稳定「没听懂,可手动点行编辑」。
+// 锁定:36 位 uuid 形态 draft_id 必须通过形状门并正常完成解析。
+test("draftEditParse:draft_id 为 36 位 uuid 通过形状门(真机回归)", async () => {
+  const uuidId = "3f2a9c1e-6b7d-4e8f-9a0b-1c2d3e4f5a6b";
+  const engines = makeEngines([
+    JSON.stringify({
+      intent: "edit",
+      target: { draft_id: uuidId, matched_word: "无线充电笔" },
+      edits: [{ field: "location", old: "", new: "书房" }],
+      needs_pick: false,
+      picks: [],
+    }),
+  ]);
+  const logs = [];
+  const res = await runParse(
+    engines,
+    editEvent({
+      text: "无线充电笔放到书房去",
+      candidates: [
+        { draft_id: uuidId, name: "无线充电笔" },
+        { draft_id: "1f0e3d2c-4b5a-4968-8776-5d4c3b2a1a0b", name: "USB充电线" },
+      ],
+    }),
+    logs,
+  );
+  assert.strictEqual(res.ok, true, JSON.stringify(res));
+  assert.strictEqual(res.intent, "edit");
+  assert.strictEqual(res.target && res.target.draft_id, uuidId);
 });
