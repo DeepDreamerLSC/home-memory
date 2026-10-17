@@ -336,7 +336,16 @@ Page({
         if (unfinished === null) {
             return null;
         }
-        return { count: unfinished.rows.length };
+        // 真实状态分诊(架构评审 2026-10-17:全记完只剩照片待关联时,不再误报「没记完」)
+        const notDone = unfinished.rows.filter((r) => !r.done).length;
+        if (notDone > 0) {
+            return { count: notDone, mode: "review" };
+        }
+        const pending = unfinished.pendingEvidence;
+        if (pending !== null && pending !== undefined && pending.items.length > 0) {
+            return { count: pending.items.length, mode: "evidence" };
+        }
+        return null;
     },
     onPhotoResumeTap() {
         if (this.data.photoResume === null) {

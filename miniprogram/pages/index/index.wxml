@@ -31,7 +31,7 @@
 
   <!-- 未完成拍照批恢复(#3):与草稿横幅并存,点进 photo 页带 resume=1 -->
   <view wx:if="{{ photoResume }}" class="resume-banner photo-resume-banner" bindtap="onPhotoResumeTap">
-    上次拍照的 {{ photoResume.count }} 件没记完,继续核对 ›
+    {{ photoResume.mode === 'evidence' ? photoResume.count + ' 件照片待关联,继续处理 ›' : '上次拍照的 ' + photoResume.count + ' 件没记完,继续核对 ›' }}
   </view>
 
   <!-- 后台刷新失败:保留旧内容,如实提示(点按强制重试) -->
@@ -69,8 +69,6 @@
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
       <view class="cta-sublnks">
         <view class="cta-sublnk" bindtap="onTextRecordTap">用文字记</view>
-        <view class="cta-sublnk-sep">·</view>
-        <view class="cta-sublnk" bindtap="onPhotoRecordTap">📷 拍照记</view>
       </view>
       <view class="tiny-center">你确认后,我才会真正记住。</view>
 
