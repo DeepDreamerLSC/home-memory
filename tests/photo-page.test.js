@@ -1149,14 +1149,11 @@ test("PP-STATIC-1:wxml 渲染结构契约(三态徽标/框语义/CTA 文案在�
   [
     "点开照片核对", // 证据条 chip
     "证据区 · 框在展开后显示",
-    "这批候选默认都在哪?", // 位置栏
     "按住说位置",
-    "候选默认继承这个位置,例外在编辑里逐件改;保存前会再让你确认一次",
-    "一条记录 = 一件可查找的物品", // 横幅
     "全保留", // 快速核实三档(替代原「全选 / 清空」小字,真机反馈 2026-10-17)
     "只留高可信",
     ">清空<",
-    "按住说话",
+    "voiceCtaText", // 语音胶囊动态 CTA 绑定(文案随批次位置切换,字面量由 PP-CTA-1 锁)
     "松开,去核对", // recsheet
     "上滑取消 · 取消就当没说过,什么都不记",
     "念错了,当我没说",
@@ -1971,4 +1968,16 @@ test("PP-QUICK-1:快速核实三档——全保留/只留高可信/清空;done �
 
   page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "bogus" } } });
   assert.ok(page.rowsRaw.every(function (r) { return r.checked === false; }), "非法档位零动作");
+});
+
+// 真机反馈(2026-10-17)UI 三连:照片证据条吸顶(wxml 契约见 PP-STATIC-1)、
+// 中部冗余文字移除、语音胶囊动态文案(先问位置→已填问修改)。
+test("PP-CTA-1:语音胶囊文案随批次位置切换", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  assert.equal(page.data.voiceCtaText, "这些物品位置在哪,请告诉我", "位置未填:引导说位置");
+  page.setBatchLocationText("玄关柜 · 第二层抽屉");
+  assert.equal(page.data.voiceCtaText, "有什么物品要改的吗?请告诉我", "位置已填:引导改物品");
+  page.setBatchLocationText("   ");
+  assert.equal(page.data.voiceCtaText, "这些物品位置在哪,请告诉我", "清空位置:回到引导说位置");
 });

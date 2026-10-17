@@ -73,6 +73,7 @@ Page({
         photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
         photoCollapsed: true,
         qkHigh: 0,
+        voiceCtaText: "这些物品位置在哪,请告诉我",
         highlightId: "",
         boxViews: [],
         rows: [],
@@ -679,7 +680,10 @@ Page({
         this.setBatchLocationText(loc);
     },
     setBatchLocationText(v) {
-        this.setData({ batchLocation: v });
+        this.setData({
+            batchLocation: v,
+            voiceCtaText: v.trim() === "" ? "这些物品位置在哪,请告诉我" : "有什么物品要改的吗?请告诉我",
+        });
         this.persistSession();
         this.rebuildRows();
     },
@@ -1028,7 +1032,13 @@ Page({
             return;
         }
         // batch_location:改批次默认位置;已设例外的候选不受影响(例外仍是例外)
-        this.setData({ diff: null, batchLocation: d.locNew });
+        this.setData({
+            diff: null,
+            batchLocation: d.locNew,
+            voiceCtaText: d.locNew.trim() === ""
+                ? "这些物品位置在哪,请告诉我"
+                : "有什么物品要改的吗?请告诉我",
+        });
         this.persistSession();
         wx.showToast({ title: "本批位置已改:" + d.locNew, icon: "none" });
     },

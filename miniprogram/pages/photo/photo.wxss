@@ -1220,3 +1220,13 @@
   filter: brightness(0.94);
   transform: scale(0.985);
 }
+
+/* 照片证据条冻结置顶(真机反馈 2026-10-17):收起态随滚动吸顶,清单再长照片始终可见;
+   展开态(46vh 限高)保持文档流,避免吸顶占掉半个屏。 */
+.photoWrap.collapsed {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.18);
+}

@@ -240,6 +240,8 @@ Page<
     /** 展开态样式:aspect-ratio + 竖构图限高 46vh 居中(两侧留黑边,零裁剪保框对齐) */
     photoExpandStyle: string;
     photoCollapsed: boolean;
+    /** 语音胶囊动态文案:位置未填=引导说位置;已填=引导改物品 */
+    voiceCtaText: string;
     /** 高可信未定件数(快速核实「只留高可信」档标签) */
     qkHigh: number;
     /** 脉冲高亮的框/行 draftId(""=无;原型 flashBox/flashRow) */
@@ -419,6 +421,7 @@ Page<
     photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
     photoCollapsed: true,
     qkHigh: 0,
+    voiceCtaText: "这些物品位置在哪,请告诉我",
     highlightId: "",
     boxViews: [] as BoxView[],
     rows: [] as RowView[],
@@ -1074,7 +1077,10 @@ Page<
   },
 
   setBatchLocationText(v: string) {
-    this.setData({ batchLocation: v });
+    this.setData({
+      batchLocation: v,
+      voiceCtaText: v.trim() === "" ? "这些物品位置在哪,请告诉我" : "有什么物品要改的吗?请告诉我",
+    });
     this.persistSession();
     this.rebuildRows();
   },
@@ -1436,7 +1442,14 @@ Page<
       return;
     }
     // batch_location:改批次默认位置;已设例外的候选不受影响(例外仍是例外)
-    this.setData({ diff: null, batchLocation: d.locNew });
+    this.setData({
+      diff: null,
+      batchLocation: d.locNew,
+      voiceCtaText:
+        d.locNew.trim() === ""
+          ? "这些物品位置在哪,请告诉我"
+          : "有什么物品要改的吗?请告诉我",
+    });
     this.persistSession();
     wx.showToast({ title: "本批位置已改:" + d.locNew, icon: "none" });
   },
