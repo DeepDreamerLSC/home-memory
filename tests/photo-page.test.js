@@ -95,6 +95,12 @@ function makeEnv(opts) {
     router: makeRouter(opts),
   };
   var storage = new Map();
+  env.storage = storage;
+  if (!opts.vlAuthReset) {
+    // B4 默认模拟「老用户已授权识别临时传输」:既有用例不受授权弹窗影响;
+    // opts.vlAuthReset=true 走首次授权路径(PP-AUTH-*)
+    storage.set("home-memory:photo-vl-auth", "granted");
+  }
   env.wx = {
     getStorageSync: function (k) {
       return storage.has(k) ? storage.get(k) : "";
@@ -1192,4 +1198,99 @@ test("PP-SCOPE-3:会话家庭与当前作用域一致(未切换)→ 保存照常
   );
   assert.equal(ctx.env.uploads[0].cloudPath.indexOf("photo-evidence/hh_pagecccccccccccccccccccccccccccc1/"), 0, "上传前缀=会话家庭");
   assert.equal(page.rowsRaw[0].done, true, "照常入库");
+});
+
+/* ---------------- PP-AUTH:首次识别授权(PR #67 B4) ---------------- */
+
+function authModalSeen(env) {
+  return env.modals.filter(function (m) { return m.title === "云端识别授权"; });
+}
+
+test("PP-AUTH-1:首次识别弹一次性授权(同意→识别调用发生;storage 记忆;本页再拍不再问)", async function () {
+  var modalAnswers = [];
+  var ctx = await boot({
+    vlAuthReset: true,
+    onModal: function (o) {
+      modalAnswers.push(o.title);
+      if (o.title === "云端识别授权") {
+        o.success({ confirm: true, cancel: false, content: "" });
+        return;
+      }
+      o.success({ confirm: false, cancel: true, content: "" });
+    },
+  });
+  var page = ctx.page;
+  var env = ctx.env;
+
+  var auths = authModalSeen(env);
+  assert.equal(auths.length, 1, "首次识别前恰好弹一次授权");
+  assert.equal(
+    auths[0].content,
+    "识别需要把这张照片临时发送到云端处理(仅传输识别,不会保存);你点确认入库后,照片才会保存。",
+    "授权文案如实说明临时传输与保存是两回事",
+  );
+  assert.equal(auths[0].confirmText, "同意");
+  assert.equal(ctx.env.vlCalls.length, 1, "同意 → 识别调用发生");
+  assert.equal(page.data.entryReady, true);
+  assert.equal(page.rowsRaw.length, 2, "候选照常上屏");
+  assert.equal(ctx.env.vlCalls[0].image_base64, "QQ==");
+  assert.equal(page.vlAuthGranted, true);
+  assert.equal(page.data.vlAuthDenied, false);
+
+  // 同一页面重拍:不再弹授权(storage 记忆 + 实例 granted),识别直接发起
+  page.onEntryShotTap();
+  await settle();
+  assert.equal(authModalSeen(ctx.env).length, 1, "本页访问内只问一次");
+  assert.equal(ctx.env.vlCalls.length, 2, "重拍识别照常");
+});
+
+test("PP-AUTH-2:拒绝 → 识别绝不调用;手动/语音候选照常;圈选入口灰化提示;拒绝不落记忆(重进会再问)", async function () {
+  var ctx = await boot({
+    vlAuthReset: true,
+    onModal: function (o) {
+      o.success({ confirm: false, cancel: true, content: "" }); // 所有 modal 默认拒绝(防御性回调)
+    },
+  });
+  var page = ctx.page;
+  assert.equal(ctx.env.vlCalls.length, 0, "拒绝 → 本次绝不调识别(零传输)");
+  assert.equal(page.data.entryReady, true, "仍进核对页(照片留本机作证据)");
+  assert.equal(page.rowsRaw.length, 0, "无识别候选");
+  assert.equal(page.data.vlAuthDenied, true, "识别入口灰化标记");
+  assert.ok(page.data.navSubtitle.indexOf("未授权云端识别") !== -1);
+  assert.equal(ctx.env.storage.has("home-memory:photo-vl-auth"), false, "拒绝不落记忆键");
+
+  // 手动路径可用:手动添加一行候选
+  page.onManualAddTap();
+  assert.notEqual(page.data.edit, null, "手动添加面板照常打开");
+  page.data.edit.nameInput = "指甲刀";
+  page.onEditConfirmTap();
+  assert.equal(page.rowsRaw.length, 1, "手动添加候选成功");
+  assert.equal(page.rowsRaw[0].name, "指甲刀");
+
+  // 圈选入口被拦:提示重新进入会再询问,不发起识别
+  page.onEnterCircle();
+  assert.equal(page.data.mode, "confirm", "未进入圈选模式");
+  assert.ok(toastTexts(ctx.env).indexOf("未授权云端识别,重新进入时会再询问") !== -1);
+  assert.equal(ctx.env.vlCalls.length, 0);
+
+  // 本页访问内重拍:不再问,也不识别(照片仍作证据)
+  page.onEntryShotTap();
+  await settle();
+  assert.equal(authModalSeen(ctx.env).length, 1, "拒绝后本访问不重复问");
+  assert.equal(ctx.env.vlCalls.length, 0);
+
+  // 重新进入(全新页面实例、无记忆键):会再询问一次,此时同意 → 识别发生并落记忆
+  var reentry = await boot({
+    vlAuthReset: true,
+    onModal: function (o) {
+      if (o.title === "云端识别授权") {
+        o.success({ confirm: true, cancel: false, content: "" });
+        return;
+      }
+      o.success({ confirm: false, cancel: true, content: "" });
+    },
+  });
+  assert.equal(authModalSeen(reentry.env).length, 1, "重新进入时会再询问(拒绝未持久化)");
+  assert.equal(reentry.env.vlCalls.length, 1, "这次同意 → 识别调用发生");
+  assert.equal(reentry.env.storage.get("home-memory:photo-vl-auth"), "granted", "同意落记忆键(此后不再问)");
 });

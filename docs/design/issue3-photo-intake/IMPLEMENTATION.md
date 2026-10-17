@@ -11,11 +11,11 @@
 
 ## 0. 范围与总架构
 
-一句话:拍照 → 本地压缩 → **base64 直传** `extractDraft.vlRecognize` 识别(候选+框;**确认前照片不上云**)→ 拍照确认页(photo 页,三态候选+语音受限编辑+圈选补识别)→ 用户最终确认 → `wx.cloud.uploadFile` 上传**同一张压缩图**得 file_id → `itemsApi.photoCommit` 批量建档+落 `photo_evidence` 证据行 → 详情页 `itemsApi.photoEvidenceGet` 回放历史证据。
+一句话:拍照 → 本地压缩 → **base64 直传** `extractDraft.vlRecognize` 识别(候选+框;**确认前不持久化、不写云存储;识别需临时传输(传输即处理,不落盘),首次使用需用户授权**)→ 拍照确认页(photo 页,三态候选+语音受限编辑+圈选补识别)→ 用户最终确认 → `wx.cloud.uploadFile` 上传**同一张压缩图**得 file_id → `itemsApi.photoCommit` 批量建档+落 `photo_evidence` 证据行 → 详情页 `itemsApi.photoEvidenceGet` 回放历史证据。
 
 四个新云函数动作、一个新集合、一个新页面、若干新 utils(photo-box / intake-draft / photo-vl / photo-session)、若干既有文件的最小侵入扩展。
 
-**不引入 `items.quantity`**(数量冻结为 note 文本,设计合同 V0.4);**不改 confirm 文字链路任何行为**(现状锁);**VL 链路不接 DeepSeek 降级**(deepseek-flash 无视觉模型,只走本地 VL 引擎);**照片在用户最终确认保存之前绝不上传云端**(#65 V0.4 合同第五项边界,冻结红线:识别走 callFunction 载荷直传本地压缩图 base64——与 `utils/voice.ts` 音频 base64 → transcribe 同款先例;确认前云端零残留,放弃/识别失败不产生任何云端文件)。
+**不引入 `items.quantity`**(数量冻结为 note 文本,设计合同 V0.4);**不改 confirm 文字链路任何行为**(现状锁);**VL 链路不接 DeepSeek 降级**(deepseek-flash 无视觉模型,只走本地 VL 引擎);**照片在用户最终确认保存之前不持久化、不写云存储**(#65 V0.4 合同第五项边界;PR #67 B4 措辞精确化:识别走 callFunction 载荷把本地压缩图 base64 **临时传输**到云函数处理——传输即处理、内存态、不落盘,与 `utils/voice.ts` 音频 base64 → transcribe 同款先例,**首次使用需用户授权**(photo 页一次性授权弹窗,拒绝则本次不识别只走手动/语音);确认前不产生任何云端文件,放弃/识别失败零云端残留)。
 
 ---
 
@@ -47,7 +47,7 @@
 }
 ```
 
-**隐私红线**:识别**不经云存储**——没有 file_id、没有 downloadFile 路径(服务端刻意不留旁路,旧式 file_id 事件按 INVALID_INPUT 拒绝);图片只在本次调用载荷里经过云函数内存,不落任何持久层。确认后的上传(§1.3 photoCommit 的 `photo.file_id`)上传的是**同一张压缩图**,坐标基准(img_w/img_h)全程一致。
+**隐私红线**:识别**不经云存储**——没有 file_id、没有 downloadFile 路径(服务端刻意不留旁路,旧式 file_id 事件按 INVALID_INPUT 拒绝);图片只在本次调用载荷里经过云函数内存,不落任何持久层;**识别=把照片临时传输到云端处理(传输即处理,不落盘),首次使用需用户授权**(photo 页一次性授权弹窗,PR #67 B4)。确认后的上传(§1.3 photoCommit 的 `photo.file_id`)上传的是**同一张压缩图**,坐标基准(img_w/img_h)全程一致。
 
 校验(任一不过 → `{ok:false,error:"INVALID_INPUT",message:"照片参数不合法"}`):
 - `image_base64` 非空裸 base64 字符串;长度先按 10MB 对应上界(`ceil(10MB/3)*4`)廉价拒绝、再按解码字节数 1B~10MB 门(超出 → 客户端提示重拍);
@@ -300,7 +300,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 
 | 文件 | 职责 |
 | --- | --- |
-| `miniprogram/pages/photo/photo.ts/.wxml/.wxss/.json` | **拍照识物确认页**(屏①-⑤)。拍照入口后的唯一页面,两模式:`confirm`(默认,候选清单)与 `circle`(圈选补识别)。承载:证据条折叠/展开+全部框、位置栏、横幅、三态清单+步进器、按住说话(recsheet 浮层)、diff sheet(屏③)、编辑 sheet(屏④)、保存最终确认 sheet、圈选画框与结果卡。json:`{"navigationBarTitleText":"拍照识物"}`,无 usingComponents。生命周期纪律见 §7.6。 |
+| `miniprogram/pages/photo/photo.ts/.wxml/.wxss/.json` | **拍照识物确认页**(屏①-⑤)。拍照入口后的唯一页面,两模式:`confirm`(默认,候选清单)与 `circle`(圈选补识别)。承载:证据条折叠/展开+全部框、位置栏、横幅、三态清单+步进器、按住说话(recsheet 浮层)、diff sheet(屏③)、编辑 sheet(屏④)、保存最终确认 sheet、圈选画框与结果卡;**首次识别授权弹窗**(PR #67 B4:一次性,同意落 `home-memory:photo-vl-auth` 记忆,拒绝本次不识别、圈选入口灰化提示重新进入会再询问)。json:`{"navigationBarTitleText":"拍照识物"}`,无 usingComponents。生命周期纪律见 §7.6。 |
 | `miniprogram/utils/photo-intake.ts` | 拍照编排(页面侧粘合,薄层):① `takePhoto()`:chooseMedia(`count:1, sourceType:["camera","album"], sizeType:["compressed"]`)→ 授权失败分类(§7.3)→ 交给 `utils/photo-vl.ts` 的 `recognizePhotoFile(tempPath)`(压缩→实测宽高→base64→vlRecognize;**不上传**,prepared 只存页面内存);② 候选行状态机一律调 `utils/intake-draft.ts`(本文件不再重复实现);③ `commitPhotoBatch`:用户点「确认,记住了」后**先** `wx.cloud.uploadFile(prepared.path, cloudPath 规则 §10.4)` 得 file_id(本批首次且唯一的上云动作;上传失败 → 整批不提交、如实提示可重试、云端零残留),**再**调 photoCommit 并逐件落行(失败行保留 operation_id 可重试);④ `ensurePhotoAuth()`。测试钩子 `__setPhotoIntakeDepsForTest`(wx API 全注入)。 |
 | `miniprogram/utils/photo-vl.ts` | **客户端识别封装(已实现)**:`preparePhotoForVl(tempPath)`(wx.getImageInfo 取原尺寸 → wx.compressImage 长边 ≤1280/quality 70,失败则原样如实 → 对压缩产物再实测宽高 = img_w/img_h 唯一来源 → readFile 裸 base64;产物只在内存)、`recognizeWithVl(prepared, {mode, region})`(callFunction extractDraft vlRecognize,超时 70s;响应最小结构校验,形状非法整体 bad_response 绝不半带;圈选复用同一 prepared 不重复读盘)、`recognizePhotoFile(tempPath)` 一步式。降级:AI_UNAVAILABLE/网络错/超时 → `kind:"unavailable", manualFallback:true`;INVALID_INPUT → `kind:"invalid_photo"`「照片太大,请重拍」;取不到宽高 → `image_info_failed`(不猜)。wx 依赖全注入(partial 覆盖);静态守卫:编译产物不含 uploadFile/downloadFile 调用。 |
 | `miniprogram/utils/intake-draft.ts` | **候选三态状态机纯函数(已实现)**:`IntakeRow = PhotoCandidate + done/failMsg`;`parseIntakeQtyNote`/`composeNote`(qty 1-99 + suffix 单一来源);入列工厂 `makeAiRow`(high 默认勾选)/`makeCircleRow`(圈选入列默认未勾选、沿用用户圈选框)/`makeVoiceAddedRow`;`toggleRowChecked`(done 终态 no-op)/`setRowsChecked`(不动 done)/`stepRowQty`/`markRowSaved`/`markRowFailed`;`applyDraftEdits(row, edits, pickedFields)`(只应用勾选字段、0 勾选不执行、绝不改勾选态、应用后 src=voice);`intakeCounts`/`intakeCountView`(头部与保存按钮文案单一来源);`deriveSaveConfirm(rows, batchLocation)`(例外只含已勾选件、#d 序号、summary/exception 文案)。全部纯函数,draftId/operationId 全程稳定。 |
@@ -317,7 +317,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 
 | 文件 | 改动 |
 | --- | --- |
-| `cloudfunctions/extractDraft/index.js` | ① event 带 `action` 时路由(`"vlRecognize"`/`"draftEditParse"`);不带 action(旧调用/语音提取)走既有提取,**逐字节一致(现状锁)**;② **不注入 downloadFile**(vlRecognize 只收 image_base64,红线:确认前照片不上云、无云存储读取路径);③ `vl.isVlConfigured()` 为 true 时注入 `deps.callVL = vl.callVlModel`,否则不注入(handler 返回 vl_not_configured);④ VL 环境变量与 DEEPSEEK/LOCAL_LLM 并存,互不影响。 |
+| `cloudfunctions/extractDraft/index.js` | ① event 带 `action` 时路由(`"vlRecognize"`/`"draftEditParse"`);不带 action(旧调用/语音提取)走既有提取,**逐字节一致(现状锁)**;② **不注入 downloadFile**(vlRecognize 只收 image_base64,红线:识别仅临时传输、无云存储读取路径);③ `vl.isVlConfigured()` 为 true 时注入 `deps.callVL = vl.callVlModel`,否则不注入(handler 返回 vl_not_configured);④ VL 环境变量与 DEEPSEEK/LOCAL_LLM 并存,互不影响。 |
 | `cloudfunctions/extractDraft/lib/handler.js` | 新增 `vlRecognize`/`draftEditParse` 两个分支与各自 prompt/validate(约 +260 行);既有提取路径零改动。 |
 | `cloudfunctions/extractDraft/lib/vl.js` | 新文件(§1.1)。 |
 | `cloudfunctions/extractDraft/config.json` | `timeout: 30 → 60`(vlRecognize = VL 推理,本地 Qwen3-VL-8B@1024 实测可达 30s+;无下载步骤;客户端超时 70s 严格大于服务端,见 §4.3)。 |
@@ -441,5 +441,5 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 - VL 不接 DeepSeek 降级(无视觉模型);vlRecognize/draftEditParse 不引入家庭解析(无状态红线);
 - 不改 confirm 文字链路、不改语音→提取→确认页既有链路任何行为(routeExtract 是可选旁路,现状锁);
 - 不做实时取景/连拍/多照片批(一屏一照;多照=多次拍照分批);
-- 照片在用户最终确认保存之前绝不上传云端(#65 V0.4 合同第五项边界,冻结红线:识别=本地压缩 base64 直传,云端零残留);确认后上传成功但 photoCommit 单件失败的行,file_id 随会话保留供重试收敛,不回收(除此之外无任何云端残留)。
+- 照片在用户最终确认保存之前不持久化、不写云存储(#65 V0.4 合同第五项边界;PR #67 B4 措辞精确化:识别=本地压缩 base64 **临时传输**(传输即处理,不落盘),首次使用需用户授权;确认前零云端残留);确认后上传成功但 photoCommit 单件失败的行,file_id 随会话保留供重试收敛,不回收(除此之外无任何云端残留)。
 - photo_evidence 不做删除/编辑(证据只增;物品删除后证据行成为悬挂行——删除物品时不级联清证据 ⚖️,与 reminders 级联不同:证据是历史事实,保留成本为零。PR #67 B2 修订:photoEvidenceGet 返回证据行前按 item_ids 反查 items(作用域内 deleted:false),**已删/不存在物品的证据行静默过滤**,悬挂行不再回到任何回放入口)。

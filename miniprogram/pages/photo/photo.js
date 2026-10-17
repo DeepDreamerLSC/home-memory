@@ -11,8 +11,8 @@
  *   本页只渲染 recsheet 浮层并经 routeExtract 旁路接 draftEditParse → diff 弹层
  *   (逐字段勾选应用,0 勾选禁用;原话保留可回听);
  * - 手动编辑面板 / 保存最终确认弹层 / 圈选画框;
- * - 隐私红线:确认「存 n 件」前绝不上传照片(utils/photo-intake.commitPhotoBatch
- *   是唯一上云动作,只在最终确认后到达)。
+ * - 隐私口径:确认「存 n 件」前照片不持久化、不写云存储(识别的临时传输需首次
+ *   授权,B4;utils/photo-intake.commitPhotoBatch 是唯一写云存储动作,只在最终确认后到达)。
  *
  * 生命周期(§7.8):onHide/onUnload → voiceEntry.invalidate()(防幽灵录音与迟到 diff)。
  */
@@ -42,6 +42,14 @@ const EDIT_FIELD_LABEL = {
 const REMIND_KIND_OPTIONS = ["有效期", "开封后", "下次维护"];
 /** 圈选框最小显示尺寸(px):小于此视为误触,不发起识别 */
 const CIRCLE_MIN_PX = 12;
+/**
+ * 云端识别授权记忆键(PR #67 B4,命名沿用 home-memory: 前缀风格):
+ * 值 "granted" = 用户同意过识别临时传输,此后不再询问;**拒绝不落键**
+ * (重新进入拍照页时会再询问——本仓库无设置页,不做「去设置开启」入口)。
+ */
+const VL_AUTH_STORAGE_KEY = "home-memory:photo-vl-auth";
+/** 授权弹窗文案:如实说明识别=临时传输处理,保存是另一回事 */
+const VL_AUTH_CONTENT = "识别需要把这张照片临时发送到云端处理(仅传输识别,不会保存);你点确认入库后,照片才会保存。";
 /* ---------------- 页面 ---------------- */
 Page({
     data: {
@@ -81,6 +89,7 @@ Page({
             errorText: "",
             result: null,
         },
+        vlAuthDenied: false,
     },
     rowsRaw: [],
     prepared: null,
@@ -101,6 +110,8 @@ Page({
     circleBox: null,
     circleRectEl: null,
     voiceEntry: null,
+    vlAuthGranted: false,
+    vlAuthAsked: false,
     onLoad(options) {
         // 实例态重建(Page options 被浅拷贝共享,index 页同款防护)
         this.rowsRaw = [];
@@ -110,6 +121,9 @@ Page({
         this.sessionCreatedAt = 0;
         this.sessionScope = null;
         this.batchFinished = false;
+        // B4:授权记忆还原(同意过识别临时传输的不再问;拒绝不落键,重进会再问)
+        this.vlAuthGranted = this.readVlAuthRemembered();
+        this.vlAuthAsked = this.vlAuthGranted;
         this.capturing = false;
         this.committing = false;
         this.lastAudioPath = "";
@@ -153,6 +167,63 @@ Page({
         }
     },
     /* ---------------- 拍照入口(§7.3/§7.4 降级) ---------------- */
+    /** 读授权记忆(best-effort:读失败按未授权处理,绝不静默放行识别) */
+    readVlAuthRemembered() {
+        if (typeof wx === "undefined" || typeof wx.getStorageSync !== "function") {
+            return false;
+        }
+        try {
+            return wx.getStorageSync(VL_AUTH_STORAGE_KEY) === "granted";
+        }
+        catch (e) {
+            return false;
+        }
+    },
+    /**
+     * 首次识别授权(B4,一次性):识别需把照片临时发送到云端处理,先征得同意。
+     * 同意 → storage 记忆 "granted"(此后不再问);拒绝 → 本次不调识别(不落键,
+     * 重新进入本页会再询问——无设置页,不造入口),页面仍可手动/语音建候选。
+     * 已问过且未同意(本页访问内)→ 不再问,直接按拒绝返回。
+     */
+    askVlAuthOnce() {
+        if (this.vlAuthGranted) {
+            return Promise.resolve(true);
+        }
+        if (!this.vlAuthAsked) {
+            this.vlAuthAsked = true;
+            return new Promise((resolve) => {
+                wx.showModal({
+                    title: "云端识别授权",
+                    content: VL_AUTH_CONTENT,
+                    confirmText: "同意",
+                    cancelText: "本次不用",
+                    success: (r) => {
+                        if (r.confirm) {
+                            this.vlAuthGranted = true;
+                            if (typeof wx !== "undefined" && typeof wx.setStorageSync === "function") {
+                                try {
+                                    wx.setStorageSync(VL_AUTH_STORAGE_KEY, "granted");
+                                }
+                                catch (e) {
+                                    // 记忆失败不影响本次:下次进入再问一次(如实,不静默放行)
+                                }
+                            }
+                            resolve(true);
+                            return;
+                        }
+                        this.setData({ vlAuthDenied: true });
+                        resolve(false);
+                    },
+                    fail: () => {
+                        // 弹层失败按拒绝处理:绝不未经同意就发起识别传输
+                        this.setData({ vlAuthDenied: true });
+                        resolve(false);
+                    },
+                });
+            });
+        }
+        return Promise.resolve(false);
+    },
     async beginCapture() {
         if (this.capturing) {
             return;
@@ -175,7 +246,7 @@ Page({
             });
             return;
         }
-        // 本地压缩 → 宽高 → base64(零上云;prepared 只存页面内存)
+        // 本地压缩 → 宽高 → base64(不写云存储;prepared 只存页面内存,识别传输见下方授权门)
         const prepared = await (0, photo_vl_1.preparePhotoForVl)(shot.tempFilePath);
         if (!prepared.ok) {
             this.capturing = false;
@@ -190,6 +261,14 @@ Page({
             imgH: prepared.imgH,
             photoAspect: prepared.imgW + " / " + prepared.imgH,
         });
+        // B4:识别=把照片临时发送到云端处理——首次需用户授权;拒绝则本次不调识别,
+        // 照片仍留在本机作证据,页面照常进手动/语音建候选
+        const granted = await this.askVlAuthOnce();
+        if (!granted) {
+            this.capturing = false;
+            this.startEmptyBatch(prepared, "未授权云端识别;可手动添加或语音建候选,照片仍作证据。");
+            return;
+        }
         const outcome = await (0, photo_vl_1.recognizeWithVl)(prepared);
         this.capturing = false;
         if (outcome.ok) {
@@ -1174,6 +1253,15 @@ Page({
     },
     /* ---------------- 圈选模式(屏⑤) ---------------- */
     onEnterCircle() {
+        if (!this.vlAuthGranted) {
+            // B4:未授权云端识别(或本页访问内已拒)——圈选入口灰化,只提示,不发起识别
+            wx.showToast({
+                title: "未授权云端识别,重新进入时会再询问;可手动添加或语音建候选",
+                icon: "none",
+                duration: 2500,
+            });
+            return;
+        }
         this.setData({
             mode: "circle",
             circle: { drawing: false, rect: null, recognizing: false, errorText: "", result: null },

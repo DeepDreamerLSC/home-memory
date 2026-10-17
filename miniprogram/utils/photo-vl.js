@@ -2,11 +2,13 @@
 /**
  * 拍照识物客户端识别封装(#3):本地压缩 → base64 → extractDraft.vlRecognize 云函数。
  *
- * 隐私红线(#65 V0.4 合同第五项边界,主会话已拍板):照片在用户最终确认保存之前
- * **绝不上传云端**——识别走 callFunction 载荷直传本地压缩图的 base64(与语音链路
- * utils/voice.ts 的 readFile base64 → transcribe 同款先例),不落云存储、不留任何
- * 云端残留;上传只发生在用户确认后的保存流程(photo 页用 prepared.path 经
- * wx.cloud.uploadFile 得 file_id 再走 itemsApi.photoCommit)。
+ * 隐私口径(#65 V0.4 合同第五项边界;PR #67 B4 措辞精确化):照片在用户最终确认
+ * 保存之前**不持久化、不写云存储**——识别走 callFunction 载荷把本地压缩图的
+ * base64 **临时传输**到云函数处理(传输即处理、内存态、不落盘;与语音链路
+ * utils/voice.ts 的 readFile base64 → transcribe 同款先例);首次使用需用户在
+ * photo 页授权(拒绝则本次不识别,只走手动/语音)。照片真正写入云存储只发生在
+ * 用户确认后的保存流程(photo 页用 prepared.path 经 wx.cloud.uploadFile 得
+ * file_id 再走 itemsApi.photoCommit)。
  *
  * 两段式 API:
  * - preparePhotoForVl(tempPath):压缩(长边 ≤1280、JPEG quality 70;失败则原样,

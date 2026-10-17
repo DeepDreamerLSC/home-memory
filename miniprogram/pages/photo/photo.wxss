@@ -1155,3 +1155,22 @@
   line-height: 1.6;
   text-align: center;
 }
+
+/* ================ 云端识别授权(B4):拒绝后识别入口灰化 + 提示 ================ */
+.circle-entry.disabled {
+  opacity: 0.4;
+}
+
+.vl-auth-hint {
+  position: absolute;
+  right: 12rpx;
+  bottom: 64rpx;
+  max-width: 70%;
+  background: rgba(17, 17, 17, 0.72);
+  color: #fff;
+  font-size: 20rpx;
+  line-height: 1.5;
+  padding: 10rpx 16rpx;
+  border-radius: 12rpx;
+  z-index: 7;
+}

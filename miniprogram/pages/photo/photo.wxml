@@ -79,7 +79,8 @@
       >
         <text class="tag">{{ item.tag }}</text>
       </view>
-      <view class="circle-entry" catchtap="onEnterCircle">⭕ 漏了?圈一下补识别</view>
+      <view class="circle-entry {{ vlAuthDenied ? 'disabled' : '' }}" catchtap="onEnterCircle">⭕ 漏了?圈一下补识别</view>
+      <view wx:if="{{ vlAuthDenied }}" class="vl-auth-hint">未授权云端识别:重新进入本页时会再询问;仍可手动添加或语音建候选。</view>
     </block>
     <view wx:if="{{ photoCollapsed }}" class="evTap">
       <view class="evChip">📍 点开照片核对<text class="e2">证据区 · 框在展开后显示</text></view>

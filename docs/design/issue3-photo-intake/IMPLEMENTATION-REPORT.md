@@ -11,7 +11,7 @@
 
 一句话链路(与 IMPLEMENTATION.md §0 一致,已全部落地):
 
-> 拍照 → 本地压缩(长边 ≤1280/JPEG q70)→ **base64 直传** `extractDraft.vlRecognize` 识别(候选+框;**确认前照片不上云**)→ 拍照确认页 `pages/photo`(三态候选+语音受限编辑+圈选补识别)→ 用户最终确认 → `wx.cloud.uploadFile` 上传**同一张压缩图**得 file_id → `itemsApi.photoCommit` 批量建档+落 `photo_evidence` 证据行 → 详情页 `itemsApi.photoEvidenceGet` 回放历史证据;首页搜索结果行按需出证据缩略。
+> 拍照 → 本地压缩(长边 ≤1280/JPEG q70)→ **base64 直传** `extractDraft.vlRecognize` 识别(候选+框;**确认前不持久化、不写云存储;识别需临时传输(传输即处理,不落盘),首次使用需用户授权**)→ 拍照确认页 `pages/photo`(三态候选+语音受限编辑+圈选补识别)→ 用户最终确认 → `wx.cloud.uploadFile` 上传**同一张压缩图**得 file_id → `itemsApi.photoCommit` 批量建档+落 `photo_evidence` 证据行 → 详情页 `itemsApi.photoEvidenceGet` 回放历史证据;首页搜索结果行按需出证据缩略。
 
 按屏对照(原型六屏 → 生产页面):
 
@@ -26,8 +26,9 @@
 
 其余功能面:
 
-- **拍照会话**:中途退出保留(TTL 24h、作用域隔离、只留最新一个),首页 `onShow` 恢复横幅「上次拍照的 N 件没记完,继续核对 ›」(`pages/index/index.ts:581`);确认前 `fileId` 恒 null、base64 绝不入会话存储;
-- **降级全链**:VL 不可用 → modal「拍照识别暂不可用,可手动添加」仍进页手动添加(云端零残留);相机权限拒绝 → 「去设置」/「从相册选」兜底;压缩失败原图如实直传(云函数 10MB 门兜底);确认后上传失败整批不提交可重试;photoCommit 逐件失败行标红单行重试(operation_id 幂等);
+- **拍照会话**:中途退出保留(TTL 24h、作用域隔离、只留最新一个),首页 `onShow` 恢复横幅「上次拍照的 N 件没记完,继续核对 ›」(`pages/index/index.ts:581`);确认前 `fileId` 恒 null、base64 绝不入会话存储;会话归属家庭开批时捕获(PR #67 B1,保存一致性绑定 SCOPE_MISMATCH 硬拒);
+- **识别授权(PR #67 B4)**:首次识别前一次性授权弹窗(文案如实说明「临时发送到云端处理(仅传输识别,不会保存);你点确认入库后,照片才会保存」);同意落 storage 记忆(`home-memory:photo-vl-auth`)此后不再问;拒绝本次不调识别、页面仍可手动/语音建候选,识别入口(圈选)灰化并提示「重新进入时会再询问」(无设置页,不造入口),拒绝不落键;
+- **降级全链**:VL 不可用 → modal「拍照识别暂不可用,可手动添加」仍进页手动添加(云端零残留);相机权限拒绝 → 「去设置」/「从相册选」兜底;压缩失败原图如实直传(服务端大小门兜底);确认后上传失败整批不提交可重试;photoCommit 逐件失败行标红单行重试(operation_id 幂等);
 - **done 终态门**(ac7ba8b,对应 issue #65 评论「#65 终态行编辑」):已入库行只读查看、面板开着落终态后确认零改动零假回执。
 
 ## 2. 文件与 API 清单
@@ -90,7 +91,7 @@
 | 2 | **数量冻结**:`items` 不引入 `quantity`,数量仅草稿备注 | `grep -c quantity cloudfunctions/itemsApi/lib/handler.js` = **0**(实测,零出现);数量=note 文本:客户端拼接 `intake-draft.ts:90` `composeNote`(`×{qty} {suffix}` 单一来源,步进器只改这份草稿);服务端 photoCommit 只收 `note` 字段(`itemsApi/lib/handler.js:2156` 起 photo 形状门无数量项);photo_evidence schema 同样无数量字段(IMPLEMENTATION.md §2);页面横幅「电池×24 也只记一条」(photo.wxml) | 入库后数量只存在于 items.note 文本,无库存/取用/剩余语义(见 §8 已知限制) |
 | 3 | **批次位置**:区域确认→默认继承→逐件例外→保存前最终确认弹层;不新建位置模型 | 批次位置+例外状态:`IntakeRow.exc`(`intake-draft.ts:40` 起);例外不改批次、批次改动不动已设例外行(`applyDraftEdits` 只改勾选字段 `intake-draft.ts:264`);保存前最终确认:`deriveSaveConfirm`(`intake-draft.ts:390`,例外**只汇总已勾选件**、#d 序号、保留 N/丢弃 M 文案)→ `pages/photo/photo.ts:1393` 弹层 → 「确认,记住了」才走 `commitPhotoBatch`(`photo.ts:1422`);位置事实仍写 `location_text`(photoCommit 逐件传 `location_text`,`itemsApi/lib/handler.js:2165` 起直接复用既有 createItem),不产生照片位置模型 | 「确认,记住了」是本批唯一进入写链路的触发点 |
 | 4 | **照片证据链**:Photo Capture→Visual Drafts→确认→Items;Photo Evidence 独立关联不充当现址;服务端派生作用域 | 证据行落库:`itemsApi/lib/handler.js:2165` `photoCommitItem`(建档成功后才 add 证据行,`_id="pe_"+genId`,唯一索引 (household_id,item_id,file_id) 冲突回查收敛);回放:`handler.js:2274` `photoEvidenceGetItem`(服务端解析 household_id 过滤,每件 created_at 降序前 3,`PHOTO_EVIDENCE_PER_ITEM` `handler.js:2048`);「不充当现址」:`evidence-view.ts:96` `mapEvidenceView` 派生「位置已变更」灰标——`captured_location_text ≠ 当前 locationText` 时以文字为准,旧照片仅作证据;一张照片关联多件:每件独立证据行共享同一 file_id | 证据只增不删(删除物品不级联,悬挂行按 item_id 查询天然查不到,IMPLEMENTATION.md §11) |
-| 5 | **权限与隐私**:授权前不上传云端;真实家庭影像不进仓库 | 确认前零上云:识别走 base64 直传(`utils/photo-vl.ts:338` event 只带 image_base64/img_w/img_h;**静态守卫** `tests/photo-vl-client.test.js:157-160` 断言编译产物不含 `uploadFile(`/`downloadFile(`);服务端 `cloudfunctions/extractDraft/index.js` 不注入 downloadFile,旧式 file_id 事件 INVALID_INPUT);唯一上云动作=用户点「确认,记住了」后 `commitPhotoBatch` 先 `wx.cloud.uploadFile` 再 photoCommit(`utils/photo-intake.ts:350` 起,上传失败整批不提交、云端零残留);会话 `fileId` 确认前恒 null、base64 绝不落存储(`utils/photo-session.ts:30`);集合权限「所有用户不可读不可写」、household_id 一律服务端解析(`itemsApi/lib/handler.js:2039` 注释+实现);跨成员读照片一律走云函数 getTempFileURL 换临时链接(`itemsApi/index.js:73`),不直接用 fileID 渲染;真实抽屉照片不随仓库分发(README.md「怎么 看」节) | 红线由测试+静态扫描双保险,不是口头约定 |
+| 5 | **权限与隐私**:授权前不上传云端;真实家庭影像不进仓库 | 确认前不持久化、不写云存储(PR #67 B4 措辞精确化):识别走 base64 **临时传输**(`utils/photo-vl.ts:338` event 只带 image_base64/img_w/img_h,传输即处理、内存态不落盘;**首次使用需 photo 页一次性授权**,拒绝则本次不识别只走手动/语音,识别入口灰化提示重新进入会再询问——无设置页不造入口);**静态守卫** `tests/photo-vl-client.test.js:157-160` 断言编译产物不含 `uploadFile(`/`downloadFile(`);服务端 `cloudfunctions/extractDraft/index.js` 不注入 downloadFile,旧式 file_id 事件 INVALID_INPUT);唯一写云存储动作=用户点「确认,记住了」后 `commitPhotoBatch` 先 `wx.cloud.uploadFile` 再 photoCommit(`utils/photo-intake.ts:350` 起,上传失败整批不提交、云端零残留);会话 `fileId` 确认前恒 null、base64 绝不落存储(`utils/photo-session.ts:30`);集合权限「所有用户不可读不可写」、household_id 一律服务端解析(`itemsApi/lib/handler.js:2039` 注释+实现);跨成员读照片一律走云函数 getTempFileURL 换临时链接(`itemsApi/index.js:73`),不直接用 fileID 渲染;真实抽屉照片不随仓库分发(README.md「怎么 看」节) | 红线由测试+静态扫描双保险,不是口头约定 |
 | 6 | **坐标格式**:适配层显式声明量纲(禁按最大值猜)→存 0-1+原图宽高→前端变换→不可信框宁可不显示 | 量纲唯一声明=提示词逐字写 0-1000(IMPLEMENTATION.md §1.1,handler `buildVlPrompt`);云函数适配层 `vl.js:92` `normalizeVlBox`:四值有限整数 ∈[0,1000] 且 x2>x1/y2>y1 才 `/1000` 归一,**任一不满足整框丢弃为 null(物品行保留)**,绝不舍入钳制;存储与 API 一律 0-1+`img_w`/`img_h` 随行(photo_evidence schema §2);客户端变换 `utils/photo-box.ts`(`containRect:75`/`coverRect:90`/圈选反算 `containPointToNormalized:107`),容器 aspect-ratio=img_w/img_h 等比零裁切;云函数不解析图片二进制、不猜量纲 | 「宁可不显示」落在 box=null 合法且只显照片不画框(photo 页与详情证据卡同语义) |
 
 ## 4. 如何本地验证
