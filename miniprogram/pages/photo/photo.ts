@@ -754,7 +754,7 @@ Page<
         preselected +
         " 个" +
         (outcome.truncated ? "(超过 10 件,只取前 10)" : "");
-      this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle });
+      this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle, photoCollapsed: true });
       this.refreshRecentLocations();
       this.rebuildRows();
       return;
@@ -811,6 +811,7 @@ Page<
     this.setData({
       entryReady: true,
       recognizing: false,
+      photoCollapsed: true,
       navSubtitle: subtitle,
       photoPath: prepared.path,
       imgW: prepared.imgW,
@@ -841,6 +842,7 @@ Page<
       this.setData({
         entryReady: true,
         recognizing: false,
+        photoCollapsed: true,
         photoPath: session.file.localPath,
         imgW: session.file.imgW,
         imgH: session.file.imgH,
