@@ -1,9 +1,10 @@
 # 拍照识物 · 实现报告(#3 / #65)
 
-- 分支:`feat/issue3-photo-intake`,`origin/main..HEAD` 共 **12 个提交**(a6d9369 → ac7ba8b,`git log --oneline origin/main..HEAD` 实测);
-- 差异面:`git diff --stat origin/main..HEAD` 共 54 个文件、+15671 / -38 行;
-- 验证实测(2026-10-17,本报告撰写时):`npm test` **725 项全绿**(0 fail,pretest 先跑 `npm run build:mp`),`npm run typecheck` 通过(零输出退出);
-- 设计合同:issue #65 正文 V0.4(六项边界冻结);工程说明:同目录 `IMPLEMENTATION.md`(V0.4.2 对齐版);交互基准:同目录 `prototype.html` 六屏。
+- 分支:`feat/issue3-photo-intake`,`origin/main..HEAD` 共 **16 个提交**(a6d9369 起,含 PR #67 复审修复 4 个提交,`git log --oneline origin/main..HEAD` 实测);
+- 差异面:`git diff --stat origin/main..HEAD` 共 55 个文件、+16918 / -50 行;
+- 验证实测:`npm test` **740 项全绿**(0 fail,pretest 先跑 `npm run build:mp`;基线 725 + PR #67 修复新增 15 项),`npm run typecheck` 通过(零输出退出);
+- 设计合同:issue #65 正文 V0.4(六项边界冻结);工程说明:同目录 `IMPLEMENTATION.md`(V0.4.2 对齐版,PR #67 修订随行);交互基准:同目录 `prototype.html` 六屏;
+- PR #67 架构复审修复(2026-10):B1 家庭切换竞态(SCOPE_MISMATCH 硬拒)/ B2 file_id 归属验证+已删物品证据过滤 / B4 首次识别授权+隐私措辞精确化 / B5 载荷上限 4,000,000 字符对齐——详见 §8。
 
 ---
 
@@ -28,7 +29,7 @@
 
 - **拍照会话**:中途退出保留(TTL 24h、作用域隔离、只留最新一个),首页 `onShow` 恢复横幅「上次拍照的 N 件没记完,继续核对 ›」(`pages/index/index.ts:581`);确认前 `fileId` 恒 null、base64 绝不入会话存储;会话归属家庭开批时捕获(PR #67 B1,保存一致性绑定 SCOPE_MISMATCH 硬拒);
 - **识别授权(PR #67 B4)**:首次识别前一次性授权弹窗(文案如实说明「临时发送到云端处理(仅传输识别,不会保存);你点确认入库后,照片才会保存」);同意落 storage 记忆(`home-memory:photo-vl-auth`)此后不再问;拒绝本次不调识别、页面仍可手动/语音建候选,识别入口(圈选)灰化并提示「重新进入时会再询问」(无设置页,不造入口),拒绝不落键;
-- **降级全链**:VL 不可用 → modal「拍照识别暂不可用,可手动添加」仍进页手动添加(云端零残留);相机权限拒绝 → 「去设置」/「从相册选」兜底;压缩失败原图如实直传(服务端大小门兜底);确认后上传失败整批不提交可重试;photoCommit 逐件失败行标红单行重试(operation_id 幂等);
+- **降级全链**:VL 不可用 → modal「拍照识别暂不可用,可手动添加」仍进页手动添加(云端零残留);相机权限拒绝 → 「去设置」/「从相册选」兜底;压缩失败原图如实直传,大小门两侧对齐 4,000,000 字符(PR #67 B5:客户端压缩后仍超限直接提示「照片过大,请靠近重拍」不发起 callFunction,服务端字符门兜底);确认后上传失败整批不提交可重试;photoCommit 逐件失败行标红单行重试(operation_id 幂等);
 - **done 终态门**(ac7ba8b,对应 issue #65 评论「#65 终态行编辑」):已入库行只读查看、面板开着落终态后确认零改动零假回执。
 
 ## 2. 文件与 API 清单
@@ -99,7 +100,7 @@
 ### 4.1 自动化(本报告撰写时实测)
 
 ```
-npm test          # 725 项全绿(0 fail;pretest 先 npm run build:mp)——2026-10-17 实测
+npm test          # 740 项全绿(0 fail;pretest 先 npm run build:mp)——PR #67 修复后复测
 npm run typecheck # tsc -p miniprogram --noEmit 通过(零输出)——2026-10-17 实测
 ```
 
@@ -135,10 +136,20 @@ npm run typecheck # tsc -p miniprogram --noEmit 通过(零输出)——2026-10-1
 5. **每件证据回放上限 3 条**:photoEvidenceGet 每件取 created_at 降序前 3(`itemsApi/lib/handler.js:2048`),更早照片不回传;
 6. **一屏一照**:不做连拍/多照片批,多照=多次拍照分批(合同 §11);
 7. **会话恢复受小程序临时文件生命周期约束**:退出后 localPath 可能被系统回收,恢复时文件不存在则如实提示重拍(base64 不落存储的代价,不编造);
-8. **draftEditParse 单意图**:一句话含多类操作只取最主要一类,其余在 matched_word 外如实丢弃(IMPLEMENTATION.md §1.2 ⚖️ 拍板)。
+8. **draftEditParse 单意图**:一句话含多类操作只取最主要一类,其余在 matched_word 外如实丢弃(IMPLEMENTATION.md §1.2 ⚖️ 拍板);
+9. **未覆盖项(PR #67 B5)**:callFunction 事件整体 5MB 上限的**真机传输验证**未做——4,000,000 字符门是按 5MB 上限减事件 JSON 外壳的离线推导(离线测试覆盖门两侧边界:恰 4,000,000 字符放行、超出拒绝、客户端超限不发起调用),真实网关在 4,000,000 字符载荷下的行为留待真机联调确认。
 
 ## 7. 与 IMPLEMENTATION.md 的差异(诚实记录)
 
 - **`callVlRecognize` 未在 api.ts 另做薄封装**:IMPLEMENTATION.md §4.2 计划 api.ts 加薄封装但注明「调用封装已由 utils/photo-vl.ts 提供;api.ts 若另做薄封装,形状必须一致」——实现选择了不重复封装,vlRecognize 的 callFunction/超时/降级/形状校验全部在 `utils/photo-vl.ts`(`:323` 起),api.ts 只加了 `callDraftEditParse`(`:564`)与 callItemsApi 两 action 扩展。形状与 §1.1 契约一致;
-- **测试文件数超计划**:计划 4 个新测试文件 + voice-entry 补 2 例,实际 12 个新文件(多出 photo-intake/photo-session/photo-page/item-evidence/index-evidence-thumb/evidence-view 六个,覆盖编排、会话、页面、详情卡、首页缩略、视图映射),总测试 725 项(基线 542,本分支净增 183 项)——超出计划属加强,无缺项;
+- **测试文件数超计划**:计划 4 个新测试文件 + voice-entry 补 2 例,实际 12 个新文件(多出 photo-intake/photo-session/photo-page/item-evidence/index-evidence-thumb/evidence-view 六个,覆盖编排、会话、页面、详情卡、首页缩略、视图映射),总测试 740 项(基线 542,本分支净增 198 项,含 PR #67 修复新增 15 项)——超出计划属加强,无缺项;
 - **无其他偏差**:六项边界、4 个 API 契约、坐标契约、部署面均与 IMPLEMENTATION.md 对齐(本报告 §3 抽验锚点均为当前分支实测行号)。
+
+## 8. PR #67 架构复审修复记录(review 5555714304,B3 为流程项无代码)
+
+| 项 | 修了什么 | 关键落点 | 负例测试 |
+| --- | --- | --- | --- |
+| B1 家庭切换竞态(P0) | 会话归属家庭开批时捕获(photo-session `scope`);commitPhotoBatch 携带 `expected_household_id`=开批家庭(上传路径前缀同源);api 层显式 marker 优先于自动双 marker;服务端会话作用域门先于通用硬门:与当前派生家庭不一致 → **SCOPE_MISMATCH 零写入**;客户端保存前置复核 + 收到 SCOPE_MISMATCH 统一终局(按会话自身作用域键终止会话、toast「家庭已切换,本批未保存」、返回首页,终局后迟到手势吞掉);服务端拒绝路径孤儿文件与取消路径同语义 | `miniprogram/utils/photo-session.ts`、`utils/photo-intake.ts`、`utils/api.ts`、`pages/photo/photo.ts`、`cloudfunctions/itemsApi/lib/handler.js` | PC-SCOPE-1/2、PP-SCOPE-1/2/3、PS-8/8b、PI-12/13 |
+| B2 file_id 归属验证(P0) | 上传路径约定 `photo-evidence/{会话开批家庭}/{时间戳}-{随机}.jpg`;服务端 photoCommit 解析 fileID 路径,前缀 ≠ 当前派生家庭 → **FILE_NOT_OWNED 整批零写入**,解析不出路径一律 INVALID_INPUT;photoEvidenceGet 按 item_ids 反查 items(作用域内 deleted:false),已删/不存在物品的证据行**静默过滤**(删除不级联清证据=历史事实保留,读取入口校验有效性) | `miniprogram/utils/photo-intake.ts`、`cloudfunctions/itemsApi/lib/handler.js` | PC-OWN-1/2、PE-VALID |
+| B4 措辞与授权(P1) | photo 页首次识别一次性授权弹窗(同意落 `home-memory:photo-vl-auth` 不再问;拒绝本次不识别、手动/语音照常、圈选入口灰化提示「重新进入时会再询问」,拒绝不落键;无设置页不造入口);全仓「确认前不上云/绝不上传/零上云」逐处改为精确表述「确认前不持久化、不写云存储;识别需临时传输(传输即处理,不落盘),首次使用需用户授权」 | `pages/photo/photo.ts/.wxml/.wxss`、`utils/photo-vl.ts`、`utils/photo-intake.ts`、`pages/index/index.ts`、IMPLEMENTATION.md / 本报告 | PP-AUTH-1/2 |
+| B5 载荷上限对齐(P1) | callFunction 事件整体上限 5MB,服务端 vlRecognize 大小门 10MB 解码门 → **4,000,000 字符**(原门形同虚设已废除,解码 ≥1B 门保留);客户端压缩后 base64 仍超 4,000,000 字符 → 直接失败「照片过大,请靠近重拍」不发起 callFunction;真实 5MB 传输验证留待真机联调(§6.9 未覆盖项) | `cloudfunctions/extractDraft/lib/handler.js`、`miniprogram/utils/photo-vl.ts` | photo-vl 大小门边界(恰 4,000,000 放行/超出拒/参数门先于引擎门)、photo-vl-client 载荷预检门、PP-FB-2 |

@@ -14,7 +14,7 @@
  *   失败语义,错误只带错误码(不含 token/地址/base64);
  * - handler.vlRecognize:参数校验 INVALID_INPUT 各形态(image_base64 缺失/空/
  *   data: 前缀/含空白/非 base64 字符/解码 0 字节/超长度上界不解码直接拒、img_w/
- *   img_h/mode/region)、解码 >10MB 拒绝、未注入 callVL(三件套缺任一)→
+ *   img_h/mode/region)、超 4,000,000 字符拒绝(callFunction 5MB 事件上限对齐,B5)、未注入 callVL(三件套缺任一)→
  *   vl_not_configured(engine unavailable 不抛错)、成功链(坐标归一/越界丢框
  *   物品保留/confidence 词表外 low/qty_note 截断/非法名丢弃/>10 件截断 truncated、
  *   客户端 base64 原样直传不二次编码)、坏 JSON 带错误重试一次(仍败 vl_bad_output,
@@ -47,7 +47,8 @@ const FAKE_JPEG = Buffer.from("fake-jpeg-bytes-for-offline-test-only");
 const IMAGE_B64 = FAKE_JPEG.toString("base64");
 const VL_TOKEN = "hm-vl-test-token-9f2c-do-not-log";
 const VL_MODEL = "/Users/…/Qwen3-VL-8B-Instruct-4bit";
-const TEN_MB = 10 * 1024 * 1024;
+/** PR #67 B5:大小门=4,000,000 字符(callFunction 5MB 事件上限对齐;原 10MB 解码门已废除) */
+const VL_MAX_CHARS = 4000000;
 
 const GOOD_VL_REPLY = JSON.stringify({
   items: [
@@ -393,29 +394,31 @@ test("vlRecognize:照片参数校验——image_base64/img_w/img_h/mode/region �
 
 // ---------- handler.vlRecognize:图片大小门与引擎可用性 ----------
 
-test("vlRecognize:解码后超 10MB → INVALID_INPUT;恰 10MB 放行;超长度上界的 base64 不解码直接拒绝", async () => {
+test("vlRecognize:image_base64 超 4,000,000 字符 → INVALID_INPUT;恰 4,000,000 字符放行(callFunction 5MB 事件上限对齐,PR #67 B5)", async () => {
   const t = makeVlDeps([GOOD_VL_REPLY]);
-  const res = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB + 1).toString("base64") }), t.deps);
+  const res = await vlRecognize(vlEvent({ image_base64: "A".repeat(VL_MAX_CHARS + 1) }), t.deps);
   assert.strictEqual(res.ok, false);
   assert.strictEqual(res.error, "INVALID_INPUT");
+  assert.strictEqual(res.message, "照片参数不合法");
   assert.strictEqual(t.calls.length, 0, "超限绝不送引擎");
 
+  // 恰 4,000,000 字符(解码 ≈3MB,连同事件 JSON 外壳在 5MB 事件上限内)放行
   const okT = makeVlDeps([GOOD_VL_REPLY]);
-  const okRes = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB).toString("base64") }), okT.deps);
-  assert.strictEqual(okRes.ok, true, "恰 10MB 不应拒绝:" + JSON.stringify(okRes));
+  const okRes = await vlRecognize(vlEvent({ image_base64: "A".repeat(VL_MAX_CHARS) }), okT.deps);
+  assert.strictEqual(okRes.ok, true, "恰 4,000,000 字符不应拒绝:" + JSON.stringify(okRes));
+  assert.strictEqual(okT.calls.length, 1);
 
-  // 10MB 对应 base64 长度上界 = ceil(10MB/3)*4;再多 4 个字符即超界,按长度直接拒(不解码)
-  const bound = Math.ceil(TEN_MB / 3) * 4;
-  const hugeT = makeVlDeps([GOOD_VL_REPLY]);
-  const hugeRes = await vlRecognize(vlEvent({ image_base64: "A".repeat(bound + 4) }), hugeT.deps);
-  assert.strictEqual(hugeRes.ok, false);
-  assert.strictEqual(hugeRes.error, "INVALID_INPUT");
-  assert.strictEqual(hugeT.calls.length, 0);
+  // 边界外一格按字符门直接拒(原 10MB 解码门在 5MB 事件上限下形同虚设,已废除)
+  const bigT = makeVlDeps([GOOD_VL_REPLY]);
+  const bigRes = await vlRecognize(vlEvent({ image_base64: "A".repeat(VL_MAX_CHARS + 4) }), bigT.deps);
+  assert.strictEqual(bigRes.ok, false);
+  assert.strictEqual(bigRes.error, "INVALID_INPUT");
+  assert.strictEqual(bigT.calls.length, 0);
 });
 
 test("vlRecognize:参数门先于引擎门——callVL 未注入时超限图片仍是 INVALID_INPUT(客户端 bug 不伪装成不可用)", async () => {
   const t = makeVlDeps([], { noCallVL: true });
-  const res = await vlRecognize(vlEvent({ image_base64: Buffer.alloc(TEN_MB + 1).toString("base64") }), t.deps);
+  const res = await vlRecognize(vlEvent({ image_base64: "A".repeat(VL_MAX_CHARS + 1) }), t.deps);
   assert.strictEqual(res.ok, false);
   assert.strictEqual(res.error, "INVALID_INPUT");
 });

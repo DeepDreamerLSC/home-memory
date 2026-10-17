@@ -46,6 +46,9 @@ function makeDeps(opts) {
       if (opts.readFail) {
         return Promise.reject(new Error("readFile:fail"));
       }
+      if (typeof opts.readBase64 === "function") {
+        return opts.readBase64(filePath);
+      }
       return Promise.resolve(B64);
     },
     callVl: function (event) {
@@ -266,13 +269,57 @@ test("recognize:网络错/超时(callVl reject)→ unavailable,同 AI_UNAVAILABL
   assert.equal(out.manualFallback, true);
 });
 
-test("recognize:INVALID_INPUT(10MB 门)→ invalid_photo「照片太大,请重拍」,留在入口", async function () {
+test("recognize:INVALID_INPUT(大小门)→ invalid_photo「照片过大,请靠近重拍」,留在入口", async function () {
   var t = makeDeps({ vlResult: { ok: false, error: "INVALID_INPUT", message: "照片参数不合法" } });
   var out = await pv.recognizeWithVl(await pv.preparePhotoForVl(ORIG_PATH, t.deps), undefined, t.deps);
   assert.equal(out.ok, false);
   assert.equal(out.kind, "invalid_photo");
   assert.equal(out.manualFallback, false);
-  assert.equal(out.message, "照片太大,请重拍", "§7.4 固定文案(服务端文案对用户无重拍指引)");
+  assert.equal(out.message, "照片过大,请靠近重拍", "§7.4 固定文案(服务端文案对用户无重拍指引)");
+});
+
+test("recognize:压缩后 base64 仍超 4,000,000 字符 → 不发起 callFunction,直接 invalid_photo「照片过大,请靠近重拍」(PR #67 B5)", async function () {
+  var t = makeDeps({ vlResult: GOOD_RESULT });
+  var prepared = {
+    ok: true,
+    path: COMP_PATH,
+    imgW: 1280,
+    imgH: 960,
+    base64: "A".repeat(pv.PHOTO_VL_MAX_BASE64_CHARS + 1),
+    compressed: true,
+  };
+  var out = await pv.recognizeWithVl(prepared, undefined, t.deps);
+  assert.equal(out.ok, false);
+  assert.equal(out.kind, "invalid_photo");
+  assert.equal(out.manualFallback, false, "留在入口重拍,不进手动添加链");
+  assert.equal(out.message, "照片过大,请靠近重拍");
+  assert.equal(t.calls.vl.length, 0, "绝不发起注定超限的 callFunction(5MB 事件上限在网关就拒)");
+
+  // 边界内一字符放行(调用照常发起)
+  var t2 = makeDeps({ vlResult: GOOD_RESULT });
+  var okPrepared = {
+    ok: true,
+    path: COMP_PATH,
+    imgW: 1280,
+    imgH: 960,
+    base64: "A".repeat(pv.PHOTO_VL_MAX_BASE64_CHARS),
+    compressed: true,
+  };
+  var out2 = await pv.recognizeWithVl(okPrepared, undefined, t2.deps);
+  assert.equal(out2.ok, true, "恰 4,000,000 字符在门内:" + JSON.stringify(out2));
+  assert.equal(t2.calls.vl.length, 1);
+
+  // 一步式同样被预检门拦住(超限不调云函数)
+  var t3 = makeDeps({
+    readBase64: function () {
+      return Promise.resolve("B".repeat(pv.PHOTO_VL_MAX_BASE64_CHARS + 100));
+    },
+    vlResult: GOOD_RESULT,
+  });
+  var r3 = await pv.recognizePhotoFile(ORIG_PATH, t3.deps);
+  assert.equal(r3.ok, false);
+  assert.equal(r3.kind, "invalid_photo");
+  assert.equal(t3.calls.vl.length, 0);
 });
 
 // ---------- 一步式:recognizePhotoFile ----------

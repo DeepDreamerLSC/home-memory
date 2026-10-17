@@ -27,7 +27,7 @@
  * 日志纪律:失败只记动作名与错误码,绝不 log base64/物品名。
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PHOTO_VL_CALL_TIMEOUT_MS = exports.PHOTO_VL_JPEG_QUALITY = exports.PHOTO_VL_LONG_EDGE_MAX = void 0;
+exports.PHOTO_VL_CALL_TIMEOUT_MS = exports.PHOTO_VL_MAX_BASE64_CHARS = exports.PHOTO_VL_JPEG_QUALITY = exports.PHOTO_VL_LONG_EDGE_MAX = void 0;
 exports.preparePhotoForVl = preparePhotoForVl;
 exports.recognizeWithVl = recognizeWithVl;
 exports.recognizePhotoFile = recognizePhotoFile;
@@ -35,6 +35,12 @@ exports.recognizePhotoFile = recognizePhotoFile;
 exports.PHOTO_VL_LONG_EDGE_MAX = 1280;
 /** 压缩质量:JPEG quality 70 */
 exports.PHOTO_VL_JPEG_QUALITY = 70;
+/**
+ * base64 字符数上限(PR #67 B5):与服务端 vlRecognize 门同值(4,000,000 字符,
+ * 为 callFunction 5MB 事件上限留 JSON 外壳余量)。压缩后仍超限 → 客户端直接
+ * 判失败提示重拍,绝不发起注定超限的 callFunction。
+ */
+exports.PHOTO_VL_MAX_BASE64_CHARS = 4000000;
 /** 客户端调用超时:70s 严格大于服务端 config 60s(§4.3/§10) */
 exports.PHOTO_VL_CALL_TIMEOUT_MS = 70000;
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
@@ -136,7 +142,7 @@ function resolveDeps(partial) {
 /**
  * 备好识别输入(全部本地,零上送):
  * 1. wx.getImageInfo 取原尺寸(拿不到 → image_info_failed,没有宽高就没有坐标契约);
- * 2. 目标长边 ≤1280、quality 70 压缩(失败 → 原文件原样,如实,服务端 10MB 门兜底);
+ * 2. 目标长边 ≤1280、quality 70 压缩(失败 → 原文件原样,如实,服务端 4,000,000 字符门兜底);
  * 3. 对**压缩后的那张**再取实际宽高(img_w/img_h 唯一来源——识别与确认后上传同图,
  *    坐标基准一致;压缩器未必精确命中目标尺寸,以实测为准);
  * 4. readFile 读裸 base64(直传云函数,不落云存储)。
@@ -212,7 +218,10 @@ function validRegion(v) {
 }
 /**
  * 调 vlRecognize 并校验响应:
- * - ok:false → INVALID_INPUT 映射 invalid_photo(照片太大,请重拍);AI_UNAVAILABLE
+ * - **载荷预检门(B5)**:base64 超 4,000,000 字符 → 不发起 callFunction,直接
+ *   invalid_photo「照片过大,请靠近重拍」(callFunction 事件整体上限 5MB,超限
+ *   请求到不了函数;与服务端字符门同值,压缩后仍超限=极端大图,如实让用户重拍);
+ * - ok:false → INVALID_INPUT 映射 invalid_photo(照片过大,请靠近重拍);AI_UNAVAILABLE
  *   映射 unavailable(manual_fallback 透传语义);其他错误码按 bad_response;
  * - ok:true → items 逐件最小结构校验(name 非空串、confidence 词表外 low、qty_note
  *   容错为空串、box 形状门),任一件硬形状非法 → 整体 bad_response(绝不半带);
@@ -221,6 +230,10 @@ function validRegion(v) {
  */
 async function recognizeWithVl(prepared, opts, deps) {
     const d = resolveDeps(deps);
+    if (prepared.base64.length > exports.PHOTO_VL_MAX_BASE64_CHARS) {
+        // B5:绝不发起注定超限的调用(5MB 事件上限在网关层就会拒绝)
+        return fail("invalid_photo", "照片过大,请靠近重拍", false);
+    }
     const event = {
         action: "vlRecognize",
         image_base64: prepared.base64,
@@ -250,9 +263,10 @@ async function recognizeWithVl(prepared, opts, deps) {
         const code = typeof res.error === "string" ? res.error : "";
         const message = typeof res.message === "string" && res.message.trim() !== "" ? res.message : "";
         if (code === "INVALID_INPUT") {
-            // §7.4 固定文案:合法客户端触发 INVALID_INPUT 的唯一预期原因是 10MB 门(服务端
-            // 文案「照片参数不合法」对用户无指引);留在入口重拍,不进 photo 页
-            return fail("invalid_photo", "照片太大,请重拍", false);
+            // §7.4 固定文案:合法客户端触发 INVALID_INPUT 的唯一预期原因是大小门
+            // (B5:4,000,000 字符;服务端文案「照片参数不合法」对用户无指引);
+            // 留在入口重拍,不进 photo 页
+            return fail("invalid_photo", "照片过大,请靠近重拍", false);
         }
         if (code === "AI_UNAVAILABLE") {
             return fail("unavailable", message || "拍照识别暂不可用,可手动添加", true);

@@ -809,11 +809,11 @@ test("PP-FB-1:VL unavailable → modal 确认仍进页面,空候选+手动添加
   assert.equal(page.rowsRaw[0].done, true);
 });
 
-test("PP-FB-2:invalid_photo(照片太大)→ toast 重拍、留在入口态", async function () {
+test("PP-FB-2:invalid_photo(照片过大,服务端大小门)→ toast 重拍、留在入口态", async function () {
   var ctx = await boot({ vlError: { ok: false, error: "INVALID_INPUT", message: "照片参数不合法" } });
   var page = ctx.page;
   assert.equal(page.data.entryReady, false, "留在入口");
-  assert.ok(toastTexts(ctx.env).indexOf("照片太大,请重拍") !== -1);
+  assert.ok(toastTexts(ctx.env).indexOf("照片过大,请靠近重拍") !== -1, "B5 统一文案");
   assert.equal(ctx.env.uploads.length, 0);
   assert.equal(page.data.entryHint, "");
 });

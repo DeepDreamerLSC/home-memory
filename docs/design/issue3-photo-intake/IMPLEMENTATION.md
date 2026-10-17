@@ -39,7 +39,7 @@
 ```jsonc
 {
   "action": "vlRecognize",
-  "image_base64": "/9j/4AAQ…",       // 必填,本地压缩图(长边 ≤1280/JPEG q70)的裸 base64(无 data: 前缀/空白),解码后 1B~10MB
+  "image_base64": "/9j/4AAQ…",       // 必填,本地压缩图(长边 ≤1280/JPEG q70)的裸 base64(无 data: 前缀/空白),长度 ≤4,000,000 字符、解码 ≥1B
   "img_w": 1280,                    // 必填,客户端 wx.getImageInfo 实测**压缩后**那张图的宽(px),正整数 ≤10000
   "img_h": 960,                     // 必填,同上
   "mode": "full",                   // 可选,"full"(默认)| "region"
@@ -50,7 +50,7 @@
 **隐私红线**:识别**不经云存储**——没有 file_id、没有 downloadFile 路径(服务端刻意不留旁路,旧式 file_id 事件按 INVALID_INPUT 拒绝);图片只在本次调用载荷里经过云函数内存,不落任何持久层;**识别=把照片临时传输到云端处理(传输即处理,不落盘),首次使用需用户授权**(photo 页一次性授权弹窗,PR #67 B4)。确认后的上传(§1.3 photoCommit 的 `photo.file_id`)上传的是**同一张压缩图**,坐标基准(img_w/img_h)全程一致。
 
 校验(任一不过 → `{ok:false,error:"INVALID_INPUT",message:"照片参数不合法"}`):
-- `image_base64` 非空裸 base64 字符串;长度先按 10MB 对应上界(`ceil(10MB/3)*4`)廉价拒绝、再按解码字节数 1B~10MB 门(超出 → 客户端提示重拍);
+- `image_base64` 非空裸 base64 字符串;长度 ≤ **4,000,000 字符**(PR #67 B5:callFunction 事件整体上限 5MB,4,000,000 字符 ≈3.83MB 为事件 JSON 外壳留余量;原 10MB 解码门在 5MB 事件上限下形同虚设,已废除——超出字符门直接拒绝不解码;解码后 ≥1B 门保留),超出 → 客户端提示「照片过大,请靠近重拍」;
 - `img_w`/`img_h` 正整数 ≤10000;
 - `mode="region"` 时 `region` 四值均为有限数 ∈[0,1] 且 `x2>x1`、`y2>y1`。
 
@@ -306,7 +306,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 | `miniprogram/utils/intake-draft.ts` | **候选三态状态机纯函数(已实现)**:`IntakeRow = PhotoCandidate + done/failMsg`;`parseIntakeQtyNote`/`composeNote`(qty 1-99 + suffix 单一来源);入列工厂 `makeAiRow`(high 默认勾选)/`makeCircleRow`(圈选入列默认未勾选、沿用用户圈选框)/`makeVoiceAddedRow`;`toggleRowChecked`(done 终态 no-op)/`setRowsChecked`(不动 done)/`stepRowQty`/`markRowSaved`/`markRowFailed`;`applyDraftEdits(row, edits, pickedFields)`(只应用勾选字段、0 勾选不执行、绝不改勾选态、应用后 src=voice);`intakeCounts`/`intakeCountView`(头部与保存按钮文案单一来源);`deriveSaveConfirm(rows, batchLocation)`(例外只含已勾选件、#d 序号、summary/exception 文案)。全部纯函数,draftId/operationId 全程稳定。 |
 | `miniprogram/utils/photo-box.ts` | §3.2 坐标换算纯函数(零 wx 依赖;**已实现**)。 |
 | `miniprogram/utils/photo-session.ts` | **拍照批会话**(仿 `utils/draft-session.ts` 逐条纪律):存储键 `"home-memory:photo-session" + householdScopeSuffix()`(作用域隔离,F3 同款)、TTL 24h、只留最新一个、photo 页中途退出保留、全部入库/放弃时清除、`getUnfinishedPhotoSession()` 供首页恢复横幅。载荷:`{ batchId, file:{ localPath, imgW, imgH, fileId: string|null }, batchLocation, rows: IntakeRow[], createdAt }`——`fileId` 在用户确认上传前恒为 null(确认前云端零残留);`localPath` 为本地临时文件路径(小程序临时文件可能被回收:恢复时若文件已不存在,如实提示重拍,不编造);**base64 绝不入会话存储**(只在页面内存,恢复后按 localPath 重新 prepare)。`PhotoCandidate`/`IntakeRow` 形状见 types.ts 与 utils/intake-draft.ts。 |
-| `tests/photo-vl.test.js` | lib/vl.js + handler vlRecognize 分支(依赖注入):isVlConfigured 三件套、normalizeVlBox(0-1000→0-1/越界丢框/小数 NaN Infinity 像素值全丢)、围栏剥离、坏 JSON 重试一次、未配置返回 vl_not_configured、image_base64 形状/大小门(data: 前缀/空白/非 base64/解码 0 字节/超长度上界不解码直接拒/>10MB)、客户端 base64 原样直传不二次编码、**红线守卫**(deps/stub 的 downloadFile 一旦被调用即抛错;旧式 file_id 事件 INVALID_INPUT)、日志纪律。仿 `tests/extractDraft-local-llm.test.js` 模式(127.0.0.1 stub server 扮演 VL 端点)。 |
+| `tests/photo-vl.test.js` | lib/vl.js + handler vlRecognize 分支(依赖注入):isVlConfigured 三件套、normalizeVlBox(0-1000→0-1/越界丢框/小数 NaN Infinity 像素值全丢)、围栏剥离、坏 JSON 重试一次、未配置返回 vl_not_configured、image_base64 形状/大小门(data: 前缀/空白/非 base64/解码 0 字节/超 4,000,000 字符不解码直接拒,B5)、客户端 base64 原样直传不二次编码、**红线守卫**(deps/stub 的 downloadFile 一旦被调用即抛错;旧式 file_id 事件 INVALID_INPUT)、日志纪律。仿 `tests/extractDraft-local-llm.test.js` 模式(127.0.0.1 stub server 扮演 VL 端点)。 |
 | `tests/photo-vl-client.test.js` | utils/photo-vl.ts(wx 全注入):压缩目标尺寸(长边 1280/q70、小图不放大、极端比夹 ≥1)、img_w/img_h 取压缩后实测、base64 读压缩产物、压缩失败原样如实、取不到宽高/读文件失败各自 kind、event 形状(无 file_id/mode)、region 透传与非法 region 不调云函数、圈选复用同一 base64、响应映射与硬形状 bad_response、unavailable/invalid_photo 降级、一步式透传、**静态红线守卫**(编译产物不含 uploadFile/downloadFile 调用)。 |
 | `tests/intake-draft.test.js` | utils/intake-draft.ts 全状态机:数量拆分/拼接边界、三类入列工厂(AI 预选/圈选默认未勾选/语音补录)、三态流转与 done 终态、框标签前缀同步、全选清空不动 done、步进上下限、语音应用全勾/部分勾/0 勾不执行/勾选态不变/白名单外跳过、保存结果落行、计数单一来源与圈选联动、保存确认例外只含已勾选、入参不被改动、全链路 draftId 稳定。 |
 | `tests/photo-draft-edit.test.js` | draftEditParse:三类 intent、field 白门、非法 draft_id 强制 needs_pick、needs_pick 与 edits 互斥、>200 字 INVALID_INPUT、local→deepseek 降级、日志不含原文。 |
@@ -376,7 +376,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 1. **VL 不可用**(三件套缺任一 / 网络错 / 超时 / 坏 JSON 重试仍败)→ 服务端 AI_UNAVAILABLE + manual_fallback:true(客户端网络错/超时同款 UX)→ 客户端 modal「拍照识别暂不可用,可手动添加」,确认后**仍进 photo 页**:照片仍只是本地临时文件(未上传,**云端零残留**),候选清单为空,提供「+ 手动添加物品」行(手输名称/数量/位置,box=null 整照关联,保存时才首次上传,photoCommit 照常);取消则返回首页(**云端无任何残留**,本地临时文件随小程序生命周期自然回收)。
 2. **draftEditParse 不可用** → toast「没听懂,可手动点行编辑」,不弹 diff(§5.9)。
 3. **无照片/相机权限**:`chooseMedia` fail 且 errMsg 含 "auth" → showModal「需要相机权限」(confirmText「去设置」→ `wx.openSetting`;cancelText「从相册选」→ 重新 chooseMedia 只带 album);相册本身无需授权,用户拒绝相机时始终有相册兜底;两次都取消 → 返回上一页。
-4. **图片超限/压缩失败**:`wx.compressImage` 失败 → 原图 base64 原样直传识别(如实,云函数 10MB 解码门兜底,超出 INVALID_INPUT → 客户端提示「照片太大,请重拍」并留在入口);目标压缩:长边 ≤1280 JPEG quality 70(§4.1)。`wx.getImageInfo` 失败 → 中止本次拍照并 toast(没有宽高就没有坐标契约,不猜)。
+4. **图片超限/压缩失败(PR #67 B5 修订)**:`wx.compressImage` 失败 → 原图 base64 原样直传识别(如实);大小门两侧对齐 **4,000,000 字符**(callFunction 事件整体上限 5MB 留外壳余量):客户端压缩后仍超限 → 直接失败提示「照片过大,请靠近重拍」不发起 callFunction;服务端字符门超出 → INVALID_INPUT → 同款提示并留在入口;目标压缩:长边 ≤1280 JPEG quality 70(§4.1)。`wx.getImageInfo` 失败 → 中止本次拍照并 toast(没有宽高就没有坐标契约,不猜)。
 5. **圈选识别失败** → 结果卡显示失败文案+「不是,重圈」重试;已有候选零影响(原型 resetCircle 语义,prototype.html:733-738)。
 6. **确认后上传失败 / 部分保存失败**:确认后首先 `wx.cloud.uploadFile` 同一张压缩图(本批唯一上云动作),失败 → 整批不提交 photoCommit、如实 toast 可重试(云端零残留,会话保留);上传成功后 photoCommit 逐件结果:失败行标红+可单行重试(operation_id 沿用,同键同内容幂等收敛;内容改过仍沿用原键,服务端异内容 OPERATION_CONFLICT 兜底),已成功行不动(§1.3,batch-save 哲学);file_id 一旦取得随会话保留,重试不重复上传。
 7. **家庭切换在途 + 会话归属家庭(PR #67 B1 修订)**:photo 会话存储键带作用域后缀(§4.1 photo-session),换家庭后旧批不可达、回切恢复(F3 同款);photo 页所有上屏前作用域代数复核(§6.1 同款);photoCommit 经 api.ts 自动双 marker,共享家庭 FAMILY_SWITCHED/FAMILY_STALE_SCOPE 由服务端硬门拦下,客户端如实 toast 服务端文案。**会话归属家庭在开批时捕获**(photo-session 载荷 `scope` 字段):保存时把该 `expected_household_id` 随 photoCommit 上送(api 层显式携带优先于自动 marker),服务端与当前派生家庭不一致 → **SCOPE_MISMATCH 零写入**(先于通用双 marker 硬门裁定);客户端保存前置复核漂移、收到 SCOPE_MISMATCH 同款终局:终止会话(按会话自己的作用域键清除)、toast「家庭已切换,本批未保存」、返回首页,**绝不重试写另一个家**。服务端拒绝路径上照片文件可能已在云存储(用户确认后先上传再 commit):该孤儿文件不产生任何 items/证据行,与「确认后上传失败整批不提交」的取消路径同语义(云存储无事务,孤儿文件可接受),不回收。

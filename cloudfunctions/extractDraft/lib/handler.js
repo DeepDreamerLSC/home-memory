@@ -294,9 +294,13 @@ async function handler(event, deps) {
 // 日志只记计数与错误码,绝不落 base64、识别结果、prompt 原文、转写原文、候选名。
 
 const VL_IMG_DIM_MAX = 10000;
-const VL_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-/** 解码前的廉价上限:10MB 原始字节的 base64 长度上界(超出直接拒绝,不解码) */
-const VL_MAX_IMAGE_BASE64_CHARS = Math.ceil(VL_MAX_IMAGE_BYTES / 3) * 4;
+/**
+ * image_base64 字符数上限(PR #67 B5):腾讯云开发 callFunction 事件整体上限 5MB,
+ * 4,000,000 字符(≈3.83MB UTF-8)为事件 JSON 外壳(action/img_w/img_h 等字段)
+ * 留余量——原 10MB 解码门在 5MB 事件上限下形同虚设(超限请求根本到不了函数)。
+ * 超出直接拒绝,不解码。
+ */
+const VL_MAX_IMAGE_BASE64_CHARS = 4000000;
 /** 裸 base64(无 data: 前缀、无换行/空白;小程序 readFile encoding:"base64" 的原样产物) */
 const VL_BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const VL_MAX_ITEMS = 10;
@@ -424,7 +428,7 @@ function validateVlOutput(rawText) {
  * 识别只收客户端本地压缩图的 base64(与 transcribe 音频 base64 直传同款先例),
  * 本函数不读云存储、不落任何持久层;上传只发生在用户确认后的保存流程(photoCommit)。
  * 1. 形状校验(image_base64/img_w/img_h/mode/region,任一不过 → INVALID_INPUT):
- *    image_base64 须为裸 base64(无 data: 前缀/空白),解码后 1 字节 ~ 10MB
+ *    image_base64 须为裸 base64(无 data: 前缀/空白),长度 ≤4,000,000 字符、解码 ≥1 字节
  *    (超过 → INVALID_INPUT,客户端提示重拍;解码前先按长度上界廉价拒绝);
  * 2. deps.callVL 未注入(三件套缺任一,胶水层据此不注入)→ AI_UNAVAILABLE
  *    reason:"vl_not_configured" + manual_fallback(engine unavailable,不抛错);
@@ -477,9 +481,10 @@ async function vlRecognize(event, deps) {
     }
   }
 
-  // 解码只为丈量字节数(10MB 门);上送 VL 的仍是客户端原样 base64,不再二次编码。
+  // 解码只为丈量字节数(0 字节门;长度上界已在字符门先行裁定);上送 VL 的
+  // 仍是客户端原样 base64,不再二次编码。
   const imageBytes = Buffer.byteLength(imageBase64, "base64");
-  if (imageBytes < 1 || imageBytes > VL_MAX_IMAGE_BYTES) {
+  if (imageBytes < 1) {
     logger(logMeta({ error: "INVALID_INPUT" }));
     return vlInvalidInputResult();
   }
