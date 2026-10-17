@@ -40,6 +40,7 @@ type VoiceBarMethods = {
 };
 
 Component<VoiceBarData, Record<string, never>, VoiceBarMethods, VoiceBarCustom>({
+  options: { multipleSlots: true },
   data: {
     voiceState: "idle",
     transcribing: false,
