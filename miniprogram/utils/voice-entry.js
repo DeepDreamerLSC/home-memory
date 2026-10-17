@@ -129,7 +129,7 @@ function ensureVoiceCtrl() {
             clearRecordTimer();
             patch({ transcribing: true, partialText: "识别中…" });
         },
-        onStop: (text) => {
+        onStop: (text, audioTempPath) => {
             clearRecordTimer();
             activeVoiceSession = null; // 语音处理结束,释放会话引用
             patch({ voiceState: "idle", transcribing: false, partialText: text });
@@ -140,15 +140,22 @@ function ensureVoiceCtrl() {
                 return;
             }
             // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认);
-            // 文本回传发起按压的宿主(首页同步 memoText,切「改用文字」输入仍在)
+            // 文本回传发起按压的宿主(首页同步 memoText,切「改用文字」输入仍在;
+            // #3 顺带本次录音临时文件路径,diff sheet「原话已保留 · 可回听」用)
             if (presser !== null && presser.onTranscript) {
-                presser.onTranscript(text);
+                presser.onTranscript(text, audioTempPath);
             }
             // 转写到达先复核发起绑定:按下后家庭切换过(或发起页面已失效),
             // 这句话不属于现在的家庭,不进提取——迟到的语音绝不落进新家庭的草稿
             const binding = pressBinding;
             if (binding !== null && staleBindingReason(binding) !== null) {
                 dropStaleExtract(binding);
+                return;
+            }
+            // #3 可选旁路:presser 自带提取管线(photo 页接 draftEditParse)则移交,
+            // 不建 confirm 会话、不跳页;未声明 → 既有 extractText 现状锁
+            if (presser !== null && typeof presser.routeExtract === "function") {
+                void presser.routeExtract(text, binding === null ? { scopeGen: (0, household_scope_1.captureScopeGeneration)(), abortEpoch: extractAbortEpoch } : binding);
                 return;
             }
             void extractText(text, binding);

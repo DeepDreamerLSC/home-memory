@@ -33,6 +33,54 @@
     <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
   </view>
 
+  <!-- 照片证据回放(#3):照片是历史证据——只说明拍摄当日记录在哪,不冒充当前位置;
+       位置已变更时以文字位置为准、旧照片作证据。拉取失败整卡不渲染(增强露出,静默) -->
+  <view wx:if="{{ evidenceReady && evidence }}" class="ev-card">
+    <!-- 折叠态:压暗缩略条,点开回放 -->
+    <view wx:if="{{ !evidenceOpen }}" class="ev-fold" bindtap="onEvidenceTap">
+      <image wx:if="{{ !evidence.latest.urlFail }}" class="ev-fold-img" src="{{ evidence.latest.photoUrl }}" mode="aspectFill" />
+      <view wx:else class="ev-fold-fail">照片加载失败,点按重试</view>
+      <view class="ev-chip">📍 点开看拍照留证</view>
+    </view>
+    <!-- 展开态:等比 contain 全幅(aspect-ratio 跟随原图,零裁切)+ 黄环脉冲框 + 当时记录角标 -->
+    <block wx:else>
+      <view class="ev-wrap" style="aspect-ratio: {{ evidence.latest.aspect }}" bindtap="onEvidenceTap">
+        <image wx:if="{{ !evidence.latest.urlFail }}" class="ev-img" src="{{ evidence.latest.photoUrl }}" mode="aspectFill" />
+        <view wx:else class="ev-fail">照片加载失败,点按重试</view>
+        <view wx:if="{{ evidence.latest.box && !evidence.latest.urlFail }}" class="ev-box" style="left:{{ evidence.latest.box.left }}%;top:{{ evidence.latest.box.top }}%;width:{{ evidence.latest.box.width }}%;height:{{ evidence.latest.box.height }}%"></view>
+        <view class="ev-ask">{{ evidence.latest.badge }}</view>
+      </view>
+      <view class="ev-meta">
+        <view wx:if="{{ evidence.latest.changed }}" class="ev-changed">位置已变更</view>
+        <view class="ev-sub {{ evidence.latest.changed ? 'moved' : '' }}">{{ evidence.latest.subText }}</view>
+        <view class="ev-acts">
+          <view class="ev-retake" hover-class="ev-retake-hover" hover-stay-time="80" bindtap="onRetakeTap">📸 重拍更新</view>
+          <view wx:if="{{ evidence.olderCount > 0 }}" class="ev-older-toggle" bindtap="onEvidenceOlderToggle">
+            {{ evidenceOlderOpen ? '收起更早照片' : '更早的照片 ' + evidence.olderCount + ' 张' }}
+          </view>
+        </view>
+      </view>
+      <!-- 更早的照片:同物品多次拍照,全部平铺(created_at 降序) -->
+      <view wx:if="{{ evidenceOlderOpen }}" class="ev-older">
+        <view wx:for="{{ evidence.older }}" wx:key="key" class="ev-wrap older" style="aspect-ratio: {{ item.aspect }}">
+          <image wx:if="{{ !item.urlFail }}" class="ev-img" src="{{ item.photoUrl }}" mode="aspectFill" />
+          <view wx:else class="ev-fail">照片加载失败</view>
+          <view wx:if="{{ item.box && !item.urlFail }}" class="ev-box" style="left:{{ item.box.left }}%;top:{{ item.box.top }}%;width:{{ item.box.width }}%;height:{{ item.box.height }}%"></view>
+          <view class="ev-ask">{{ item.badge }}</view>
+        </view>
+      </view>
+    </block>
+  </view>
+  <!-- 拉取成功但没证据行:如实说明只有文字位置,给补拍入口(原型屏⑥ nocard) -->
+  <view wx:elif="{{ evidenceNoPhoto }}" class="ev-none">
+    <view class="ev-none-ico">📷</view>
+    <view class="ev-none-main">
+      <view class="ev-none-t">这件还没拍过照片</view>
+      <view class="ev-none-s">只有文字位置,没有照片留证</view>
+    </view>
+    <view class="ev-none-go" hover-class="ev-none-go-hover" hover-stay-time="80" bindtap="onRetakeTap">去补拍</view>
+  </view>
+
   <!-- 保质期行(#36):有 active 提醒才显示;到了那天出现在「快到期」里,不做任何推送承诺 -->
   <view wx:if="{{ expire }}" class="expire-row">
     <view class="expire-main">

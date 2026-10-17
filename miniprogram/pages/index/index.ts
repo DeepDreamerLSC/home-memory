@@ -6,6 +6,8 @@ import type {
   LocationNodeSummary,
 } from "../../types";
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
+import { getUnfinishedPhotoSession } from "../../utils/photo-session";
+import { pickEvidenceUrls } from "../../utils/evidence-view";
 import {
   countDue,
   dueBannerText,
@@ -62,8 +64,12 @@ function toUnmountedRows(
   }));
 }
 
-/** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用) */
-type DisplayItem = ItemSummary & { updated_at_short: string };
+/** 用于渲染的物品条目(附记录更新日期短文案,H1b 结果与容器条目共用;
+    evidenceUrl = 证据缩略临时链接(#3),有证据的照片行才携带) */
+type DisplayItem = ItemSummary & {
+  updated_at_short: string;
+  evidenceUrl?: string;
+};
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
 interface ViewLayer {
@@ -107,6 +113,11 @@ Page<
     queryError: string;
     /** 未完成草稿会话恢复入口(非空时显示横幅) */
     resumeSession: { sid: string; count: number } | null;
+    /**
+     * 未完成拍照批恢复入口(#3,非空时显示次行横幅,与 resumeSession 并存):
+     * 点进 photo 页带 ?resume=1;按当前家庭作用域键读取(展示前资格复核同上)。
+     */
+    photoResume: { count: number } | null;
     /**
      * 到期横幅(#36,仅家里层显示):remindList 有 active 且(已过期或 7 天内)
      * 才非空;加载失败保持 null 静默(横幅属增强,不影响地图),切换家庭随作用域清。
@@ -178,11 +189,22 @@ Page<
     onTextRecordTap(): void;
     onQueryInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onQueryTap(): Promise<void>;
+    /**
+     * 搜索/找物结果行的证据缩略(#3):结果上屏后按需批量拉一次
+     * photoEvidenceGet(≤10,API 单次上限),有证据的行以照片缩略替代
+     * 首字图标;失败/无证据静默保持纯文字行(增强露出,绝不出错提示)。
+     */
+    attachQueryEvidence(ids: string[], scopeGen: number): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     /** 收起搜索结果,回家里地图 */
     onCollapseResultsTap(): void;
     onResumeTap(): void;
     currentResumeSession(): { sid: string; count: number } | null;
+    /** 拍照批恢复横幅(#3):读当前家庭作用域的未完成拍照会话 */
+    currentPhotoResume(): { count: number } | null;
+    onPhotoResumeTap(): void;
+    /** 拍照识物入口(#3):进 photo 页新批拍照 */
+    onPhotoRecordTap(): void;
     /** 地图当前层加载(X1/X2 与分层缓存、防旧覆盖守卫全在这里) */
     requestSeq: LocationsRequestSeq;
     /** 当前视图层是否已有内容上屏(决定骨架还是轻量刷新) */
@@ -253,6 +275,7 @@ Page<
     queryResults: [],
     queryError: "",
     resumeSession: null as { sid: string; count: number } | null,
+    photoResume: null as { count: number } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
     firstUse: false,
@@ -322,7 +345,10 @@ Page<
     // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
     // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
     void ensureScopeVerified().then(() => {
-      this.setData({ resumeSession: this.currentResumeSession() });
+      this.setData({
+        resumeSession: this.currentResumeSession(),
+        photoResume: this.currentPhotoResume(),
+      });
     });
     // 到期横幅(#36):同样资格复核后拉取;失败静默,不影响地图
     void this.refreshDueBanner();
@@ -459,6 +485,11 @@ Page<
         queryKeyword: q,
         queryResults: toDisplayItems(res.items),
       });
+      // 证据缩略(#3):结果先以纯文字上屏,缩略异步补(失败静默不补)
+      void this.attachQueryEvidence(
+        res.items.map((it) => it.item_id),
+        scopeGen,
+      );
     } catch (e) {
       if (!isScopeGenerationCurrent(scopeGen)) {
         return; // 同上:旧家庭的失败提示也不上屏
@@ -472,6 +503,40 @@ Page<
       });
     } finally {
       this.setData({ querying: false });
+    }
+  },
+
+  /**
+   * 搜索/找物结果行的证据缩略(#3 §6,结构现成的低成本增强):按需批量
+   * photoEvidenceGet(单次 ≤10,超出的行保持纯文字——结果按相关度排序,
+   * 前排优先),每件取最新一张换链成功的临时链接。守卫与查询同源:
+   * 在途家庭切换、用户已收起结果或已发起下一次搜索(queriedScopeGen 变了)
+   * 时绝不回写 queryResults。缩略只是「有留证」的示意,行内位置仍以
+   * 文字记录为准(语义在详情页证据卡展开说明)。
+   */
+  async attachQueryEvidence(ids: string[], scopeGen: number) {
+    const top = ids.slice(0, 10);
+    if (top.length === 0) {
+      return;
+    }
+    try {
+      const res = await callItemsApi({
+        action: "photoEvidenceGet",
+        item_ids: top,
+      });
+      if (
+        !isScopeGenerationCurrent(scopeGen) ||
+        this.queriedScopeGen !== scopeGen
+      ) {
+        return; // 在途家庭切换 / 结果已收起或已换新:不回写
+      }
+      const urls = pickEvidenceUrls(res.evidence, top);
+      const rows = this.data.queryResults.map((r) =>
+        urls[r.item_id] !== undefined ? { ...r, evidenceUrl: urls[r.item_id] } : r,
+      );
+      this.setData({ queryResults: rows });
+    } catch (e) {
+      // 静默:缩略属增强露出,拉不到就保持纯文字行,绝不出错提示
     }
   },
 
@@ -509,6 +574,38 @@ Page<
       return null;
     }
     return { sid: unfinished.sid, count: unfinished.payload.drafts.length };
+  },
+
+  /** 拍照批恢复(#3):按当前家庭作用域键读未完成拍照会话(同硬门 C 口径) */
+  currentPhotoResume() {
+    const unfinished = getUnfinishedPhotoSession();
+    if (unfinished === null) {
+      return null;
+    }
+    return { count: unfinished.rows.length };
+  },
+
+  onPhotoResumeTap() {
+    if (this.data.photoResume === null) {
+      return;
+    }
+    this.setData({ photoResume: null });
+    wx.navigateTo({
+      url: "/pages/photo/photo?resume=1",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** 拍照识物入口(#3):新批拍照(确认前照片不持久化、不写云存储;识别临时传输需首次授权) */
+  onPhotoRecordTap() {
+    wx.navigateTo({
+      url: "/pages/photo/photo",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
   },
 
   /* ---------------- 家庭地图(H1:容器视图整页切换,X1/X2 全守卫) ---------------- */
@@ -1182,7 +1279,7 @@ Page<
       });
       // 与 onShow 同链刷新:上下文头 → 地图(先骨架屏再按新家重载)→ 未完成批次 → 快到期
       this.refreshFamilyChip();
-      this.setData({ resumeSession: this.currentResumeSession() });
+      this.setData({ resumeSession: this.currentResumeSession(), photoResume: this.currentPhotoResume() });
       void this.loadMapLayer();
       void this.refreshDueBanner();
     } catch (e) {

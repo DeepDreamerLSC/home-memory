@@ -133,8 +133,13 @@ export interface VoiceControllerCallbacks {
   onStart(): void;
   /** 录音停止、开始识别(界面可显示"识别中") */
   onTranscribing(): void;
-  /** 最终结果(已清洗;空字符串代表无有效内容) */
-  onStop(text: string): void;
+  /**
+   * 最终结果(已清洗;空字符串代表无有效内容)。
+   * audioTempPath(#3 拍照识物):本次录音的本地临时文件路径(res.tempFilePath
+   * 顺手透传,photo 页 diff sheet 的「原话已保留 · 可回听」用;小程序临时文件,
+   * 本次启动内有效)。可选第二参,既有实现忽略不回归。
+   */
+  onStop(text: string, audioTempPath?: string): void;
   /** 失败(code 见 VOICE_ERROR_MESSAGES) */
   onError(code: string, message: string): void;
 }
@@ -247,7 +252,7 @@ export function createVoiceController(
           at: new Date().toISOString(),
         });
         if (result.ok) {
-          callbacks.onStop(text);
+          callbacks.onStop(text, res.tempFilePath);
         } else if (result.error === "INVALID_INPUT") {
           callbacks.onError("RECORD_TOO_SHORT", voiceErrorMessage("RECORD_TOO_SHORT"));
         } else {

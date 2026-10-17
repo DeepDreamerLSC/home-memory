@@ -4,6 +4,7 @@ exports.ApiError = exports.CLIENT_BAD_RESPONSE = exports.CLIENT_NETWORK = export
 exports.isApiError = isApiError;
 exports.callItemsApi = callItemsApi;
 exports.callExtractDraft = callExtractDraft;
+exports.callDraftEditParse = callDraftEditParse;
 exports.uuid = uuid;
 exports.formatDateTime = formatDateTime;
 exports.errorMessage = errorMessage;
@@ -46,6 +47,10 @@ const ITEMS_API_MESSAGES = {
     FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
     FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
     HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
+    /** PR #67 B1:photoCommit 会话家庭与当前派生家庭不一致(服务端 message 优先) */
+    SCOPE_MISMATCH: "家庭已切换,本批未保存",
+    /** PR #67 C3:photoEvidenceRetry 单件证据写入失败(服务端 message 优先) */
+    EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
 };
 const EXTRACT_DRAFT_MESSAGES = {
     AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
@@ -163,6 +168,52 @@ function validateItemsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "photoCommit":
+            // 拍照识物批量建档(#3):逐行回执形状门——index 数值 + ok 布林必须齐,
+            // 失败行 error 文案可选;残缺响应整次抛错,绝不半带部分件。
+            // PR #67 C3:evidence_failed(证据写入失败的 item_id 列表)可选携带,
+            // 携带时必须是字符串数组
+            if (!Array.isArray(r.results) ||
+                !r.results.every((row) => isRecord(row) &&
+                    typeof row.index === "number" &&
+                    typeof row.ok === "boolean" &&
+                    (row.error === undefined || typeof row.error === "string")) ||
+                (r.evidence_failed !== undefined &&
+                    (!Array.isArray(r.evidence_failed) ||
+                        !r.evidence_failed.every((id) => typeof id === "string")))) {
+                throw bad();
+            }
+            break;
+        case "photoEvidenceRetry":
+            // 证据幂等重试关联(PR #67 C3):逐行回执形状门——index/item_id/ok 必须
+            // 齐,error 可选;残缺响应整次抛错
+            if (!Array.isArray(r.results) ||
+                !r.results.every((row) => isRecord(row) &&
+                    typeof row.index === "number" &&
+                    typeof row.item_id === "string" &&
+                    typeof row.ok === "boolean" &&
+                    (row.error === undefined || typeof row.error === "string"))) {
+                throw bad();
+            }
+            break;
+        case "photoEvidenceGet":
+            // 证据行形状门(#3):box null 或四值 0-1;换链失败 photo_url 为空串也合法
+            if (!Array.isArray(r.evidence) ||
+                !r.evidence.every((row) => isRecord(row) &&
+                    typeof row.item_id === "string" &&
+                    typeof row.file_id === "string" &&
+                    typeof row.photo_url === "string" &&
+                    typeof row.img_w === "number" &&
+                    typeof row.img_h === "number" &&
+                    typeof row.captured_location_text === "string" &&
+                    typeof row.created_at === "string" &&
+                    (row.source === "vl" || row.source === "circle") &&
+                    (row.box === null ||
+                        (isRecord(row.box) &&
+                            [row.box.x1, row.box.y1, row.box.x2, row.box.y2].every((n) => typeof n === "number" && n >= 0 && n <= 1))))) {
+                throw bad();
+            }
+            break;
         case "remindList":
             // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
             // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
@@ -184,7 +235,7 @@ function validateItemsOkResponse(action, r) {
             break;
     }
 }
-/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定;#36 提醒写操作同走硬门) */
+/** itemsApi 写类 action(P1-B F2:自动拼装作用域一致性绑定;#36 提醒写操作同走硬门;#3 photoCommit/photoEvidenceRetry 同走) */
 const ITEMS_MUTATING_ACTIONS = new Set([
     "create",
     "update",
@@ -192,13 +243,18 @@ const ITEMS_MUTATING_ACTIONS = new Set([
     "remindComplete",
     "remindClear",
     "remindSet",
+    "photoCommit",
+    "photoEvidenceRetry",
 ]);
 async function callItemsApi(event) {
     // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision
     // (来自 household-scope 捕获的服务端权威作用域;未捕获时不编造,旧云函数窗口
-    // 与 0.4.7 单人行为逐字节一致)
+    // 与 0.4.7 单人行为逐字节一致)。PR #67 B1:显式携带在 event 里的
+    // expected_household_id(拍照会话开批时捕获的会话家庭)优先于自动 marker——
+    // 自动 marker 取的是**提交时刻**的当前作用域,会覆盖会话绑定导致中途切家后
+    // 旧批误写新家庭;event 字段后展开即优先(其余 action 均不显式携带,零回归)
     const payload = ITEMS_MUTATING_ACTIONS.has(event.action)
-        ? { ...event, ...(0, household_scope_1.scopeWriteMarkers)() }
+        ? Object.assign({}, (0, household_scope_1.scopeWriteMarkers)(), event)
         : event;
     let result;
     try {
@@ -222,10 +278,13 @@ async function callItemsApi(event) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     validateItemsOkResponse(event.action, result);
-    if (event.action === "list" || event.action === "remindList") {
+    if (event.action === "list" ||
+        event.action === "remindList" ||
+        event.action === "photoEvidenceGet") {
         // issue #34 P0/P1-B:从 list / remindList 响应捕获服务端解析的家庭作用域
         // (household_id 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
         // 把家庭切换显式接入 locations-cache 既有失效代数(F2);
+        // photoEvidenceGet(#3)同款收口(响应带 household_id/scope_revision);
         // 非法/缺省静默忽略,保持回退值(旧云函数窗口与单人阶段行为不变)
         if ((0, household_scope_1.captureHouseholdId)(result.household_id, result.scope_revision)) {
             (0, locations_cache_1.clearLocationsCache)();
@@ -233,7 +292,8 @@ async function callItemsApi(event) {
     }
     if (event.action === "create" ||
         event.action === "update" ||
-        event.action === "delete") {
+        event.action === "delete" ||
+        event.action === "photoCommit") {
         // 物品写入会影响空间树各层数据(create 影响「未归位」计数,update/delete
         // 影响层级物品摘要):整树缓存失效,失效收口在 API 层(issue #23)
         (0, locations_cache_1.clearLocationsCache)();
@@ -325,6 +385,118 @@ async function callExtractDraft(text, opts) {
             certain: draft.certain,
             qualifiers: draft.qualifiers.filter((q) => typeof q === "string"),
         },
+    };
+}
+/** draftEditParse edits 行的 field 白名单(与服务端硬门同源) */
+const DRAFT_EDIT_FIELDS = new Set(["name", "qty_note", "location"]);
+/**
+ * 拍照识物语音受限编辑解析(#3,IMPLEMENTATION.md §1.2/§4.3 ②):
+ * 调 extractDraft.draftEditParse 并做五分支结构校验(intent 是判别字段)。
+ * 服务端已保证:field 白名单/needs_pick 与 edits 互斥/target.draft_id ∈ candidates
+ * ——客户端只做形状门(残缺响应整体抛 CLIENT_BAD_RESPONSE,绝不半带)。
+ * 超时 30000(服务端 LLM 20s+ 余量,与 callExtractDraft 同款)。
+ * 本函数绝不触任何写:返回的 edits 只作用于客户端本地拍照草稿。
+ */
+async function callDraftEditParse(event) {
+    const result = await callCloudFunction(EXTRACT_DRAFT_FUNCTION, event, EXTRACT_DRAFT_TIMEOUT_MS);
+    if (!isRecord(result)) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    if (result.ok === false) {
+        throw toServerError(result.error, result.message, EXTRACT_DRAFT_MESSAGES);
+    }
+    if (result.ok !== true) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const intent = result.intent;
+    const picksValid = Array.isArray(result.picks) &&
+        result.picks.every((p) => isRecord(p) && typeof p.draft_id === "string" && typeof p.name === "string");
+    if (!picksValid) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const picks = result.picks.map((p) => ({
+        draft_id: p.draft_id,
+        name: p.name,
+    }));
+    if (intent === "add") {
+        if (!isRecord(result.added) || typeof result.added.name !== "string") {
+            throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+        }
+        return {
+            ok: true,
+            engine: typeof result.engine === "string" ? result.engine : "",
+            intent: "add",
+            added: {
+                name: result.added.name,
+                qty_note: typeof result.added.qty_note === "string" ? result.added.qty_note : "",
+            },
+            needs_pick: false,
+            picks,
+        };
+    }
+    if (intent === "batch_location") {
+        if (typeof result.new_location !== "string" || result.new_location.trim() === "") {
+            throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+        }
+        return {
+            ok: true,
+            engine: typeof result.engine === "string" ? result.engine : "",
+            intent: "batch_location",
+            new_location: result.new_location,
+            needs_pick: false,
+            picks,
+        };
+    }
+    if (intent === "none") {
+        return {
+            ok: true,
+            engine: typeof result.engine === "string" ? result.engine : "",
+            intent: "none",
+            needs_pick: false,
+            picks,
+        };
+    }
+    if (intent !== "edit") {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    // intent="edit":target(可 null) + edits(0-3 行,field 白名单/new 非空)
+    if (result.needs_pick !== true && result.needs_pick !== false) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const target = result.target === null || result.target === undefined
+        ? null
+        : isRecord(result.target) && typeof result.target.draft_id === "string"
+            ? {
+                draft_id: result.target.draft_id,
+                matched_word: typeof result.target.matched_word === "string" ? result.target.matched_word : "",
+            }
+            : null;
+    if (!Array.isArray(result.edits)) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const edits = [];
+    for (const e of result.edits) {
+        if (!isRecord(e) ||
+            typeof e.field !== "string" ||
+            !DRAFT_EDIT_FIELDS.has(e.field) ||
+            typeof e.new !== "string" ||
+            e.new.trim() === "") {
+            throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+        }
+        edits.push({
+            field: e.field,
+            new: e.new,
+            old: typeof e.old === "string" ? e.old : "",
+        });
+    }
+    return {
+        ok: true,
+        engine: typeof result.engine === "string" ? result.engine : "",
+        intent: "edit",
+        target,
+        edits,
+        needs_pick: result.needs_pick === true,
+        picks,
     };
 }
 /** 生成 operation_id(uuid v4 形态,36 位,满足契约 ≤64) */

@@ -6,6 +6,7 @@ const locations_api_1 = require("../../utils/locations-api");
 const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
+const evidence_view_1 = require("../../utils/evidence-view");
 const subscribe_1 = require("../../utils/subscribe");
 const notify_accepted_1 = require("../../utils/notify-accepted");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
@@ -88,6 +89,11 @@ Page({
         vagueQuote: "",
         conflicts: [],
         conflictPending: false,
+        evidenceReady: false,
+        evidenceNoPhoto: false,
+        evidenceOpen: false,
+        evidenceOlderOpen: false,
+        evidence: null,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -174,6 +180,9 @@ Page({
         if (!this.hasRemindConflict() && this.pendingRemindWrite() === null) {
             void this.refreshReminderRow();
         }
+        // 照片证据回放卡(#3 §6):进页/回页拉取;applySummary/update 后不自动重拉
+        //(onShow 再拉)。失败静默(增强露出,不影响详情主体)
+        void this.refreshEvidence();
     },
     onNameInput(e) {
         const value = e.detail && e.detail.value ? e.detail.value : "";
@@ -1641,6 +1650,86 @@ Page({
         finally {
             this.setData({ remindBusy: false });
         }
+    },
+    /* ---------------- 照片证据回放(#3 §6) ---------------- */
+    /**
+     * 拉当前家庭这件的照片证据行(只取数,不上屏):经 households 资格复核后
+     * 捕获作用域代数,响应回来复核——在途家庭切换时旧家庭证据不上屏;
+     * 复核失败或加载失败返回 undefined,调用方静默(证据是增强露出,
+     * fetchReminderRow 同款口径:绝不把旧家庭/失败当作「无证据」)。
+     */
+    async fetchEvidenceRows() {
+        if (!this.data.itemId) {
+            return undefined;
+        }
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+        }
+        catch (e) {
+            return undefined; // 复核失败:静默,证据卡不渲染
+        }
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
+        try {
+            const res = await (0, api_1.callItemsApi)({
+                action: "photoEvidenceGet",
+                item_ids: [this.data.itemId],
+            });
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
+                return undefined; // 在途期间家庭已切换:旧家庭响应不可用
+            }
+            return res.evidence;
+        }
+        catch (e) {
+            return undefined; // 静默:详情主体照常
+        }
+    },
+    /**
+     * 刷新证据卡:先收起旧卡(家庭切换/换物品后冷启动,展示前不得残留旧
+     * 作用域证据),再拉取。有行 → mapEvidenceView 派生渲染视图(「位置已
+     * 变更」按当前表单位置文本判定);无行 → 只显「去补拍」;失败 → 整卡
+     * 不渲染。文案纪律:照片是历史证据,只说明拍摄当日记录在哪,绝不冒充
+     * 当前位置——位置已变更时以文字位置为准,旧照片仅作证据。
+     */
+    async refreshEvidence() {
+        this.setData({
+            evidenceReady: false,
+            evidenceNoPhoto: false,
+            evidenceOpen: false,
+            evidenceOlderOpen: false,
+            evidence: null,
+        });
+        const rows = await this.fetchEvidenceRows();
+        if (rows === undefined) {
+            return;
+        }
+        if (rows.length === 0) {
+            this.setData({ evidenceNoPhoto: true });
+            return;
+        }
+        this.setData({
+            evidenceReady: true,
+            evidence: (0, evidence_view_1.mapEvidenceView)(rows, this.data.locationText),
+        });
+    },
+    onEvidenceTap() {
+        if (this.data.evidence !== null && this.data.evidence.latest.urlFail) {
+            // 换链失败(file_id 仍在):点按 = 重新调 photoEvidenceGet 重试
+            void this.refreshEvidence();
+            return;
+        }
+        this.setData({ evidenceOpen: !this.data.evidenceOpen });
+    },
+    onEvidenceOlderToggle() {
+        this.setData({ evidenceOlderOpen: !this.data.evidenceOlderOpen });
+    },
+    onRetakeTap() {
+        // 重拍更新 / 去补拍:进拍照页开新一批(不带恢复参数,§6.4)
+        wx.navigateTo({
+            url: "/pages/photo/photo",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
     },
     noop() { },
 });

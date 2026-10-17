@@ -67,6 +67,12 @@ exports.main = async function (event) {
     // expected_household_id + expected_scope_revision;个人家庭维持宽松口径
     householdShared: resolved.shared === true,
     scopeRevision: resolved.shared === true ? resolved.scopeRevision : null,
+    // 拍照识物(#3):photoEvidenceGet 按需把云存储 fileID 换成临时 https 链接
+    // (跨成员读一律走云函数,云存储默认仅创建者可读写);查询异常由 handler
+    // 按 §1.4 降级为空链接,绝不废整个查询。
+    getTempFileUrls: function (fileIds) {
+      return cloud.getTempFileURL({ fileList: fileIds });
+    },
     logger: makeLogger()
   };
   return handler(event, deps);

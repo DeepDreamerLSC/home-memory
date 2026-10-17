@@ -37,7 +37,14 @@ import type {
   ConflictField,
   EditableField,
 } from "../../utils/conflict";
-import type { ItemSummary, RemindKind, RemindRow } from "../../types";
+import type {
+  ItemSummary,
+  PhotoEvidenceRow,
+  RemindKind,
+  RemindRow,
+} from "../../types";
+import { mapEvidenceView } from "../../utils/evidence-view";
+import type { EvidenceView } from "../../utils/evidence-view";
 import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
   clearNotifyAccepted,
@@ -196,6 +203,20 @@ Page<
     conflicts: ConflictEntry[];
     /** 存在未选择的冲突字段时禁止再次保存(按钮禁用 + 双保险门禁) */
     conflictPending: boolean;
+    /**
+     * 照片证据回放卡(#3 §6):拉取成功且有证据行才为 true(折叠条默认);
+     * 拉取失败静默 false(整卡不渲染,证据是增强露出,绝不打扰详情主体)。
+     * 照片是历史证据:只说明「拍摄于某日 · 当时记录在哪」,绝不冒充当前位置。
+     */
+    evidenceReady: boolean;
+    /** 拉取成功但无证据行:显示「去补拍」行(原型屏⑥ nocard);失败时不显示 */
+    evidenceNoPhoto: boolean;
+    /** 证据卡展开态(折叠为常态,点照片条展开回放) */
+    evidenceOpen: boolean;
+    /** 「更早的照片 N 张」列表展开(同一物品多次拍照,§6.5) */
+    evidenceOlderOpen: boolean;
+    /** 证据卡渲染视图(mapEvidenceView 派生;evidenceReady 才有意义) */
+    evidence: EvidenceView | null;
   },
   {
     original: { name: string; location: string; note: string };
@@ -297,6 +318,15 @@ Page<
     onRemindDateChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): Promise<void>;
     /** 编辑折叠「提醒」:✕ 连日期一起清除(remindClear;不存在存日期但不提醒) */
     onRemindFieldClear(): Promise<void>;
+    /* ---------------- 照片证据回放(#3 §6) ---------------- */
+    fetchEvidenceRows(): Promise<PhotoEvidenceRow[] | undefined>;
+    refreshEvidence(): Promise<void>;
+    /** 折叠条点开 / 展开态点收起;换链失败(urlFail)时点按 = 重新拉取重试 */
+    onEvidenceTap(): void;
+    /** 「更早的照片 N 张」列表展开 / 收起 */
+    onEvidenceOlderToggle(): void;
+    /** 「📸 重拍更新 / 去补拍」:进拍照页开新一批(不带恢复参数) */
+    onRetakeTap(): void;
   }
 >({
   data: {
@@ -335,6 +365,11 @@ Page<
     vagueQuote: "",
     conflicts: [] as ConflictEntry[],
     conflictPending: false,
+    evidenceReady: false,
+    evidenceNoPhoto: false,
+    evidenceOpen: false,
+    evidenceOlderOpen: false,
+    evidence: null as EvidenceView | null,
   },
 
   /** 最近一次加载到的内容,用于判断是否有修改 */
@@ -431,6 +466,9 @@ Page<
     if (!this.hasRemindConflict() && this.pendingRemindWrite() === null) {
       void this.refreshReminderRow();
     }
+    // 照片证据回放卡(#3 §6):进页/回页拉取;applySummary/update 后不自动重拉
+    //(onShow 再拉)。失败静默(增强露出,不影响详情主体)
+    void this.refreshEvidence();
   },
 
   onNameInput(e) {
@@ -1928,6 +1966,90 @@ Page<
     } finally {
       this.setData({ remindBusy: false });
     }
+  },
+
+  /* ---------------- 照片证据回放(#3 §6) ---------------- */
+
+  /**
+   * 拉当前家庭这件的照片证据行(只取数,不上屏):经 households 资格复核后
+   * 捕获作用域代数,响应回来复核——在途家庭切换时旧家庭证据不上屏;
+   * 复核失败或加载失败返回 undefined,调用方静默(证据是增强露出,
+   * fetchReminderRow 同款口径:绝不把旧家庭/失败当作「无证据」)。
+   */
+  async fetchEvidenceRows(): Promise<PhotoEvidenceRow[] | undefined> {
+    if (!this.data.itemId) {
+      return undefined;
+    }
+    try {
+      await ensureScopeVerified();
+    } catch (e) {
+      return undefined; // 复核失败:静默,证据卡不渲染
+    }
+    const scopeGen = captureScopeGeneration();
+    try {
+      const res = await callItemsApi({
+        action: "photoEvidenceGet",
+        item_ids: [this.data.itemId],
+      });
+      if (!isScopeGenerationCurrent(scopeGen)) {
+        return undefined; // 在途期间家庭已切换:旧家庭响应不可用
+      }
+      return res.evidence;
+    } catch (e) {
+      return undefined; // 静默:详情主体照常
+    }
+  },
+
+  /**
+   * 刷新证据卡:先收起旧卡(家庭切换/换物品后冷启动,展示前不得残留旧
+   * 作用域证据),再拉取。有行 → mapEvidenceView 派生渲染视图(「位置已
+   * 变更」按当前表单位置文本判定);无行 → 只显「去补拍」;失败 → 整卡
+   * 不渲染。文案纪律:照片是历史证据,只说明拍摄当日记录在哪,绝不冒充
+   * 当前位置——位置已变更时以文字位置为准,旧照片仅作证据。
+   */
+  async refreshEvidence(): Promise<void> {
+    this.setData({
+      evidenceReady: false,
+      evidenceNoPhoto: false,
+      evidenceOpen: false,
+      evidenceOlderOpen: false,
+      evidence: null,
+    });
+    const rows = await this.fetchEvidenceRows();
+    if (rows === undefined) {
+      return;
+    }
+    if (rows.length === 0) {
+      this.setData({ evidenceNoPhoto: true });
+      return;
+    }
+    this.setData({
+      evidenceReady: true,
+      evidence: mapEvidenceView(rows, this.data.locationText),
+    });
+  },
+
+  onEvidenceTap() {
+    if (this.data.evidence !== null && this.data.evidence.latest.urlFail) {
+      // 换链失败(file_id 仍在):点按 = 重新调 photoEvidenceGet 重试
+      void this.refreshEvidence();
+      return;
+    }
+    this.setData({ evidenceOpen: !this.data.evidenceOpen });
+  },
+
+  onEvidenceOlderToggle() {
+    this.setData({ evidenceOlderOpen: !this.data.evidenceOlderOpen });
+  },
+
+  onRetakeTap() {
+    // 重拍更新 / 去补拍:进拍照页开新一批(不带恢复参数,§6.4)
+    wx.navigateTo({
+      url: "/pages/photo/photo",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
   },
 
   noop() {},

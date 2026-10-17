@@ -53,8 +53,9 @@ export type VoiceEntryStatePhase = "idle" | "recording" | "cancelPending";
 /**
  * 一次提取的发起绑定(PR #48 复审 B1):语音按下(或文字直提发起)那一刻的
  * 家庭代数与提取作废代数。后续每个异步步骤回来都与之比对,不一致=迟到,丢弃。
+ * (#3 导出:photo 页 routeExtract 宿主接管提取管线时,用同一绑定做迟到复核。)
  */
-interface ExtractBinding {
+export interface ExtractBinding {
   /** 发起时的作用域代数(家庭切换/漂移由既有 capture 系列递增) */
   scopeGen: number;
   /** 发起时的提取作废代数(invalidate 递增:发起页面已失效) */
@@ -88,8 +89,21 @@ export interface VoiceEntryHost {
   onStateChange(state: VoiceEntryState): void;
   /** 本宿主发起的按压,录音授权被拒且用户选「用文字」的回退 */
   fallbackToText(entry: VoiceEntryActions): void;
-  /** 本宿主按压得到的有效转写文本(首页同步 memoText:切文字模式不丢输入;可选) */
-  onTranscript?(text: string): void;
+  /**
+   * 本宿主按压得到的有效转写文本(首页同步 memoText:切文字模式不丢输入;可选)。
+   * audioTempPath(#3):本次录音的本地临时文件路径(diff sheet「原话可回听」用;
+   * 小程序临时文件,本次启动内有效)。可选第二参,既有实现忽略不回归。
+   */
+  onTranscript?(text: string, audioTempPath?: string): void;
+  /**
+   * 自带提取管线的宿主旁路(#3 拍照识物,现状锁的可选出口):
+   * 声明了本方法的宿主,有效转写且发起绑定复核通过后走它(photo 页接
+   * draftEditParse,不建 confirm 会话、不跳页);未声明 → 走既有 extractText
+   * (提取→建草稿会话→跳确认页,行为逐字节一致)。voice-entry 不做三选门。
+   * 迟到复核责任在宿主:响应回来后按 binding.scopeGen/abortEpoch 自查
+   * (isScopeGenerationCurrent + 页面自有代数)。
+   */
+  routeExtract?(text: string, binding: ExtractBinding): Promise<void>;
 }
 
 /** 语音入口动作(宿主接线触摸/文字提取用) */
@@ -218,7 +232,7 @@ function ensureVoiceCtrl(): void {
         clearRecordTimer();
         patch({ transcribing: true, partialText: "识别中…" });
       },
-      onStop: (text) => {
+      onStop: (text, audioTempPath) => {
         clearRecordTimer();
         activeVoiceSession = null; // 语音处理结束,释放会话引用
         patch({ voiceState: "idle", transcribing: false, partialText: text });
@@ -229,15 +243,22 @@ function ensureVoiceCtrl(): void {
           return;
         }
         // 转写完成 → 自动进入既有提取链路(录音→转写→AI提取→确认);
-        // 文本回传发起按压的宿主(首页同步 memoText,切「改用文字」输入仍在)
+        // 文本回传发起按压的宿主(首页同步 memoText,切「改用文字」输入仍在;
+        // #3 顺带本次录音临时文件路径,diff sheet「原话已保留 · 可回听」用)
         if (presser !== null && presser.onTranscript) {
-          presser.onTranscript(text);
+          presser.onTranscript(text, audioTempPath);
         }
         // 转写到达先复核发起绑定:按下后家庭切换过(或发起页面已失效),
         // 这句话不属于现在的家庭,不进提取——迟到的语音绝不落进新家庭的草稿
         const binding = pressBinding;
         if (binding !== null && staleBindingReason(binding) !== null) {
           dropStaleExtract(binding);
+          return;
+        }
+        // #3 可选旁路:presser 自带提取管线(photo 页接 draftEditParse)则移交,
+        // 不建 confirm 会话、不跳页;未声明 → 既有 extractText 现状锁
+        if (presser !== null && typeof presser.routeExtract === "function") {
+          void presser.routeExtract(text, binding === null ? { scopeGen: captureScopeGeneration(), abortEpoch: extractAbortEpoch } : binding);
           return;
         }
         void extractText(text, binding);

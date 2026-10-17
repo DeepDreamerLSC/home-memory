@@ -46,7 +46,16 @@ var ERROR_MESSAGES = {
   UNAUTHORIZED: "请先登录",
   OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
   FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
-  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试"
+  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
+  // PR #67 B1:photoCommit 会话家庭(客户端开批时捕获的 expected_household_id)
+  // 与服务端当前派生家庭不一致——零写入,客户端终止会话,绝不改投当前家庭
+  SCOPE_MISMATCH: "家庭已切换,本批未保存",
+  // PR #67 B2:photo 的 file_id 云存储路径前缀不属于当前派生家庭——零写入,
+  // 他家/来路不明的照片绝不落进本家庭的证据行
+  FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存",
+  // PR #67 C3:photoEvidenceRetry 单件证据写入失败(非唯一索引冲突的基础设施
+  // 错误)——物品已建、证据行未落,可幂等重试
+  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试"
 };
 
 function fail(error) {
@@ -2022,6 +2031,523 @@ async function claimNextForSet(deps, itemId, reminder) {
   return null;
 }
 
+// ---------- 拍照识物(#3):photo_evidence 证据集合 + photoCommit/photoEvidenceGet ----------
+//
+// 语义(IMPLEMENTATION §1.3/§1.4/§1.5/§2):
+// - photoCommit:批量建档——逐件直接复用既有 createItem(幂等/提醒 slot 全套
+//   白拿)+ 落 photo_evidence 证据行(item_id/photo file_id/0-1 box/原图宽高/
+//   拍摄时位置文本)。**部分成功语义**:纯参数校验失败整批 INVALID_INPUT 零写入;
+//   运行期单件失败(OPERATION_CONFLICT 等)只进该件 results 失败项,不拦其余件
+//   (一次确认不是数据库原子事务,与 miniprogram/utils/batch-save.ts 逐行哲学一致,
+//   保存前已有最终确认弹层过目);PR #67 C3:证据写入失败不回滚不掩盖——item_id
+//   进响应 evidence_failed,物品保留、其余件继续,客户端走 photoEvidenceRetry
+//   幂等重试关联;
+// - photoEvidenceRetry(C3):{file_id, img_w, img_h, items:[{item_id, box?, source?}]}
+//   ——file_id 归属验证(B2 同款)+ 逐件作用域内存活重验后补插证据行,唯一索引
+//   冲突(E11000)=已存在=成功,幂等;
+// - photoEvidenceGet:按 item_ids 批量查证据(AND 等值查询,不引入 db.command.in,
+//   与 tests/helpers/memoryDb 的等值匹配语义兼容),每件 created_at 降序前 3,
+//   汇总去重 file_id 经 deps.getTempFileUrls 换临时链接(跨成员读一律走云函数,
+//   云存储默认仅创建者可读写);单文件换链失败该行 photo_url:"" 绝不废整个查询;
+// - 证据行不做删除/编辑(证据只增;物品删除不级联清证据——证据是历史事实);
+// - household_id 一律来自服务端解析(deps),绝不来自 event;photoCommit 与
+//   photoEvidenceRetry 进 WRITE_ACTIONS(共享家庭双 marker 硬门与 create 同款)。
+
+var PHOTO_EVIDENCE_COLLECTION = "photo_evidence";
+var PHOTO_COMMIT_ITEMS_MAX = 10;
+var PHOTO_BATCH_ID_MIN = 8;
+var PHOTO_BATCH_ID_MAX = 64;
+var PHOTO_FILE_ID_MAX = 512;
+var PHOTO_IMG_DIM_MAX = 10000;
+var PHOTO_EVIDENCE_PER_ITEM = 3;
+var PHOTO_SOURCES = ["vl", "circle"];
+/** 客户端上传路径约定前缀(PR #67 B2):photo-evidence/<household_id>/<时间戳>-<随机>.jpg */
+var PHOTO_CLOUD_PATH_PREFIX = "photo-evidence/";
+
+function photoEvidence(deps) {
+  return deps.db.collection(PHOTO_EVIDENCE_COLLECTION);
+}
+
+/** created_at 降序(ISO 字符串按字典序比较,同 byUpdatedDesc 口径) */
+function byCreatedDesc(a, b) {
+  if (a.created_at === b.created_at) {
+    return 0;
+  }
+  return a.created_at < b.created_at ? 1 : -1;
+}
+
+/**
+ * box 入参校验(§1.3 形状门,photoCommit 与 photoEvidenceRetry 共用):
+ * 未携带 → null(合法,无框/手动行);携带时四值有限数 ∈[0,1] 且 x2>x1、y2>y1;
+ * 非法 → "INVALID"。
+ */
+function parseBoxInput(box) {
+  if (box === undefined || box === null) {
+    return null;
+  }
+  if (typeof box !== "object" || Array.isArray(box)) {
+    return "INVALID";
+  }
+  var keys = ["x1", "y1", "x2", "y2"];
+  var cleaned = {};
+  for (var i = 0; i < keys.length; i++) {
+    var v = box[keys[i]];
+    if (typeof v !== "number" || !isFinite(v) || v < 0 || v > 1) {
+      return "INVALID";
+    }
+    cleaned[keys[i]] = v;
+  }
+  if (!(cleaned.x2 > cleaned.x1) || !(cleaned.y2 > cleaned.y1)) {
+    return "INVALID";
+  }
+  return cleaned;
+}
+
+/**
+ * 校验 photoCommit 单件的 photo 入参(§1.3 形状门,纯参数校验):
+ * 返回 null(未带照片,合法)/ "INVALID" / 规范化对象 { file_id, img_w, img_h, box|null, source }。
+ * box 为 null 合法(无框/手动行);携带时四值有限数 ∈[0,1] 且 x2>x1、y2>y1。
+ */
+function parsePhotoInput(photo) {
+  if (photo === undefined || photo === null) {
+    return null;
+  }
+  if (typeof photo !== "object" || Array.isArray(photo)) {
+    return "INVALID";
+  }
+  if (!isString(photo.file_id) || photo.file_id.length < 1 || photo.file_id.length > PHOTO_FILE_ID_MAX) {
+    return "INVALID";
+  }
+  if (!Number.isInteger(photo.img_w) || photo.img_w < 1 || photo.img_w > PHOTO_IMG_DIM_MAX) {
+    return "INVALID";
+  }
+  if (!Number.isInteger(photo.img_h) || photo.img_h < 1 || photo.img_h > PHOTO_IMG_DIM_MAX) {
+    return "INVALID";
+  }
+  var box = parseBoxInput(photo.box);
+  if (box === "INVALID") {
+    return "INVALID";
+  }
+  if (PHOTO_SOURCES.indexOf(photo.source) === -1) {
+    return "INVALID";
+  }
+  return { file_id: photo.file_id, img_w: photo.img_w, img_h: photo.img_h, box: box, source: photo.source };
+}
+
+/**
+ * PR #67 B2:file_id 归属验证。解析 fileID 携带的云存储路径
+ * (cloud://<env>.<bucket>/<path> 形态),路径前缀必须等于
+ * photo-evidence/<当前派生家庭 household_id>/——他家前缀/来路不明的照片
+ * 绝不落进本家庭证据行。返回 null=放行;"INVALID"=路径解析不出来
+ * (非 cloud:// 形态/无路径段/含 "..",按参数形状错拒绝);
+ * "FILE_NOT_OWNED"=前缀不属于当前派生家庭。纯函数、发生在任何写入之前。
+ */
+function checkPhotoFileIdOwnership(deps, fileId) {
+  var path = null;
+  if (isString(fileId) && fileId.indexOf("cloud://") === 0) {
+    var rest = fileId.slice("cloud://".length);
+    var slash = rest.indexOf("/");
+    if (slash !== -1) {
+      var candidate = rest.slice(slash + 1);
+      if (candidate.length > 0 && candidate.indexOf("..") === -1) {
+        path = candidate;
+      }
+    }
+  }
+  if (path === null) {
+    return "INVALID";
+  }
+  if (path.indexOf(PHOTO_CLOUD_PATH_PREFIX + deps.householdId + "/") !== 0) {
+    return "FILE_NOT_OWNED";
+  }
+  return null;
+}
+
+/**
+ * 证据行落库(§1.3 步骤 3/5):
+ * - 已有 (household_id, item_id, file_id) 行 → 跳过返回 false(原键重放幂等,
+ *   证据行不重复);
+ * - add 撞唯一索引(E11000)→ 回查确认存在即当已保存返回 true(并发孪生收敛,
+ *   同 createItem 的 isDuplicateKeyError 模式);回查不到属异常,按原始错误上抛
+ *   绝不假装成功;
+ * - captured_location_text 取本件刚提交的 location_text(回放比对「位置已变更」
+ *   的依据)。
+ */
+async function savePhotoEvidence(deps, itemId, photo, locationText) {
+  var pre = await photoEvidence(deps)
+    .where({ household_id: deps.householdId, item_id: itemId, file_id: photo.file_id })
+    .get();
+  if (pre.data && pre.data.length > 0) {
+    return false;
+  }
+  var doc = {
+    _id: "pe_" + deps.genId(),
+    household_id: deps.householdId,
+    item_id: itemId,
+    file_id: photo.file_id,
+    box: photo.box,
+    img_w: photo.img_w,
+    img_h: photo.img_h,
+    source: photo.source,
+    captured_location_text: locationText,
+    created_at: deps.now()
+  };
+  try {
+    await photoEvidence(deps).add({ data: doc });
+    return true;
+  } catch (e) {
+    if (!isDuplicateKeyError(e)) {
+      throw e;
+    }
+    var twin = await photoEvidence(deps)
+      .where({ household_id: deps.householdId, item_id: itemId, file_id: photo.file_id })
+      .get();
+    if (twin.data && twin.data.length > 0) {
+      return true;
+    }
+    throw e;
+  }
+}
+
+/**
+ * photoCommit:入参 { action, batch_id(8-64,仅日志聚合口径,不落库), items: 1-10 件 }。
+ * 逐件 { operation_id, name, location_text, note?, reminder?, photo? }——参数校验
+ * 复用 create 的全部形状门(cleanRequired/cleanOptional/parseReminderInput +
+ * photo 形状门);任一件参数非法 → 整批 INVALID_INPUT 零写入(参数错误是客户端
+ * bug,不是运行期冲突)。逐件执行直接调既有 createItem:幂等(operation_id 同键
+ * 同内容 duplicated)、并发重放收敛、提醒 slot 全套语义白拿;createItem 失败只进
+ * 该件 results 失败项,不拦其余件。photo_evidence 唯一索引 (household_id,
+ * item_id, file_id) 保证重放/并发不重(证据只增)。
+ * PR #67 C3:证据写入失败=部分成功语义——createItem 成功后 savePhotoEvidence
+ * 抛错(非唯一索引冲突的基础设施错误)不回滚物品、不掩盖、不废整批:该 item_id
+ * 进响应 evidence_failed 列表,其余件照常推进,全部建完后整体成功返回;客户端
+ * 凭 evidence_failed 走 photoEvidenceRetry 幂等重试关联。重试整批 photoCommit 会
+ * 撞同键 duplicated(物品不重建),但会再次尝试证据行——evidence_failed 是唯一
+ * 如实的收敛出口。
+ */
+async function photoCommitItem(event, deps) {
+  var batchId = event.batch_id;
+  if (!isString(batchId) || batchId.length < PHOTO_BATCH_ID_MIN || batchId.length > PHOTO_BATCH_ID_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  var items = event.items;
+  if (!Array.isArray(items) || items.length < 1 || items.length > PHOTO_COMMIT_ITEMS_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  // 第一步:整批纯参数校验(任何查询/写入之前),任一件非法 → 整批零写入
+  var prepared = [];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it === null || typeof it !== "object" || Array.isArray(it)) {
+      return fail("INVALID_INPUT");
+    }
+    if (!isString(it.operation_id) || it.operation_id.length < 1 || it.operation_id.length > OPERATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var name = cleanRequired(it.name, NAME_MAX);
+    if (name === null) {
+      return fail("INVALID_INPUT");
+    }
+    var locationText = cleanRequired(it.location_text, LOCATION_MAX);
+    if (locationText === null) {
+      return fail("INVALID_INPUT");
+    }
+    var note = cleanOptional(it.note, NOTE_MAX);
+    if (note === null) {
+      return fail("INVALID_INPUT");
+    }
+    var reminder = parseReminderInput(it.reminder);
+    if (reminder === "INVALID") {
+      return fail("INVALID_INPUT");
+    }
+    var photo = parsePhotoInput(it.photo);
+    if (photo === "INVALID") {
+      return fail("INVALID_INPUT");
+    }
+    // PR #67 B2:file_id 归属验证(整批纯参数校验阶段,任何写入之前)——
+    // 路径解析不出 → INVALID_INPUT;前缀非当前派生家庭 → FILE_NOT_OWNED。
+    // 任一件不通过整批零写入(与既有纯参数校验纪律一致)
+    if (photo !== null) {
+      var ownership = checkPhotoFileIdOwnership(deps, photo.file_id);
+      if (ownership === "INVALID") {
+        return fail("INVALID_INPUT");
+      }
+      if (ownership === "FILE_NOT_OWNED") {
+        return fail("FILE_NOT_OWNED");
+      }
+    }
+    prepared.push({
+      operationId: it.operation_id,
+      name: name,
+      locationText: locationText,
+      note: note,
+      reminder: reminder,
+      photo: photo
+    });
+  }
+
+  // 第二步:逐件建档 + 证据行(部分失败不拦其余件;C3:证据写失败同样不拦不掩盖)
+  var results = [];
+  var evidenceFailed = [];
+  for (var j = 0; j < prepared.length; j++) {
+    var p = prepared[j];
+    var createRes = await createItem(
+      {
+        operation_id: p.operationId,
+        name: p.name,
+        location_text: p.locationText,
+        note: p.note,
+        reminder: p.reminder === null ? undefined : p.reminder
+      },
+      deps
+    );
+    if (!createRes || createRes.ok !== true) {
+      // 单件失败(OPERATION_CONFLICT / STALE 提醒冲突等):进失败项,其余件照常
+      results.push({
+        index: j,
+        ok: false,
+        error: createRes && createRes.error ? createRes.error : "INTERNAL",
+        message: createRes && createRes.message ? createRes.message : ERROR_MESSAGES.INVALID_INPUT
+      });
+      continue;
+    }
+    var row = {
+      index: j,
+      ok: true,
+      item_id: createRes.item.item_id,
+      duplicated: createRes.duplicated === true,
+      evidence_saved: false
+    };
+    if (p.photo) {
+      try {
+        row.evidence_saved = await savePhotoEvidence(deps, createRes.item.item_id, p.photo, p.locationText);
+      } catch (e) {
+        // C3:证据写入失败不回滚不掩盖——物品已建,如实进 evidence_failed 供
+        // photoEvidenceRetry 幂等重试;其余件照常推进,整批仍成功返回
+        evidenceFailed.push(createRes.item.item_id);
+        row.evidence_saved = false;
+      }
+    }
+    results.push(row);
+  }
+  var res = { ok: true, results: results };
+  if (evidenceFailed.length > 0) {
+    res.evidence_failed = evidenceFailed;
+  }
+  return res;
+}
+
+/**
+ * photoEvidenceRetry(PR #67 C3):入参 { action, file_id, img_w, img_h,
+ * items: [{ item_id, box?, source? }] }(写类 action,进 WRITE_ACTIONS 走通用
+ * 双 marker 硬门)——photoCommit 证据写入失败(evidence_failed)后的幂等重试关联。
+ * ①file_id 归属验证(B2 同款,任何写入之前):路径前缀 ≠ photo-evidence/<当前
+ *   派生家庭>/ → FILE_NOT_OWNED 整批零写入;路径解析不出 → INVALID_INPUT;
+ * ②逐件重验 item 在作用域内存在且未删除(跨家/已删/不存在 → 该件 NOT_FOUND
+ *   失败项,不拦其余件);captured_location_text 取该件当前 items.location_text
+ *   (重验时已读到,不要求客户端重传);
+ * ③逐条插 photo_evidence(复用 savePhotoEvidence:唯一索引冲突 E11000 回查
+ *   收敛=已存在=成功,幂等);
+ * ④单件证据写入失败(非唯一索引冲突的基础设施错误)只进该件失败项
+ *   (EVIDENCE_WRITE_FAILED),不拦其余件;返回逐件结果,整体 ok:true。
+ */
+async function photoEvidenceRetryItem(event, deps) {
+  if (!isString(event.file_id) || event.file_id.length < 1 || event.file_id.length > PHOTO_FILE_ID_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  if (!Number.isInteger(event.img_w) || event.img_w < 1 || event.img_w > PHOTO_IMG_DIM_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  if (!Number.isInteger(event.img_h) || event.img_h < 1 || event.img_h > PHOTO_IMG_DIM_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  var items = event.items;
+  if (!Array.isArray(items) || items.length < 1 || items.length > PHOTO_COMMIT_ITEMS_MAX) {
+    return fail("INVALID_INPUT");
+  }
+  // ①file_id 归属验证(B2 同款,任何写入之前)
+  var ownership = checkPhotoFileIdOwnership(deps, event.file_id);
+  if (ownership === "INVALID") {
+    return fail("INVALID_INPUT");
+  }
+  if (ownership === "FILE_NOT_OWNED") {
+    return fail("FILE_NOT_OWNED");
+  }
+  // 参数形状预校验(任何查询/写入之前):item_id 非空字符串、box 形状、source 词表
+  var prepared = [];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it === null || typeof it !== "object" || Array.isArray(it)) {
+      return fail("INVALID_INPUT");
+    }
+    if (!validItemId(it.item_id)) {
+      return fail("INVALID_INPUT");
+    }
+    var box = parseBoxInput(it.box);
+    if (box === "INVALID") {
+      return fail("INVALID_INPUT");
+    }
+    var source = it.source === undefined || it.source === null ? "vl" : it.source;
+    if (PHOTO_SOURCES.indexOf(source) === -1) {
+      return fail("INVALID_INPUT");
+    }
+    prepared.push({ itemId: it.item_id, box: box, source: source });
+  }
+  var photo = { file_id: event.file_id, img_w: event.img_w, img_h: event.img_h };
+  var results = [];
+  for (var j = 0; j < prepared.length; j++) {
+    var q = prepared[j];
+    // ②逐件重验:作用域内存在且未删除(跨家 item 的 household_id 不等值,
+    // 天然查不到)
+    var got = await collection(deps)
+      .where({ _id: q.itemId, household_id: deps.householdId, deleted: false })
+      .get();
+    if (!got.data || got.data.length === 0) {
+      results.push({
+        index: j,
+        item_id: q.itemId,
+        ok: false,
+        error: "NOT_FOUND",
+        message: ERROR_MESSAGES.NOT_FOUND
+      });
+      continue;
+    }
+    var itemDoc = got.data[0];
+    try {
+      var saved = await savePhotoEvidence(
+        deps,
+        q.itemId,
+        Object.assign({}, photo, { box: q.box, source: q.source }),
+        isString(itemDoc.location_text) ? itemDoc.location_text : ""
+      );
+      results.push({ index: j, item_id: q.itemId, ok: true, evidence_saved: saved });
+    } catch (e) {
+      // ④基础设施错误:只废该件,可再重试
+      results.push({
+        index: j,
+        item_id: q.itemId,
+        ok: false,
+        error: "EVIDENCE_WRITE_FAILED",
+        message: ERROR_MESSAGES.EVIDENCE_WRITE_FAILED
+      });
+    }
+  }
+  return { ok: true, results: results };
+}
+
+/** getTempFileURL 响应 → { fileID: tempFileURL }(只收非空链接,缺/败不进表) */
+function mapTempUrls(res) {
+  var map = {};
+  var list = res && Array.isArray(res.fileList) ? res.fileList : [];
+  for (var i = 0; i < list.length; i++) {
+    var f = list[i];
+    if (f && isString(f.fileID) && isString(f.tempFileURL) && f.tempFileURL !== "") {
+      map[f.fileID] = f.tempFileURL;
+    }
+  }
+  return map;
+}
+
+/**
+ * PR #67 B1:photoCommit 会话作用域门(在通用双 marker 硬门**之前**裁定)。
+ * expected_household_id 来自客户端拍照会话**开批时**捕获的家庭(photo-session
+ * scope),不是提交时刻的当前作用域——与本处服务端解析的当前活跃家庭不一致,
+ * 说明会话期内发生过家庭切换 → SCOPE_MISMATCH 零写入(错误码区别于通用
+ * FAMILY_SWITCHED,客户端据此终止会话,绝不重试写另一个家)。
+ * 未携带(开批时未捕获作用域/旧客户端)→ 返回 null 落回通用硬门(共享家庭
+ * 缺 marker 仍被 FAMILY_SWITCHED 拦下);类型非法 → INVALID_INPUT(与通用门同口径)。
+ */
+function checkPhotoSessionScope(deps, event) {
+  var expected = event ? event.expected_household_id : undefined;
+  if (expected === undefined) {
+    return null;
+  }
+  if (!isString(expected)) {
+    return fail("INVALID_INPUT");
+  }
+  if (expected !== deps.householdId) {
+    return fail("SCOPE_MISMATCH");
+  }
+  return null;
+}
+
+/**
+ * photoEvidenceGet:入参 { action, item_ids: 1-10 个 }(只读,不进 WRITE_ACTIONS)。
+ * 响应带 household_id(共享家庭另带 scope_revision)——api.ts captureHouseholdId
+ * 用,与 list/remindList 同款收口。逐 item_id 等值查询(≤10 次,等值 AND 不引入
+ * db.command.in),每件内存排序 created_at 降序取前 3;汇总去重 file_id 换临时
+ * 链接;单文件换链失败该行 photo_url:""(file_id 照返,客户端可重试),换链整体
+ * 异常同样降级空链接,绝不废整个查询。投影不含 household_id 之外的内部态。
+ * PR #67 B2:逐 item_id 先反查 items(作用域内 deleted:false)——已删/不存在
+ * 物品的证据行静默过滤(证据只增不删,但读取入口校验物品有效性)。
+ */
+async function photoEvidenceGetItem(event, deps) {
+  var ids = event.item_ids;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 10) {
+    return fail("INVALID_INPUT");
+  }
+  for (var i = 0; i < ids.length; i++) {
+    if (!validItemId(ids[i])) {
+      return fail("INVALID_INPUT");
+    }
+  }
+  var evidence = [];
+  var fileIds = [];
+  var seenFile = Object.create(null);
+  for (var j = 0; j < ids.length; j++) {
+    // PR #67 B2:返回证据行前先按 item_ids 反查 items(作用域内)——已删除
+    // (deleted:true)/不存在的 item 其证据行不返回(静默过滤)。删除物品不级联
+    // 清证据=历史事实保留;读取入口校验物品有效性,悬挂行不再回到任何回放入口
+    var alive = await collection(deps)
+      .where({ _id: ids[j], household_id: deps.householdId, deleted: false })
+      .get();
+    if (!alive.data || alive.data.length === 0) {
+      continue;
+    }
+    var got = await photoEvidence(deps)
+      .where({ household_id: deps.householdId, item_id: ids[j] })
+      .get();
+    var rows = (got && got.data) || [];
+    rows.sort(byCreatedDesc);
+    var top = rows.slice(0, PHOTO_EVIDENCE_PER_ITEM);
+    for (var k = 0; k < top.length; k++) {
+      var row = top[k];
+      evidence.push({
+        item_id: row.item_id,
+        file_id: row.file_id,
+        photo_url: "",
+        box: row.box === undefined ? null : row.box,
+        img_w: row.img_w,
+        img_h: row.img_h,
+        captured_location_text: isString(row.captured_location_text) ? row.captured_location_text : "",
+        source: row.source === "circle" ? "circle" : "vl",
+        created_at: row.created_at
+      });
+      if (isString(row.file_id) && !seenFile[row.file_id]) {
+        seenFile[row.file_id] = true;
+        fileIds.push(row.file_id);
+      }
+    }
+  }
+  if (fileIds.length > 0 && deps && typeof deps.getTempFileUrls === "function") {
+    try {
+      var urlMap = mapTempUrls(await deps.getTempFileUrls(fileIds));
+      for (var m = 0; m < evidence.length; m++) {
+        if (Object.prototype.hasOwnProperty.call(urlMap, evidence[m].file_id)) {
+          evidence[m].photo_url = urlMap[evidence[m].file_id];
+        }
+      }
+    } catch (e) {
+      // 换链整体失败:全部空链接,查询结果照常返回(客户端可重试)
+    }
+  }
+  var res = { ok: true, household_id: deps.householdId, evidence: evidence };
+  if (deps.householdShared === true) {
+    res.scope_revision = deps.scopeRevision;
+  }
+  return res;
+}
+
 var ACTIONS = {
   create: createItem,
   update: updateItem,
@@ -2032,7 +2558,10 @@ var ACTIONS = {
   remindList: remindListItems,
   remindComplete: remindCompleteItem,
   remindClear: remindClearItem,
-  remindSet: remindSetItem
+  remindSet: remindSetItem,
+  photoCommit: photoCommitItem,
+  photoEvidenceGet: photoEvidenceGetItem,
+  photoEvidenceRetry: photoEvidenceRetryItem
 };
 
 /**
@@ -2048,6 +2577,8 @@ var ACTIONS = {
  *   以前客户端单人零回归。
  * 提醒写操作(issue #36):remindComplete/remindClear/remindSet 与
  * create/update/delete 同走此硬门,不另起炉灶。
+ * 拍照识物(#3):photoCommit(批量建档+证据行)与 photoEvidenceRetry(C3 证据
+ * 幂等重试关联)同走此硬门,与 create 同款。
  * 两参数仅做一致性校验,不具任何授权效力;身份与家庭归属始终由服务端独立解析。
  */
 var WRITE_ACTIONS = {
@@ -2056,7 +2587,9 @@ var WRITE_ACTIONS = {
   delete: true,
   remindComplete: true,
   remindClear: true,
-  remindSet: true
+  remindSet: true,
+  photoCommit: true,
+  photoEvidenceRetry: true
 };
 
 /**
@@ -2077,7 +2610,11 @@ function logResult(deps, action, result, startedAt) {
       ? result.items.length
       : Array.isArray(result.reminders)
         ? result.reminders.length
-        : 1;
+        : Array.isArray(result.results)
+          ? result.results.filter(function (r) { return r && r.ok === true; }).length
+          : Array.isArray(result.evidence)
+            ? result.evidence.length
+            : 1;
   } else {
     entry.count = 0;
   }
@@ -2107,13 +2644,19 @@ async function handler(event, deps) {
     } else if (WRITE_ACTIONS[action]) {
       // F2 写入硬门(issue #34 P0+P1-A):共享家庭强制作用域绑定(缺 marker /
       // 旧修订 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持
-      // P0 宽松口径(可选 marker)。gate 返回 null = 放行
-      var gate = checkWriteScopeBinding(
-        deps.householdId,
-        deps.householdShared === true,
-        deps.scopeRevision,
-        event
-      );
+      // P0 宽松口径(可选 marker)。gate 返回 null = 放行。
+      // PR #67 B1:photoCommit 先过会话作用域门(expected_household_id=开批时
+      // 捕获的会话家庭,与当前派生家庭不一致 → SCOPE_MISMATCH 零写入,先于
+      // 通用硬门裁定,客户端据此终止会话);未携带/一致 → 照走通用硬门
+      var gate = action === "photoCommit" ? checkPhotoSessionScope(deps, event) : null;
+      if (gate === null) {
+        gate = checkWriteScopeBinding(
+          deps.householdId,
+          deps.householdShared === true,
+          deps.scopeRevision,
+          event
+        );
+      }
       result = gate === null ? await ACTIONS[action](event, deps) : gate;
     } else {
       result = await ACTIONS[action](event, deps);

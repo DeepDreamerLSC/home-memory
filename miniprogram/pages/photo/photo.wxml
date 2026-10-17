@@ -1,0 +1,368 @@
+<!-- 拍照识物确认页(#3,屏①-⑤):两模式 confirm/circle;弹层(diff/编辑/保存确认)只挂一个 -->
+
+<!-- ================ 入口态(还没拍到照片) ================ -->
+<view class="page photo-page" wx:if="{{ !entryReady }}">
+  <view class="entry">
+    <view class="entry-ico">📷</view>
+    <view class="entry-title">拍一张抽屉,我帮你列清单</view>
+    <view class="entry-sub">照片先留在本机;你确认保存之前,不会上传云端。</view>
+    <view class="btn ink block entry-btn" hover-class="btn-hover" hover-stay-time="80" bindtap="onEntryShotTap">
+      <view class="btn-face">{{ recognizing ? '识别中…' : '拍照 / 从相册选' }}</view>
+    </view>
+    <view wx:if="{{ entryHint }}" class="entry-hint">{{ entryHint }}</view>
+    <view class="entry-hint dim">{{ recognizing ? '本地压缩后送识别,大图可能要等一会儿' : '' }}</view>
+  </view>
+</view>
+
+<!-- ================ 圈选模式(屏⑤) ================ -->
+<view class="page photo-page circle-page" wx:elif="{{ mode === 'circle' }}">
+  <view class="circle-head">
+    <view class="backchip" hover-class="backchip-hover" hover-stay-time="80" bindtap="onExitCircle"><view class="backchip-face">‹ 回核对</view></view>
+    <view class="circle-title">圈一下,问它是什么</view>
+  </view>
+  <view class="hintbar"><view class="dot"></view>用手指在照片上画一个框,框住想知道的东西</view>
+  <view
+    class="photoWrap circle-wrap"
+    id="circlePhoto"
+    style="aspect-ratio: {{ photoAspect }}"
+    catchtouchstart="onCircleTouchStart"
+    catchtouchmove="onCircleTouchMove"
+    catchtouchend="onCircleTouchEnd"
+    catchtouchcancel="onCircleResetTap"
+  >
+    <image class="ph-img" src="{{ photoPath }}" mode="aspectFill" />
+    <view wx:for="{{ boxViews }}" wx:key="draftId" class="bbox {{ item.cls }}" style="left:{{ item.left }}%;top:{{ item.top }}%;width:{{ item.width }}%;height:{{ item.height }}%">
+      <text class="tag">{{ item.tag }}</text>
+    </view>
+    <view wx:if="{{ circle.rect }}" class="bbox user drawing" style="left:{{ circle.rect.left }}px;top:{{ circle.rect.top }}px;width:{{ circle.rect.width }}px;height:{{ circle.rect.height }}px">
+      <text class="tag">你圈的框</text>
+    </view>
+  </view>
+  <view wx:if="{{ circle.recognizing }}" class="result">
+    <view class="rt">看一下你圈的…</view>
+    <view class="rd">全图 + 坐标一起送识别,几秒后出结果。</view>
+  </view>
+  <view wx:elif="{{ circle.errorText }}" class="result">
+    <view class="rt">没认出来</view>
+    <view class="rd">{{ circle.errorText }}</view>
+    <view class="result-acts">
+      <view class="btn quiet" hover-class="btn-hover" hover-stay-time="80" bindtap="onCircleResetTap"><view class="btn-face">不是,重圈</view></view>
+    </view>
+  </view>
+  <view wx:elif="{{ circle.result }}" class="result">
+    <view class="rt">{{ circle.result.name }} <text class="rc">{{ circle.result.confText }}</text></view>
+    <view class="rd">{{ circle.result.reasonText }}</view>
+    <view class="result-acts">
+      <view class="btn quiet" hover-class="btn-hover" hover-stay-time="80" bindtap="onCircleResetTap"><view class="btn-face">不是,重圈</view></view>
+      <view class="btn go" hover-class="btn-hover" hover-stay-time="80" bindtap="onCircleAddTap"><view class="btn-face">加进清单(候选)</view></view>
+    </view>
+  </view>
+  <view class="circle-note">已有候选不受影响;点「加进清单」才入列,且入列默认不勾选。</view>
+</view>
+
+<!-- ================ 核对模式(屏①) ================ -->
+<view class="page photo-page" wx:else>
+  <view class="ph-sub">{{ navSubtitle }}</view>
+
+  <!-- 照片=证据区:默认折叠(压暗缩略,框隐藏);点开才全幅,容器等比跟随原图 -->
+  <view class="photoWrap {{ photoCollapsed ? 'collapsed' : '' }}" style="{{ photoCollapsed ? '' : 'aspect-ratio: ' + photoAspect }}" bindtap="onPhotoTap">
+    <image class="ph-img {{ photoCollapsed ? 'dim' : '' }}" src="{{ photoPath }}" mode="aspectFill" />
+    <view wx:if="{{ !photoCollapsed }}" class="ask" catchtap="onAskChipTap">🅐 本批照片(证据)· 收起</view>
+    <block wx:if="{{ !photoCollapsed }}">
+      <view
+        wx:for="{{ boxViews }}"
+        wx:key="draftId"
+        class="bbox {{ item.cls }} {{ item.isHl ? 'pulse' : '' }}"
+        style="left:{{ item.left }}%;top:{{ item.top }}%;width:{{ item.width }}%;height:{{ item.height }}%"
+        data-id="{{ item.draftId }}"
+        catchtap="onBoxTap"
+      >
+        <text class="tag">{{ item.tag }}</text>
+      </view>
+      <view class="circle-entry {{ vlAuthDenied ? 'disabled' : '' }}" catchtap="onEnterCircle">⭕ 漏了?圈一下补识别</view>
+      <view wx:if="{{ vlAuthDenied }}" class="vl-auth-hint">未授权云端识别:重新进入本页时会再询问;仍可手动添加或语音建候选。</view>
+    </block>
+    <view wx:if="{{ photoCollapsed }}" class="evTap">
+      <view class="evChip">📍 点开照片核对<text class="e2">证据区 · 框在展开后显示</text></view>
+    </view>
+  </view>
+
+  <!-- 位置栏:批次默认位置(手动/常用快选/按住说位置) -->
+  <view class="locbar">
+    <view class="ico">📍</view>
+    <view class="main">
+      <view class="lb">这批候选默认都在哪?(填一次,逐件可改)</view>
+      <view class="lv" bindtap="onBatchLocEditTap">{{ batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
+      <view class="lc">
+        <view class="chip c1" catchtouchstart="onTalkTouchStart" catchtouchmove="onTalkTouchMove" catchtouchend="onTalkTouchEnd" catchtouchcancel="onTalkTouchCancel">🎤 按住说位置</view>
+        <view wx:for="{{ recentLocations }}" wx:key="*this" class="chip c2" data-loc="{{ item }}" bindtap="onRecentLocTap">常用:{{ item }}</view>
+        <view class="chip c3" bindtap="onNewLocTap">＋新建</view>
+      </view>
+      <view class="hint">候选默认继承这个位置,例外在编辑里逐件改;保存前会再让你确认一次。</view>
+    </view>
+  </view>
+
+  <view class="warn">一条记录 = 一件可查找的物品:电池×24 也只记一条,数量是备注,不做库存管理。数量为 AI 估计,核对更稳。</view>
+
+  <!-- C3:终态「照片待关联」提示 + 幂等重试关联入口(样式沿用 warn/btn) -->
+  <view wx:if="{{ evidencePending }}" class="warn evretry">
+    <view class="evretry-line">已入库 {{ evidencePending.savedCount }} 件,其中 {{ evidencePending.count }} 件照片待关联(物品已记住,补关联照片即可)。</view>
+    <view
+      class="btn go {{ evidenceRetryBusy ? 'disabled' : '' }} evretry-btn"
+      hover-class="{{ evidenceRetryBusy ? 'none' : 'btn-hover' }}"
+      hover-stay-time="80"
+      bindtap="onEvidenceRetryTap"
+    ><view class="btn-face">{{ evidenceRetryBusy ? '关联中…' : '重试关联' }}</view></view>
+  </view>
+
+  <view class="listhead">
+    <text>{{ headText }}</text>
+    <text class="selall" bindtap="onToggleAllTap">全选 / 清空</text>
+  </view>
+
+  <view class="list">
+    <view
+      wx:for="{{ rows }}"
+      wx:key="draftId"
+      class="row {{ item.stateCls }} {{ item.isHl ? 'hl' : '' }}"
+      hover-class="row-hover"
+      hover-stay-time="60"
+      data-index="{{ index }}"
+      bindtap="onRowTap"
+    >
+      <view class="ck {{ item.checked ? 'on' : '' }}" data-index="{{ index }}" catchtap="onCheckTap">{{ item.checked ? '✓' : '' }}</view>
+      <view class="mid">
+        <view class="nm">
+          <text class="nm-text">{{ item.name }}</text>
+          <text wx:if="{{ item.srcBadge }}" class="src {{ item.srcCls }}">{{ item.srcBadge }}</text>
+          <text class="src {{ item.stateCls }}">{{ item.stateLabel }}</text>
+        </view>
+        <view class="meta">{{ item.metaText }}</view>
+        <view wx:if="{{ item.failMsg }}" class="failmsg">{{ item.failMsg }} · 点「{{ saveText }}」重试</view>
+      </view>
+      <view class="step" data-index="{{ index }}" catchtap="noop">
+        <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onStepTap">−</view>
+        <text class="stepNum">{{ item.qty }}</text>
+        <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onStepTap">+</view>
+      </view>
+    </view>
+    <view class="addmanual" hover-class="row-hover" hover-stay-time="60" bindtap="onManualAddTap">＋ 手动添加物品</view>
+  </view>
+</view>
+
+<!-- ================ 底部:按住胶囊 + 保存(核对/圈选两模式共用) ================ -->
+<view class="botbar" wx:if="{{ entryReady }}">
+  <view
+    class="hold {{ holdPressed ? 'pressed' : '' }} {{ (transcribing || extracting || diffLoading) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
+    catchtouchstart="onTalkTouchStart"
+    catchtouchmove="onTalkTouchMove"
+    catchtouchend="onTalkTouchEnd"
+    catchtouchcancel="onTalkTouchCancel"
+  >
+    <view class="hold-face">
+      <view class="micdot">
+        <block wx:if="{{ voiceState === 'recording' }}"><text class="mic-seconds">{{ recordSeconds }}s</text></block>
+        <block wx:else><view class="mic-cap"></view><view class="mic-stand"></view><view class="mic-base"></view></block>
+      </view>
+      <view class="hold-label">
+        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : transcribing ? '整理你刚说的话…' : diffLoading ? '在解析你说的…' : extracting ? '核对中…' : '按住说话' }}
+        <text class="l2">补全 · 改数量 · 说位置</text>
+      </view>
+    </view>
+  </view>
+  <view class="saveSm {{ saveDisabled ? 'disabled' : '' }}" hover-class="btn-hover" hover-stay-time="80" bindtap="onSaveTap">{{ saveText }}</view>
+</view>
+
+<!-- ================ 录音浮层(屏②,复刻 voice-bar recsheet) ================ -->
+<block wx:if="{{ voiceState !== 'idle' }}">
+  <view class="recback"></view>
+  <view class="recsheet">
+    <view class="rec-title">{{ voiceState === 'cancelPending' ? '好,当我没听见。' : '说吧,我记着呢。' }}</view>
+    <view class="recrow">
+      <view class="recmic"><view class="mic-cap"></view><view class="mic-stand"></view><view class="mic-base"></view></view>
+      <view class="wave"><view class="wv" style="height:24rpx"></view><view class="wv" style="height:48rpx;animation-delay:.12s"></view><view class="wv" style="height:60rpx;animation-delay:.24s"></view><view class="wv" style="height:40rpx;animation-delay:.36s"></view><view class="wv" style="height:28rpx;animation-delay:.48s"></view><view class="wv" style="height:52rpx;animation-delay:.6s"></view><view class="wv" style="height:22rpx;animation-delay:.72s"></view></view>
+    </view>
+    <view class="rec-hint">{{ partialText || '松手后逐项核对,勾几项改几项。' }}</view>
+    <view class="rec-cta">{{ voiceState === 'cancelPending' ? '(松手即取消)' : '松开,去核对' }}</view>
+    <view class="rec-cancel">{{ voiceState === 'cancelPending' ? '↓ 滑回来就继续说' : '↑ 上滑取消 · 取消就当没说过,什么都不记' }}</view>
+  </view>
+</block>
+
+<!-- ================ diff 解析中(轻提示层) ================ -->
+<block wx:if="{{ diffLoading && !diff }}">
+  <view class="dim"></view>
+  <view class="minisheet">
+    <view class="grip"></view>
+    <view class="mini-title">在解析你说的…</view>
+    <view class="mini-sub">按内容锁定候选,不按行号;没对上就不改,让你点选。</view>
+  </view>
+</block>
+
+<!-- ================ diff 弹层(屏③) ================ -->
+<block wx:if="{{ diff }}">
+  <view class="dim" bindtap="onDiffCancelTap"></view>
+  <view class="sheet" catchtap="noop">
+    <view class="grip"></view>
+    <view class="card">
+      <view class="ct"><text>你说</text><text wx:if="{{ diff.audioAvailable }}" class="audio" catchtap="onDiffPlayTap">🎧 原话已保留 · 可回听</text></view>
+      <view class="trans">{{ diff.text }}</view>
+    </view>
+
+    <!-- intent=edit 且锁定:逐字段勾选 -->
+    <block wx:if="{{ diff.intent === 'edit' && !diff.needsPick }}">
+      <view class="lockTip">已锁定候选 <text class="lockb">#d{{ diff.lockIndex }} {{ diff.lockName }}</text>——按内容锁定,不按行号;你删行、重排都不受影响。没对上就不改,让你点选。</view>
+      <view class="card card-mb">
+        <view class="ct">我理解为 {{ diff.edits.length }} 处修改,勾选应用</view>
+        <view wx:for="{{ diff.edits }}" wx:key="field" class="drow" data-index="{{ index }}" bindtap="onDiffFieldToggle">
+          <view class="dck {{ diff.edits[index].picked ? 'on' : '' }}">{{ diff.edits[index].picked ? '✓' : '' }}</view>
+          <view class="dc">
+            <view class="df">{{ diff.edits[index].label }}</view>
+            <view class="dline">
+              <text class="old">{{ diff.edits[index].old }}</text>
+              <text class="arr">→</text>
+              <text class="new">{{ diff.edits[index].new }}</text>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{ diff.matchedWord }}" class="why">解析:内容词「{{ diff.matchedWord }}」对上 #d{{ diff.lockIndex }};勾几项改几项,位置只改这一件的例外。</view>
+      </view>
+    </block>
+
+    <!-- needs_pick:点选是哪一件 -->
+    <block wx:if="{{ diff.needsPick }}">
+      <view class="lockTip">对不上是哪一件,点一下:点了会按你说的重新解析一次。</view>
+      <view class="card card-mb">
+        <view
+          wx:for="{{ diff.picks }}"
+          wx:key="draftId"
+          class="pickrow"
+          hover-class="row-hover"
+          hover-stay-time="60"
+          data-id="{{ item.draftId }}"
+          bindtap="onDiffPickTap"
+        >
+          <text class="did">#d{{ item.index }}</text>
+          <text class="pickname">{{ item.name }}</text>
+          <text class="chev">›</text>
+        </view>
+      </view>
+    </block>
+
+    <!-- intent=add:补一件 -->
+    <block wx:if="{{ diff.intent === 'add' }}">
+      <view class="card card-mb">
+        <view class="ct">清单里没有,补一件</view>
+        <view class="addline">{{ diff.addName }} <text class="addnote">{{ diff.addNoteText }}</text></view>
+        <view class="why">入列默认不勾选,由你决定保不保留。</view>
+      </view>
+    </block>
+
+    <!-- intent=batch_location:改批次位置 -->
+    <block wx:if="{{ diff.intent === 'batch_location' }}">
+      <view class="card card-mb">
+        <view class="ct">本批默认位置</view>
+        <view class="dline"><text class="old">{{ batchLocation || '(还没填)' }}</text><text class="arr">→</text><text class="new">{{ diff.locNew }}</text></view>
+        <view class="why">已设例外的候选不受影响,例外仍是例外。</view>
+      </view>
+    </block>
+
+    <view class="sheet-acts">
+      <view class="btn quiet" hover-class="btn-hover" hover-stay-time="80" bindtap="onDiffCancelTap"><view class="btn-face">念错了,当我没说</view></view>
+      <view class="btn go {{ diff.applyDisabled ? 'disabled' : '' }}" hover-class="{{ diff.applyDisabled ? 'none' : 'btn-hover' }}" hover-stay-time="80" bindtap="onDiffApplyTap"><view class="btn-face">{{ diff.applyText }}</view></view>
+    </view>
+    <view class="keepTip" wx:if="{{ diff.intent === 'edit' && !diff.needsPick }}">改完接着按住说下一处就行;一句话多项修改会拆开,你可以只应用其中几项。</view>
+  </view>
+</block>
+
+<!-- ================ 手动编辑面板(屏④) ================ -->
+<block wx:if="{{ edit }}">
+  <view class="dim" bindtap="onEditCloseTap"></view>
+  <view class="sheet" catchtap="noop">
+    <view class="grip"></view>
+    <view class="sheet-h3">{{ edit.title }}</view>
+    <view class="sheet-conf">{{ edit.sourceText }}</view>
+
+    <view class="fld" wx:if="{{ !edit.isNew }}">
+      <view class="flabel">名称 · 候选点选即改</view>
+      <view class="cand">
+        <view
+          wx:for="{{ edit.nameChips }}"
+          wx:key="name"
+          class="cand-chip {{ edit.nameChips[index].name === '保持:' + edit.nameInput ? 'on' : '' }}"
+          data-name="{{ item.name }}"
+          bindtap="onEditChipTap"
+        >{{ item.name }}<text wx:if="{{ item.isKeep }}" class="star">★</text></view>
+      </view>
+    </view>
+    <view class="fld">
+      <view class="flabel">{{ edit.isNew ? '名称' : '或直接改名称' }}</view>
+      <input class="input" value="{{ edit.nameInput }}" placeholder="物品叫什么" placeholder-class="placeholder" bindinput="onEditNameInput" />
+    </view>
+
+    <view class="fld">
+      <view class="flabel">数量备注(一条记录,不做库存管理)</view>
+      <view class="inp">
+        <text class="inp-pre">备注 ×</text>
+        <view class="step" catchtap="noop">
+          <view class="stepBtn" data-d="{{ -1 }}" catchtap="onEditStepTap">−</view>
+          <text class="stepNum">{{ edit.qty }}</text>
+          <view class="stepBtn" data-d="{{ 1 }}" catchtap="onEditStepTap">+</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="fld">
+      <view class="flabel">位置(默认继承批次,不同才改)</view>
+      <input class="input" value="{{ edit.locValue }}" placeholder="如:厨房" placeholder-class="placeholder" bindinput="onEditLocInput" />
+    </view>
+
+    <view class="fld">
+      <view class="flabel">提醒日期(可选)</view>
+      <picker mode="date" value="{{ edit.dueDate }}" bindchange="onEditDateChange">
+        <view class="inp">
+          <text class="{{ edit.hasRemind ? 'inp-val' : 'inp-pre' }}">{{ edit.hasRemind ? edit.dueDate : '不设提醒' }}</text>
+          <text class="pen">✎</text>
+        </view>
+      </picker>
+      <picker wx:if="{{ edit.hasRemind }}" range="{{ edit.remindKinds }}" value="{{ edit.remindKindIndex }}" bindchange="onEditKindChange">
+        <view class="inp kindline">
+          <text class="inp-val">类别:{{ edit.remindKinds[edit.remindKindIndex] }}</text>
+          <text class="pen">✎</text>
+        </view>
+      </picker>
+      <view wx:if="{{ edit.hasRemind }}" class="clear-remind" bindtap="onEditClearRemindTap">不提醒了</view>
+    </view>
+
+    <view class="btn go block-sheet" hover-class="btn-hover" hover-stay-time="80" bindtap="onEditConfirmTap"><view class="btn-face">{{ edit.isNew ? '加进清单(候选)' : '就这么改' }}</view></view>
+  </view>
+</block>
+
+<!-- ================ 保存最终确认弹层(屏①) ================ -->
+<block wx:if="{{ saveSheet }}">
+  <view class="dim" bindtap="onSaveBackTap"></view>
+  <view class="sheet" catchtap="noop">
+    <view class="grip"></view>
+    <view class="sheet-h3">保存前最后确认</view>
+    <view class="sheet-conf">本批位置与例外,确认了才写入</view>
+    <view class="card">
+      <view class="ct">本批位置(保留的候选默认继承)</view>
+      <view class="bigline">{{ saveSheet.batchLocation }}</view>
+    </view>
+    <view class="card">
+      <view class="ct">位置例外</view>
+      <view wx:if="{{ saveSheet.exceptionLines.length > 0 }}" class="exclist">
+        <view wx:for="{{ saveSheet.exceptionLines }}" wx:key="*this" class="excline">{{ item }}</view>
+      </view>
+      <view wx:else class="excline dim2">{{ saveSheet.exceptionText }}</view>
+    </view>
+    <view class="card card-mb">
+      <view class="ct">最终保存</view>
+      <view class="sumline">{{ saveSheet.summaryText }}</view>
+    </view>
+    <view class="sheet-acts">
+      <view class="btn quiet" hover-class="btn-hover" hover-stay-time="80" bindtap="onSaveBackTap"><view class="btn-face">再看看</view></view>
+      <view class="btn go {{ saveBusy ? 'disabled' : '' }}" hover-class="{{ saveBusy ? 'none' : 'btn-hover' }}" hover-stay-time="80" bindtap="onSaveGoTap"><view class="btn-face">{{ saveBusy ? '保存中…' : '确认,记住了' }}</view></view>
+    </view>
+    <view class="keepTip">未勾选的候选不会入库(就当没看见);确认后即为「已确认记住」,此时才有正式记录。确认后照片才第一次上传云端。</view>
+  </view>
+</block>

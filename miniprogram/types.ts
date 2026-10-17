@@ -5,6 +5,8 @@
  * (household_id / openid 全部由云函数服务端自行派生)。
  */
 
+import type { Box } from "./utils/photo-box";
+
 /** items 集合完整文档(create / update 成功后返回) */
 export interface ItemRecord {
   _id: string;
@@ -186,6 +188,37 @@ export type ItemsApiEvent =
   | ({ action: "remindClear"; item_id: string; expected_generation?: number } & ScopeWriteBinding)
   | (
       {
+        /**
+         * 拍照识物批量建档(#3,IMPLEMENTATION.md §1.3):逐件复用 create 语义
+         * (operation_id 幂等/提醒 slot);进 WRITE_ACTIONS,api 层自动拼双 marker。
+         */
+        action: "photoCommit";
+        /** 客户端 uuid(8-64),仅日志聚合口径 */
+        batch_id: string;
+        /** 1-10 件;任一件参数非法服务端整批零写入 */
+        items: PhotoCommitItem[];
+      } & ScopeWriteBinding
+    )
+  | { action: "photoEvidenceGet"; item_ids: string[] }
+  | (
+      {
+        /**
+         * 证据幂等重试关联(#3,PR #67 C3,IMPLEMENTATION.md §1.5):photoCommit
+         * 响应 evidence_failed 非空后的收敛出口;进 WRITE_ACTIONS,api 层自动拼
+         * 双 marker。服务端重验 file_id 归属(B2 同款)与逐件作用域内存活后补插
+         * photo_evidence,唯一索引冲突=已存在=成功。
+         */
+        action: "photoEvidenceRetry";
+        /** photoCommit 已取得的云存储 fileID(证据待关联的照片) */
+        file_id: string;
+        img_w: number;
+        img_h: number;
+        /** 1-10 件;每件 { item_id, box?(null=整照关联), source?("vl"|"circle") } */
+        items: PhotoEvidenceRetryItem[];
+      } & ScopeWriteBinding
+    )
+  | (
+      {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
         action: "remindSet";
         item_id: string;
@@ -310,7 +343,10 @@ export type ItemsApiOkResponse =
   | RemindListResponse
   | RemindCompleteResponse
   | RemindClearResponse
-  | RemindSetResponse;
+  | RemindSetResponse
+  | PhotoCommitResponse
+  | PhotoEvidenceGetResponse
+  | PhotoEvidenceRetryResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -794,3 +830,213 @@ export type HouseholdsApiEvent =
   | { action: "dissolve" }
   | { action: "memberList" }
   | { action: "switch"; target: "personal" | "shared" };
+
+/* ---------------- 拍照识物(#3,docs/design/issue3-photo-intake/IMPLEMENTATION.md) ---------------- */
+
+/** VL 识别置信度(vlRecognize 响应词表,词表外服务端已按 "low" 收敛) */
+export type VlConfidence = "high" | "mid" | "low";
+
+/** vlRecognize 响应的单件候选行(服务端已校验清洗;box 已归一 0-1,null=无框整照关联) */
+export interface VlCandidate {
+  /** 中文物品名,1-50 码点 */
+  name: string;
+  /** 数量线索原样(如「约2根」;可空串,≤40 码点) */
+  qty_note: string;
+  confidence: VlConfidence;
+  /** 0-1 相对原图左上角;null = 该件无框 */
+  box: Box | null;
+}
+
+/**
+ * 拍照识物确认页的候选行(与 photo-session 会话载荷同形状,IMPLEMENTATION.md §4.1;
+ * 供页面与 utils 共用)。三态:未勾选=「候选」、checked=「保留(待存)」、
+ * 保存成功=「已确认记住」(done 态由 intake-draft 的行状态承载,不进本形状)。
+ */
+export interface PhotoCandidate {
+  /** 入列即生成的稳定标识(uuid):锁定/语音编辑/计数一律以此为准,绝不按行号 */
+  draftId: string;
+  name: string;
+  /** 数量拆 qty+suffix(V0.4.2 单一来源;qty 域 1-99,数量只是备注不做库存) */
+  qty: number;
+  /** 数量备注后缀(空串按「备注」展示;与 qty 共同拼成 note 文本) */
+  suffix: string;
+  /** 位置例外(null=继承批次默认位置;非空=该件单独位置,保存确认只汇总已勾选件的例外) */
+  exc: string | null;
+  /**
+   * 行来源:照片识别 / 语音补录 / 圈选补识别 / 手动补录。
+   * "manual" = VL 不可用降级或用户点「＋手动添加物品」补的行(§7.1:box=null
+   * 整照关联,保存时才首次上传,photoCommit 照常);无 VL 依据,置信度恒 "low"。
+   */
+  src: "ai" | "voice" | "circle" | "manual";
+  /** VL 置信度(voice 行无 VL 依据,恒 "low" 且无框,不参与框样式) */
+  confidence: VlConfidence;
+  /** 0-1 相对原图;null = 无框(手动/语音行,整照关联) */
+  box: Box | null;
+  /** 勾选=「保留」;未勾=「候选」(AI 预选规则:confidence="high" 默认勾选) */
+  checked: boolean;
+  /** 入列即生成的 photoCommit 幂等键(uuid):内容改后仍沿用,服务端同键同内容幂等 */
+  operationId: string;
+  /**
+   * 提醒日期(可选,屏④手动编辑面板的 picker;YYYY-MM-DD)。null/缺省=不设提醒;
+   * 保存时映射为 photoCommit 的 reminder {due_date, kind}(kind 冻结词表,缺省「下次维护」)。
+   */
+  remind?: { due_date: string; kind: RemindKind } | null;
+}
+
+/* ---------------- 拍照识物:photoCommit / photoEvidenceGet(§1.3/§1.4) ---------------- */
+
+/** photoCommit 单件的 photo 证据绑定(该行绑了照片证据才携带) */
+export interface PhotoCommitPhoto {
+  /** 用户点「确认,记住了」后 wx.cloud.uploadFile 得到的云存储 fileID(确认前不存在) */
+  file_id: string;
+  /** 压缩图实测宽高(与 vlRecognize 上送值一致,坐标反算基准) */
+  img_w: number;
+  img_h: number;
+  /** 0-1 相对原图;null = 无框(整照关联的手动/语音行) */
+  box: Box | null;
+  /** "vl" = AI 识别框 | "circle" = 用户圈选 */
+  source: "vl" | "circle";
+}
+
+/** photoCommit 单件(与 create 同形状的建档参数 + 可选 photo) */
+export interface PhotoCommitItem {
+  /** 行内固定幂等键(重试沿用;内容改后仍沿用,服务端同键同内容幂等/异内容冲突) */
+  operation_id: string;
+  name: string;
+  /** 批次位置或该件例外(客户端已合成) */
+  location_text: string;
+  /** 数量备注,客户端拼 "×{qty} {suffix}" */
+  note?: string;
+  /** 可选提醒,与 create 完全同形状 */
+  reminder?: ReminderInput;
+  photo?: PhotoCommitPhoto;
+}
+
+export interface PhotoCommitResultRow {
+  /** items 内 0-based 下标回执 */
+  index: number;
+  ok: boolean;
+  item_id?: string;
+  duplicated?: boolean;
+  evidence_saved?: boolean;
+  /** ok:false 时携带 */
+  error?: string;
+  message?: string;
+}
+
+export interface PhotoCommitResponse {
+  ok: true;
+  results: PhotoCommitResultRow[];
+  /**
+   * 证据写入失败的 item_id 列表(PR #67 C3,部分成功语义):这些件物品已建、
+   * 照片待关联——客户端走 photoEvidenceRetry 幂等重试;缺省/空 = 全部关联成功
+   */
+  evidence_failed?: string[];
+}
+
+/** photoEvidenceRetry 单件(C3):item_id + 该行的框与来源(照片宽高在事件顶层) */
+export interface PhotoEvidenceRetryItem {
+  item_id: string;
+  /** 0-1 相对原图;null/缺省 = 无框(整照关联) */
+  box?: Box | null;
+  /** "vl" = AI 识别框 | "circle" = 用户圈选;缺省 "vl" */
+  source?: "vl" | "circle";
+}
+
+/** photoEvidenceRetry 逐件回执(C3) */
+export interface PhotoEvidenceRetryResultRow {
+  /** items 内 0-based 下标回执 */
+  index: number;
+  item_id: string;
+  ok: boolean;
+  /** ok:true 时:true=本次新写入,false=已存在(唯一索引幂等) */
+  evidence_saved?: boolean;
+  /** ok:false 时携带(NOT_FOUND / EVIDENCE_WRITE_FAILED) */
+  error?: string;
+  message?: string;
+}
+
+export interface PhotoEvidenceRetryResponse {
+  ok: true;
+  results: PhotoEvidenceRetryResultRow[];
+}
+
+/** photoEvidenceGet 的证据行投影(§1.4) */
+export interface PhotoEvidenceRow {
+  item_id: string;
+  file_id: string;
+  /** getTempFileURL 临时链接;换链失败为 ""(file_id 仍在,客户端可重试) */
+  photo_url: string;
+  box: Box | null;
+  img_w: number;
+  img_h: number;
+  captured_location_text: string;
+  source: "vl" | "circle";
+  created_at: string;
+}
+
+export interface PhotoEvidenceGetResponse {
+  ok: true;
+  household_id?: string;
+  scope_revision?: number;
+  evidence: PhotoEvidenceRow[];
+}
+
+/* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */
+
+export interface DraftEditParseEvent {
+  action: "draftEditParse";
+  /** 用户原话(去空白后 1-200 码点) */
+  text: string;
+  /** 当前批次默认位置(给模型看) */
+  batch_location: string;
+  /** 当前候选清单(1-12 项;draft_id 页面侧为 IntakeRow.draftId) */
+  candidates: { draft_id: string; name: string }[];
+}
+
+export type DraftEditIntent = "edit" | "add" | "batch_location" | "none";
+
+export interface DraftEditRow {
+  /** 服务端白名单 {"name","qty_note","location"} */
+  field: "name" | "qty_note" | "location";
+  /** 仅展示用 */
+  old?: string;
+  new: string;
+}
+
+export interface DraftEditPick {
+  draft_id: string;
+  name: string;
+}
+
+/**
+ * 五分支响应(intent 是判别字段;needs_pick=true 时 edits 必空、target 必 null,
+ * 服务端硬门已保证,客户端不做二次判断)。
+ */
+export type DraftEditParseResponse =
+  | {
+      ok: true;
+      engine: string;
+      intent: "edit";
+      target: { draft_id: string; matched_word?: string } | null;
+      edits: DraftEditRow[];
+      needs_pick: boolean;
+      picks: DraftEditPick[];
+    }
+  | {
+      ok: true;
+      engine: string;
+      intent: "add";
+      added: { name: string; qty_note?: string };
+      needs_pick: false;
+      picks: DraftEditPick[];
+    }
+  | {
+      ok: true;
+      engine: string;
+      intent: "batch_location";
+      new_location: string;
+      needs_pick: false;
+      picks: DraftEditPick[];
+    }
+  | { ok: true; engine: string; intent: "none"; needs_pick: false; picks: DraftEditPick[] };
