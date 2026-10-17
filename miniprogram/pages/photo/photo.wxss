@@ -1292,3 +1292,10 @@
     opacity: 1;
   }
 }
+
+/* 层级预览行(2026-10-18):点按手动改拆分层级(› 连接) */
+.lv.locpath {
+  font-size: 26rpx;
+  color: var(--text-2);
+  margin-top: 2rpx;
+}

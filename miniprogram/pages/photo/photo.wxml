@@ -94,7 +94,8 @@
   <view class="locbar">
     <view class="ico">📍</view>
     <view class="main">
-  <view class="lv" bindtap="onBatchLocEditTap">{{ locPathText || batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
+  <view class="lv" bindtap="onBatchLocEditTap">{{ batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
+  <view wx:if="{{ locPathText }}" class="lv locpath" bindtap="onLocPathEditTap">🌳 {{ locPathText }} <text class="pen">✎ 改层级</text></view>
     </view>
   </view>
 

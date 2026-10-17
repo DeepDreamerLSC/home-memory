@@ -2178,3 +2178,27 @@ async function readyToSaveSplit(ctx, page, location) {
   page.onSaveTap();
   await settle();
 }
+
+// 真机反馈(2026-10-18):模型拆错层级时无法编辑。点层级预览 → › 编辑 → 手动覆盖缓存。
+test("PP-LOCPATH-6:手动改层级——› 分段写入 locPathCache 直接生效", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  var modal = null;
+  ctx.env.wx.showModal = function (o) {
+    modal = o;
+    ctx.env.modals.push(o);
+    o.success({ confirm: true, cancel: false, content: "书房 › 桌子 › 右边抽屉" });
+  };
+  page.setBatchLocationText("书房桌子的右边抽屉");
+  page.onLocPathEditTap();
+  assert.ok(modal !== null, "弹出层级编辑");
+  assert.deepEqual(page.locPathCache["书房桌子的右边抽屉"], ["书房", "桌子", "右边抽屉"], "手动路径入缓存");
+  assert.equal(page.data.locPathText, "书房 › 桌子 › 右边抽屉", "预览即时更新");
+  // 非法输入不改
+  ctx.env.wx.showModal = function (o) {
+    ctx.env.modals.push(o);
+    o.success({ confirm: true, cancel: false, content: "  ›  › " });
+  };
+  page.onLocPathEditTap();
+  assert.deepEqual(page.locPathCache["书房桌子的右边抽屉"], ["书房", "桌子", "右边抽屉"], "空层级零动作");
+});
