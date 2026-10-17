@@ -142,7 +142,7 @@ test("键盘弹起自动避让:attached 注册监听,高度>0 隐藏、归零恢
 
 test("冻结设计基线:wxml 文案与 wxss 取值(--vb-*/安全区/按压反馈/单色麦克风)", function () {
   var wxml = read("voice-bar.wxml");
-  assert.ok(wxml.indexOf("按住说话") !== -1, "胶囊默认文案为按住说话");
+  assert.ok(wxml.indexOf("一句话录入物品") !== -1, "胶囊默认文案为一句话录入物品(2026-10-17 用户拍板)");
   assert.ok(wxml.indexOf("说吧,我记着呢。") !== -1, "录音中文案沿用首页语义");
   assert.ok(wxml.indexOf("好,当我没听见。") !== -1, "上滑取消文案沿用首页语义");
   assert.ok(wxml.indexOf("文字") !== -1, "「文字」按钮存在");
