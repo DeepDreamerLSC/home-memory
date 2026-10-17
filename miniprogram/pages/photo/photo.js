@@ -6,7 +6,12 @@
  * - 证据条:默认折叠(压暗缩略),点开或点候选行展开全幅并高亮该候选框;
  *   容器等比跟随原图(aspect-ratio = img_w/img_h,零裁切,§3.2 纪律);
  * - 候选清单三态(候选/保留/已确认记住)+ 计数单一来源(utils/intake-draft);
- * - 位置栏:批次位置(手动/常用快选/按住说位置),逐件例外在编辑面板改;
+ * - 位置栏:批次位置(手动/常用快选/按住说位置),逐件例外在编辑面板改;保存
+ *   成功后批次位置与各件例外像语音确认流程一样挂到位置节点树(issue #65 V0.4
+ *   第③条:同一 ensureAndLink 机制,失败不回滚不阻断,只轻提示「主界面可补」);
+ *   挂树分段 LLM 逐字锚定优先(extractDraft.locationSplit 预热 locPathCache,
+ *   无分隔符中文可拆「书房 › 桌子 › 右边抽屉」,位置栏同步层级预览),缺失/在途
+ *   走 splitLocationSegments 分隔符规则兜底,绝不因异步拆分未返回而阻塞保存;
  * - 按住说话:utils/voice-entry 单例的真实手势机(按住/松手/上滑取消/最短按压),
  *   本页只渲染 recsheet 浮层并经 routeExtract 旁路接 draftEditParse → diff 弹层
  *   (逐字段勾选应用,0 勾选禁用;原话保留可回听);
@@ -53,6 +58,20 @@ const VL_AUTH_STORAGE_KEY = "home-memory:photo-vl-auth";
 /** 授权弹窗文案:如实说明识别=临时传输处理,保存是另一回事 */
 const VL_AUTH_CONTENT = "识别需要把这张照片临时发送到云端处理(仅传输识别,不会保存);你点确认入库后,照片才会保存。";
 /* ---------------- 页面 ---------------- */
+/** 展开态尺寸(真机 2026-10-17 二次反馈:aspect-ratio/min/calc/vh 在部分内核未全生效,
+ * 照片曾放大至 300%+;改为 JS 直接算像素——横向或纵向先撑满即停,样式只吃 px)。
+ * 规则:先按宽撑满;高超过屏高 46% 则按高截断、宽同比例回缩,居中留黑边,零裁剪。 */
+function photoExpandStyleOf(imgW, imgH, winW, winH) {
+    const r = imgW > 0 && imgH > 0 ? imgW / imgH : 4 / 3;
+    let w = winW;
+    let h = winW / r;
+    const capH = Math.round(winH * 0.46);
+    if (h > capH) {
+        h = capH;
+        w = Math.round(capH * r);
+    }
+    return "width:" + Math.round(w) + "px;height:" + Math.round(h) + "px;margin:0 auto;";
+}
 Page({
     data: {
         mode: "confirm",
@@ -63,7 +82,13 @@ Page({
         imgW: 0,
         imgH: 0,
         photoAspect: "4 / 3",
+        photoExpandStyle: "width:375px;height:281px;margin:0 auto;",
         photoCollapsed: true,
+        qkHigh: 0,
+        /** 窗口逻辑尺寸(onLoad 读取;stub 环境失败用 375×667) */
+        winW: 375,
+        winH: 667,
+        voiceCtaText: "这些物品位置在哪,请告诉我",
         highlightId: "",
         boxViews: [],
         rows: [],
@@ -72,6 +97,7 @@ Page({
         saveDisabled: true,
         navSubtitle: "",
         batchLocation: "",
+        locPathText: "",
         recentLocations: [],
         voiceState: "idle",
         transcribing: false,
@@ -120,7 +146,18 @@ Page({
     voiceEntry: null,
     vlAuthGranted: false,
     vlAuthAsked: false,
+    locPathCache: {},
+    locPathPending: {},
     onLoad(options) {
+        try {
+            const si = wx.getSystemInfoSync();
+            if (si && si.windowWidth > 0) {
+                this.setData({ winW: si.windowWidth, winH: si.windowHeight || 667 });
+            }
+        }
+        catch (e) {
+            /* stub/异常:保持默认 375×667 */
+        }
         // 实例态重建(Page options 被浅拷贝共享,index 页同款防护)
         this.rowsRaw = [];
         this.prepared = null;
@@ -133,6 +170,9 @@ Page({
         // B4:授权记忆还原(同意过识别临时传输的不再问;拒绝不落键,重进会再问)
         this.vlAuthGranted = this.readVlAuthRemembered();
         this.vlAuthAsked = this.vlAuthGranted;
+        // 位置层级拆分缓存/在途表重建(Page options 被浅拷贝共享,同 rowsRaw 防护)
+        this.locPathCache = {};
+        this.locPathPending = {};
         this.capturing = false;
         this.captureEpoch = 0;
         this.committing = false;
@@ -291,6 +331,7 @@ Page({
             imgW: prepared.imgW,
             imgH: prepared.imgH,
             photoAspect: prepared.imgW + " / " + prepared.imgH,
+            photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH, this.data.winW, this.data.winH),
         });
         // B4:识别=把照片临时发送到云端处理——首次需用户授权;拒绝则本次不调识别,
         // 照片仍留在本机作证据,页面照常进手动/语音建候选
@@ -331,7 +372,7 @@ Page({
                 preselected +
                 " 个" +
                 (outcome.truncated ? "(超过 10 件,只取前 10)" : "");
-            this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle });
+            this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle, photoCollapsed: true });
             this.refreshRecentLocations();
             this.rebuildRows();
             return;
@@ -379,11 +420,13 @@ Page({
         this.setData({
             entryReady: true,
             recognizing: false,
+            photoCollapsed: true,
             navSubtitle: subtitle,
             photoPath: prepared.path,
             imgW: prepared.imgW,
             imgH: prepared.imgH,
             photoAspect: prepared.imgW + " / " + prepared.imgH,
+            photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH, this.data.winW, this.data.winH),
         });
         this.refreshRecentLocations();
         this.rebuildRows();
@@ -407,16 +450,21 @@ Page({
             this.setData({
                 entryReady: true,
                 recognizing: false,
+                photoCollapsed: true,
                 photoPath: session.file.localPath,
                 imgW: session.file.imgW,
                 imgH: session.file.imgH,
                 photoAspect: session.file.imgW + " / " + session.file.imgH,
+                photoExpandStyle: photoExpandStyleOf(session.file.imgW, session.file.imgH, this.data.winW, this.data.winH),
                 batchLocation: session.batchLocation,
+                locPathText: this.locPathViewOf(session.batchLocation),
                 navSubtitle: "继续核对上次的 " + session.rows.length + " 个候选(已确认记住 " + counts.done + " 件)",
             });
             this.refreshRecentLocations();
             this.rebuildRows();
             this.buildEvidencePendingView();
+            // 会话恢复的批次位置同机制预热层级拆分(挂树/预览与手输同源)
+            this.ensureLocPath(session.batchLocation);
         };
         // 小程序临时文件可能被系统回收:恢复前复核文件是否还在
         if (typeof wx !== "undefined" &&
@@ -486,7 +534,11 @@ Page({
     /* ---------------- 证据条与识别框 ---------------- */
     /** 折叠态点照片/evChip:展开全幅(框随展开显示) */
     onPhotoTap() {
+        // 开关语义(真机反馈 2026-10-17):竖构图展开几乎满屏,用户本能点图想收起——
+        // 展开态点照片空白区=收起(框/角标/圈选入口均为 catchtap,不会误触)
         if (!this.data.photoCollapsed) {
+            this.setData({ photoCollapsed: true, highlightId: "" });
+            this.rebuildRows();
             return;
         }
         this.setData({ photoCollapsed: false });
@@ -553,6 +605,17 @@ Page({
         this.rebuildRows();
         this.persistSession();
     },
+    /** 快速核实(真机反馈:逐件勾选繁琐):一键三档——全保留/只留高可信/清空。
+     *  done 行是终态不动;点完立即重建计数,保存键/确认弹层随之更新。 */
+    onQuickVerifyTap(e) {
+        const mode = String(((e.currentTarget || {}).dataset || {}).mode || "");
+        if (mode !== "all" && mode !== "high" && mode !== "none") {
+            return;
+        }
+        this.rowsRaw = (0, intake_draft_1.quickVerifyRows)(this.rowsRaw, mode);
+        this.rebuildRows();
+        this.persistSession();
+    },
     onManualAddTap() {
         this.openNewRowSheet();
     },
@@ -616,7 +679,8 @@ Page({
             saveText = "重试存 " + counts.keep + " 件";
             saveDisabled = false;
         }
-        this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled });
+        const qkHigh = this.rowsRaw.filter((r) => !r.done && r.confidence === "high").length;
+        this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled, qkHigh });
     },
     /* ---------------- 位置栏 ---------------- */
     onBatchLocEditTap() {
@@ -651,9 +715,68 @@ Page({
         this.setBatchLocationText(loc);
     },
     setBatchLocationText(v) {
-        this.setData({ batchLocation: v });
+        this.setData({
+            batchLocation: v,
+            voiceCtaText: v.trim() === "" ? "这些物品位置在哪,请告诉我" : "有什么物品要改的吗?请告诉我",
+            locPathText: this.locPathViewOf(v),
+        });
+        this.ensureLocPath(v);
         this.persistSession();
         this.rebuildRows();
+    },
+    /**
+     * LLM 位置层级拆分预热(真机 2026-10-17):无分隔符中文(「书房桌子右边
+     * 抽屉」)确定性分段只能整串挂平节点,交给 extractDraft.locationSplit 按
+     * 「从大到小」拆层级(服务端逐字锚定硬校验)。fire-and-forget:只回填
+     * locPathCache 与位置栏预览,绝不 await、绝不阻塞保存——保存时刻缓存缺什么
+     * 就走 splitLocationSegments 确定性兜底。fallback:true(模型输出没过硬校验)
+     * 不回填缓存:回落规则分段,带分隔符文本仍能按规则拆开。
+     */
+    ensureLocPath(text) {
+        const t = (typeof text === "string" ? text : "").trim();
+        if (t === "") {
+            return;
+        }
+        if (Object.prototype.hasOwnProperty.call(this.locPathCache, t)) {
+            return;
+        }
+        if (this.locPathPending[t]) {
+            return;
+        }
+        this.locPathPending[t] = true;
+        void (0, api_1.callLocationSplit)(t)
+            .then((res) => {
+            if (!res.fallback &&
+                Array.isArray(res.path) &&
+                res.path.length > 0 &&
+                res.path.every((seg) => typeof seg === "string" && seg.trim() !== "")) {
+                this.locPathCache[t] = res.path;
+            }
+        })
+            .catch(() => {
+            // AI_UNAVAILABLE/网络/形状失败:不缓存、不提示(拆分是增强,兜底常在)
+        })
+            .then(() => {
+            delete this.locPathPending[t];
+            if (this.data.batchLocation.trim() === t) {
+                this.syncLocPathView(this.data.batchLocation);
+            }
+        });
+    },
+    /** 位置栏层级预览文案:缓存命中 → 「书房 › 桌子 › 右边抽屉」;否则原文 */
+    locPathViewOf(text) {
+        const t = (typeof text === "string" ? text : "").trim();
+        if (t !== "" &&
+            Object.prototype.hasOwnProperty.call(this.locPathCache, t) &&
+            Array.isArray(this.locPathCache[t]) &&
+            this.locPathCache[t].length > 0) {
+            return this.locPathCache[t].join(" › ");
+        }
+        return t;
+    },
+    /** 批次位置变化/缓存回填时同步 locPathText 上屏(无缓存时显示原文) */
+    syncLocPathView(text) {
+        this.setData({ locPathText: this.locPathViewOf(text) });
     },
     /** 常用快选:取 locations-cache 根层最近的 2 个房间(失败/未验证隐藏) */
     refreshRecentLocations() {
@@ -1000,7 +1123,15 @@ Page({
             return;
         }
         // batch_location:改批次默认位置;已设例外的候选不受影响(例外仍是例外)
-        this.setData({ diff: null, batchLocation: d.locNew });
+        this.setData({
+            diff: null,
+            batchLocation: d.locNew,
+            voiceCtaText: d.locNew.trim() === ""
+                ? "这些物品位置在哪,请告诉我"
+                : "有什么物品要改的吗?请告诉我",
+            locPathText: this.locPathViewOf(d.locNew),
+        });
+        this.ensureLocPath(d.locNew);
         this.persistSession();
         wx.showToast({ title: "本批位置已改:" + d.locNew, icon: "none" });
     },
@@ -1164,6 +1295,10 @@ Page({
         const batch = this.data.batchLocation.trim();
         // 位置(默认继承批次,不同才改):与批次相同 → 例外清空(继承),不同 → 例外
         const exc = loc !== batch || batch === "" ? (loc !== "" ? loc : null) : null;
+        // 例外位置同机制预热 LLM 层级拆分(挂树时经同一 locPathCache 命中)
+        if (exc !== null) {
+            this.ensureLocPath(exc);
+        }
         const remind = ed.hasRemind && ed.dueDate !== ""
             ? { due_date: ed.dueDate, kind: REMIND_KIND_OPTIONS[ed.remindKindIndex] }
             : null;
@@ -1380,6 +1515,31 @@ Page({
         else {
             this.persistSession();
             wx.showToast({ title: fails + " 件没存上,失败行可重试", icon: "none", duration: 2500 });
+        }
+        // 位置挂树(issue #65 V0.4 第③条):本批唯一位置清单(批次位置+各已保存件
+        // 例外,去重)→ 逐件挂上位置树。终态与提示先落,挂树在后(fire-and-forget);
+        // 挂树失败不回滚不阻断,由 runPhotoMounts 轻提示。会话恢复/失败重试只带
+        // 未 done 行,已 done 件不会重挂(update_id 又按行幂等键收敛)。
+        // 分段 LLM 逐字锚定优先(locPathCache 预热命中的文本用之),缺失/在途走
+        // splitLocationSegments 规则兜底——绝不因异步拆分未返回而阻塞保存。
+        void this.runPhotoMounts((0, photo_intake_1.planPhotoMounts)(pending, outcome.results, this.data.batchLocation, this.locPathCache));
+    },
+    /**
+     * 保存成功后的位置挂树(issue #65 V0.4 第③条):拍照批次位置与逐件例外像
+     * 语音录入确认流程一样挂到位置节点树(同一个 locations.ensureAndLink API
+     * 与幂等语义),用户不必再去主界面二次确认归属。挂树失败**不回滚不阻断**:
+     * location_text 已随 photoCommit 落库,件照常在「尚未归类」,只轻提示
+     * 「N 件的位置树没挂上,主界面可补」;全部挂上则零打扰。
+     */
+    async runPhotoMounts(plan) {
+        const outcome = await (0, photo_intake_1.mountPhotoItems)(plan);
+        const notMounted = outcome.failed + plan.skipped;
+        if (notMounted > 0) {
+            wx.showToast({
+                title: notMounted + " 件的位置树没挂上,主界面可补",
+                icon: "none",
+                duration: 2500,
+            });
         }
     },
     /* ---------------- 证据待关联重试(C3:photoEvidenceRetry 幂等收敛) ---------------- */

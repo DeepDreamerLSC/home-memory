@@ -21,11 +21,14 @@
  *   并存互不影响;
  * - event.action === "draftEditParse":走 handler.draftEditParse,与提取共用
  *   local→DeepSeek 双引擎 deps;
+ * - event.action === "locationSplit"(§1.6 位置层级拆分):走 handler.locationSplit,
+ *   同样共用 local→DeepSeek 双引擎 deps(无分隔符中文位置交模型拆层级,
+ *   服务端逐字锚定硬校验,不过 → 整串单段兜底);
  * - 不带 action(旧调用/语音提取)走既有提取,逐字节一致(现状锁)。
  */
 
 const cloud = require("wx-server-sdk");
-const { handler, vlRecognize, draftEditParse } = require("./lib/handler");
+const { handler, vlRecognize, draftEditParse, locationSplit } = require("./lib/handler");
 const { callDeepSeek } = require("./lib/deepseek");
 const localLlm = require("./lib/local-llm");
 const vl = require("./lib/vl");
@@ -69,6 +72,10 @@ exports.main = async function (event) {
   };
   if (action === "draftEditParse") {
     return draftEditParse(event, deps);
+  }
+  if (action === "locationSplit") {
+    // 位置层级拆分(§1.6):与语音编辑解析共用 local→DeepSeek 双引擎 deps
+    return locationSplit(event, deps);
   }
   return handler(event, deps);
 };

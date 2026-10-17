@@ -65,7 +65,7 @@
   <view class="ph-sub">{{ navSubtitle }}</view>
 
   <!-- 照片=证据区:默认折叠(压暗缩略,框隐藏);点开才全幅,容器等比跟随原图 -->
-  <view class="photoWrap {{ photoCollapsed ? 'collapsed' : '' }}" style="{{ photoCollapsed ? '' : 'aspect-ratio: ' + photoAspect }}" bindtap="onPhotoTap">
+  <view class="photoWrap {{ photoCollapsed ? 'collapsed' : '' }}" style="{{ photoCollapsed ? '' : photoExpandStyle }}" bindtap="onPhotoTap">
     <image class="ph-img {{ photoCollapsed ? 'dim' : '' }}" src="{{ photoPath }}" mode="aspectFill" />
     <view wx:if="{{ !photoCollapsed }}" class="ask" catchtap="onAskChipTap">🅐 本批照片(证据)· 收起</view>
     <block wx:if="{{ !photoCollapsed }}">
@@ -91,18 +91,9 @@
   <view class="locbar">
     <view class="ico">📍</view>
     <view class="main">
-      <view class="lb">这批候选默认都在哪?(填一次,逐件可改)</view>
-      <view class="lv" bindtap="onBatchLocEditTap">{{ batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
-      <view class="lc">
-        <view class="chip c1" catchtouchstart="onTalkTouchStart" catchtouchmove="onTalkTouchMove" catchtouchend="onTalkTouchEnd" catchtouchcancel="onTalkTouchCancel">🎤 按住说位置</view>
-        <view wx:for="{{ recentLocations }}" wx:key="*this" class="chip c2" data-loc="{{ item }}" bindtap="onRecentLocTap">常用:{{ item }}</view>
-        <view class="chip c3" bindtap="onNewLocTap">＋新建</view>
-      </view>
-      <view class="hint">候选默认继承这个位置,例外在编辑里逐件改;保存前会再让你确认一次。</view>
+  <view class="lv" bindtap="onBatchLocEditTap">{{ locPathText || batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
     </view>
   </view>
-
-  <view class="warn">一条记录 = 一件可查找的物品:电池×24 也只记一条,数量是备注,不做库存管理。数量为 AI 估计,核对更稳。</view>
 
   <!-- C3:终态「照片待关联」提示 + 幂等重试关联入口(样式沿用 warn/btn) -->
   <view wx:if="{{ evidencePending }}" class="warn evretry">
@@ -115,9 +106,15 @@
     ><view class="btn-face">{{ evidenceRetryBusy ? '关联中…' : '重试关联' }}</view></view>
   </view>
 
+  <!-- 快速核实(真机反馈:逐件勾选繁琐)——一键三档,点完看清单微调即可 -->
+  <view class="qkbar">
+    <view class="qk-chip go" hover-class="qk-hover" hover-stay-time="80" data-mode="all" bindtap="onQuickVerifyTap">✓ 全保留</view>
+    <view class="qk-chip hi" hover-class="qk-hover" hover-stay-time="80" data-mode="high" bindtap="onQuickVerifyTap">★ 只留高可信 {{ qkHigh }}</view>
+    <view class="qk-chip no" hover-class="qk-hover" hover-stay-time="80" data-mode="none" bindtap="onQuickVerifyTap">清空</view>
+  </view>
+
   <view class="listhead">
     <text>{{ headText }}</text>
-    <text class="selall" bindtap="onToggleAllTap">全选 / 清空</text>
   </view>
 
   <view class="list">
@@ -165,8 +162,7 @@
         <block wx:else><view class="mic-cap"></view><view class="mic-stand"></view><view class="mic-base"></view></block>
       </view>
       <view class="hold-label">
-        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : transcribing ? '整理你刚说的话…' : diffLoading ? '在解析你说的…' : extracting ? '核对中…' : '按住说话' }}
-        <text class="l2">补全 · 改数量 · 说位置</text>
+        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : transcribing ? '整理你刚说的话…' : diffLoading ? '在解析你说的…' : extracting ? '核对中…' : voiceCtaText }}
       </view>
     </view>
   </view>

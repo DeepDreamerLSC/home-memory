@@ -24,17 +24,6 @@
     </view>
   </view>
 
-  <!-- 拍照识物常驻入口(#3):根层视图且不在搜索态才显示;白卡细描边胶囊,不新造颜色 -->
-  <view
-    wx:if="{{ isRootView && !queried }}"
-    class="photo-entry"
-    hover-class="photo-entry-hover"
-    hover-stay-time="80"
-    bindtap="onPhotoRecordTap"
-  >
-    <view class="photo-entry-face">📷 拍照记一抽屉<text class="photo-entry-sub">拍照列清单,逐件核对才入库</text></view>
-  </view>
-
   <!-- 未完成草稿恢复(中途退出/进程回收;原幂等键续存) -->
   <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">
     上次有 {{ resumeSession.count }} 件没记完,继续核对 ›
@@ -102,6 +91,17 @@
           </view>
         </view>
       </view>
+      <!-- 拍照识物入口(#3,真机反馈 2026-10-17 挪位):找东西下面、家里有什么(家庭地图)上面 -->
+      <view
+        wx:if="{{ isRootView && !queried }}"
+        class="photo-entry"
+        hover-class="photo-entry-hover"
+        hover-stay-time="80"
+        bindtap="onPhotoRecordTap"
+      >
+        <view class="photo-entry-face">📷 拍照记录物品</view>
+      </view>
+
       <!-- 空搜索不造假:结果就地展开(H1b 同款空态,搜完自动切到结果视图) -->
     </view>
   </block>
@@ -125,6 +125,17 @@
             {{ querying ? '…' : '找' }}
           </view>
         </view>
+      </view>
+
+      <!-- 拍照识物入口(#3,真机反馈 2026-10-17 挪位):找东西下面、家里有什么(家庭地图)上面 -->
+      <view
+        wx:if="{{ isRootView && !queried }}"
+        class="photo-entry"
+        hover-class="photo-entry-hover"
+        hover-stay-time="80"
+        bindtap="onPhotoRecordTap"
+      >
+        <view class="photo-entry-face">📷 拍照记录物品</view>
       </view>
 
       <!-- H1b 搜索结果:命中按物品分组,替换中间区域 -->

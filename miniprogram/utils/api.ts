@@ -23,6 +23,8 @@ import type {
   ExtractDraftMultiResponse,
   ExtractDraftOkResponse,
   GetItemResponse,
+  LocationSplitEvent,
+  LocationSplitResponse,
   ItemsApiEvent,
   ItemsApiOkResponse,
   ItemSummary,
@@ -708,6 +710,47 @@ export async function callDraftEditParse(
     edits,
     needs_pick: result.needs_pick === true,
     picks,
+  };
+}
+
+/**
+ * 拍照识物位置层级拆分(#3,IMPLEMENTATION §1.6,真机 2026-10-17):
+ * 调 extractDraft.locationSplit,把无分隔符中文位置(「书房桌子右边抽屉」)交给
+ * 模型拆成从大到小的层级路径(逐字锚定纪律与语音链路 mount_path 同源)。
+ * 服务端已硬校验(每段是原文逐字子串、按序、1-6 段、每段 1-30 码点;
+ * 不过 → 整串单段 + fallback:true);客户端只做形状门(path 数组每项 string,
+ * 残缺响应整体抛 CLIENT_BAD_RESPONSE,绝不半带)。ok:false(含 AI_UNAVAILABLE)
+ * 抛 ApiError,由调用方走 splitLocationSegments 确定性兜底——绝不阻塞保存。
+ * 超时 30000(与 callExtractDraft/callDraftEditParse 同款)。
+ */
+export async function callLocationSplit(text: string): Promise<LocationSplitResponse> {
+  const event: LocationSplitEvent = { action: "locationSplit", text };
+  const result = await callCloudFunction(
+    EXTRACT_DRAFT_FUNCTION,
+    event,
+    EXTRACT_DRAFT_TIMEOUT_MS,
+  );
+  if (!isRecord(result)) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (result.ok === false) {
+    throw toServerError(result.error, result.message, EXTRACT_DRAFT_MESSAGES);
+  }
+  if (result.ok !== true) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (
+    !Array.isArray(result.path) ||
+    result.path.length < 1 ||
+    !result.path.every((seg) => typeof seg === "string" && seg.trim() !== "")
+  ) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  return {
+    ok: true,
+    engine: typeof result.engine === "string" ? result.engine : "",
+    path: (result.path as string[]).map((seg) => seg),
+    fallback: result.fallback === true,
   };
 }
 

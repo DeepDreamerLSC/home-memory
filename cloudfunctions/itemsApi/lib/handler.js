@@ -2316,7 +2316,11 @@ async function photoCommitItem(event, deps) {
       ok: true,
       item_id: createRes.item.item_id,
       duplicated: createRes.duplicated === true,
-      evidence_saved: false
+      evidence_saved: false,
+      // 建档后版本(issue #65 V0.4 第③条):拍照批次位置/逐件例外随后挂位置树
+      // (locations.ensureAndLink 的 expected_version)取它;duplicated 重放时为
+      // 既有文档当前版本。旧客户端忽略该字段,零行为变化
+      version: createRes.item.version
     };
     if (p.photo) {
       try {

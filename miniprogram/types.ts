@@ -919,6 +919,12 @@ export interface PhotoCommitResultRow {
   item_id?: string;
   duplicated?: boolean;
   evidence_saved?: boolean;
+  /**
+   * ok:true 时携带:该件建档后的版本(issue #65 V0.4 第③条,拍照位置挂树):
+   * 客户端随后 locations.ensureAndLink 挂树的 expected_version 取它;duplicated
+   * 重放时为既有文档当前版本。旧云函数窗口缺省 → 客户端跳过挂树不误报
+   */
+  version?: number;
   /** ok:false 时携带 */
   error?: string;
   message?: string;
@@ -1040,3 +1046,20 @@ export type DraftEditParseResponse =
       picks: DraftEditPick[];
     }
   | { ok: true; engine: string; intent: "none"; needs_pick: false; picks: DraftEditPick[] };
+
+/* ---------------- 拍照识物:locationSplit(§1.6,位置层级拆分) ---------------- */
+
+export interface LocationSplitEvent {
+  action: "locationSplit";
+  /** 位置原文(去空白后 1-200 码点) */
+  text: string;
+}
+
+export interface LocationSplitResponse {
+  ok: true;
+  engine: string;
+  /** 层级路径(1-6 段、每段 1-30 码点、逐字取自原文且按序) */
+  path: string[];
+  /** true = 模型输出未过硬校验,整串单段兜底(客户端不优先采用,回落分隔符规则) */
+  fallback: boolean;
+}

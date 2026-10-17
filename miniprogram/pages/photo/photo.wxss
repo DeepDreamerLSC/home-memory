@@ -1183,3 +1183,50 @@
   border-radius: 12rpx;
   z-index: 7;
 }
+
+/* 快速核实条(真机反馈 2026-10-17):一键三档,替代原隐蔽的「全选/清空」小字 */
+.qkbar {
+  display: flex;
+  gap: 12rpx;
+  padding: 16rpx 24rpx 4rpx;
+}
+.qk-chip {
+  flex: 1;
+  min-height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+.qk-chip.go {
+  background: var(--go-bg);
+  color: var(--go-fg);
+  box-shadow: 0 5rpx 0 var(--cta-shadow);
+}
+.qk-chip.hi {
+  background: var(--accent-dim);
+  color: var(--text);
+  border: 2rpx solid var(--accent-shadow);
+}
+.qk-chip.no {
+  background: var(--card);
+  color: var(--text-2);
+  border: 2rpx solid var(--vb-btn-line);
+}
+.qk-hover {
+  filter: brightness(0.94);
+  transform: scale(0.985);
+}
+
+/* 照片证据条冻结置顶(真机反馈 2026-10-17):收起态随滚动吸顶,清单再长照片始终可见;
+   展开态(46vh 限高)保持文档流,避免吸顶占掉半个屏。 */
+.photoWrap.collapsed {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.18);
+}

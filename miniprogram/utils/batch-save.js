@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MOUNT_SEGMENT_MAX_CODEPOINTS = exports.MOUNT_PATH_MAX_SEGMENTS = void 0;
 exports.rowsToSave = rowsToSave;
 exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
@@ -93,20 +94,23 @@ function rowReminderInput(row) {
             : {}),
     };
 }
-/** 与 locations 节点名同限:1-6 段,每段去空白 1-30 码点 */
-const MOUNT_PATH_MAX_SEGMENTS = 6;
-const MOUNT_SEGMENT_MAX_CODEPOINTS = 30;
+/**
+ * 与 locations 节点名同限:1-6 段,每段去空白 1-30 码点。
+ * 导出供拍照流程的确定性分段共用(issue #65 ③:同一份限值,单一来源)
+ */
+exports.MOUNT_PATH_MAX_SEGMENTS = 6;
+exports.MOUNT_SEGMENT_MAX_CODEPOINTS = 30;
 function codePointLength(s) {
     return Array.from(s).length;
 }
 /** 路径段形状复核(纯函数):非数组/超限/含空段或超长段一律不通过,不猜 */
 function isValidPathSegments(path) {
-    if (!Array.isArray(path) || path.length < 1 || path.length > MOUNT_PATH_MAX_SEGMENTS) {
+    if (!Array.isArray(path) || path.length < 1 || path.length > exports.MOUNT_PATH_MAX_SEGMENTS) {
         return false;
     }
     return path.every((seg) => typeof seg === "string" &&
         codePointLength(seg.trim()) >= 1 &&
-        codePointLength(seg.trim()) <= MOUNT_SEGMENT_MAX_CODEPOINTS);
+        codePointLength(seg.trim()) <= exports.MOUNT_SEGMENT_MAX_CODEPOINTS);
 }
 /**
  * 草稿 → 「放进」路径预览(纯函数):仅 certain=true 且形状合法才透传,

@@ -27,11 +27,18 @@ import { callItemsApi, isApiError, uuid } from "./api";
 import { householdScopeId } from "./household-scope";
 import { composeNote } from "./intake-draft";
 import type { IntakeRow } from "./intake-draft";
+import {
+  MOUNT_PATH_MAX_SEGMENTS,
+  MOUNT_SEGMENT_MAX_CODEPOINTS,
+} from "./batch-save";
+import { callLocationsApi } from "./locations-api";
 import type { Box } from "./photo-box";
 import { recognizePhotoFile } from "./photo-vl";
 import type { PhotoVlFileOutcome } from "./photo-vl";
 import type {
+  EnsureAndLinkResponse,
   ItemsApiEvent,
+  LocationsApiEvent,
   PhotoCommitItem,
   PhotoCommitResponse,
   PhotoCommitResultRow,
@@ -74,6 +81,10 @@ export interface PhotoIntakeDeps {
   recognize(tempPath: string): Promise<PhotoVlFileOutcome>;
   commit(event: PhotoCommitEvent): Promise<PhotoCommitResponse>;
   evidenceRetry(event: PhotoEvidenceRetryEvent): Promise<PhotoEvidenceRetryResponse>;
+  /** 位置挂树(issue #65 ③):与语音确认流程完全相同的 locations.ensureAndLink */
+  ensureAndLink(
+    event: Extract<LocationsApiEvent, { action: "ensureAndLink" }>,
+  ): Promise<EnsureAndLinkResponse>;
   uuid(): string;
   now(): Date;
 }
@@ -166,6 +177,7 @@ const defaultDeps: PhotoIntakeDeps = {
   recognize: (tempPath) => recognizePhotoFile(tempPath),
   commit: (event) => callItemsApi(event),
   evidenceRetry: (event) => callItemsApi(event),
+  ensureAndLink: (event) => callLocationsApi(event),
   uuid: () => uuid(),
   now: () => new Date(),
 };
@@ -469,6 +481,211 @@ export async function retryPhotoEvidence(
     const code = isApiError(e) ? e.code : undefined;
     return { ok: false, message, error: code };
   }
+}
+
+// ---------- 位置挂树(issue #65 V0.4 第③条:批次位置 + 逐件例外挂到节点树) ----------
+
+/**
+ * 确定性分段(#65 ③,新增决策;真机 2026-10-17 起为兜底层):拍照流程的位置是
+ * 用户手输文本(如「玄关柜 · 第二层抽屉」),没有语音链路 extractDraft v2 的
+ * mount_path 提取环节;确认页手动改位置 = 清空路径不挂靠,locations 侧的
+ * parseLocation 是 LLM 候选+逐段人工核对(交互式),都不是「文本→路径段」的
+ * 确定性机制——本函数按「·」「/」「-」「的」与空白切分,逐段 trim、空段丢弃,
+ * 单段=单层。**分隔符规则拆不开无分隔符中文**(「书房桌子右边抽屉」整串一平段),
+ * 故挂树分段现在是 LLM 逐字锚定优先(extractDraft.locationSplit,页面侧
+ * locPathCache 预热,见 planPhotoMounts 的 cache 参数),本函数退为兜底:
+ * LLM 未返回/失败/形状不合法时用之,保证保存绝不因异步拆分在途而阻塞。
+ * 切分后仍须满足挂树路径形状门(与 batch-save / 服务端 cleanPathSegments 同限:
+ * 1-6 段、每段 1-30 码点);超限一律返回空数组 = 该位置不挂(location_text 已随
+ * photoCommit 落库,绝不猜路径、绝不截断改名)。
+ */
+export function splitLocationSegments(text: string): string[] {
+  const segments = (typeof text === "string" ? text : "")
+    .split(/[·/\-的\s]+/)
+    .map((seg) => seg.trim())
+    .filter((seg) => seg !== "");
+  if (segments.length < 1 || segments.length > MOUNT_PATH_MAX_SEGMENTS) {
+    return [];
+  }
+  if (segments.some((seg) => Array.from(seg).length > MOUNT_SEGMENT_MAX_CODEPOINTS)) {
+    return [];
+  }
+  return segments;
+}
+
+/** 挂树目标件:item_id + 建档版本 + 稳定幂等键 */
+export interface PhotoMountTarget {
+  item_id: string;
+  /** photoCommit 回执的建档后版本(ensureAndLink 的 expected_version) */
+  expected_version: number;
+  /**
+   * 挂树幂等键:"photo:" + 行内 operationId——行内 operationId 全程稳定
+   * (失败重试/会话恢复沿用),同一件无论重试多少次挂树都用同一键;服务端
+   * ensureAndLink 幂等(TS-EAL-1:重复同路径 already:true 且 version 不再 +1,
+   * 同 update_id 重放收敛),绝不重复挂。
+   */
+  update_id: string;
+}
+
+/** 挂树计划的单个位置条目(位置文本去重后的唯一清单之一) */
+export interface PhotoMountPlanEntry {
+  /** 位置原文(trim;批次位置或该件例外) */
+  locationText: string;
+  /** 层级分段(LLM 拆分缓存优先,否则分隔符规则兜底;形状不合法的位置不进 entries) */
+  path: string[];
+  /** 该位置下本轮已建的件 */
+  items: PhotoMountTarget[];
+}
+
+/** 挂树计划:合法位置的唯一清单 + 无法挂树的已建件数 */
+export interface PhotoMountPlan {
+  entries: PhotoMountPlanEntry[];
+  /**
+   * 无法挂树的已建件数(回执缺 version=旧云函数窗口 / 位置分段形状不合法):
+   * location_text 已随 photoCommit 落库,这些件照常在「尚未归类」,不阻断不回滚
+   */
+  skipped: number;
+}
+
+/**
+ * 挂树路径形状门(与 splitLocationSegments 产物同限):LLM 拆分缓存同样不得
+ * 越 6 段/30 码点——服务端已硬校验,这里兜客户端半边(如超长单段兜底路径),
+ * 不过 → 调用方回落 splitLocationSegments 的既有口径。
+ */
+function isValidMountPath(path: unknown): path is string[] {
+  if (!Array.isArray(path) || path.length < 1 || path.length > MOUNT_PATH_MAX_SEGMENTS) {
+    return false;
+  }
+  return path.every(
+    (seg) =>
+      typeof seg === "string" &&
+      Array.from(seg.trim()).length >= 1 &&
+      Array.from(seg.trim()).length <= MOUNT_SEGMENT_MAX_CODEPOINTS,
+  );
+}
+
+/**
+ * 生成本轮挂树计划(纯函数):
+ * - 有效位置 = 例外优先、批次位置兜底(与 buildPhotoCommitItems 的
+ *   location_text 合成完全同款),按文本去重收集;
+ * - 只收本轮 photoCommit 成功(item_id + version 齐)的件;失败件不挂(重试
+ *   成功后由那轮回执挂),回执缺 version(旧云函数窗口)计入 skipped;
+ * - 分段优先级:可选 cache(extractDraft.locationSplit 的 LLM 逐字锚定拆分,
+ *   页面 fire-and-forget 预热)有该文本且形状合法 → 用之;否则现行为
+ *   splitLocationSegments 分隔符规则兜底——**绝不因异步拆分未返回而阻塞保存**,
+ *   保存时刻缓存里有什么就用什么,没有就走规则;
+ * - 分段形状不合法的位置(超 6 段/超 30 码点段)不进 entries,该位置下的件
+ *   全部计入 skipped——location_text 已落库,绝不猜路径。
+ */
+export function planPhotoMounts(
+  rows: readonly IntakeRow[],
+  results: readonly PhotoCommitResultRow[],
+  batchLocation: string,
+  cache?: Readonly<Record<string, string[]>>,
+): PhotoMountPlan {
+  const batch = (typeof batchLocation === "string" ? batchLocation : "").trim();
+  const cachedPathOf = (locationText: string): string[] | null => {
+    if (
+      cache !== undefined &&
+      cache !== null &&
+      Object.prototype.hasOwnProperty.call(cache, locationText) &&
+      isValidMountPath(cache[locationText])
+    ) {
+      return cache[locationText];
+    }
+    return null;
+  };
+  const byLocation = new Map<string, PhotoMountPlanEntry>();
+  const order: string[] = [];
+  let skipped = 0;
+  for (const rr of results) {
+    if (!rr.ok || rr.item_id === undefined) {
+      continue; // 失败件不挂(行未终态,重试成功后由那轮回执挂)
+    }
+    if (typeof rr.version !== "number" || !Number.isInteger(rr.version) || rr.version < 1) {
+      skipped += 1; // 旧云函数窗口:无版本回执,挂不了也不误报
+      continue;
+    }
+    const row = rows[rr.index];
+    if (!row) {
+      continue;
+    }
+    const exc = typeof row.exc === "string" ? row.exc.trim() : "";
+    const locationText = exc !== "" ? exc : batch;
+    if (locationText === "") {
+      continue; // 理论边路(保存门已要求批次位置非空):不挂不猜
+    }
+    let entry = byLocation.get(locationText);
+    if (entry === undefined) {
+      entry = {
+        locationText,
+        path: cachedPathOf(locationText) ?? splitLocationSegments(locationText),
+        items: [],
+      };
+      byLocation.set(locationText, entry);
+      order.push(locationText);
+    }
+    entry.items.push({
+      item_id: rr.item_id,
+      expected_version: rr.version,
+      update_id: "photo:" + row.operationId,
+    });
+  }
+  let invalidPathItems = 0;
+  const entries: PhotoMountPlanEntry[] = [];
+  for (const locationText of order) {
+    const entry = byLocation.get(locationText) as PhotoMountPlanEntry;
+    if (entry.path.length === 0) {
+      invalidPathItems += entry.items.length; // 分段形状不合法:该位置下全部件不挂
+      continue;
+    }
+    entries.push(entry);
+  }
+  return { entries, skipped: skipped + invalidPathItems };
+}
+
+/** mountPhotoItems 结果 */
+export interface MountPhotoItemsOutcome {
+  /** 实际发起的挂树调用次数 */
+  attempted: number;
+  /** 挂树失败件数(网络/冲突/跨家庭;物品已保存,绝不回滚) */
+  failed: number;
+}
+
+/**
+ * 执行挂树计划:逐位置逐件调 locations.ensureAndLink——与语音确认流程
+ * (batch-save.saveRowWithMount → confirm 页)完全相同的 API 与语义:
+ * 建缺失路径 + 版本条件更新挂上;created_from="manual"(路径段来自用户手输
+ * 位置的确定性拆分,不是原话 parse)。挂树失败**不回滚不阻断不重试**:物品已
+ * 保存、location_text 已落库,失败件由调用方轻提示「主界面可补」(该件在
+ * 「尚未归类」)。顺序执行(与语音流程逐行串行同款),一件失败不影响其余件。
+ */
+export async function mountPhotoItems(
+  plan: PhotoMountPlan,
+  deps?: Partial<Pick<PhotoIntakeDeps, "ensureAndLink">>,
+): Promise<MountPhotoItemsOutcome> {
+  const d = resolveDeps(deps);
+  let attempted = 0;
+  let failed = 0;
+  for (const entry of plan.entries) {
+    for (const item of entry.items) {
+      attempted += 1;
+      try {
+        await d.ensureAndLink({
+          action: "ensureAndLink",
+          item_id: item.item_id,
+          path: entry.path,
+          expected_version: item.expected_version,
+          update_id: item.update_id,
+          created_from: "manual",
+        });
+      } catch (e) {
+        // 不回滚、不重试、不抛错:物品已记住,如实计数由调用方轻提示
+        failed += 1;
+      }
+    }
+  }
+  return { attempted, failed };
 }
 
 /** 测试钩子:注入 wx API 依赖(partial 覆盖;null = 还原生产依赖) */
