@@ -62,4 +62,8 @@
   >
     <view class="txtbtn-face">文字</view>
   </view>
+  <!-- 可选右侧动作插槽(2026-10-17:首页放 📷 拍照入口;不传=原样零感知;录音/识别/提取中禁用防幽灵) -->
+  <view class="vb-actions {{ voiceState !== 'idle' || transcribing || extracting ? 'busy' : '' }}">
+    <slot name="actions"></slot>
+  </view>
 </view>

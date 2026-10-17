@@ -89,15 +89,6 @@
           </view>
         </view>
       </view>
-      <!-- 拍照识物入口(#3,真机反馈 2026-10-17 挪位):找东西下面、家里有什么(家庭地图)上面 -->
-      <view
-        wx:if="{{ isRootView && !queried }}"
-        class="photo-entry"
-        hover-class="photo-entry-hover"
-        hover-stay-time="80"
-        bindtap="onPhotoRecordTap"
-      >
-        <view class="photo-entry-face">📷 拍照记录物品</view>
       </view>
 
       <!-- 空搜索不造假:结果就地展开(H1b 同款空态,搜完自动切到结果视图) -->
@@ -124,16 +115,6 @@
           </view>
         </view>
       </view>
-
-      <!-- 拍照识物入口(#3,真机反馈 2026-10-17 挪位):找东西下面、家里有什么(家庭地图)上面 -->
-      <view
-        wx:if="{{ isRootView && !queried }}"
-        class="photo-entry"
-        hover-class="photo-entry-hover"
-        hover-stay-time="80"
-        bindtap="onPhotoRecordTap"
-      >
-        <view class="photo-entry-face">📷 拍照记录物品</view>
       </view>
 
       <!-- H1b 搜索结果:命中按物品分组,替换中间区域 -->
@@ -316,4 +297,8 @@
 </view>
 
 <!-- 常驻语音条(issue #45 全局可达:首页全部状态) -->
-<voice-bar />
+<voice-bar>
+  <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
+    <view class="vb-photo-face">📷 拍照</view>
+  </view>
+</voice-bar>

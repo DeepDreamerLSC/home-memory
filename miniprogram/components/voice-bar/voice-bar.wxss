@@ -414,3 +414,17 @@
     box-shadow: 0 0 0 20rpx transparent;
   }
 }
+
+/* 可选右侧动作插槽:首页「📷 拍照」入口(2026-10-17);不传内容时整体塌缩零占位 */
+.vb-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.vb-actions:empty {
+  display: none;
+}
+.vb-actions.busy {
+  opacity: 0.55;
+  pointer-events: none;
+}

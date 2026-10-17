@@ -13,6 +13,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const voice_entry_1 = require("../../utils/voice-entry");
 Component({
+    options: { multipleSlots: true },
     data: {
         voiceState: "idle",
         transcribing: false,

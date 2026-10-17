@@ -821,3 +821,30 @@
   padding: 5rpx 8rpx;
   border-radius: 8rpx 0 0 0;
 }
+
+/* 底部条右侧「📷 拍照」入口(2026-10-17):与语音胶囊同区=记东西双入口;
+   墨底黄字+硬投影+按压下沉,与拍照页「存 N 件」同语言 */
+.vb-photo-btn {
+  padding: 5rpx 0;
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+}
+.vb-photo-face {
+  min-width: 120rpx;
+  height: 78rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22rpx;
+  background: var(--go-bg);
+  color: var(--go-fg);
+  font-size: 25rpx;
+  font-weight: 800;
+  box-shadow: 0 6rpx 0 var(--vb-cta-shadow);
+}
+.vb-photo-hover .vb-photo-face {
+  filter: brightness(0.94);
+  transform: translateY(2rpx);
+  box-shadow: 0 4rpx 0 var(--vb-cta-shadow);
+}
