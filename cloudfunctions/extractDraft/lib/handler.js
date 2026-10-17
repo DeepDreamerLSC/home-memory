@@ -542,7 +542,10 @@ const EDIT_TEXT_MAX = 200;
 const EDIT_LOCATION_MAX = 200;
 const EDIT_CANDIDATES_MIN = 1;
 const EDIT_CANDIDATES_MAX = 12;
-const EDIT_DRAFT_ID_MAX = 32;
+// draft_id 上限 64:客户端 intake-draft 用 uuid()(v4,36 位)生成候选 id,
+// 32 会把真实页面的全部候选判非法(INVALID_INPUT→客户端稳定「没听懂」,
+// 0.9.8 真机事故 2026-10-17);与 api.ts operation_id「≤64」契约对齐。
+const EDIT_DRAFT_ID_MAX = 64;
 const EDIT_NAME_MAX = 50;
 const EDIT_VALUE_MAX = 200;
 const EDIT_EDITS_MAX = 3;
