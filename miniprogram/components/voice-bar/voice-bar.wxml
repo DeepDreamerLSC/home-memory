@@ -52,7 +52,7 @@
         </block>
       </view>
       <view class="hold-label">
-        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话' }}
+        {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '一句话录入物品' }}
       </view>
     </view>
   </view>
