@@ -33,6 +33,7 @@ import {
   markRowFailed,
   markRowSaved,
   parseIntakeQtyNote,
+  quickVerifyRows,
   qtyNoteText,
   rowStateOf,
   setRowsChecked,
@@ -239,6 +240,8 @@ Page<
     /** 展开态样式:aspect-ratio + 竖构图限高 46vh 居中(两侧留黑边,零裁剪保框对齐) */
     photoExpandStyle: string;
     photoCollapsed: boolean;
+    /** 高可信未定件数(快速核实「只留高可信」档标签) */
+    qkHigh: number;
     /** 脉冲高亮的框/行 draftId(""=无;原型 flashBox/flashRow) */
     highlightId: string;
     boxViews: BoxView[];
@@ -338,6 +341,7 @@ Page<
     onCheckTap(e: WechatMiniprogram.CustomEvent): void;
     onStepTap(e: WechatMiniprogram.CustomEvent): void;
     onToggleAllTap(): void;
+    onQuickVerifyTap(e: WechatMiniprogram.CustomEvent): void;
     onManualAddTap(): void;
     rebuildRows(): void;
     /* ---- 位置栏 ---- */
@@ -414,6 +418,7 @@ Page<
     photoAspect: "4 / 3",
     photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
     photoCollapsed: true,
+    qkHigh: 0,
     highlightId: "",
     boxViews: [] as BoxView[],
     rows: [] as RowView[],
@@ -950,6 +955,18 @@ Page<
     this.persistSession();
   },
 
+  /** 快速核实(真机反馈:逐件勾选繁琐):一键三档——全保留/只留高可信/清空。
+   *  done 行是终态不动;点完立即重建计数,保存键/确认弹层随之更新。 */
+  onQuickVerifyTap(e) {
+    const mode = String(((e.currentTarget || {}).dataset || {}).mode || "");
+    if (mode !== "all" && mode !== "high" && mode !== "none") {
+      return;
+    }
+    this.rowsRaw = quickVerifyRows(this.rowsRaw, mode);
+    this.rebuildRows();
+    this.persistSession();
+  },
+
   onManualAddTap() {
     this.openNewRowSheet();
   },
@@ -1015,7 +1032,8 @@ Page<
       saveText = "重试存 " + counts.keep + " 件";
       saveDisabled = false;
     }
-    this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled });
+    const qkHigh = this.rowsRaw.filter((r) => !r.done && r.confidence === "high").length;
+    this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled, qkHigh });
   },
 
   /* ---------------- 位置栏 ---------------- */

@@ -115,9 +115,15 @@
     ><view class="btn-face">{{ evidenceRetryBusy ? '关联中…' : '重试关联' }}</view></view>
   </view>
 
+  <!-- 快速核实(真机反馈:逐件勾选繁琐)——一键三档,点完看清单微调即可 -->
+  <view class="qkbar">
+    <view class="qk-chip go" hover-class="qk-hover" hover-stay-time="80" data-mode="all" bindtap="onQuickVerifyTap">✓ 全保留</view>
+    <view class="qk-chip hi" hover-class="qk-hover" hover-stay-time="80" data-mode="high" bindtap="onQuickVerifyTap">★ 只留高可信 {{ qkHigh }}</view>
+    <view class="qk-chip no" hover-class="qk-hover" hover-stay-time="80" data-mode="none" bindtap="onQuickVerifyTap">清空</view>
+  </view>
+
   <view class="listhead">
     <text>{{ headText }}</text>
-    <text class="selall" bindtap="onToggleAllTap">全选 / 清空</text>
   </view>
 
   <view class="list">

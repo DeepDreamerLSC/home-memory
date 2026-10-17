@@ -215,6 +215,22 @@ export function qtyNoteText(row: IntakeRow): string {
  * 勾选/取消勾选(候选 ↔ 保留):done 行不可再变更(原型 toggleRow 对 done 直接
  * 返回);qty/draftId 等一切其他字段不动。
  */
+/**
+ * 快速核实(真机反馈 2026-10-17:逐件勾选繁琐):一键批量设定勾选状态。
+ * mode:"all"=全部保留 | "high"=只保留高可信(confidence==="high")| "none"=清空;
+ * done 行是终态(已入库)永不动;返回新数组(纯函数,与 setRowsChecked(全量布尔)互补)。
+ */
+export function quickVerifyRows(
+  rows: readonly IntakeRow[],
+  mode: "all" | "high" | "none",
+): IntakeRow[] {
+  return rows.map((r) =>
+    r.done
+      ? r
+      : { ...r, checked: mode === "all" ? true : mode === "high" ? r.confidence === "high" : false },
+  );
+}
+
 export function toggleRowChecked(row: IntakeRow): IntakeRow {
   if (row.done) {
     return row;

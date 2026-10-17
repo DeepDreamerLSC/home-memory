@@ -1153,7 +1153,9 @@ test("PP-STATIC-1:wxml 渲染结构契约(三态徽标/框语义/CTA 文案在�
     "按住说位置",
     "候选默认继承这个位置,例外在编辑里逐件改;保存前会再让你确认一次",
     "一条记录 = 一件可查找的物品", // 横幅
-    "全选 / 清空",
+    "全保留", // 快速核实三档(替代原「全选 / 清空」小字,真机反馈 2026-10-17)
+    "只留高可信",
+    ">清空<",
     "按住说话",
     "松开,去核对", // recsheet
     "上滑取消 · 取消就当没说过,什么都不记",
@@ -1942,4 +1944,31 @@ test("PP-MOUNT-4:旧云函数窗口(回执无 version)→ 零挂树调用,计入
   assert.equal(page.rowsRaw[0].done, true, "入库照常");
   assert.equal(ctx.env.mountCalls.length, 0, "无版本回执绝不发起注定失败的挂树");
   assert.ok(toastTexts(ctx.env).indexOf("1 件的位置树没挂上,主界面可补") !== -1, "如实计入未挂件数");
+});
+
+// 快速核实(真机反馈 2026-10-17:逐件勾选繁琐):一键三档批量设定勾选。
+test("PP-QUICK-1:快速核实三档——全保留/只留高可信/清空;done 行不动;计数联动", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  var confidences = page.rowsRaw.map(function (r) { return r.confidence; });
+  var highCount = page.rowsRaw.filter(function (r) { return r.confidence === "high"; }).length;
+  assert.ok(highCount >= 1, "boot 环境至少 1 件高可信(前置)");
+
+  page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "all" } } });
+  assert.ok(page.rowsRaw.every(function (r) { return r.checked === true; }), "全保留:未定件全部勾选");
+  assert.ok(page.data.saveText.indexOf(String(page.rowsRaw.length)) !== -1, "保存键计数联动");
+
+  page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "high" } } });
+  assert.ok(
+    page.rowsRaw.every(function (r) { return r.checked === (r.confidence === "high"); }),
+    "只留高可信:非 high 一律不勾",
+  );
+  assert.equal(page.data.qkHigh, highCount, "高可信计数上屏");
+
+  page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "none" } } });
+  assert.ok(page.rowsRaw.every(function (r) { return r.checked === false; }), "清空:全部不勾");
+  assert.equal(page.data.saveDisabled, true, "零保留时保存禁用");
+
+  page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "bogus" } } });
+  assert.ok(page.rowsRaw.every(function (r) { return r.checked === false; }), "非法档位零动作");
 });

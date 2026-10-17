@@ -72,6 +72,7 @@ Page({
         photoAspect: "4 / 3",
         photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
         photoCollapsed: true,
+        qkHigh: 0,
         highlightId: "",
         boxViews: [],
         rows: [],
@@ -568,6 +569,17 @@ Page({
         this.rebuildRows();
         this.persistSession();
     },
+    /** 快速核实(真机反馈:逐件勾选繁琐):一键三档——全保留/只留高可信/清空。
+     *  done 行是终态不动;点完立即重建计数,保存键/确认弹层随之更新。 */
+    onQuickVerifyTap(e) {
+        const mode = String(((e.currentTarget || {}).dataset || {}).mode || "");
+        if (mode !== "all" && mode !== "high" && mode !== "none") {
+            return;
+        }
+        this.rowsRaw = (0, intake_draft_1.quickVerifyRows)(this.rowsRaw, mode);
+        this.rebuildRows();
+        this.persistSession();
+    },
     onManualAddTap() {
         this.openNewRowSheet();
     },
@@ -631,7 +643,8 @@ Page({
             saveText = "重试存 " + counts.keep + " 件";
             saveDisabled = false;
         }
-        this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled });
+        const qkHigh = this.rowsRaw.filter((r) => !r.done && r.confidence === "high").length;
+        this.setData({ rows, boxViews, headText: view.headText, saveText, saveDisabled, qkHigh });
     },
     /* ---------------- 位置栏 ---------------- */
     onBatchLocEditTap() {
