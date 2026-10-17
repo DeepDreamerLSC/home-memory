@@ -14,7 +14,9 @@
  * - 隐私口径:确认「存 n 件」前照片不持久化、不写云存储(识别的临时传输需首次
  *   授权,B4;utils/photo-intake.commitPhotoBatch 是唯一写云存储动作,只在最终确认后到达)。
  *
- * 生命周期(§7.8):onHide/onUnload → voiceEntry.invalidate()(防幽灵录音与迟到 diff)。
+ * 生命周期(§7.8):onHide/onUnload → voiceEntry.invalidate()(防幽灵录音与迟到 diff);
+ * onUnload 另递增 captureEpoch(PR #67 R2),在途识别/授权/降级弹窗/圈选的迟到
+ * 回包按代数核对后静默丢弃,页面销毁后零建会话零上屏。
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 const intake_draft_1 = require("../../utils/intake-draft");
@@ -102,6 +104,7 @@ Page({
     entryScope: null,
     batchFinished: false,
     capturing: false,
+    captureEpoch: 0,
     committing: false,
     pendingEvidence: null,
     evidenceRetryBusy: false,
@@ -131,6 +134,7 @@ Page({
         this.vlAuthGranted = this.readVlAuthRemembered();
         this.vlAuthAsked = this.vlAuthGranted;
         this.capturing = false;
+        this.captureEpoch = 0;
         this.committing = false;
         this.pendingEvidence = null;
         this.evidenceRetryBusy = false;
@@ -165,6 +169,8 @@ Page({
             this.voiceEntry.detach();
             this.voiceEntry = null;
         }
+        // R2:页面销毁——在途异步(识别/授权/降级弹窗/圈选)的迟到回包全部失效
+        this.captureEpoch += 1;
         // 全部入库(或空批)**且无证据待关联**才清会话;否则中途退出保留恢复入口
         // (§4.1 photo-session)。pendingEvidence 非空(C3:evidence_failed 待重试关联)
         // 时一律 persistSession——用户离开绝不删会话与续联载荷,跨页恢复重试不断链
@@ -240,9 +246,15 @@ Page({
         if (this.capturing) {
             return;
         }
+        // R2:新一轮拍照流程开始——上一轮在途异步的迟到回包全部失效
+        this.captureEpoch += 1;
+        const epoch = this.captureEpoch;
         this.capturing = true;
         this.setData({ recognizing: true, entryHint: "" });
         const shot = await (0, photo_intake_1.takePhoto)();
+        if (epoch !== this.captureEpoch) {
+            return; // R2:页面已走/已被新一轮接管:选片回包静默丢弃
+        }
         if (!shot.ok) {
             this.capturing = false;
             if (shot.kind === "cancel") {
@@ -264,6 +276,9 @@ Page({
         this.entryScope = (0, photo_session_1.capturePhotoSessionScope)();
         // 本地压缩 → 宽高 → base64(不写云存储;prepared 只存页面内存,识别传输见下方授权门)
         const prepared = await (0, photo_vl_1.preparePhotoForVl)(shot.tempFilePath);
+        if (epoch !== this.captureEpoch) {
+            return; // R2:压缩/读盘等待期页面已走/被新一轮接管:静默丢弃
+        }
         if (!prepared.ok) {
             this.capturing = false;
             this.setData({ recognizing: false, entryHint: "" });
@@ -280,12 +295,18 @@ Page({
         // B4:识别=把照片临时发送到云端处理——首次需用户授权;拒绝则本次不调识别,
         // 照片仍留在本机作证据,页面照常进手动/语音建候选
         const granted = await this.askVlAuthOnce();
+        if (epoch !== this.captureEpoch) {
+            return; // R2:授权弹窗等待期页面已走:同意/拒绝都不再续行,不建会话不识别
+        }
         if (!granted) {
             this.capturing = false;
             this.startEmptyBatch(prepared, "未授权云端识别;可手动添加或语音建候选,照片仍作证据。", this.entryScope);
             return;
         }
         const outcome = await (0, photo_vl_1.recognizeWithVl)(prepared);
+        if (epoch !== this.captureEpoch) {
+            return; // R2:识别回包迟到(页面已走/被新一轮接管):不建会话不上屏
+        }
         this.capturing = false;
         // C1:识别返回后、候选上屏/开批之前先复核入口作用域——识别等待期间家庭已切换
         // → 不建会话、候选不上屏,终局与 B1 的 SCOPE_MISMATCH 同款语义;同 householdId
@@ -324,6 +345,9 @@ Page({
                 confirmText: "手动添加",
                 cancelText: "不拍了",
                 success: (r) => {
+                    if (epoch !== this.captureEpoch) {
+                        return; // R2:降级弹窗等待期页面已走/被新一轮接管:不建会话不上屏
+                    }
                     if (r.confirm) {
                         this.startEmptyBatch(prepared, "拍照识别暂不可用;手动添加的物品照常保存,照片仍作证据。", this.entryScope === null ? undefined : this.entryScope);
                     }
@@ -1539,12 +1563,20 @@ Page({
             y2: Math.max(p1.y, p2.y),
         };
         this.circleBox = box;
+        // R2:捕获代数——圈选链路在途步骤(读盘/识别)续行前核对,页面已走即静默丢弃
+        const epoch = this.captureEpoch;
         const prepared = await this.ensurePrepared();
+        if (epoch !== this.captureEpoch) {
+            return;
+        }
         if (prepared === null) {
             return;
         }
         this.setData({ circle: { ...this.data.circle, recognizing: true, errorText: "", result: null } });
         const outcome = await (0, photo_vl_1.recognizeWithVl)(prepared, { mode: "region", region: box });
+        if (epoch !== this.captureEpoch) {
+            return; // R2:圈选识别回包迟到(页面已走):不上屏
+        }
         if (this.data.mode !== "circle") {
             return; // 用户已退出圈选:迟到结果不上屏
         }

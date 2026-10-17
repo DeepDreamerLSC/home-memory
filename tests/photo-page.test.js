@@ -1669,3 +1669,142 @@ test("PP-AUTH-2:拒绝 → 识别绝不调用;手动/语音候选照常;圈选�
   assert.equal(reentry.env.vlCalls.length, 1, "这次同意 → 识别调用发生");
   assert.equal(reentry.env.storage.get("home-memory:photo-vl-auth"), "granted", "同意落记忆键(此后不再问)");
 });
+
+/* ---------------- PP-EPOCH:页面销毁后的在途异步失效(PR #67 R2,captureEpoch) ---------------- */
+
+/** 监听此后 page.setData 的调用次数(页面销毁后绝不应再 setData) */
+function setDataCounter(page) {
+  var counter = { calls: 0 };
+  var orig = page.setData;
+  page.setData = function (patch) {
+    counter.calls += 1;
+    return orig.call(page, patch);
+  };
+  return counter;
+}
+
+test("PP-EPOCH-1:识别在途 onUnload → 迟到回包静默丢弃:零建会话零上屏零 setData", async function () {
+  var holder = {};
+  var ctx = await boot({ vlDefer: holder });
+  var page = ctx.page;
+  assert.equal(page.data.recognizing, true, "识别在途(挂起桩)");
+  assert.equal(typeof holder.resolve, "function");
+  var round1 = holder.resolve;
+
+  page.onUnload();
+  var counter = setDataCounter(page);
+  round1(VL_OK_TWO_ITEMS); // 页面已销毁,识别才返回
+  await settle();
+
+  assert.equal(counter.calls, 0, "页面销毁后零 setData");
+  assert.equal(page.data.entryReady, false, "候选绝不上屏");
+  assert.equal(page.rowsRaw.length, 0, "零候选");
+  assert.equal(page.sessionScope, null, "零建会话");
+  assert.equal(page.batchId, "", "未开批");
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "会话存储为空");
+});
+
+test("PP-EPOCH-2:新一轮 beginCapture 接管(epoch+1)→ 第一轮迟到回包丢弃、第二轮照常", async function () {
+  var holder = {};
+  var ctx = await boot({ vlDefer: holder });
+  var page = ctx.page;
+  var round1 = holder.resolve;
+  assert.equal(page.data.recognizing, true, "第一轮识别在途");
+  var epoch1 = page.captureEpoch;
+
+  // 新一轮接管:生产中识别在途 capturing 门拦住重入(CTA 单一入口),此处模拟
+  // 上一轮已被放行终止、新一轮 beginCapture 开始——epoch 必须前进
+  page.capturing = false;
+  page.beginCapture();
+  await settle();
+  assert.equal(page.captureEpoch, epoch1 + 1, "新一轮拍照流程开始:epoch 递增");
+  var round2 = holder.resolve;
+  assert.notEqual(round2, round1, "第二轮有自己的在途识别");
+  assert.equal(page.data.recognizing, true, "第二轮识别在途");
+  assert.equal(page.data.entryReady, false);
+
+  var counter = setDataCounter(page);
+  round1(VL_OK_TWO_ITEMS); // 第一轮迟到回包
+  await settle();
+  assert.equal(counter.calls, 0, "第一轮迟到回包零续行(静默丢弃)");
+  assert.equal(page.data.entryReady, false, "第一轮不上屏");
+  assert.equal(page.rowsRaw.length, 0);
+  assert.equal(page.batchId, "", "第一轮不建会话");
+
+  round2(VL_OK_TWO_ITEMS); // 第二轮照常
+  await settle();
+  assert.equal(page.data.entryReady, true, "第二轮照常上屏");
+  assert.equal(page.rowsRaw.length, 2);
+  assert.notEqual(page.sessionScope, null, "第二轮照常建会话");
+});
+
+test("PP-EPOCH-3:授权弹窗等待期 onUnload → 迟到同意回包后不建会话、绝不发起识别", async function () {
+  var authDefer = {};
+  var ctx = await boot({
+    vlAuthReset: true,
+    onModal: function (o) {
+      if (o.title === "云端识别授权") {
+        authDefer.success = o.success; // 挂起授权弹窗,由用例手动放行
+        return;
+      }
+      o.success({ confirm: false, cancel: true, content: "" });
+    },
+  });
+  var page = ctx.page;
+  assert.equal(ctx.env.vlCalls.length, 0, "授权未决,识别未发起");
+  assert.equal(typeof authDefer.success, "function", "停在授权弹窗等待");
+
+  page.onUnload();
+  var counter = setDataCounter(page);
+  authDefer.success({ confirm: true, cancel: false, content: "" }); // 迟到同意
+  await settle();
+
+  assert.equal(counter.calls, 0, "页面销毁后零 setData");
+  assert.equal(ctx.env.vlCalls.length, 0, "页面已走绝不发起识别传输");
+  assert.equal(page.sessionScope, null, "零建会话");
+  assert.equal(page.batchId, "");
+  assert.equal(page.data.entryReady, false, "未授权降级路径也不再开批");
+});
+
+test("PP-EPOCH-4:正常流程 epoch 全程不变(回归)——识别/上屏/建会话照常", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  assert.equal(page.captureEpoch, 1, "onLoad 首轮拍照恰好递增一次");
+  assert.equal(page.data.entryReady, true, "识别照常完成");
+  assert.equal(page.rowsRaw.length, 2, "候选照常上屏");
+  assert.notEqual(page.sessionScope, null, "会话照常建立");
+  assert.equal(ctx.env.vlCalls.length, 1);
+  assert.equal(page.captureEpoch, 1, "无卸载无新一轮,epoch 不再变化");
+});
+
+test("PP-EPOCH-5:圈选识别在途 onUnload → 迟到结果不上屏零 setData", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  assert.equal(page.data.entryReady, true);
+  page.onEnterCircle();
+  await settle();
+  var holder = {};
+  ctx.env.router = function (name, data) {
+    if (name === "extractDraft" && data.action === "vlRecognize") {
+      return new Promise(function (resolve) {
+        holder.resolve = resolve;
+      });
+    }
+    return makeRouter({})(name, data);
+  };
+  page.onCircleTouchStart({ touches: [{ clientX: 60, clientY: 200 }] });
+  page.onCircleTouchMove({ touches: [{ clientX: 150, clientY: 268 }] });
+  var endPromise = page.onCircleTouchEnd();
+  await settle();
+  assert.equal(typeof holder.resolve, "function", "圈选识别在途");
+  assert.equal(page.data.circle.recognizing, true);
+
+  page.onUnload();
+  var counter = setDataCounter(page);
+  holder.resolve(VL_OK_TWO_ITEMS);
+  await endPromise;
+  await settle();
+  assert.equal(counter.calls, 0, "迟到圈选结果零续行");
+  assert.equal(page.data.circle.result, null, "结果卡不上屏");
+  assert.equal(page.data.circle.recognizing, true, "状态不被迟到回包改写");
+});
