@@ -212,6 +212,12 @@ interface CircleState {
 
 /* ---------------- 页面 ---------------- */
 
+const PHOTO_EXPAND_VH = 46;
+function photoExpandStyleOf(imgW: number, imgH: number): string {
+  const r = imgW > 0 && imgH > 0 ? Math.round((imgW / imgH) * 10000) / 10000 : 1.3333;
+  return "aspect-ratio: " + r + "; width: min(100%, calc(" + PHOTO_EXPAND_VH + "vh * " + r + ")); margin: 0 auto;";
+}
+
 Page<
   {
     mode: "confirm" | "circle";
@@ -225,6 +231,8 @@ Page<
     imgH: number;
     /** 等比容器:aspect-ratio 值("1024 / 768"),从根上避免裁切错位 */
     photoAspect: string;
+    /** 展开态样式:aspect-ratio + 竖构图限高 46vh 居中(两侧留黑边,零裁剪保框对齐) */
+    photoExpandStyle: string;
     photoCollapsed: boolean;
     /** 脉冲高亮的框/行 draftId(""=无;原型 flashBox/flashRow) */
     highlightId: string;
@@ -394,6 +402,7 @@ Page<
     imgW: 0,
     imgH: 0,
     photoAspect: "4 / 3",
+    photoExpandStyle: "aspect-ratio: 1.3333; width: min(100%, calc(46vh * 1.3333)); margin: 0 auto;",
     photoCollapsed: true,
     highlightId: "",
     boxViews: [] as BoxView[],
@@ -628,6 +637,7 @@ Page<
       imgW: prepared.imgW,
       imgH: prepared.imgH,
       photoAspect: prepared.imgW + " / " + prepared.imgH,
+      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH),
     });
     // B4:识别=把照片临时发送到云端处理——首次需用户授权;拒绝则本次不调识别,
     // 照片仍留在本机作证据,页面照常进手动/语音建候选
@@ -736,6 +746,7 @@ Page<
       imgW: prepared.imgW,
       imgH: prepared.imgH,
       photoAspect: prepared.imgW + " / " + prepared.imgH,
+      photoExpandStyle: photoExpandStyleOf(prepared.imgW, prepared.imgH),
     });
     this.refreshRecentLocations();
     this.rebuildRows();
@@ -764,6 +775,7 @@ Page<
         imgW: session.file.imgW,
         imgH: session.file.imgH,
         photoAspect: session.file.imgW + " / " + session.file.imgH,
+      photoExpandStyle: photoExpandStyleOf(session.file.imgW, session.file.imgH),
         batchLocation: session.batchLocation,
         navSubtitle:
           "继续核对上次的 " + session.rows.length + " 个候选(已确认记住 " + counts.done + " 件)",
@@ -848,7 +860,11 @@ Page<
 
   /** 折叠态点照片/evChip:展开全幅(框随展开显示) */
   onPhotoTap() {
+    // 开关语义(真机反馈 2026-10-17):竖构图展开几乎满屏,用户本能点图想收起——
+    // 展开态点照片空白区=收起(框/角标/圈选入口均为 catchtap,不会误触)
     if (!this.data.photoCollapsed) {
+      this.setData({ photoCollapsed: true, highlightId: "" });
+      this.rebuildRows();
       return;
     }
     this.setData({ photoCollapsed: false });

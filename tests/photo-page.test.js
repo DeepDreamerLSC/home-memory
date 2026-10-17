@@ -1808,3 +1808,21 @@ test("PP-EPOCH-5:圈选识别在途 onUnload → 迟到结果不上屏零 setDat
   assert.equal(page.data.circle.result, null, "结果卡不上屏");
   assert.equal(page.data.circle.recognizing, true, "状态不被迟到回包改写");
 });
+
+// 真机反馈(2026-10-17):竖构图照片展开态几乎满屏、且点照片本体无法收起。
+// 锁定:①展开样式带限高与居中(竖构图宽度收窄,零裁剪保框对齐)
+//      ②点照片本体=开关(展开态再点即收起,角标收起不变)。
+test("PP-PHOTO-2:竖构图展开限高居中 + 点图本体切换展开/收起", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  assert.ok(page.data.photoExpandStyle.indexOf("46vh") !== -1, "展开样式含 46vh 限高");
+  assert.ok(page.data.photoExpandStyle.indexOf("margin: 0 auto") !== -1, "展开样式居中");
+  assert.ok(page.data.photoExpandStyle.indexOf("1.3333") !== -1, "boot 环境横构图 1024/768≈1.3333");
+  assert.equal(page.data.photoCollapsed, true, "默认折叠");
+  page.onPhotoTap();
+  assert.equal(page.data.photoCollapsed, false, "点图展开");
+  page.onPhotoTap();
+  assert.equal(page.data.photoCollapsed, true, "展开态再点图本体=收起(真机反馈)");
+  page.onPhotoTap();
+  assert.equal(page.data.photoCollapsed, false, "再点又展开(开关语义)");
+});

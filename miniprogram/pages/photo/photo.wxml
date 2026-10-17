@@ -65,7 +65,7 @@
   <view class="ph-sub">{{ navSubtitle }}</view>
 
   <!-- 照片=证据区:默认折叠(压暗缩略,框隐藏);点开才全幅,容器等比跟随原图 -->
-  <view class="photoWrap {{ photoCollapsed ? 'collapsed' : '' }}" style="{{ photoCollapsed ? '' : 'aspect-ratio: ' + photoAspect }}" bindtap="onPhotoTap">
+  <view class="photoWrap {{ photoCollapsed ? 'collapsed' : '' }}" style="{{ photoCollapsed ? '' : photoExpandStyle }}" bindtap="onPhotoTap">
     <image class="ph-img {{ photoCollapsed ? 'dim' : '' }}" src="{{ photoPath }}" mode="aspectFill" />
     <view wx:if="{{ !photoCollapsed }}" class="ask" catchtap="onAskChipTap">🅐 本批照片(证据)· 收起</view>
     <block wx:if="{{ !photoCollapsed }}">
