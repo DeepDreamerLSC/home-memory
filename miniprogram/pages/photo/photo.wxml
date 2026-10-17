@@ -14,6 +14,9 @@
   </view>
 </view>
 
+<!-- 保存庆祝胶囊(微交互包):墨底黄字弹入自动收 -->
+<view wx:if="{{ celebrateText }}" class="celebrate">{{ celebrateText }}</view>
+
 <!-- ================ 圈选模式(屏⑤) ================ -->
 <view class="page photo-page circle-page" wx:elif="{{ mode === 'circle' }}">
   <view class="circle-head">
