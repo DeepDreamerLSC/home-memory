@@ -10,8 +10,8 @@
  *   压缩图(本批首次且唯一的上云动作;fileId 已取得则复用,绝不重复上传),
  *   **再**调 itemsApi.photoCommit 逐件落行;上传失败 → 整批不提交、如实提示可
  *   重试、云端零残留;
- * - 上传路径规则(§10.4):photo-evidence/{householdScopeId()}/{yyyyMM}/{uuid}.jpg
- *   (householdScopeId 未捕获时为 "default")。
+ * - 上传路径规则(§10.4,PR #67 B2 修订):photo-evidence/{会话家庭}/{时间戳}-{随机}.jpg
+ *   ——scopeId 段是服务端 file_id 归属验证依据;会话家庭未捕获时回退 "default"。
  *
  * 隐私红线:照片在用户最终确认保存之前绝不上传云端——本文件唯一触上传的
  * commitPhotoBatch 只由保存确认弹层的「确认,记住了」按钮到达。
@@ -261,11 +261,14 @@ export function ensurePhotoAuth(
 
 // ---------- 保存确认后的上传 + 批量建档(§7.6) ----------
 
-/** 上传云存储路径:photo-evidence/{scopeId}/{yyyyMM}/{uuid}.jpg(§10.4) */
+/**
+ * 上传云存储路径:photo-evidence/{scopeId}/{时间戳}-{随机}.jpg(§10.4,PR #67 B2)。
+ * scopeId 段是服务端 file_id 归属验证的依据(必须=会话开批家庭的 household_id,
+ * commitPhotoBatch 已如此传入;未捕获时回退 "default",服务端将按前缀不符拒绝);
+ * 文件名 = 毫秒时间戳 + "-" + 随机 id,同批同图唯一、可读性不承载任何语义。
+ */
 export function photoCloudPath(scopeId: string, now: Date, id: string): string {
-  const m = now.getMonth() + 1;
-  const yyyyMM = String(now.getFullYear()) + (m < 10 ? "0" + m : String(m));
-  return "photo-evidence/" + scopeId + "/" + yyyyMM + "/" + id + ".jpg";
+  return "photo-evidence/" + scopeId + "/" + now.getTime() + "-" + id + ".jpg";
 }
 
 /**

@@ -670,7 +670,11 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
 
   assert.equal(ctx.env.uploads.length, 1, "确认后本批首次且唯一的上云动作");
   assert.equal(ctx.env.uploads[0].filePath, "wxfile://tmp/compressed.jpg", "上传识别用的同一张压缩图");
-  assert.match(ctx.env.uploads[0].cloudPath, /^photo-evidence\/default\/\d{6}\//);
+  assert.match(
+    ctx.env.uploads[0].cloudPath,
+    /^photo-evidence\/default\/\d+-[\w-]+\.jpg$/,
+    "上传路径约定:photo-evidence/{家庭}/{时间戳}-{随机}.jpg(PR #67 B2)",
+  );
 
   assert.equal(ctx.env.commitCalls.length, 1);
   var ev = ctx.env.commitCalls[0];

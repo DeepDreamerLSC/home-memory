@@ -201,7 +201,7 @@
 ```
 
 **实现**(lib/handler.js 新增 `photoCommitItem`,~80 行):
-1. 整体校验:items 数组 1-10、batch_id 形状;逐件先做**纯参数校验**(name/location_text/note/reminder 与 photo 形状,复用 `cleanRequired`/`cleanOptional`/`parseReminderInput`,photo.box 四值 ∈[0,1] 且 x2>x1/y2>y1 或 null)——任一件参数非法 → **整批 INVALID_INPUT,零写入**(与服务端「校验失败绝不写入」纪律一致;参数错误是客户端 bug,不是运行期冲突)⚖️;
+1. 整体校验:items 数组 1-10、batch_id 形状;逐件先做**纯参数校验**(name/location_text/note/reminder 与 photo 形状,复用 `cleanRequired`/`cleanOptional`/`parseReminderInput`,photo.box 四值 ∈[0,1] 且 x2>x1/y2>y1 或 null)——任一件参数非法 → **整批 INVALID_INPUT,零写入**(与服务端「校验失败绝不写入」纪律一致;参数错误是客户端 bug,不是运行期冲突)⚖️;**file_id 归属验证(PR #67 B2)**:解析 fileID 携带的云存储路径,前缀 ≠ `photo-evidence/<当前派生家庭>/` → **FILE_NOT_OWNED 整批零写入**;路径解析不出的 file_id(非 cloud:// 形态/无路径段/路径穿越)一律 INVALID_INPUT;
 2. 逐件执行:构造 `{operation_id, name, location_text, note, reminder, remind_vague_quote: undefined}` **直接调用既有 `createItem(event, deps)`**(`lib/handler.js:892`)——幂等(operation_id 同键同内容 duplicated)、并发重放收敛、提醒 slot 全套语义白拿;
 3. createItem 返回 ok → 若带 photo:查 `photo_evidence` 已有 `(household_id, item_id, file_id)` 行,有 → 跳过(`evidence_saved:false`,重放幂等);无 → add 证据行(§2 schema,`_id = "pe_" + deps.genId()`),`captured_location_text` 取**本件刚提交的 location_text**;
 4. createItem 返回 ok:false(OPERATION_CONFLICT 等)→ 该件进 results 的失败项,**不拦其余件**(「一次确认不是数据库原子事务」,与 `miniprogram/utils/batch-save.ts` 逐行哲学一致;原型保存前已有最终确认弹层过目);
@@ -429,7 +429,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 1. **控制台建集合 `photo_evidence`**:权限「所有用户不可读不可写」;索引:查询 `(household_id, item_id)`、唯一 `(household_id, item_id, file_id)`。
 2. **extractDraft 云函数**:上传部署;环境变量新增 `VL_BASE`、`VL_TOKEN`、`VL_MODEL`(可选 `VL_TIMEOUT_MS`,默认 30000);`config.json` timeout 改 60(随代码上传)。
 3. **itemsApi 云函数**:上传部署;`config.json` timeout 改 20(随代码上传);无新环境变量。
-4. **云存储**:保持默认权限(仅创建者可读写)——**不改**;跨成员读照片一律走 photoEvidenceGet 云函数 getTempFileURL(§6.3)。**上传时机:仅在用户点「确认,记住了」之后、photoCommit 之前**(确认前零上传;识别链路 base64 直传 vlRecognize,不经云存储)。上传路径规则:`photo-evidence/{householdScopeId()}/{yyyyMM}/{uuid}.jpg`(householdScopeId 未捕获时用 "default")。
+4. **云存储**:保持默认权限(仅创建者可读写)——**不改**;跨成员读照片一律走 photoEvidenceGet 云函数 getTempFileURL(§6.3)。**上传时机:仅在用户点「确认,记住了」之后、photoCommit 之前**(确认前零上传;识别链路 base64 直传 vlRecognize,不经云存储)。上传路径规则(PR #67 B2 修订):`photo-evidence/{会话开批家庭 household_id}/{时间戳}-{随机}.jpg`——scopeId 段是服务端 photoCommit **file_id 归属验证**的依据(前缀 ≠ 当前派生家庭 → FILE_NOT_OWNED 零写入;路径解析不出的 file_id 一律 INVALID_INPUT);会话开批时未捕获作用域才回退 "default"(该回退前缀会被服务端归属门拒绝,入口页均先验证作用域,理论边路)。
 5. 小程序端发版(app.json 新页面)。
 
 ---
@@ -442,4 +442,4 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 - 不改 confirm 文字链路、不改语音→提取→确认页既有链路任何行为(routeExtract 是可选旁路,现状锁);
 - 不做实时取景/连拍/多照片批(一屏一照;多照=多次拍照分批);
 - 照片在用户最终确认保存之前绝不上传云端(#65 V0.4 合同第五项边界,冻结红线:识别=本地压缩 base64 直传,云端零残留);确认后上传成功但 photoCommit 单件失败的行,file_id 随会话保留供重试收敛,不回收(除此之外无任何云端残留)。
-- photo_evidence 不做删除/编辑(证据只增;物品删除后证据行成为悬挂行,photoEvidenceGet 按 item_id 查询天然查不到已删物品——删除物品时不级联清证据 ⚖️,与 reminders 级联不同:证据是历史事实,保留成本为零)。
+- photo_evidence 不做删除/编辑(证据只增;物品删除后证据行成为悬挂行——删除物品时不级联清证据 ⚖️,与 reminders 级联不同:证据是历史事实,保留成本为零。PR #67 B2 修订:photoEvidenceGet 返回证据行前按 item_ids 反查 items(作用域内 deleted:false),**已删/不存在物品的证据行静默过滤**,悬挂行不再回到任何回放入口)。

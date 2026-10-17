@@ -235,20 +235,22 @@ test("PI-5:buildPhotoCommitItems——例外优先/批次兜底/note 拼接/phot
   assert.equal(rows[1].exc, "厨房");
 });
 
-test("PI-6:photoCloudPath——photo-evidence/{scopeId}/{yyyyMM}/{uuid}.jpg", function () {
+test("PI-6:photoCloudPath——photo-evidence/{scopeId}/{时间戳}-{随机}.jpg(PR #67 B2 上传路径约定)", function () {
   householdScope.__resetHouseholdScopeForTest();
+  var t1 = new Date("2026-10-17T08:00:00.000Z");
   assert.equal(
-    pi.photoCloudPath("default", new Date("2026-10-17T08:00:00.000Z"), "u1"),
-    "photo-evidence/default/202610/u1.jpg",
-    "未捕获作用域用 default(§10.4)",
+    pi.photoCloudPath("default", t1, "u1"),
+    "photo-evidence/default/" + t1.getTime() + "-u1.jpg",
+    "未捕获作用域用 default;文件名=毫秒时间戳-随机id",
   );
+  var t2 = new Date("2026-01-02T00:00:00.000Z");
   assert.equal(
-    pi.photoCloudPath("hh_x9", new Date("2026-01-02T00:00:00.000Z"), "u2"),
-    "photo-evidence/hh_x9/202601/u2.jpg",
-    "月份两位补零",
+    pi.photoCloudPath("hh_x9", t2, "u2"),
+    "photo-evidence/hh_x9/" + t2.getTime() + "-u2.jpg",
+    "scopeId 段=归属验证依据(会话开批家庭)",
   );
   householdScope.captureHouseholdId("hh_abc", null);
-  // commitPhotoBatch 内部用 householdScopeId();此处只验证取值口径
+  // commitPhotoBatch 内部用会话家庭(PI-12);此处只验证取值口径
   assert.equal(householdScope.householdScopeId(), "hh_abc");
   householdScope.__resetHouseholdScopeForTest();
 });

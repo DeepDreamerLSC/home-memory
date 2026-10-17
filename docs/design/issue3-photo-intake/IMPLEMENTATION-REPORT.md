@@ -122,7 +122,7 @@ npm run typecheck # tsc -p miniprogram --noEmit 通过(零输出)——2026-10-1
 1. **控制台建集合 `photo_evidence`**:权限「**所有用户不可读不可写**」(与 household 系列同纪律,读写只在云函数侧);索引两条:查询 `(household_id, item_id)`、唯一 `(household_id, item_id, file_id)`;
 2. **extractDraft 云函数重新上传部署**:环境变量新增 `VL_BASE`(含 `/v1` 基址)、`VL_TOKEN`(Bearer)、`VL_MODEL`(模型路径),可选 `VL_TIMEOUT_MS`(默认 30000)——三件套缺任一,vlRecognize 返回 `AI_UNAVAILABLE/vl_not_configured`(客户端降级手动添加);`config.json` timeout 已随代码改 60;与既有 DEEPSEEK/LOCAL_LLM 环境变量并存互不影响;
 3. **itemsApi 云函数重新上传部署**:`config.json` timeout 已随代码改 20;无新环境变量;
-4. **云存储**:保持默认权限(仅创建者可读写)**不改**——跨成员读照片一律走 photoEvidenceGet 换临时链接;上传路径规则 `photo-evidence/{householdScopeId()}/{yyyyMM}/{uuid}.jpg`(scopeId 未捕获用 "default");上传时机仅限用户确认后、photoCommit 之前;
+4. **云存储**:保持默认权限(仅创建者可读写)**不改**——跨成员读照片一律走 photoEvidenceGet 换临时链接;上传路径规则(PR #67 B2 修订)`photo-evidence/{会话开批家庭}/{时间戳}-{随机}.jpg`(scopeId 段=服务端 file_id 归属验证依据,他家前缀 FILE_NOT_OWNED 零写入;未捕获回退 "default");上传时机仅限用户确认后、photoCommit 之前;
 5. **小程序端发版**:app.json 新增页面 `pages/photo/photo`。
 
 ## 6. 已知限制(如实)
@@ -130,7 +130,7 @@ npm run typecheck # tsc -p miniprogram --noEmit 通过(零输出)——2026-10-1
 1. **数量备注不入库为结构化字段**(合同边界 2 的代价):`×{qty} {suffix}` 只存 items.note 文本,搜索/提醒/统计拿不到数量语义;photo_evidence 也无数量字段;
 2. **VL 依赖本地网关配置**:识别走本机 Qwen3-VL-8B 网关(OpenAI 兼容端点),未配置三件套或网络不通 → 全量降级为「手动添加」,**无 DeepSeek 兜底**(deepseek-flash 无视觉模型,合同明确不接);意味着没有本地网关的环境(纯云部署)拍照识别功能不可用,只有手动链路;
 3. **临时链接时效**:photoEvidenceGet 换得的 https 临时链接约 2h 有效,当次会话够用;换链失败该行 `photo_url:""` 需重试,不废整个查询;
-4. **证据只增不删**:物品删除后证据行成悬挂行保留(历史事实,按 item_id 查询天然查不到,不级联清理);
+4. **证据只增不删**:物品删除后证据行成悬挂行保留(历史事实,不级联清理;PR #67 B2 起 photoEvidenceGet 按 item_ids 反查 items,已删/不存在物品的证据行静默过滤,悬挂行不再回到任何回放入口);
 5. **每件证据回放上限 3 条**:photoEvidenceGet 每件取 created_at 降序前 3(`itemsApi/lib/handler.js:2048`),更早照片不回传;
 6. **一屏一照**:不做连拍/多照片批,多照=多次拍照分批(合同 §11);
 7. **会话恢复受小程序临时文件生命周期约束**:退出后 localPath 可能被系统回收,恢复时文件不存在则如实提示重拍(base64 不落存储的代价,不编造);

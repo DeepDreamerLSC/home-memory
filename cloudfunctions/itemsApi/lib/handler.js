@@ -49,7 +49,10 @@ var ERROR_MESSAGES = {
   FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
   // PR #67 B1:photoCommit 会话家庭(客户端开批时捕获的 expected_household_id)
   // 与服务端当前派生家庭不一致——零写入,客户端终止会话,绝不改投当前家庭
-  SCOPE_MISMATCH: "家庭已切换,本批未保存"
+  SCOPE_MISMATCH: "家庭已切换,本批未保存",
+  // PR #67 B2:photo 的 file_id 云存储路径前缀不属于当前派生家庭——零写入,
+  // 他家/来路不明的照片绝不落进本家庭的证据行
+  FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存"
 };
 
 function fail(error) {
@@ -2050,6 +2053,8 @@ var PHOTO_FILE_ID_MAX = 512;
 var PHOTO_IMG_DIM_MAX = 10000;
 var PHOTO_EVIDENCE_PER_ITEM = 3;
 var PHOTO_SOURCES = ["vl", "circle"];
+/** 客户端上传路径约定前缀(PR #67 B2):photo-evidence/<household_id>/<时间戳>-<随机>.jpg */
+var PHOTO_CLOUD_PATH_PREFIX = "photo-evidence/";
 
 function photoEvidence(deps) {
   return deps.db.collection(PHOTO_EVIDENCE_COLLECTION);
@@ -2107,6 +2112,35 @@ function parsePhotoInput(photo) {
     return "INVALID";
   }
   return { file_id: photo.file_id, img_w: photo.img_w, img_h: photo.img_h, box: box, source: photo.source };
+}
+
+/**
+ * PR #67 B2:file_id 归属验证。解析 fileID 携带的云存储路径
+ * (cloud://<env>.<bucket>/<path> 形态),路径前缀必须等于
+ * photo-evidence/<当前派生家庭 household_id>/——他家前缀/来路不明的照片
+ * 绝不落进本家庭证据行。返回 null=放行;"INVALID"=路径解析不出来
+ * (非 cloud:// 形态/无路径段/含 "..",按参数形状错拒绝);
+ * "FILE_NOT_OWNED"=前缀不属于当前派生家庭。纯函数、发生在任何写入之前。
+ */
+function checkPhotoFileIdOwnership(deps, fileId) {
+  var path = null;
+  if (isString(fileId) && fileId.indexOf("cloud://") === 0) {
+    var rest = fileId.slice("cloud://".length);
+    var slash = rest.indexOf("/");
+    if (slash !== -1) {
+      var candidate = rest.slice(slash + 1);
+      if (candidate.length > 0 && candidate.indexOf("..") === -1) {
+        path = candidate;
+      }
+    }
+  }
+  if (path === null) {
+    return "INVALID";
+  }
+  if (path.indexOf(PHOTO_CLOUD_PATH_PREFIX + deps.householdId + "/") !== 0) {
+    return "FILE_NOT_OWNED";
+  }
+  return null;
 }
 
 /**
@@ -2204,6 +2238,18 @@ async function photoCommitItem(event, deps) {
     if (photo === "INVALID") {
       return fail("INVALID_INPUT");
     }
+    // PR #67 B2:file_id 归属验证(整批纯参数校验阶段,任何写入之前)——
+    // 路径解析不出 → INVALID_INPUT;前缀非当前派生家庭 → FILE_NOT_OWNED。
+    // 任一件不通过整批零写入(与既有纯参数校验纪律一致)
+    if (photo !== null) {
+      var ownership = checkPhotoFileIdOwnership(deps, photo.file_id);
+      if (ownership === "INVALID") {
+        return fail("INVALID_INPUT");
+      }
+      if (ownership === "FILE_NOT_OWNED") {
+        return fail("FILE_NOT_OWNED");
+      }
+    }
     prepared.push({
       operationId: it.operation_id,
       name: name,
@@ -2296,6 +2342,8 @@ function checkPhotoSessionScope(deps, event) {
  * db.command.in),每件内存排序 created_at 降序取前 3;汇总去重 file_id 换临时
  * 链接;单文件换链失败该行 photo_url:""(file_id 照返,客户端可重试),换链整体
  * 异常同样降级空链接,绝不废整个查询。投影不含 household_id 之外的内部态。
+ * PR #67 B2:逐 item_id 先反查 items(作用域内 deleted:false)——已删/不存在
+ * 物品的证据行静默过滤(证据只增不删,但读取入口校验物品有效性)。
  */
 async function photoEvidenceGetItem(event, deps) {
   var ids = event.item_ids;
@@ -2311,6 +2359,15 @@ async function photoEvidenceGetItem(event, deps) {
   var fileIds = [];
   var seenFile = Object.create(null);
   for (var j = 0; j < ids.length; j++) {
+    // PR #67 B2:返回证据行前先按 item_ids 反查 items(作用域内)——已删除
+    // (deleted:true)/不存在的 item 其证据行不返回(静默过滤)。删除物品不级联
+    // 清证据=历史事实保留;读取入口校验物品有效性,悬挂行不再回到任何回放入口
+    var alive = await collection(deps)
+      .where({ _id: ids[j], household_id: deps.householdId, deleted: false })
+      .get();
+    if (!alive.data || alive.data.length === 0) {
+      continue;
+    }
     var got = await photoEvidence(deps)
       .where({ household_id: deps.householdId, item_id: ids[j] })
       .get();

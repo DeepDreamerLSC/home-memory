@@ -76,10 +76,16 @@ function freshDb() {
   });
 }
 
-function photo(fileId, extra) {
+/** 构造 photo 绑定:file_id 默认按上传路径约定(PR #67 B2)取 HOUSEHOLD_A 前缀
+ *  cloud://bucket/photo-evidence/<HOUSEHOLD_A>/<name>.jpg;他家前缀/来路不明的
+ *  形态用 extra.file_id 显式给。 */
+function photo(name, extra) {
   extra = extra || {};
   return {
-    file_id: fileId,
+    file_id:
+      extra.file_id !== undefined
+        ? extra.file_id
+        : "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/" + name + ".jpg",
     img_w: extra.img_w || 1024,
     img_h: extra.img_h || 768,
     box: extra.box !== undefined ? extra.box : { x1: 0.27, y1: 0.39, x2: 0.59, y2: 0.51 },
@@ -116,9 +122,9 @@ test("PC-COMMIT-1:逐件建档走既有 createItem 路径,证据行形状与位�
   var deps = makeDeps(db, HOUSEHOLD_A);
   var res = await handler(
     commitEvent([
-      item("op-a", "品客薯片罐", "厨房", { note: "×1 (空罐)", photo: photo("cloud://f1") }),
+      item("op-a", "品客薯片罐", "厨房", { note: "×1 (空罐)", photo: photo("f1") }),
       item("op-b", "五号电池", "玄关柜 · 第二层抽屉", {
-        photo: photo("cloud://f2", { box: null, source: "circle" })
+        photo: photo("f2", { box: null, source: "circle" })
       }),
       item("op-c", "黑色耳机", "玄关柜 · 第二层抽屉") // 不带照片:合法,无证据行
     ]),
@@ -148,7 +154,7 @@ test("PC-COMMIT-1:逐件建档走既有 createItem 路径,证据行形状与位�
   assert.equal(evidence.length, 2, "只有两件带了照片");
   assert.ok(evidence[0]._id.indexOf("pe_") === 0, "_id 应为 pe_ 前缀");
   assert.equal(evidence[0].item_id, res.results[0].item_id);
-  assert.equal(evidence[0].file_id, "cloud://f1");
+  assert.equal(evidence[0].file_id, "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f1.jpg");
   assert.deepEqual(evidence[0].box, { x1: 0.27, y1: 0.39, x2: 0.59, y2: 0.51 }, "box 以 0-1 形态存储");
   assert.equal(evidence[0].img_w, 1024);
   assert.equal(evidence[0].img_h, 768);
@@ -186,7 +192,7 @@ test("PC-COMMIT-2:带 reminder 的件复用 createItem 提醒链(reminders 落 a
 test("PC-IDEM:原键原内容重放 → duplicated:true、items 不增、证据行不重(evidence_saved:false)", async function () {
   var db = freshDb();
   var deps = makeDeps(db, HOUSEHOLD_A);
-  var ev = commitEvent([item("op-dup", "白色数据线", "电视柜", { photo: photo("cloud://f-dup") })]);
+  var ev = commitEvent([item("op-dup", "白色数据线", "电视柜", { photo: photo("f-dup") })]);
   var first = await handler(ev, deps);
   assert.equal(first.ok, true);
   assert.equal(first.results[0].duplicated, false);
@@ -208,7 +214,7 @@ test("PC-PARTIAL:同键异内容 OPERATION_CONFLICT 只进该件失败项,不拦
   var db = freshDb();
   var deps = makeDeps(db, HOUSEHOLD_A);
   var first = await handler(
-    commitEvent([item("op-x", "黑色小盒子", "抽屉", { photo: photo("cloud://f-x") })]),
+    commitEvent([item("op-x", "黑色小盒子", "抽屉", { photo: photo("f-x") })]),
     deps
   );
   assert.equal(first.ok, true);
@@ -216,8 +222,8 @@ test("PC-PARTIAL:同键异内容 OPERATION_CONFLICT 只进该件失败项,不拦
   // 第二批:op-x 换内容(同键异内容 → OPERATION_CONFLICT)+ 一件全新 op-y
   var second = await handler(
     commitEvent([
-      item("op-x", "黑色大盒子", "抽屉", { photo: photo("cloud://f-x2") }),
-      item("op-y", "指甲刀", "抽屉", { photo: photo("cloud://f-y") })
+      item("op-x", "黑色大盒子", "抽屉", { photo: photo("f-x2") }),
+      item("op-y", "指甲刀", "抽屉", { photo: photo("f-y") })
     ]),
     deps
   );
@@ -257,23 +263,23 @@ test("PC-VALIDATE:任一件纯参数非法 → 整批 INVALID_INPUT 且零写入
     },
     {
       label: "photo.box 越界(>1)",
-      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("cloud://f", { box: { x1: 0, y1: 0, x2: 1.5, y2: 1 } }) })])
+      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("f", { box: { x1: 0, y1: 0, x2: 1.5, y2: 1 } }) })])
     },
     {
       label: "photo.box 退化(x2<x1)",
-      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("cloud://f", { box: { x1: 0.9, y1: 0.1, x2: 0.1, y2: 0.9 } }) })])
+      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("f", { box: { x1: 0.9, y1: 0.1, x2: 0.1, y2: 0.9 } }) })])
     },
     {
       label: "photo.source 非法",
-      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("cloud://f", { source: "guess" }) })])
+      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("f", { source: "guess" }) })])
     },
     {
       label: "photo.file_id 空",
-      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("") })])
+      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("f", { file_id: "" }) })])
     },
     {
       label: "photo.img_w 非整数",
-      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("cloud://f", { img_w: 1024.5 }) })])
+      event: commitEvent([item("op-1", "甲", "客厅", { photo: photo("f", { img_w: 1024.5 }) })])
     },
     {
       label: "第二件非法(第一件合法)同样整批拒绝",
@@ -357,7 +363,7 @@ test("PC-RACE:证据行 add 撞唯一索引 → 回查见孪生收敛 evidence_s
       _id: "pe_twin",
       household_id: HOUSEHOLD_A,
       item_id: "it_seed",
-      file_id: "cloud://f-race",
+      file_id: "cloud://bucket/photo-evidence/" + HOUSEHOLD_A + "/f-race.jpg",
       box: null,
       img_w: 100,
       img_h: 100,
@@ -369,7 +375,7 @@ test("PC-RACE:证据行 add 撞唯一索引 → 回查见孪生收敛 evidence_s
   var raceDb = makeTwinRaceDb(db);
   var deps = makeDeps(raceDb, HOUSEHOLD_A);
   var res = await handler(
-    commitEvent([item("op-race", "黄色薯片罐", "玄关柜", { photo: photo("cloud://f-race") })]),
+    commitEvent([item("op-race", "黄色薯片罐", "玄关柜", { photo: photo("f-race") })]),
     deps
   );
   assert.equal(res.ok, true, JSON.stringify(res));
@@ -386,7 +392,7 @@ test("PC-GATE:共享家庭缺双 marker → FAMILY_SWITCHED 零写入;带齐 mar
   var db = freshDb();
   var deps = makeDeps(db, HOUSEHOLD_A, { shared: true, scopeRevision: 3 });
   var blocked = await handler(
-    commitEvent([item("op-g", "护照", "书房抽屉", { photo: photo("cloud://f-g") })]),
+    commitEvent([item("op-g", "护照", "书房抽屉", { photo: photo("f-g") })]),
     deps
   );
   assert.equal(blocked.ok, false);
@@ -406,7 +412,7 @@ test("PC-GATE:共享家庭缺双 marker → FAMILY_SWITCHED 零写入;带齐 mar
 
   var deps3 = makeDeps(db, HOUSEHOLD_A, { shared: true, scopeRevision: 3 });
   var ok = await handler(
-    commitEvent([item("op-g", "护照", "书房抽屉", { photo: photo("cloud://f-g") })], {
+    commitEvent([item("op-g", "护照", "书房抽屉", { photo: photo("f-g") })], {
       expected_household_id: HOUSEHOLD_A,
       expected_scope_revision: 3
     }),
@@ -421,6 +427,19 @@ test("PC-GATE:共享家庭缺双 marker → FAMILY_SWITCHED 零写入;带齐 mar
 
 async function seedEvidence(db, householdId, itemId, fileId, createdAt, extra) {
   extra = extra || {};
+  // PR #67 B2:读取入口校验物品有效性——默认同步播种一个作用域内存活 item;
+  // extra.itemState:"deleted" 播已删 item、"missing" 不播 item(测试过滤语义用)
+  if (extra.itemState !== "missing") {
+    await db.collection("items").add({
+      data: {
+        _id: itemId,
+        household_id: householdId,
+        name: "物品" + itemId,
+        deleted: extra.itemState === "deleted",
+        created_at: createdAt
+      }
+    });
+  }
   await db.collection("photo_evidence").add({
     data: {
       _id: extra.id || "pe_" + itemId + "_" + fileId + "_" + createdAt,
@@ -553,7 +572,7 @@ test("PC-LOG:日志只记 action/error/ms/count(成功件数),绝不落物品名
   });
   await handler(
     commitEvent([
-      item("op-l1", "牙刷", "洗手台", { photo: photo("cloud://fl1") }),
+      item("op-l1", "牙刷", "洗手台", { photo: photo("fl1") }),
       item("op-l2", "毛巾", "洗手台")
     ]),
     deps
@@ -652,12 +671,15 @@ async function seedSharedActive(db, householdId, openids) {
 
 test("PC-GLUE:个人家庭经真实入口 photoCommit 建档+证据,photoEvidenceGet 经注入的 getTempFileURL 换链", async function () {
   var db = freshDb();
+  // file_id 按上传路径约定带**服务端派生个人家庭**前缀(PR #67 B2 归属验证)
+  var glueHousehold = "hh_" + sha256hex("o-photo-glue-user").slice(0, 32);
+  var glueFileId = "cloud://bucket/photo-evidence/" + glueHousehold + "/glue-f1.jpg";
   var entry = loadCloudFunction(
     path.join(ROOT, "cloudfunctions", "itemsApi", "index.js"),
-    makeItemsApiStub("o-photo-glue-user", db, { "cloud://glue-f1": "https://temp/glue1" })
+    makeItemsApiStub("o-photo-glue-user", db, (function () { var m = {}; m[glueFileId] = "https://temp/glue1"; return m; })())
   );
   var committed = await entry.main(
-    commitEvent([item("op-glue", "护照", "书房抽屉", { photo: photo("cloud://glue-f1") })])
+    commitEvent([item("op-glue", "护照", "书房抽屉", { photo: photo("glue-f1", { file_id: glueFileId }) })])
   );
   assert.equal(committed.ok, true, JSON.stringify(committed));
   assert.equal(committed.results[0].ok, true);
@@ -715,7 +737,7 @@ test("PC-SCOPE-1:expected_household_id(会话开批家庭)≠ 当前派生家庭
   var db = freshDb();
   var depsB = makeDeps(db, HOUSEHOLD_B, { shared: true, scopeRevision: 5 });
   var res = await handler(
-    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("cloud://f-s1") })], {
+    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("f-s1") })], {
       expected_household_id: HOUSEHOLD_A,
       expected_scope_revision: 5
     }),
@@ -731,7 +753,7 @@ test("PC-SCOPE-1:expected_household_id(会话开批家庭)≠ 当前派生家庭
   var db2 = freshDb();
   var depsBPersonal = makeDeps(db2, HOUSEHOLD_B);
   var res2 = await handler(
-    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("cloud://f-s1") })], {
+    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("f-s1") })], {
       expected_household_id: HOUSEHOLD_A
     }),
     depsBPersonal
@@ -753,7 +775,7 @@ test("PC-SCOPE-2:会话门三态——类型非法 INVALID_INPUT;一致放行走
   // 一致 → 放行(个人家庭宽松口径,照常建档)
   var deps2 = makeDeps(db, HOUSEHOLD_A);
   var ok = await handler(
-    commitEvent([item("op-s2", "护照", "书房抽屉", { photo: photo("cloud://f-s2") })], {
+    commitEvent([item("op-s2", "护照", "书房抽屉", { photo: photo("f-s2") })], {
       expected_household_id: HOUSEHOLD_A
     }),
     deps2
@@ -770,4 +792,82 @@ test("PC-SCOPE-2:会话门三态——类型非法 INVALID_INPUT;一致放行走
   );
   assert.equal(blocked.error, "FAMILY_SWITCHED", "未携带不改通用硬门语义");
   assert.equal((await rawDocs(db3, "items")).length, 0);
+});
+
+// ---------- PC-OWN / PE-VALID:file_id 归属验证 + 已删物品证据过滤(PR #67 B2) ----------
+
+test("PC-OWN-1:伪造他家前缀的 file_id → FILE_NOT_OWNED 整批零写入(他家照片绝不落本家庭证据行)", async function () {
+  var db = freshDb();
+  var deps = makeDeps(db, HOUSEHOLD_A);
+  var foreign = "cloud://bucket/photo-evidence/" + HOUSEHOLD_B + "/1697000000000-forged.jpg";
+  var res = await handler(
+    commitEvent([
+      item("op-ow1", "护照", "书房抽屉", { photo: photo("ow1", { file_id: foreign }) }),
+      item("op-ow2", "户口本", "卧室", { photo: photo("ow2") }) // 第二件合法:同样被整批拦下
+    ]),
+    deps
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "FILE_NOT_OWNED");
+  assert.equal(res.message, "照片文件不属于当前家庭,本批未保存");
+  assert.equal((await rawDocs(db, "items")).length, 0, "零写入:items");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零写入:证据行");
+
+  // 共享家庭同样适用(先过会话门一致,再被归属门拦)
+  var db2 = freshDb();
+  var depsShared = makeDeps(db2, HOUSEHOLD_A, { shared: true, scopeRevision: 3 });
+  var res2 = await handler(
+    commitEvent([item("op-ow1", "护照", "书房抽屉", { photo: photo("ow1", { file_id: foreign }) })], {
+      expected_household_id: HOUSEHOLD_A,
+      expected_scope_revision: 3
+    }),
+    depsShared
+  );
+  assert.equal(res2.error, "FILE_NOT_OWNED", "共享家庭双 marker 齐备也拦归属");
+  assert.equal((await rawDocs(db2, "items")).length, 0);
+});
+
+test("PC-OWN-2:解析不出云存储路径的 file_id 一律 INVALID_INPUT 零写入", async function () {
+  var db = freshDb();
+  var deps = makeDeps(db, HOUSEHOLD_A);
+  var cases = [
+    "https://cdn.example.com/evidence.jpg", // 非 cloud:// 形态
+    "cloud://bucket-no-path", // 无路径段
+    "cloud://bucket/", // 空路径
+    "cloud://bucket/photo-evidence/../../" + HOUSEHOLD_A + "/x.jpg" // 路径穿越
+  ];
+  for (var i = 0; i < cases.length; i++) {
+    var res = await handler(
+      commitEvent([item("op-own-" + i, "护照", "书房抽屉", { photo: photo("ow", { file_id: cases[i] }) })]),
+      deps
+    );
+    assert.equal(res.ok, false, cases[i]);
+    assert.equal(res.error, "INVALID_INPUT", cases[i] + " → 参数形状错拒绝");
+  }
+  assert.equal((await rawDocs(db, "items")).length, 0, "零写入");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零写入");
+});
+
+test("PE-VALID:已删除/不存在的 item 证据行静默过滤;存活 item 照常返回", async function () {
+  var db = freshDb();
+  await seedEvidence(db, HOUSEHOLD_A, "it_alive", "cloud://fv1", "2026-10-01T00:00:00.000Z");
+  await seedEvidence(db, HOUSEHOLD_A, "it_deleted", "cloud://fv2", "2026-10-02T00:00:00.000Z", {
+    itemState: "deleted"
+  });
+  await seedEvidence(db, HOUSEHOLD_A, "it_gone", "cloud://fv3", "2026-10-03T00:00:00.000Z", {
+    itemState: "missing"
+  });
+  var deps = makeDeps(db, HOUSEHOLD_A, {
+    getTempFileUrls: async function (ids) {
+      return { fileList: ids.map(function (f) { return { fileID: f, tempFileURL: "https://t/" + f }; }) };
+    }
+  });
+  var res = await handler(
+    { action: "photoEvidenceGet", item_ids: ["it_alive", "it_deleted", "it_gone"] },
+    deps
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.evidence.length, 1, "已删/不存在物品的证据行不返回(静默过滤)");
+  assert.equal(res.evidence[0].item_id, "it_alive", "存活物品的证据照常返回");
+  assert.equal(res.evidence[0].photo_url, "https://t/cloud://fv1");
 });
