@@ -493,3 +493,62 @@ test("PI-17:mountPhotoItems——逐位置逐件 ensureAndLink(created_from=manu
   var empty = await pi.mountPhotoItems({ entries: [], skipped: 0 }, { ensureAndLink: function () { throw new Error("绝不该调"); } });
   assert.deepEqual(empty, { attempted: 0, failed: 0 });
 });
+
+/* ---------------- PI-LOCPATH:planPhotoMounts 可选 cache(LLM 层级拆分优先) ---------------- */
+
+test("PI-18:planPhotoMounts 可选 cache——缓存路径优先(无分隔符中文三段);无缓存走规则兜底;非法形状缓存回落规则", function () {
+  var rows = [makeRow(), makeRow()];
+  var results = [
+    { index: 0, ok: true, item_id: "it-0", version: 1 },
+    { index: 1, ok: true, item_id: "it-1", version: 1 },
+  ];
+
+  // 缓存命中:无分隔符中文「书房桌子右边抽屉」用 LLM 拆出的三段层级
+  var cache = { "书房桌子右边抽屉": ["书房", "桌子", "右边抽屉"] };
+  var plan = pi.planPhotoMounts(rows, results, "书房桌子右边抽屉", cache);
+  assert.equal(plan.skipped, 0);
+  assert.equal(plan.entries.length, 1);
+  assert.deepEqual(plan.entries[0].path, ["书房", "桌子", "右边抽屉"], "LLM 拆分路径优先");
+
+  // 无缓存:现行为不变(分隔符规则兜底 → 无分隔符中文整串单段平节点)
+  var plan2 = pi.planPhotoMounts(rows, results, "书房桌子右边抽屉");
+  assert.deepEqual(plan2.entries[0].path, ["书房桌子右边抽屉"], "无缓存走 splitLocationSegments 兜底");
+
+  // 缓存形状非法(超 6 段/段超 30 码点)→ 回落规则(绝不挂越限路径)
+  var long31 = new Array(31 + 1).join("字");
+  var plan3 = pi.planPhotoMounts(
+    [makeRow()],
+    [{ index: 0, ok: true, item_id: "it-x", version: 1 }],
+    "书房桌子右边抽屉",
+    { "书房桌子右边抽屉": ["一", "二", "三", "四", "五", "六", "七"] },
+  );
+  assert.deepEqual(plan3.entries[0].path, ["书房桌子右边抽屉"], "7 段缓存越限 → 回落规则");
+  var plan4 = pi.planPhotoMounts(
+    [makeRow()],
+    [{ index: 0, ok: true, item_id: "it-y", version: 1 }],
+    long31,
+    { "": [] }, // 键不命中(long31 无缓存)
+  );
+  assert.equal(plan4.entries.length, 0, "超长无分隔符文本规则兜底也拆不出 → 不挂(绝不截断改名)");
+  var plan5 = pi.planPhotoMounts(
+    [makeRow()],
+    [{ index: 0, ok: true, item_id: "it-z", version: 1 }],
+    long31,
+    { [long31]: [long31] }, // 命中但段 31 码点越限
+  );
+  assert.equal(plan5.entries.length, 0, "越限段缓存绝不采用");
+
+  // 例外位置同样吃缓存(文本级缓存,批次/例外同源)
+  var rowsExc = [{ ...makeRow(), exc: "书房桌子右边抽屉" }, makeRow()];
+  var plan6 = pi.planPhotoMounts(rowsExc, results, "玄关柜 · 第二层抽屉", cache);
+  assert.equal(plan6.entries.length, 2);
+  var byLoc = {};
+  plan6.entries.forEach(function (e) { byLoc[e.locationText] = e; });
+  assert.deepEqual(byLoc["书房桌子右边抽屉"].path, ["书房", "桌子", "右边抽屉"], "例外位置缓存命中");
+  assert.deepEqual(byLoc["玄关柜 · 第二层抽屉"].path, ["玄关柜", "第二层抽屉"], "未命中文本走规则");
+
+  // 空缓存对象/不传:行为与三参调用逐字节一致
+  var plan7 = pi.planPhotoMounts(rows, results, "书房桌子右边抽屉", {});
+  assert.deepEqual(plan7.entries[0].path, ["书房桌子右边抽屉"]);
+});
+

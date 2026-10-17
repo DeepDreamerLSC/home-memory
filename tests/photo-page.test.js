@@ -35,6 +35,14 @@ var intakeDraft = require("../miniprogram/utils/intake-draft.js");
 
 function makeRouter(opts) {
   opts = opts || {};
+  /** locationSplit 默认桩:按分隔符切(守规矩模型——段是原文逐字子串,按序) */
+  function defaultSplitResponse(text) {
+    var segs = String(text)
+      .split(/[·/\-的\s]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    return { ok: true, engine: "local", path: segs.length > 0 ? segs : [text], fallback: false };
+  }
   return function router(name, data) {
     if (name === "extractDraft" && data.action === "vlRecognize") {
       if (opts.vlError) {
@@ -64,6 +72,27 @@ function makeRouter(opts) {
         return { ok: false, error: "AI_UNAVAILABLE", message: "AI 暂时不可用,可手动录入" };
       }
       return opts.editResponse || null; // null = 测试忘了配,按意外失败爆出
+    }
+    if (name === "extractDraft" && data.action === "locationSplit") {
+      // §1.6 位置层级拆分桩:默认按分隔符拆(模拟守规矩的模型,段=原文逐字子串);
+      // opts.splitResponse 可为固定响应或 (text)=>响应;opts.splitError 模拟失败;
+      // opts.splitDefer 把回包挂起(慢解析在途:保存不得阻塞),由用例手动放行
+      if (opts.splitError) {
+        return { ok: false, error: "AI_UNAVAILABLE", message: "AI 暂时不可用,可手动录入" };
+      }
+      if (opts.splitDefer) {
+        return new Promise(function (resolve) {
+          opts.splitDefer.resolve = function (resp) {
+            resolve(resp || defaultSplitResponse(data.text));
+          };
+        });
+      }
+      if (opts.splitResponse) {
+        return typeof opts.splitResponse === "function"
+          ? opts.splitResponse(data.text)
+          : opts.splitResponse;
+      }
+      return defaultSplitResponse(data.text);
     }
     if (name === "itemsApi" && data.action === "photoCommit") {
       if (opts.commitThrow) {
@@ -140,6 +169,7 @@ function makeEnv(opts) {
     uploads: [],
     vlCalls: [],
     editCalls: [],
+    splitCalls: [], // §1.6 位置层级拆分调用
     commitCalls: [],
     retryCalls: [],
     mountCalls: [], // #65 ③:locations.ensureAndLink 挂树调用
@@ -222,6 +252,8 @@ function makeEnv(opts) {
           env.vlCalls.push(data);
         } else if (data.action === "draftEditParse") {
           env.editCalls.push(data);
+        } else if (data.action === "locationSplit") {
+          env.splitCalls.push(data);
         } else if (data.action === "photoCommit") {
           env.commitCalls.push(data);
         } else if (data.action === "photoEvidenceRetry") {
@@ -1149,7 +1181,7 @@ test("PP-STATIC-1:wxml 渲染结构契约(三态徽标/框语义/CTA 文案在�
   [
     "点开照片核对", // 证据条 chip
     "证据区 · 框在展开后显示",
-    "按住说位置",
+    // 位置栏 chips(按住说位置/常用/＋新建)已删(真机反馈 2026-10-17 三连):位置入口=点值编辑或底部语音 CTA
     "全保留", // 快速核实三档(替代原「全选 / 清空」小字,真机反馈 2026-10-17)
     "只留高可信",
     ">清空<",
@@ -1983,3 +2015,166 @@ test("PP-CTA-1:语音胶囊文案随批次位置切换", async function () {
   page.setBatchLocationText("   ");
   assert.equal(page.data.voiceCtaText, "这些物品位置在哪,请告诉我", "清空位置:回到引导说位置");
 });
+
+/* ---------------- PP-LOCPATH:位置层级拆分(§1.6,真机 2026-10-17) ----------------
+ * 无分隔符中文(「书房桌子右边抽屉」)规则拆不开 → LLM 逐字锚定拆分预热
+ * (fire-and-forget 缓存)+ 挂树缓存优先 + 规则兜底 + 保存绝不因在途而阻塞。 */
+
+test("PP-LOCPATH-1:批次位置写入 → 异步拆分回填缓存;位置栏显示层级预览;保存用缓存路径三段挂树", async function () {
+  var ctx = await boot({
+    splitResponse: { ok: true, engine: "local", path: ["书房", "桌子", "右边抽屉"], fallback: false },
+  });
+  var page = ctx.page;
+
+  page.setBatchLocationText("书房桌子右边抽屉");
+  assert.equal(page.data.locPathText, "书房桌子右边抽屉", "缓存未回填前位置栏显示原文");
+  assert.equal(ctx.env.splitCalls.length, 1, "写入点触发一次 locationSplit");
+  assert.equal(ctx.env.splitCalls[0].text, "书房桌子右边抽屉");
+  await settle();
+
+  assert.deepEqual(page.locPathCache["书房桌子右边抽屉"], ["书房", "桌子", "右边抽屉"], "缓存回填");
+  assert.equal(page.data.locPathText, "书房 › 桌子 › 右边抽屉", "位置栏层级预览(› 连接)");
+
+  // 保存:挂树用缓存三段路径(不再是整串平节点)
+  page.onSaveTap();
+  await settle();
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(ctx.env.mountCalls.length, 1);
+  assert.deepEqual(ctx.env.mountCalls[0].path, ["书房", "桌子", "右边抽屉"], "挂树路径来自 LLM 拆分缓存");
+  assert.ok(toastTexts(ctx.env).indexOf("位置树没挂上") === -1, "全部挂上零打扰");
+});
+
+test("PP-LOCPATH-2:在途去重——同一文本反复写入只发一次;fallback 兜底响应不回填缓存(回落规则)", async function () {
+  var defer = {};
+  var ctx = await boot({ splitDefer: defer });
+  var page = ctx.page;
+
+  page.setBatchLocationText("书房桌子右边抽屉");
+  page.setBatchLocationText("书房桌子右边抽屉");
+  page.ensureLocPath(" 书房桌子右边抽屉 "); // 未修剪同文本也去重
+  assert.equal(ctx.env.splitCalls.length, 1, "在途只发一次");
+  assert.equal(page.locPathPending["书房桌子右边抽屉"], true);
+  await settle(); // 等 router 微任务接住挂起请求(defer.resolve 就位)
+
+  // 放行一个 fallback:true 的服务端兜底响应(模型输出没过硬校验)
+  defer.resolve({ ok: true, engine: "local", path: ["书房桌子右边抽屉"], fallback: true });
+  await settle();
+  assert.equal(page.locPathPending["书房桌子右边抽屉"], undefined, "在途标记清理");
+  assert.equal(Object.keys(page.locPathCache).length, 0, "fallback 兜底不回填缓存(回落规则分段)");
+  assert.equal(page.data.locPathText, "书房桌子右边抽屉", "位置栏仍显示原文");
+
+  // 再写入:缓存无 → 再发一次(失败/兜底不缓存,后续写入点可再试)
+  page.setBatchLocationText("书房桌子右边抽屉");
+  assert.equal(ctx.env.splitCalls.length, 2);
+});
+
+test("PP-LOCPATH-3:慢解析在途 → 保存不阻塞,挂树走规则兜底单段;回包迟到只回填缓存与预览", async function () {
+  var defer = {};
+  var ctx = await boot({ splitDefer: defer });
+  var page = ctx.page;
+
+  page.setBatchLocationText("书房桌子右边抽屉");
+  await readyToSaveSplit(ctx, page, "书房桌子右边抽屉"); // 保存门:填位置并打开确认层
+  await page.onSaveGoTap(); // 拆分仍在途,保存绝不等待
+  await settle();
+
+  assert.equal(page.rowsRaw[0].done, true, "入库照常(不被在途拆分阻塞)");
+  assert.equal(ctx.env.mountCalls.length, 1);
+  assert.deepEqual(ctx.env.mountCalls[0].path, ["书房桌子右边抽屉"], "无缓存 → 规则兜底整串单段");
+  assert.ok(toastTexts(ctx.env).indexOf("都记住了") !== -1);
+
+  // 慢回包到达:只回填缓存与位置栏预览,绝不重挂/重保存
+  defer.resolve({ ok: true, engine: "local", path: ["书房", "桌子", "右边抽屉"], fallback: false });
+  await settle();
+  assert.deepEqual(page.locPathCache["书房桌子右边抽屉"], ["书房", "桌子", "右边抽屉"]);
+  assert.equal(page.data.locPathText, "书房 › 桌子 › 右边抽屉", "迟到回填同步层级预览");
+  assert.equal(ctx.env.mountCalls.length, 1, "绝不二次挂树");
+});
+
+test("PP-LOCPATH-4:拆分失败(AI_UNAVAILABLE)→ 零缓存零打扰;位置栏显示原文;保存走规则兜底", async function () {
+  var ctx = await boot({ splitError: true });
+  var page = ctx.page;
+
+  page.setBatchLocationText("书房桌子右边抽屉");
+  await settle();
+  assert.equal(Object.keys(page.locPathCache).length, 0, "失败不缓存");
+  assert.equal(page.data.locPathText, "书房桌子右边抽屉", "无缓存显示原文");
+  assert.equal(ctx.env.toasts.length, 0, "拆分失败零打扰(拆分是增强,兜底常在)");
+
+  await readyToSaveSplit(ctx, page, "书房桌子右边抽屉");
+  await page.onSaveGoTap();
+  await settle();
+  assert.deepEqual(ctx.env.mountCalls[0].path, ["书房桌子右边抽屉"], "规则兜底单段平节点");
+  assert.ok(toastTexts(ctx.env).indexOf("位置树没挂上") === -1);
+});
+
+test("PP-LOCPATH-5:触发点全覆盖——手动/常用 chips/编辑面板例外/语音 batch_location/会话恢复都预热拆分", async function () {
+  // ① 手动 + chips + 编辑面板例外 + 语音 batch_location(同一页面实例)
+  var ctx = await boot({
+    splitResponse: function (text) {
+      return {
+        ok: true,
+        engine: "local",
+        path: text === "书房桌子右边抽屉" ? ["书房", "桌子", "右边抽屉"] : [text],
+        fallback: false,
+      };
+    },
+  });
+  var page = ctx.page;
+  page.setBatchLocationText("玄关柜 · 第二层抽屉"); // 手动(askBatchLocation 同路)
+  page.onRecentLocTap({ currentTarget: { dataset: { loc: "客厅" } } }); // 常用 chips → 批次=客厅
+  // 编辑面板例外写入(与批次「客厅」不同 → 例外生效并预热拆分)
+  var row = page.rowsRaw[0];
+  page.openEditSheet(row.draftId);
+  page.setData({ edit: { ...page.data.edit, nameInput: row.name, locValue: "书房桌子右边抽屉" } });
+  page.onEditConfirmTap();
+  // 语音 batch_location:diff 弹层应用分支(与例外同文本 → 在途去重)
+  page.setData({ diff: { intent: "batch_location", locNew: "书房桌子右边抽屉", applyDisabled: false } });
+  page.onDiffApplyTap();
+  await settle();
+
+  var texts = ctx.env.splitCalls.map(function (c) { return c.text; });
+  assert.deepEqual(
+    texts,
+    ["玄关柜 · 第二层抽屉", "客厅", "书房桌子右边抽屉"],
+    "手动/chips/例外/语音四个写入点各触发一次(例外与语音同文本去重)",
+  );
+  assert.equal(page.rowsRaw[0].exc, "书房桌子右边抽屉", "例外已写入行");
+  assert.equal(page.data.batchLocation, "书房桌子右边抽屉", "语音改批次位置生效");
+
+  // ② 会话恢复触发(新实例 + resume;startPhotoSession 落一条带批次位置的未完成会话)
+  var sessionStorage = makeFakeStorage();
+  photoSession.__resetPhotoSessionForTest();
+  photoSession.__setPhotoSessionStorageForTest(sessionStorage);
+  photoSession.startPhotoSession(
+    { localPath: "wxfile://tmp/compressed.jpg", imgW: 1024, imgH: 768, fileId: null },
+    [],
+    "书房桌子右边抽屉",
+  );
+  var ctx2 = await boot(
+    {
+      sessionStorage: sessionStorage,
+      splitResponse: function (text) {
+        return {
+          ok: true,
+          engine: "local",
+          path: text === "书房桌子右边抽屉" ? ["书房", "桌子", "右边抽屉"] : [text],
+          fallback: false,
+        };
+      },
+    },
+    { resume: "1" },
+  );
+  await settle();
+  var texts2 = ctx2.env.splitCalls.map(function (c) { return c.text; });
+  assert.deepEqual(texts2, ["书房桌子右边抽屉"], "会话恢复的批次位置同样预热拆分");
+  assert.equal(ctx2.page.data.locPathText, "书房 › 桌子 › 右边抽屉", "恢复后位置栏层级预览");
+});
+
+/** PP-LOCPATH 专用:直接设定批次位置(不重复触发写入点断言)并打开保存确认层 */
+async function readyToSaveSplit(ctx, page, location) {
+  page.setData({ batchLocation: location });
+  page.onSaveTap();
+  await settle();
+}

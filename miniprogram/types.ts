@@ -1046,3 +1046,20 @@ export type DraftEditParseResponse =
       picks: DraftEditPick[];
     }
   | { ok: true; engine: string; intent: "none"; needs_pick: false; picks: DraftEditPick[] };
+
+/* ---------------- 拍照识物:locationSplit(§1.6,位置层级拆分) ---------------- */
+
+export interface LocationSplitEvent {
+  action: "locationSplit";
+  /** 位置原文(去空白后 1-200 码点) */
+  text: string;
+}
+
+export interface LocationSplitResponse {
+  ok: true;
+  engine: string;
+  /** 层级路径(1-6 段、每段 1-30 码点、逐字取自原文且按序) */
+  path: string[];
+  /** true = 模型输出未过硬校验,整串单段兜底(客户端不优先采用,回落分隔符规则) */
+  fallback: boolean;
+}

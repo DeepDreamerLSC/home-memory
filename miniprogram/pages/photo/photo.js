@@ -9,6 +9,9 @@
  * - 位置栏:批次位置(手动/常用快选/按住说位置),逐件例外在编辑面板改;保存
  *   成功后批次位置与各件例外像语音确认流程一样挂到位置节点树(issue #65 V0.4
  *   第③条:同一 ensureAndLink 机制,失败不回滚不阻断,只轻提示「主界面可补」);
+ *   挂树分段 LLM 逐字锚定优先(extractDraft.locationSplit 预热 locPathCache,
+ *   无分隔符中文可拆「书房 › 桌子 › 右边抽屉」,位置栏同步层级预览),缺失/在途
+ *   走 splitLocationSegments 分隔符规则兜底,绝不因异步拆分未返回而阻塞保存;
  * - 按住说话:utils/voice-entry 单例的真实手势机(按住/松手/上滑取消/最短按压),
  *   本页只渲染 recsheet 浮层并经 routeExtract 旁路接 draftEditParse → diff 弹层
  *   (逐字段勾选应用,0 勾选禁用;原话保留可回听);
@@ -94,6 +97,7 @@ Page({
         saveDisabled: true,
         navSubtitle: "",
         batchLocation: "",
+        locPathText: "",
         recentLocations: [],
         voiceState: "idle",
         transcribing: false,
@@ -142,6 +146,8 @@ Page({
     voiceEntry: null,
     vlAuthGranted: false,
     vlAuthAsked: false,
+    locPathCache: {},
+    locPathPending: {},
     onLoad(options) {
         try {
             const si = wx.getSystemInfoSync();
@@ -164,6 +170,9 @@ Page({
         // B4:授权记忆还原(同意过识别临时传输的不再问;拒绝不落键,重进会再问)
         this.vlAuthGranted = this.readVlAuthRemembered();
         this.vlAuthAsked = this.vlAuthGranted;
+        // 位置层级拆分缓存/在途表重建(Page options 被浅拷贝共享,同 rowsRaw 防护)
+        this.locPathCache = {};
+        this.locPathPending = {};
         this.capturing = false;
         this.captureEpoch = 0;
         this.committing = false;
@@ -363,7 +372,7 @@ Page({
                 preselected +
                 " 个" +
                 (outcome.truncated ? "(超过 10 件,只取前 10)" : "");
-            this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle });
+            this.setData({ entryReady: true, recognizing: false, navSubtitle: subtitle, photoCollapsed: true });
             this.refreshRecentLocations();
             this.rebuildRows();
             return;
@@ -411,6 +420,7 @@ Page({
         this.setData({
             entryReady: true,
             recognizing: false,
+            photoCollapsed: true,
             navSubtitle: subtitle,
             photoPath: prepared.path,
             imgW: prepared.imgW,
@@ -440,17 +450,21 @@ Page({
             this.setData({
                 entryReady: true,
                 recognizing: false,
+                photoCollapsed: true,
                 photoPath: session.file.localPath,
                 imgW: session.file.imgW,
                 imgH: session.file.imgH,
                 photoAspect: session.file.imgW + " / " + session.file.imgH,
                 photoExpandStyle: photoExpandStyleOf(session.file.imgW, session.file.imgH, this.data.winW, this.data.winH),
                 batchLocation: session.batchLocation,
+                locPathText: this.locPathViewOf(session.batchLocation),
                 navSubtitle: "继续核对上次的 " + session.rows.length + " 个候选(已确认记住 " + counts.done + " 件)",
             });
             this.refreshRecentLocations();
             this.rebuildRows();
             this.buildEvidencePendingView();
+            // 会话恢复的批次位置同机制预热层级拆分(挂树/预览与手输同源)
+            this.ensureLocPath(session.batchLocation);
         };
         // 小程序临时文件可能被系统回收:恢复前复核文件是否还在
         if (typeof wx !== "undefined" &&
@@ -704,9 +718,65 @@ Page({
         this.setData({
             batchLocation: v,
             voiceCtaText: v.trim() === "" ? "这些物品位置在哪,请告诉我" : "有什么物品要改的吗?请告诉我",
+            locPathText: this.locPathViewOf(v),
         });
+        this.ensureLocPath(v);
         this.persistSession();
         this.rebuildRows();
+    },
+    /**
+     * LLM 位置层级拆分预热(真机 2026-10-17):无分隔符中文(「书房桌子右边
+     * 抽屉」)确定性分段只能整串挂平节点,交给 extractDraft.locationSplit 按
+     * 「从大到小」拆层级(服务端逐字锚定硬校验)。fire-and-forget:只回填
+     * locPathCache 与位置栏预览,绝不 await、绝不阻塞保存——保存时刻缓存缺什么
+     * 就走 splitLocationSegments 确定性兜底。fallback:true(模型输出没过硬校验)
+     * 不回填缓存:回落规则分段,带分隔符文本仍能按规则拆开。
+     */
+    ensureLocPath(text) {
+        const t = (typeof text === "string" ? text : "").trim();
+        if (t === "") {
+            return;
+        }
+        if (Object.prototype.hasOwnProperty.call(this.locPathCache, t)) {
+            return;
+        }
+        if (this.locPathPending[t]) {
+            return;
+        }
+        this.locPathPending[t] = true;
+        void (0, api_1.callLocationSplit)(t)
+            .then((res) => {
+            if (!res.fallback &&
+                Array.isArray(res.path) &&
+                res.path.length > 0 &&
+                res.path.every((seg) => typeof seg === "string" && seg.trim() !== "")) {
+                this.locPathCache[t] = res.path;
+            }
+        })
+            .catch(() => {
+            // AI_UNAVAILABLE/网络/形状失败:不缓存、不提示(拆分是增强,兜底常在)
+        })
+            .then(() => {
+            delete this.locPathPending[t];
+            if (this.data.batchLocation.trim() === t) {
+                this.syncLocPathView(this.data.batchLocation);
+            }
+        });
+    },
+    /** 位置栏层级预览文案:缓存命中 → 「书房 › 桌子 › 右边抽屉」;否则原文 */
+    locPathViewOf(text) {
+        const t = (typeof text === "string" ? text : "").trim();
+        if (t !== "" &&
+            Object.prototype.hasOwnProperty.call(this.locPathCache, t) &&
+            Array.isArray(this.locPathCache[t]) &&
+            this.locPathCache[t].length > 0) {
+            return this.locPathCache[t].join(" › ");
+        }
+        return t;
+    },
+    /** 批次位置变化/缓存回填时同步 locPathText 上屏(无缓存时显示原文) */
+    syncLocPathView(text) {
+        this.setData({ locPathText: this.locPathViewOf(text) });
     },
     /** 常用快选:取 locations-cache 根层最近的 2 个房间(失败/未验证隐藏) */
     refreshRecentLocations() {
@@ -1059,7 +1129,9 @@ Page({
             voiceCtaText: d.locNew.trim() === ""
                 ? "这些物品位置在哪,请告诉我"
                 : "有什么物品要改的吗?请告诉我",
+            locPathText: this.locPathViewOf(d.locNew),
         });
+        this.ensureLocPath(d.locNew);
         this.persistSession();
         wx.showToast({ title: "本批位置已改:" + d.locNew, icon: "none" });
     },
@@ -1223,6 +1295,10 @@ Page({
         const batch = this.data.batchLocation.trim();
         // 位置(默认继承批次,不同才改):与批次相同 → 例外清空(继承),不同 → 例外
         const exc = loc !== batch || batch === "" ? (loc !== "" ? loc : null) : null;
+        // 例外位置同机制预热 LLM 层级拆分(挂树时经同一 locPathCache 命中)
+        if (exc !== null) {
+            this.ensureLocPath(exc);
+        }
         const remind = ed.hasRemind && ed.dueDate !== ""
             ? { due_date: ed.dueDate, kind: REMIND_KIND_OPTIONS[ed.remindKindIndex] }
             : null;
@@ -1444,7 +1520,9 @@ Page({
         // 例外,去重)→ 逐件挂上位置树。终态与提示先落,挂树在后(fire-and-forget);
         // 挂树失败不回滚不阻断,由 runPhotoMounts 轻提示。会话恢复/失败重试只带
         // 未 done 行,已 done 件不会重挂(update_id 又按行幂等键收敛)。
-        void this.runPhotoMounts((0, photo_intake_1.planPhotoMounts)(pending, outcome.results, this.data.batchLocation));
+        // 分段 LLM 逐字锚定优先(locPathCache 预热命中的文本用之),缺失/在途走
+        // splitLocationSegments 规则兜底——绝不因异步拆分未返回而阻塞保存。
+        void this.runPhotoMounts((0, photo_intake_1.planPhotoMounts)(pending, outcome.results, this.data.batchLocation, this.locPathCache));
     },
     /**
      * 保存成功后的位置挂树(issue #65 V0.4 第③条):拍照批次位置与逐件例外像
