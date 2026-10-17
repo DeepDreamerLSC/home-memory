@@ -46,7 +46,10 @@ var ERROR_MESSAGES = {
   UNAUTHORIZED: "请先登录",
   OPERATION_CONFLICT: "这条已保存过且内容与当前填写不同,请到详情页修改",
   FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
-  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试"
+  FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
+  // PR #67 B1:photoCommit 会话家庭(客户端开批时捕获的 expected_household_id)
+  // 与服务端当前派生家庭不一致——零写入,客户端终止会话,绝不改投当前家庭
+  SCOPE_MISMATCH: "家庭已切换,本批未保存"
 };
 
 function fail(error) {
@@ -2264,6 +2267,29 @@ function mapTempUrls(res) {
 }
 
 /**
+ * PR #67 B1:photoCommit 会话作用域门(在通用双 marker 硬门**之前**裁定)。
+ * expected_household_id 来自客户端拍照会话**开批时**捕获的家庭(photo-session
+ * scope),不是提交时刻的当前作用域——与本处服务端解析的当前活跃家庭不一致,
+ * 说明会话期内发生过家庭切换 → SCOPE_MISMATCH 零写入(错误码区别于通用
+ * FAMILY_SWITCHED,客户端据此终止会话,绝不重试写另一个家)。
+ * 未携带(开批时未捕获作用域/旧客户端)→ 返回 null 落回通用硬门(共享家庭
+ * 缺 marker 仍被 FAMILY_SWITCHED 拦下);类型非法 → INVALID_INPUT(与通用门同口径)。
+ */
+function checkPhotoSessionScope(deps, event) {
+  var expected = event ? event.expected_household_id : undefined;
+  if (expected === undefined) {
+    return null;
+  }
+  if (!isString(expected)) {
+    return fail("INVALID_INPUT");
+  }
+  if (expected !== deps.householdId) {
+    return fail("SCOPE_MISMATCH");
+  }
+  return null;
+}
+
+/**
  * photoEvidenceGet:入参 { action, item_ids: 1-10 个 }(只读,不进 WRITE_ACTIONS)。
  * 响应带 household_id(共享家庭另带 scope_revision)——api.ts captureHouseholdId
  * 用,与 list/remindList 同款收口。逐 item_id 等值查询(≤10 次,等值 AND 不引入
@@ -2422,13 +2448,19 @@ async function handler(event, deps) {
     } else if (WRITE_ACTIONS[action]) {
       // F2 写入硬门(issue #34 P0+P1-A):共享家庭强制作用域绑定(缺 marker /
       // 旧修订 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持
-      // P0 宽松口径(可选 marker)。gate 返回 null = 放行
-      var gate = checkWriteScopeBinding(
-        deps.householdId,
-        deps.householdShared === true,
-        deps.scopeRevision,
-        event
-      );
+      // P0 宽松口径(可选 marker)。gate 返回 null = 放行。
+      // PR #67 B1:photoCommit 先过会话作用域门(expected_household_id=开批时
+      // 捕获的会话家庭,与当前派生家庭不一致 → SCOPE_MISMATCH 零写入,先于
+      // 通用硬门裁定,客户端据此终止会话);未携带/一致 → 照走通用硬门
+      var gate = action === "photoCommit" ? checkPhotoSessionScope(deps, event) : null;
+      if (gate === null) {
+        gate = checkWriteScopeBinding(
+          deps.householdId,
+          deps.householdShared === true,
+          deps.scopeRevision,
+          event
+        );
+      }
       result = gate === null ? await ACTIONS[action](event, deps) : gate;
     } else {
       result = await ACTIONS[action](event, deps);

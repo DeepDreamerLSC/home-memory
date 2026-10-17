@@ -20,7 +20,7 @@
  * 日志纪律:失败只记动作与错误码,绝不 log 图片路径内容/base64/物品名。
  */
 
-import { callItemsApi, uuid } from "./api";
+import { callItemsApi, isApiError, uuid } from "./api";
 import { householdScopeId } from "./household-scope";
 import { composeNote } from "./intake-draft";
 import type { IntakeRow } from "./intake-draft";
@@ -319,14 +319,18 @@ export interface CommitPhotoBatchInput {
   imgH: number;
   /** 已取得的 fileID(重试复用,绝不重复上传);首次保存为 null */
   fileId: string | null;
+  /** 会话开批时捕获的 household_id(B1:一致性绑定与上传路径前缀的唯一来源;
+   *  null=开批时未捕获作用域,不带 marker、路径前缀用 "default") */
+  scopeHouseholdId: string | null;
 }
 
 export type CommitPhotoBatchOutcome =
   | { ok: true; fileId: string; results: PhotoCommitResultRow[] }
   /** 上传失败:整批不提交、云端零残留、会话保留可重试 */
   | { ok: false; stage: "upload"; message: string }
-  /** photoCommit 调用失败(网络/服务错误):fileId 已取得并回带,重试不再上传 */
-  | { ok: false; stage: "commit"; message: string; fileId: string };
+  /** photoCommit 调用失败(网络/服务错误):fileId 已取得并回带,重试不再上传;
+   *  error 为服务端错误码(如 SCOPE_MISMATCH,页面据此终止会话绝不重试) */
+  | { ok: false; stage: "commit"; message: string; fileId: string; error?: string };
 
 function uploadOnce(
   d: PhotoIntakeDeps,
@@ -346,12 +350,16 @@ function uploadOnce(
 /**
  * 用户已确认后的唯一上云动作编排:先上传(首次)得 file_id,再 photoCommit。
  * 上传失败 → 整批不提交(云端零残留);photoCommit 抛错 → 如实回带已得 fileId。
+ * B1(PR #67):上传路径前缀与 expected_household_id 都取**会话开批时**捕获的
+ * scopeHouseholdId(绝不是提交时刻的当前作用域)——中途切到另一家后保存,
+ * 服务端派生家庭与会话家庭不一致 → SCOPE_MISMATCH 零写入。
  */
 export async function commitPhotoBatch(
   input: CommitPhotoBatchInput,
   deps?: Partial<PhotoIntakeDeps>,
 ): Promise<CommitPhotoBatchOutcome> {
   const d = resolveDeps(deps);
+  const scopeId = input.scopeHouseholdId !== null ? input.scopeHouseholdId : householdScopeId();
   let fileId = input.fileId;
   if (fileId === null || fileId === "") {
     if (input.rows.length === 0) {
@@ -360,7 +368,7 @@ export async function commitPhotoBatch(
     try {
       fileId = await uploadOnce(
         d,
-        photoCloudPath(householdScopeId(), d.now(), d.uuid()),
+        photoCloudPath(scopeId, d.now(), d.uuid()),
         input.localPath,
       );
     } catch (e) {
@@ -374,17 +382,24 @@ export async function commitPhotoBatch(
     img_w: input.imgW,
     img_h: input.imgH,
   });
+  const event: PhotoCommitEvent = {
+    action: "photoCommit",
+    batch_id: input.batchId,
+    items,
+  };
+  if (input.scopeHouseholdId !== null) {
+    // B1:会话家庭作为一致性绑定随事件上送(api 层自动 marker 不覆盖显式携带值);
+    // 服务端与当前派生家庭不一致 → SCOPE_MISMATCH(绝不改投当前家庭)
+    event.expected_household_id = input.scopeHouseholdId;
+  }
   try {
-    const res = await d.commit({
-      action: "photoCommit",
-      batch_id: input.batchId,
-      items,
-    });
+    const res = await d.commit(event);
     return { ok: true, fileId, results: res.results };
   } catch (e) {
     const message =
       e instanceof Error && e.message ? e.message : "保存失败,请稍后重试";
-    return { ok: false, stage: "commit", message, fileId };
+    const code = isApiError(e) ? e.code : undefined;
+    return { ok: false, stage: "commit", message, fileId, error: code };
   }
 }
 

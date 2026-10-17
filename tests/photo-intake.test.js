@@ -114,6 +114,9 @@ function makeEnv(opts) {
     },
     commit: function (event) {
       env.commits.push(JSON.parse(JSON.stringify(event)));
+      if (opts.commitThrows) {
+        return Promise.reject(opts.commitThrows);
+      }
       if (opts.commitError) {
         return Promise.reject(new Error(opts.commitError));
       }
@@ -317,4 +320,54 @@ test("PI-11:0 行且无 fileId → 不上传不提交,如实拒绝(调用方 bug
   assert.equal(r.stage, "commit");
   assert.equal(env.uploads.length, 0);
   assert.equal(env.commits.length, 0);
+});
+
+/* ---------------- 会话作用域一致性绑定(PR #67 B1) ---------------- */
+
+test("PI-12:scopeHouseholdId 随事件上送(expected_household_id=开批家庭);null 不带;上传路径前缀用开批家庭而非当前作用域", async function () {
+  householdScope.__resetHouseholdScopeForTest();
+  householdScope.captureHouseholdId("hh_current00000000000000000000000000", null);
+  var env = makeEnv();
+
+  // 会话家庭 A(≠当前捕获的 hh_current):marker= A,cloudPath 前缀= A
+  var r = await pi.commitPhotoBatch(
+    commitInput({ scopeHouseholdId: "hh_sessionAAAAAAAAAAAAAAAAAAAAAAAAA" }),
+  );
+  assert.equal(r.ok, true);
+  assert.equal(env.uploads[0].cloudPath.indexOf("photo-evidence/hh_sessionAAAAAAAAAAAAAAAAAAAAAAAAA/"), 0, "上传路径前缀=会话开批家庭");
+  assert.equal(
+    env.commits[0].expected_household_id,
+    "hh_sessionAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "一致性绑定取会话家庭,不被当前作用域覆盖",
+  );
+
+  // scopeHouseholdId=null(开批时未捕获):不带 marker,路径前缀回退当前作用域
+  var env2 = makeEnv();
+  var r2 = await pi.commitPhotoBatch(commitInput({ scopeHouseholdId: null }));
+  assert.equal(r2.ok, true);
+  assert.equal("expected_household_id" in env2.commits[0], false, "未捕获不带 marker(不编造)");
+  assert.equal(
+    env2.uploads[0].cloudPath.indexOf("photo-evidence/hh_current00000000000000000000000000/") !== -1,
+    true,
+    "未捕获回退当前作用域前缀",
+  );
+  householdScope.__resetHouseholdScopeForTest();
+});
+
+test("PI-13:photoCommit 抛 ApiError(带 code,如 SCOPE_MISMATCH)→ outcome.error 如实回带,页面据此终局", async function () {
+  var apiMod = require("../miniprogram/utils/api.js");
+  var env = makeEnv({
+    commitThrows: new apiMod.ApiError("SCOPE_MISMATCH", "家庭已切换,本批未保存"),
+  });
+  var r = await pi.commitPhotoBatch(commitInput({ scopeHouseholdId: "hh_sessionAAAAAAAAAAAAAAAAAAAAAAAAA" }));
+  assert.equal(r.ok, false);
+  assert.equal(r.stage, "commit");
+  assert.equal(r.error, "SCOPE_MISMATCH", "服务端错误码透传(供页面终止会话)");
+  assert.equal(r.message, "家庭已切换,本批未保存");
+  assert.equal(r.fileId, "cloud://bucket/photo-1.jpg", "fileId 照常回带");
+
+  // 普通错误(无 code)→ error 为 undefined,不影响既有重试语义
+  var env2 = makeEnv({ commitError: "网络异常" });
+  var r2 = await pi.commitPhotoBatch(commitInput());
+  assert.equal(r2.error, undefined);
 });

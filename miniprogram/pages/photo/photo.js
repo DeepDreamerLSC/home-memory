@@ -87,6 +87,7 @@ Page({
     fileId: null,
     batchId: "",
     sessionCreatedAt: 0,
+    sessionScope: null,
     batchFinished: false,
     capturing: false,
     committing: false,
@@ -107,6 +108,7 @@ Page({
         this.fileId = null;
         this.batchId = "";
         this.sessionCreatedAt = 0;
+        this.sessionScope = null;
         this.batchFinished = false;
         this.capturing = false;
         this.committing = false;
@@ -196,6 +198,7 @@ Page({
             const session = (0, photo_session_1.startPhotoSession)({ localPath: prepared.path, imgW: prepared.imgW, imgH: prepared.imgH, fileId: null }, rows, "");
             this.batchId = session.batchId;
             this.sessionCreatedAt = session.createdAt;
+            this.sessionScope = session.scope;
             this.fileId = null;
             const preselected = rows.filter((r) => r.checked).length;
             const subtitle = "识别到 " +
@@ -238,6 +241,7 @@ Page({
         const session = (0, photo_session_1.startPhotoSession)({ localPath: prepared.path, imgW: prepared.imgW, imgH: prepared.imgH, fileId: null }, [], "");
         this.batchId = session.batchId;
         this.sessionCreatedAt = session.createdAt;
+        this.sessionScope = session.scope;
         this.fileId = null;
         this.setData({
             entryReady: true,
@@ -262,6 +266,7 @@ Page({
             this.rowsRaw = session.rows;
             this.batchId = session.batchId;
             this.sessionCreatedAt = session.createdAt;
+            this.sessionScope = session.scope;
             this.fileId = session.file.fileId;
             this.prepared = null; // base64 绝不入会话;圈选时按 localPath 重新 prepare
             const counts = (0, intake_draft_1.intakeCounts)(session.rows);
@@ -1022,8 +1027,43 @@ Page({
         this.setData({ edit: null });
     },
     /* ---------------- 保存最终确认(屏①保存 sheet) ---------------- */
+    /**
+     * 会话期内家庭漂移检测(B1):会话归属家庭(开批时捕获)≠ 当前作用域 → 保存被拦。
+     * 服务端同款判定为 SCOPE_MISMATCH 硬拒,这里是客户端前置(少一次注定失败的上传)。
+     */
+    sessionScopeDrifted() {
+        if (this.sessionScope === null) {
+            return false; // 无会话作用域记忆(理论边路):服务端硬门兜底
+        }
+        const scopeId = this.sessionScope.householdId !== null ? this.sessionScope.householdId : "default";
+        return (0, household_scope_1.householdScopeId)() !== scopeId;
+    },
+    /** 漂移/SCOPE_MISMATCH 的统一终局:终止会话 + 提示 + 返回首页,绝不重试写另一家 */
+    terminateSessionForScopeDrift() {
+        const scope = this.sessionScope;
+        this.batchFinished = true; // onUnload 不再回写复活旧批
+        this.sessionScope = null;
+        // 会话存在开批家庭的存储键下(作用域隔离):按会话自己的键清除,
+        // 再按当前键清一次兜底(default 键/未捕获开批两种路径)
+        (0, photo_session_1.clearPhotoSessionForScope)(scope);
+        (0, photo_session_1.clearPhotoSession)();
+        this.setData({ saveBusy: false, saveSheet: null, recognizing: false });
+        wx.showToast({ title: "家庭已切换,本批未保存", icon: "none", duration: 2500 });
+        wx.navigateBack({
+            fail: () => {
+                wx.reLaunch({ url: "/pages/index/index", fail: () => { } });
+            },
+        });
+    },
     onSaveTap() {
         if (this.data.saveBusy) {
+            return;
+        }
+        if (this.batchFinished) {
+            return; // 本批已终局(全部入库/漂移终止):不再打开确认层
+        }
+        if (this.sessionScopeDrifted()) {
+            this.terminateSessionForScopeDrift();
             return;
         }
         if (this.data.saveDisabled) {
@@ -1054,6 +1094,16 @@ Page({
         if (this.committing) {
             return;
         }
+        if (this.batchFinished) {
+            // 本批已终局(全部入库/漂移终止):迟到的确认手势直接吞掉,绝不再写
+            this.setData({ saveSheet: null });
+            return;
+        }
+        if (this.sessionScopeDrifted()) {
+            // B1:会话期内已切到另一家(确认层开着时漂移也要拦):终止会话返回首页
+            this.terminateSessionForScopeDrift();
+            return;
+        }
         const pending = this.rowsRaw.filter((r) => r.checked && !r.done);
         if (pending.length === 0) {
             this.setData({ saveSheet: null });
@@ -1070,6 +1120,7 @@ Page({
             imgW: this.data.imgW,
             imgH: this.data.imgH,
             fileId: this.fileId,
+            scopeHouseholdId: this.sessionScope !== null ? this.sessionScope.householdId : null,
         });
         this.committing = false;
         if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
@@ -1079,6 +1130,11 @@ Page({
             return;
         }
         if (!outcome.ok) {
+            // B1:服务端判定会话家庭 ≠ 当前派生家庭 → 终止会话返回首页,绝不重试写另一家
+            if (outcome.stage === "commit" && outcome.error === "SCOPE_MISMATCH") {
+                this.terminateSessionForScopeDrift();
+                return;
+            }
             // 上传失败:整批不提交(云端零残留);commit 失败:fileId 已回带供重试收敛
             if (outcome.stage === "upload") {
                 this.fileId = null;
@@ -1300,6 +1356,7 @@ Page({
             },
             batchLocation: this.data.batchLocation,
             rows: this.rowsRaw,
+            scope: this.sessionScope !== null ? this.sessionScope : { householdId: null, generation: 0 },
             createdAt: this.sessionCreatedAt,
         });
     },

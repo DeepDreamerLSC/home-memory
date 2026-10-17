@@ -184,3 +184,60 @@ test("PS-7:形状门——损坏/旧版本残留条目视同不存在,不进渲�
   storage.setStorageSync("home-memory:photo-session", null);
   assert.equal(ps.getUnfinishedPhotoSession(), null, "null 载荷按无会话处理");
 });
+
+/* ---------------- PS-8:会话作用域捕获(PR #67 B1) ---------------- */
+
+test("PS-8:开批时捕获家庭作用域——切家庭后旧批载荷里的 scope 不变(会话归属启动家庭)", function () {
+  var storage = setup();
+  // 开批前捕获家庭 A(generation=1)
+  householdScope.captureHouseholdId("hh_aaa111111111111111111111111111111", null);
+  var payload = ps.startPhotoSession(
+    { localPath: "wxfile://tmp/a.jpg", imgW: 1024, imgH: 768, fileId: null },
+    [makeRow("A 家的批", true)],
+    "书房抽屉",
+  );
+  assert.deepEqual(payload.scope, {
+    householdId: "hh_aaa111111111111111111111111111111",
+    generation: 1,
+  }, "开批时捕获 household_id 与作用域代数");
+  assert.equal(ps.capturePhotoSessionScope().householdId, "hh_aaa111111111111111111111111111111");
+
+  // 会话期内切到 B 家:旧批(键隔离不可达)载荷里的 scope 仍是 A;A 家新读回归属不变
+  householdScope.captureHouseholdId("hh_bbb222222222222222222222222222222", null);
+  householdScope.__resetHouseholdScopeForTest();
+  householdScope.captureHouseholdId("hh_aaa111111111111111111111111111111", null);
+  var restored = ps.getUnfinishedPhotoSession();
+  assert.equal(restored.scope.householdId, "hh_aaa111111111111111111111111111111", "会话归属不随当前作用域漂移");
+  assert.equal(restored.scope.generation, 1);
+});
+
+test("PS-8b:未捕获作用域开批 → scope.householdId=null;旧版残留(无 scope 字段)按未捕获回退;scope 损坏整条视同不存在", function () {
+  var storage = setup();
+  var payload = ps.startPhotoSession(
+    { localPath: "wxfile://tmp/c.jpg", imgW: 1, imgH: 1, fileId: null },
+    [makeRow("未捕获批", false)],
+    "玄关",
+  );
+  assert.deepEqual(payload.scope, { householdId: null, generation: 0 }, "单人回退:householdId=null");
+
+  // 旧版本残留(无 scope 字段):合法载荷,scope 按未捕获回退
+  var legacy = {
+    batchId: "legacy-batch-0001",
+    file: { localPath: "wxfile://tmp/l.jpg", imgW: 1, imgH: 1, fileId: null },
+    batchLocation: "书房",
+    rows: [makeRow("旧版批", true)],
+    createdAt: Date.now(),
+  };
+  storage.setStorageSync("home-memory:photo-session", legacy);
+  var restored = ps.getUnfinishedPhotoSession();
+  assert.notEqual(restored, null, "旧版载荷仍可恢复(向后兼容)");
+  assert.deepEqual(restored.scope, { householdId: null, generation: 0 }, "缺 scope 按未捕获回退");
+
+  // scope 存在但损坏:整条视同不存在(不进渲染/保存路径)
+  legacy.scope = { householdId: 123, generation: 0 };
+  storage.setStorageSync("home-memory:photo-session", legacy);
+  assert.equal(ps.getUnfinishedPhotoSession(), null, "损坏 scope → 整条载荷视同不存在");
+  legacy.scope = { householdId: "hh_x", generation: -2 };
+  storage.setStorageSync("home-memory:photo-session", legacy);
+  assert.equal(ps.getUnfinishedPhotoSession(), null, "非法 generation → 整条载荷视同不存在");
+});

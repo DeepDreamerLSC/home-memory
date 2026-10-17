@@ -101,6 +101,8 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
   FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
   HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
+  /** PR #67 B1:photoCommit 会话家庭与当前派生家庭不一致(服务端 message 优先) */
+  SCOPE_MISMATCH: "家庭已切换,本批未保存",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -379,9 +381,12 @@ export async function callItemsApi(
 ): Promise<ItemsApiOkResponse> {
   // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision
   // (来自 household-scope 捕获的服务端权威作用域;未捕获时不编造,旧云函数窗口
-  // 与 0.4.7 单人行为逐字节一致)
+  // 与 0.4.7 单人行为逐字节一致)。PR #67 B1:显式携带在 event 里的
+  // expected_household_id(拍照会话开批时捕获的会话家庭)优先于自动 marker——
+  // 自动 marker 取的是**提交时刻**的当前作用域,会覆盖会话绑定导致中途切家后
+  // 旧批误写新家庭;event 字段后展开即优先(其余 action 均不显式携带,零回归)
   const payload: unknown = ITEMS_MUTATING_ACTIONS.has(event.action)
-    ? { ...event, ...scopeWriteMarkers() }
+    ? Object.assign({}, scopeWriteMarkers(), event)
     : event;
   let result: unknown;
   try {

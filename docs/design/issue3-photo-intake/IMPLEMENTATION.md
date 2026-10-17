@@ -170,6 +170,8 @@
 {
   "action": "photoCommit",
   "batch_id": "b7e2…",                     // 客户端 uuid,8-64,仅日志聚合
+  "expected_household_id": "hh_…",          // 会话开批时捕获的家庭(PR #67 B1):服务端与当前派生家庭
+                                             // 不一致 → SCOPE_MISMATCH 零写入;api 层自动 marker 不覆盖显式携带值
   "items": [                                // 1-10 件,超出 INVALID_INPUT
     {
       "operation_id": "…uuid…",             // 行内固定幂等键(重试沿用;内容改后仍沿用,服务端同键同内容幂等/异内容冲突)
@@ -377,7 +379,7 @@ export function containPointToNormalized(px: number, py: number, imgW: number, i
 4. **图片超限/压缩失败**:`wx.compressImage` 失败 → 原图 base64 原样直传识别(如实,云函数 10MB 解码门兜底,超出 INVALID_INPUT → 客户端提示「照片太大,请重拍」并留在入口);目标压缩:长边 ≤1280 JPEG quality 70(§4.1)。`wx.getImageInfo` 失败 → 中止本次拍照并 toast(没有宽高就没有坐标契约,不猜)。
 5. **圈选识别失败** → 结果卡显示失败文案+「不是,重圈」重试;已有候选零影响(原型 resetCircle 语义,prototype.html:733-738)。
 6. **确认后上传失败 / 部分保存失败**:确认后首先 `wx.cloud.uploadFile` 同一张压缩图(本批唯一上云动作),失败 → 整批不提交 photoCommit、如实 toast 可重试(云端零残留,会话保留);上传成功后 photoCommit 逐件结果:失败行标红+可单行重试(operation_id 沿用,同键同内容幂等收敛;内容改过仍沿用原键,服务端异内容 OPERATION_CONFLICT 兜底),已成功行不动(§1.3,batch-save 哲学);file_id 一旦取得随会话保留,重试不重复上传。
-7. **家庭切换在途**:photo 会话存储键带作用域后缀(§4.1 photo-session),换家庭后旧批不可达、回切恢复(F3 同款);photo 页所有上屏前作用域代数复核(§6.1 同款);photoCommit 经 api.ts 自动双 marker,共享家庭 FAMILY_SWITCHED/FAMILY_STALE_SCOPE 由服务端硬门拦下,客户端如实 toast 服务端文案。
+7. **家庭切换在途 + 会话归属家庭(PR #67 B1 修订)**:photo 会话存储键带作用域后缀(§4.1 photo-session),换家庭后旧批不可达、回切恢复(F3 同款);photo 页所有上屏前作用域代数复核(§6.1 同款);photoCommit 经 api.ts 自动双 marker,共享家庭 FAMILY_SWITCHED/FAMILY_STALE_SCOPE 由服务端硬门拦下,客户端如实 toast 服务端文案。**会话归属家庭在开批时捕获**(photo-session 载荷 `scope` 字段):保存时把该 `expected_household_id` 随 photoCommit 上送(api 层显式携带优先于自动 marker),服务端与当前派生家庭不一致 → **SCOPE_MISMATCH 零写入**(先于通用双 marker 硬门裁定);客户端保存前置复核漂移、收到 SCOPE_MISMATCH 同款终局:终止会话(按会话自己的作用域键清除)、toast「家庭已切换,本批未保存」、返回首页,**绝不重试写另一个家**。服务端拒绝路径上照片文件可能已在云存储(用户确认后先上传再 commit):该孤儿文件不产生任何 items/证据行,与「确认后上传失败整批不提交」的取消路径同语义(云存储无事务,孤儿文件可接受),不回收。
 8. **页面生命周期**:photo 页 onHide/onUnload → `voiceEntry.invalidate()`(作废在途录音/识别/编辑解析,防幽灵录音与迟到 diff 上屏;与 index 页同纪律,`pages/index/index.ts:331-343`)。
 
 ---

@@ -63,6 +63,10 @@ function makeRouter(opts) {
       if (opts.commitThrow) {
         return Promise.reject(new Error(opts.commitThrow));
       }
+      if (opts.commitScopeMismatch) {
+        // PR #67 B1:服务端判定会话家庭 ≠ 当前派生家庭
+        return { ok: false, error: "SCOPE_MISMATCH", message: "家庭已切换,本批未保存" };
+      }
       var fails = opts.commitFailIndexes || [];
       return {
         ok: true,
@@ -1107,4 +1111,81 @@ test("PP-STATIC-2:页面编译产物绝无 uploadFile 直调(上传唯一入口�
   var src = fs.readFileSync(path.join(ROOT, "miniprogram/pages/photo/photo.js"), "utf8");
   assert.equal(src.indexOf("uploadFile"), -1, "photo 页不直接触上传,只经 commitPhotoBatch");
   assert.notEqual(src.indexOf("commitPhotoBatch"), -1);
+});
+
+/* ---------------- PP-SCOPE:家庭切换竞态(PR #67 B1) ---------------- */
+
+test("PP-SCOPE-1:会话期内作用域变化(A 家开批→切 B 家)→ 确认被拦:零上传零提交、终止会话、返回首页", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  // 首个会话在未捕获作用域下开批;现在捕获 A 家,重拍开一个 A 家会话
+  householdScope.captureHouseholdId("hh_pageaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", null);
+  page.onEntryShotTap();
+  await settle();
+  assert.equal(page.sessionScope.householdId, "hh_pageaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", "会话归属开批家庭");
+  assert.equal(page.rowsRaw.length, 2);
+
+  // 会话期内切到 B 家 → 填位置、点保存:客户端前置拦截
+  householdScope.captureHouseholdId("hh_pagebbbbbbbbbbbbbbbbbbbbbbbbbbbb1", null);
+  page.setBatchLocationText("B 家的抽屉");
+  page.onSaveTap();
+  await settle();
+
+  assert.equal(page.data.saveSheet, null, "确认弹层绝不打开");
+  assert.equal(ctx.env.uploads.length, 0, "零上传(不发起注定失败的写入)");
+  assert.equal(ctx.env.commitCalls.length, 0, "零 photoCommit");
+  assert.ok(toastTexts(ctx.env).indexOf("家庭已切换,本批未保存") !== -1, "统一终局文案");
+  assert.ok(ctx.env.backs.length >= 1, "返回首页(navigateBack)");
+  assert.equal(page.batchFinished, true, "会话终止:onUnload 不再回写复活旧批");
+  // 会话在 A 家键下被真正清除(回 A 家不再出现恢复横幅)
+  householdScope.__resetHouseholdScopeForTest();
+  householdScope.captureHouseholdId("hh_pageaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1", null);
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "开批家庭的会话键已清");
+
+  // 再点确认(迟到手势)也不得进入提交流程
+  page.onSaveGoTap();
+  await settle();
+  assert.equal(ctx.env.commitCalls.length, 0, "终局后绝不重试写另一个家");
+});
+
+test("PP-SCOPE-2:服务端 SCOPE_MISMATCH 回执 → 终止会话返回首页,绝不重试写另一家", async function () {
+  var ctx = await boot({ commitScopeMismatch: true });
+  var page = ctx.page;
+  await readyToSave(ctx, page);
+  await page.onSaveGoTap();
+  await settle();
+
+  assert.equal(ctx.env.commitCalls.length, 1, "发起过一次提交(客户端未拦住的服务端硬拒)");
+  assert.equal(ctx.env.commitCalls[0].expected_household_id, undefined, "未捕获作用域不带 marker(单人宽松)");
+  assert.ok(toastTexts(ctx.env).indexOf("家庭已切换,本批未保存") !== -1, "终止文案");
+  assert.ok(ctx.env.backs.length >= 1, "返回首页");
+  assert.equal(page.batchFinished, true);
+  assert.equal(page.rowsRaw.every(function (r) { return !r.done; }), true, "无行落终态(零写入)");
+  assert.equal(photoSession.getUnfinishedPhotoSession(), null, "会话清除,不保留失败重试入口");
+  // 再点保存:确认层已关、会话已终止,不得再发起提交
+  page.onSaveTap();
+  await settle();
+  assert.equal(ctx.env.commitCalls.length, 1, "绝不重试写另一个家");
+});
+
+test("PP-SCOPE-3:会话家庭与当前作用域一致(未切换)→ 保存照常,携带 expected_household_id", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  householdScope.captureHouseholdId("hh_pagecccccccccccccccccccccccccccc1", null);
+  page.onEntryShotTap();
+  await settle();
+  page.setBatchLocationText("客厅电视柜");
+  page.onSaveTap();
+  await settle();
+  assert.notEqual(page.data.saveSheet, null, "无漂移不拦,确认层照常打开");
+  await page.onSaveGoTap();
+  await settle();
+  assert.equal(ctx.env.commitCalls.length, 1);
+  assert.equal(
+    ctx.env.commitCalls[0].expected_household_id,
+    "hh_pagecccccccccccccccccccccccccccc1",
+    "一致性绑定随事件上送(会话家庭)",
+  );
+  assert.equal(ctx.env.uploads[0].cloudPath.indexOf("photo-evidence/hh_pagecccccccccccccccccccccccccccc1/"), 0, "上传前缀=会话家庭");
+  assert.equal(page.rowsRaw[0].done, true, "照常入库");
 });

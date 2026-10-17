@@ -246,16 +246,20 @@ function uploadOnce(d, cloudPath, filePath) {
 /**
  * 用户已确认后的唯一上云动作编排:先上传(首次)得 file_id,再 photoCommit。
  * 上传失败 → 整批不提交(云端零残留);photoCommit 抛错 → 如实回带已得 fileId。
+ * B1(PR #67):上传路径前缀与 expected_household_id 都取**会话开批时**捕获的
+ * scopeHouseholdId(绝不是提交时刻的当前作用域)——中途切到另一家后保存,
+ * 服务端派生家庭与会话家庭不一致 → SCOPE_MISMATCH 零写入。
  */
 async function commitPhotoBatch(input, deps) {
     const d = resolveDeps(deps);
+    const scopeId = input.scopeHouseholdId !== null ? input.scopeHouseholdId : (0, household_scope_1.householdScopeId)();
     let fileId = input.fileId;
     if (fileId === null || fileId === "") {
         if (input.rows.length === 0) {
             return { ok: false, stage: "commit", message: "没有要保存的候选", fileId: "" };
         }
         try {
-            fileId = await uploadOnce(d, photoCloudPath((0, household_scope_1.householdScopeId)(), d.now(), d.uuid()), input.localPath);
+            fileId = await uploadOnce(d, photoCloudPath(scopeId, d.now(), d.uuid()), input.localPath);
         }
         catch (e) {
             // 只记动作与错误码,绝不 log 文件内容
@@ -268,17 +272,24 @@ async function commitPhotoBatch(input, deps) {
         img_w: input.imgW,
         img_h: input.imgH,
     });
+    const event = {
+        action: "photoCommit",
+        batch_id: input.batchId,
+        items,
+    };
+    if (input.scopeHouseholdId !== null) {
+        // B1:会话家庭作为一致性绑定随事件上送(api 层自动 marker 不覆盖显式携带值);
+        // 服务端与当前派生家庭不一致 → SCOPE_MISMATCH(绝不改投当前家庭)
+        event.expected_household_id = input.scopeHouseholdId;
+    }
     try {
-        const res = await d.commit({
-            action: "photoCommit",
-            batch_id: input.batchId,
-            items,
-        });
+        const res = await d.commit(event);
         return { ok: true, fileId, results: res.results };
     }
     catch (e) {
         const message = e instanceof Error && e.message ? e.message : "保存失败,请稍后重试";
-        return { ok: false, stage: "commit", message, fileId };
+        const code = (0, api_1.isApiError)(e) ? e.code : undefined;
+        return { ok: false, stage: "commit", message, fileId, error: code };
     }
 }
 /** 测试钩子:注入 wx API 依赖(partial 覆盖;null = 还原生产依赖) */

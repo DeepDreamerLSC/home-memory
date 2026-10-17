@@ -707,3 +707,67 @@ test("PC-CONFIG:itemsApi config.json timeout 提到 20(photoCommit 10 件留余�
   );
   assert.equal(config.timeout, 20);
 });
+
+// ---------- PC-SCOPE:photoCommit 会话作用域门(PR #67 B1) ----------
+
+test("PC-SCOPE-1:expected_household_id(会话开批家庭)≠ 当前派生家庭 → SCOPE_MISMATCH 零写入,优先于共享双 marker 硬门", async function () {
+  // 场景:用户在 A 家开拍照会话 → 中途切到 B 家(服务端解析活跃家庭=B)→ 点确认
+  var db = freshDb();
+  var depsB = makeDeps(db, HOUSEHOLD_B, { shared: true, scopeRevision: 5 });
+  var res = await handler(
+    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("cloud://f-s1") })], {
+      expected_household_id: HOUSEHOLD_A,
+      expected_scope_revision: 5
+    }),
+    depsB
+  );
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "SCOPE_MISMATCH", "错误码是 SCOPE_MISMATCH,不是通用 FAMILY_SWITCHED");
+  assert.equal(res.message, "家庭已切换,本批未保存");
+  assert.equal((await rawDocs(db, "items")).length, 0, "零写入:items");
+  assert.equal((await rawDocs(db, "photo_evidence")).length, 0, "零写入:证据行");
+
+  // 个人家庭派生同样适用(A 家个人批切到 B 家个人活跃家庭)
+  var db2 = freshDb();
+  var depsBPersonal = makeDeps(db2, HOUSEHOLD_B);
+  var res2 = await handler(
+    commitEvent([item("op-s1", "护照", "书房抽屉", { photo: photo("cloud://f-s1") })], {
+      expected_household_id: HOUSEHOLD_A
+    }),
+    depsBPersonal
+  );
+  assert.equal(res2.error, "SCOPE_MISMATCH");
+  assert.equal((await rawDocs(db2, "items")).length, 0, "个人家庭同样零写入");
+});
+
+test("PC-SCOPE-2:会话门三态——类型非法 INVALID_INPUT;一致放行走后续建档;未携带落回通用硬门", async function () {
+  var db = freshDb();
+  var deps = makeDeps(db, HOUSEHOLD_A);
+  // 类型非法
+  var bad = await handler(
+    commitEvent([item("op-s2", "护照", "书房抽屉")], { expected_household_id: 12345 }),
+    deps
+  );
+  assert.equal(bad.error, "INVALID_INPUT", "marker 类型非法与通用门同口径");
+
+  // 一致 → 放行(个人家庭宽松口径,照常建档)
+  var deps2 = makeDeps(db, HOUSEHOLD_A);
+  var ok = await handler(
+    commitEvent([item("op-s2", "护照", "书房抽屉", { photo: photo("cloud://f-s2") })], {
+      expected_household_id: HOUSEHOLD_A
+    }),
+    deps2
+  );
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal((await rawDocs(db, "items")).length, 1);
+
+  // 未携带(开批时未捕获作用域)→ 落回通用硬门:共享家庭仍被 FAMILY_SWITCHED 拦下
+  var db3 = freshDb();
+  var depsShared = makeDeps(db3, HOUSEHOLD_A, { shared: true, scopeRevision: 2 });
+  var blocked = await handler(
+    commitEvent([item("op-s3", "护照", "书房抽屉")]),
+    depsShared
+  );
+  assert.equal(blocked.error, "FAMILY_SWITCHED", "未携带不改通用硬门语义");
+  assert.equal((await rawDocs(db3, "items")).length, 0);
+});
