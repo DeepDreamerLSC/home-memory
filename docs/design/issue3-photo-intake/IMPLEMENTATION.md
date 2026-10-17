@@ -277,6 +277,11 @@
 1. **路径段来源**:拍照流程没有 extractDraft 的 mount_path 提取环节,位置是用户手输文本(确认页手动改位置在语音链路 = 清空路径不挂靠;`parseLocation` 是 LLM 候选 + 逐段人工核对的交互式机制)——两处都不是「文本→路径段」的确定性机制,故**新增最小确定性分段工具 `splitLocationSegments`**(新增决策,`utils/photo-intake.ts`):按 `·` `/` `-` `的` 与空白切分,逐段 trim、空段丢弃,**单段=单层**(如「玄关」直接挂根下房间节点);
 2. **`created_from="manual"`**(不是 `parse`):路径段来自用户手输位置的确定性拆分,不是原话提取;建出的节点与手动整理位置同源。
 
+**分段 = LLM 逐字锚定优先 + 分隔符规则兜底 + 失败单段**(真机 2026-10-17 增补):无分隔符中文(「书房桌子右边抽屉」)用分隔符规则只能整串挂一个平节点——中文无分隔符不可能用规则确定性拆分,须交给模型按「从大到小」拆层级,纪律与语音链路 mount_path 同源:**每段必须是原文逐字子串**(可跳过连接字/空白,不得改写、缩写、编造)。三级机制:
+- **LLM 优先**:`extractDraft` 新增 action `locationSplit`(event `{action, text}`,1-200 码点;提示词 = 拆分器 system prompt +【原文】标记 + text;引擎链与 draftEditParse 完全同款 local 优先→DeepSeek 降级、`emptyOutputIsFailure`、一次带错误反馈的重试)。**服务端硬校验不信任模型**:每段是 text 逐字子串、按原文顺序、1-6 段、每段 1-30 码点;任一不过 → 整串单段兜底 `{ok:true, path:[text], fallback:true}`(绝不带编造段上树);坏 JSON 两次/双引擎失败 → AI_UNAVAILABLE。日志只记 `{action, textLength, segCount, engine, error?}`,绝不落位置原文;
+- **规则兜底**:`pages/photo/photo.ts` 实例态 `locPathCache`(文本→路径)+ `ensureLocPath(text)` fire-and-forget 预热(在途去重;`fallback:true` 与失败**不回填缓存**——回落规则分段,带分隔符文本仍能按规则拆开);触发点 = 批次位置全部写入路径(setBatchLocationText / 语音 batch_location 应用 / 常用 chips / 会话恢复)与编辑面板例外写入。位置栏显示层级预览「书房 › 桌子 › 右边抽屉」(有缓存时;无缓存显示原文)——用户一眼看到树会怎么挂,不对改文本即可;`planPhotoMounts` 增可选 `cache` 参数:有该文本且形状合法(1-6 段×每段 1-30 码点)的缓存用之,无则现行为 `splitLocationSegments`;
+- **失败单段**:LLM 未返回/在途/失败/形状不合法 → 一律走规则兜底;规则也拆不出(无分隔符超 30 码点等)→ 现行为不变(不挂,计入 skipped 轻提示)。**保存绝不因异步拆分在途而阻塞**:保存时刻缓存里有什么就用什么,没有就走规则。
+
 **分段形状门**(与 batch-save/服务端 `cleanPathSegments` 同限,限值常量从 batch-save 导出共用):切分后 1-6 段、每段 1-30 码点;超限(如 7 段、单段 31 字)**一律不挂**——返回空数组,绝不静默丢段/截断改名造错误路径(`location_text` 原文已随 photoCommit 落库,查件不受影响)。
 
 **编排**(`pages/photo/photo.ts` `onSaveGoTap` 成功路径 → `runPhotoMounts`,`utils/photo-intake.ts` `planPhotoMounts` 纯函数下沉):
@@ -291,7 +296,7 @@
 
 **失败语义**(挂树失败**不回滚不阻断**):网络/VERSION_CONFLICT(他人在主界面同时整理)/跨家庭 NOT_FOUND 等任何挂树失败——物品已保存、`location_text` 已落库、行仍是「已确认记住」终态,件照常在「尚未归类」;只轻提示「N 件的位置树没挂上,主界面可补」(N = 失败件 + 无法挂树件),绝不影响保存流程与证据关联。跨家庭安全:ensureAndLink 服务端按当前派生家庭解析物品,他家的 item_id → NOT_FOUND 零写入,共享家庭另受双 marker 硬门。
 
-**测试**:PI-14/15(分段:分隔符/空段/单段/恰 6 段/超 6 段/超 30 码点/空文本)、PI-16(计划:去重分组/例外优先/幂等键确定性/失败件与缺版本件不进/形状不合法计入 skipped)、PI-17(逐件 ensureAndLink 参数与失败计数不抛)、PP-MOUNT-1..4(页面级:参数逐项正确/失败终态不受影响+轻提示/恢复会话已 done 不重挂/旧窗口零调用)、PC-COMMIT-1 与 PC-IDEM(回执 version 字段与重放稳定)。
+**测试**:PI-14/15(分段:分隔符/空段/单段/恰 6 段/超 6 段/超 30 码点/空文本)、PI-16(计划:去重分组/例外优先/幂等键确定性/失败件与缺版本件不进/形状不合法计入 skipped)、PI-17(逐件 ensureAndLink 参数与失败计数不抛)、PP-MOUNT-1..4(页面级:参数逐项正确/失败终态不受影响+轻提示/恢复会话已 done 不重挂/旧窗口零调用)、PC-COMMIT-1 与 PC-IDEM(回执 version 字段与重放稳定);LLM 分段增补(2026-10-17):tests/photo-location-split.test.js(prompt 拼装/逐字锚定·乱序·越限硬门→单段兜底/引擎链/日志白名单/胶水路由)、PI-18(planPhotoMounts 缓存优先+非法缓存回落规则)、PP-LOCPATH-1..5(回填缓存+层级预览+缓存路径挂树/在途去重+fallback 不缓存/慢解析保存不阻塞走兜底/失败零打扰/五个写入点触发)。
 
 ---
 

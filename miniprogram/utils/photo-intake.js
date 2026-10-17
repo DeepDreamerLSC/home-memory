@@ -337,14 +337,18 @@ async function retryPhotoEvidence(input, deps) {
 }
 // ---------- 位置挂树(issue #65 V0.4 第③条:批次位置 + 逐件例外挂到节点树) ----------
 /**
- * 确定性分段(#65 ③,新增决策):拍照流程的位置是用户手输文本(如「玄关柜 · 第二层
- * 抽屉」),没有语音链路 extractDraft v2 的 mount_path 提取环节;确认页手动改位置
- * = 清空路径不挂靠,locations 侧的 parseLocation 是 LLM 候选+逐段人工核对(交互式),
- * 都不是「文本→路径段」的确定性机制——故新增本最小确定性分段:按「·」「/」「-」
- * 「的」与空白切分,逐段 trim、空段丢弃,单段=单层。切分后仍须满足挂树路径形状门
- * (与 batch-save / 服务端 cleanPathSegments 同限:1-6 段、每段 1-30 码点);
- * 超限一律返回空数组 = 该位置不挂(location_text 已随 photoCommit 落库,绝不猜
- * 路径、绝不截断改名)。
+ * 确定性分段(#65 ③,新增决策;真机 2026-10-17 起为兜底层):拍照流程的位置是
+ * 用户手输文本(如「玄关柜 · 第二层抽屉」),没有语音链路 extractDraft v2 的
+ * mount_path 提取环节;确认页手动改位置 = 清空路径不挂靠,locations 侧的
+ * parseLocation 是 LLM 候选+逐段人工核对(交互式),都不是「文本→路径段」的
+ * 确定性机制——本函数按「·」「/」「-」「的」与空白切分,逐段 trim、空段丢弃,
+ * 单段=单层。**分隔符规则拆不开无分隔符中文**(「书房桌子右边抽屉」整串一平段),
+ * 故挂树分段现在是 LLM 逐字锚定优先(extractDraft.locationSplit,页面侧
+ * locPathCache 预热,见 planPhotoMounts 的 cache 参数),本函数退为兜底:
+ * LLM 未返回/失败/形状不合法时用之,保证保存绝不因异步拆分在途而阻塞。
+ * 切分后仍须满足挂树路径形状门(与 batch-save / 服务端 cleanPathSegments 同限:
+ * 1-6 段、每段 1-30 码点);超限一律返回空数组 = 该位置不挂(location_text 已随
+ * photoCommit 落库,绝不猜路径、绝不截断改名)。
  */
 function splitLocationSegments(text) {
     const segments = (typeof text === "string" ? text : "")
@@ -360,16 +364,42 @@ function splitLocationSegments(text) {
     return segments;
 }
 /**
+ * 挂树路径形状门(与 splitLocationSegments 产物同限):LLM 拆分缓存同样不得
+ * 越 6 段/30 码点——服务端已硬校验,这里兜客户端半边(如超长单段兜底路径),
+ * 不过 → 调用方回落 splitLocationSegments 的既有口径。
+ */
+function isValidMountPath(path) {
+    if (!Array.isArray(path) || path.length < 1 || path.length > batch_save_1.MOUNT_PATH_MAX_SEGMENTS) {
+        return false;
+    }
+    return path.every((seg) => typeof seg === "string" &&
+        Array.from(seg.trim()).length >= 1 &&
+        Array.from(seg.trim()).length <= batch_save_1.MOUNT_SEGMENT_MAX_CODEPOINTS);
+}
+/**
  * 生成本轮挂树计划(纯函数):
  * - 有效位置 = 例外优先、批次位置兜底(与 buildPhotoCommitItems 的
  *   location_text 合成完全同款),按文本去重收集;
  * - 只收本轮 photoCommit 成功(item_id + version 齐)的件;失败件不挂(重试
  *   成功后由那轮回执挂),回执缺 version(旧云函数窗口)计入 skipped;
+ * - 分段优先级:可选 cache(extractDraft.locationSplit 的 LLM 逐字锚定拆分,
+ *   页面 fire-and-forget 预热)有该文本且形状合法 → 用之;否则现行为
+ *   splitLocationSegments 分隔符规则兜底——**绝不因异步拆分未返回而阻塞保存**,
+ *   保存时刻缓存里有什么就用什么,没有就走规则;
  * - 分段形状不合法的位置(超 6 段/超 30 码点段)不进 entries,该位置下的件
  *   全部计入 skipped——location_text 已落库,绝不猜路径。
  */
-function planPhotoMounts(rows, results, batchLocation) {
+function planPhotoMounts(rows, results, batchLocation, cache) {
     const batch = (typeof batchLocation === "string" ? batchLocation : "").trim();
+    const cachedPathOf = (locationText) => {
+        if (cache !== undefined &&
+            cache !== null &&
+            Object.prototype.hasOwnProperty.call(cache, locationText) &&
+            isValidMountPath(cache[locationText])) {
+            return cache[locationText];
+        }
+        return null;
+    };
     const byLocation = new Map();
     const order = [];
     let skipped = 0;
@@ -392,7 +422,11 @@ function planPhotoMounts(rows, results, batchLocation) {
         }
         let entry = byLocation.get(locationText);
         if (entry === undefined) {
-            entry = { locationText, path: splitLocationSegments(locationText), items: [] };
+            entry = {
+                locationText,
+                path: cachedPathOf(locationText) ?? splitLocationSegments(locationText),
+                items: [],
+            };
             byLocation.set(locationText, entry);
             order.push(locationText);
         }

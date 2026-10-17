@@ -865,6 +865,185 @@ async function draftEditParse(event, deps) {
   return aiUnavailableResult(engine);
 }
 
+// ---------- locationSplit(位置层级拆分,§1.6 真机 2026-10-17) ----------
+//
+// 无分隔符中文(「书房桌子右边抽屉」)用 splitLocationSegments 的分隔符规则
+// 只能整串挂一个平节点;中文无分隔符不可能用规则确定性拆分——交给模型按
+// 「从大到小」拆层级,纪律与语音链路 mount_path 同源:每段必须是原文逐字
+// 子串(可跳过连接字/空白,不得改写、缩写、编造),服务端硬校验不信任模型。
+
+const LOC_SPLIT_TEXT_MAX = 200;
+const LOC_SPLIT_MAX_SEGMENTS = 6;
+const LOC_SPLIT_SEGMENT_MAX = 30;
+/** 位置原文标记(与【用户输入】同族,拼装方式参照 buildDraftEditPrompt) */
+const SOURCE_MARKER = "【原文】";
+
+const LOCATION_SPLIT_SYSTEM_PROMPT = [
+  "你是家庭位置层级拆分器。用户给一段位置描述,把它拆成从大到小的层级路径。",
+  "规则:",
+  "1. 每一段必须逐字取自原文(可跳过连接字/空白,但不得改写、缩写、编造)。",
+  "2. 最多 6 段,每段 1-30 字。",
+  "3. 拆不出层级(单实体)就输出单段整串。",
+  '4. 只输出一个 JSON 对象 {"path":["…"]},不要任何其他文字或围栏。',
+].join("\n");
+
+function locationSplitInvalidInputResult() {
+  return { ok: false, error: "INVALID_INPUT", message: "位置描述不合法" };
+}
+
+function buildLocationSplitPrompt(userText, retryInfo) {
+  let prompt = LOCATION_SPLIT_SYSTEM_PROMPT + "\n\n" + SOURCE_MARKER + "\n" + userText;
+  if (retryInfo) {
+    prompt +=
+      "\n\n" +
+      RETRY_OUTPUT_MARKER +
+      "\n" +
+      retryInfo.previousOutput +
+      "\n" +
+      RETRY_ERROR_MARKER +
+      "\n" +
+      retryInfo.reason +
+      "\n请重新输出,只输出一个符合上述字段要求的 JSON 对象,不要包含任何其他文字或代码块围栏。";
+  }
+  return prompt;
+}
+
+/*
+ * 模型输出校验 + 服务端硬门(不信任模型):
+ * - 顶层不是 JSON 对象 / path 缺失或不是数组 → retryable(handler 带错误重试一次);
+ * - 段级硬门(不过 = fallback,不重试):1-6 段、每段 trim 后 1-30 码点、
+ *   每段是原文逐字子串且按原文顺序出现(有序锚定:后一段必须在前一段结束
+ *   之后的位置找到)——任一不过 → 整串单段兜底 {path:[text],fallback:true},
+ *   绝不带模型改写/编造的段上树。
+ */
+function validateLocationSplitOutput(rawText, userText) {
+  const parsed = extractJsonObject(rawText);
+  if (parsed === undefined || parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, retryable: true, reason: "输出不是合法的 JSON 对象" };
+  }
+  if (!Array.isArray(parsed.path)) {
+    return { ok: false, retryable: true, reason: "path 字段缺失或不是数组" };
+  }
+  const fallback = () => ({ ok: true, fallback: true, segments: null });
+  if (parsed.path.length < 1 || parsed.path.length > LOC_SPLIT_MAX_SEGMENTS) {
+    return fallback();
+  }
+  const segments = [];
+  for (const seg of parsed.path) {
+    if (typeof seg !== "string") return fallback();
+    const t = seg.trim();
+    if (codePointLength(t) < 1 || codePointLength(t) > LOC_SPLIT_SEGMENT_MAX) {
+      return fallback();
+    }
+    segments.push(t);
+  }
+  let searchFrom = 0;
+  for (const seg of segments) {
+    const idx = userText.indexOf(seg, searchFrom);
+    if (idx === -1) return fallback();
+    searchFrom = idx + seg.length;
+  }
+  return { ok: true, segments: segments };
+}
+
+/*
+ * locationSplit 入口(event = {action:"locationSplit", text}):无状态纯解析,
+ * 无 DB 客户端、无 openid 依赖(结构上不可能写)。
+ * - text 去空白 1-200 码点,非法 → INVALID_INPUT(引擎未参与);
+ * - 引擎链与 draftEditParse 完全同款:local 优先(emptyOutputIsFailure:空文本
+ *   视为引擎失败)→ 失败立即降级 DeepSeek;坏 JSON 带错误重试一次仍走同一
+ *   引擎(模型质量失败不触发降级);双失败/两次坏 JSON → AI_UNAVAILABLE
+ *   (客户端走 splitLocationSegments 确定性兜底);
+ * - 段级硬门不过 → ok:true + path:[整串] + fallback:true(单段兜底,不失败);
+ * - 日志只记 {action, textLength, segCount, engine, error?}(白名单),绝不落
+ *   位置原文与拆分结果。
+ */
+async function locationSplit(event, deps) {
+  const logger = deps && typeof deps.logger === "function" ? deps.logger : function () {};
+  const callLLM = deps ? deps.callLLM : undefined;
+  const callLocalLLM =
+    deps && typeof deps.callLocalLLM === "function" ? deps.callLocalLLM : null;
+
+  const rawText = event && typeof event.text === "string" ? event.text : null;
+  if (rawText === null) {
+    logger({ action: "locationSplit", textLength: 0, segCount: 0, engine: null, error: "INVALID_INPUT" });
+    return locationSplitInvalidInputResult();
+  }
+  const textLength = codePointLength(stripAllWhitespace(rawText));
+  const userText = rawText.trim();
+  if (textLength < 1 || textLength > LOC_SPLIT_TEXT_MAX) {
+    logger({ action: "locationSplit", textLength: textLength, segCount: 0, engine: null, error: "INVALID_INPUT" });
+    return locationSplitInvalidInputResult();
+  }
+
+  const buildPrompt0 = (retryInfo) => buildLocationSplitPrompt(userText, retryInfo);
+  const runSplitEngineChain = async (callFn, emptyOutputIsFailure) => {
+    const isEmptyFailure = (output) =>
+      emptyOutputIsFailure && (typeof output !== "string" || output.trim() === "");
+    let output;
+    try {
+      output = await callFn(buildPrompt0(null));
+    } catch (e) {
+      return { engineFailed: true };
+    }
+    if (isEmptyFailure(output)) {
+      return { engineFailed: true };
+    }
+    let result = validateLocationSplitOutput(output, userText);
+    if (!result.ok && result.retryable) {
+      let retryOutput;
+      try {
+        retryOutput = await callFn(
+          buildPrompt0({ previousOutput: output, reason: result.reason })
+        );
+      } catch (e) {
+        return { engineFailed: true };
+      }
+      if (isEmptyFailure(retryOutput)) {
+        return { engineFailed: true };
+      }
+      result = validateLocationSplitOutput(retryOutput, userText);
+    }
+    return { engineFailed: false, result: result };
+  };
+
+  let engine = "deepseek";
+  let chain;
+  if (callLocalLLM) {
+    engine = "local";
+    chain = await runSplitEngineChain(callLocalLLM, true);
+    if (chain.engineFailed) {
+      engine = "deepseek";
+      chain = await runSplitEngineChain(callLLM, false);
+    }
+  } else {
+    chain = await runSplitEngineChain(callLLM, false);
+  }
+
+  if (!chain.engineFailed && chain.result.ok) {
+    if (chain.result.fallback) {
+      // 段级硬门不过:整串单段兜底(挂平节点,绝不带编造段)
+      logger({ action: "locationSplit", textLength: textLength, segCount: 1, engine: engine });
+      return { ok: true, engine: engine, path: [userText], fallback: true };
+    }
+    logger({
+      action: "locationSplit",
+      textLength: textLength,
+      segCount: chain.result.segments.length,
+      engine: engine,
+    });
+    return { ok: true, engine: engine, path: chain.result.segments, fallback: false };
+  }
+  logger({
+    action: "locationSplit",
+    textLength: textLength,
+    segCount: 0,
+    engine: engine,
+    error: "AI_UNAVAILABLE",
+  });
+  return aiUnavailableResult(engine);
+}
+
 module.exports = {
   handler,
   buildPrompt,
@@ -875,4 +1054,8 @@ module.exports = {
   buildVlPrompt,
   validateVlOutput,
   validateDraftEditOutput,
+  locationSplit,
+  LOCATION_SPLIT_SYSTEM_PROMPT,
+  buildLocationSplitPrompt,
+  validateLocationSplitOutput,
 };

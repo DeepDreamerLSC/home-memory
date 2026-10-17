@@ -91,7 +91,7 @@
   <view class="locbar">
     <view class="ico">📍</view>
     <view class="main">
-  <view class="lv" bindtap="onBatchLocEditTap">{{ batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
+  <view class="lv" bindtap="onBatchLocEditTap">{{ locPathText || batchLocation || '点这里填位置' }} <text class="pen">✎</text></view>
       <view class="lc">
         <view class="chip c1" catchtouchstart="onTalkTouchStart" catchtouchmove="onTalkTouchMove" catchtouchend="onTalkTouchEnd" catchtouchcancel="onTalkTouchCancel">🎤 按住说位置</view>
         <view wx:for="{{ recentLocations }}" wx:key="*this" class="chip c2" data-loc="{{ item }}" bindtap="onRecentLocTap">常用:{{ item }}</view>
