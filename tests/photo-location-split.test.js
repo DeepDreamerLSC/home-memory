@@ -427,3 +427,22 @@ test("LOC-SPLIT-DIR:方位词段确定性修补(真机回归「书房桌子的�
   );
   assert.deepEqual(rTail.path, ["书房", "柜子里面"], "末位方位段并入前段");
 });
+
+// 真机二次(2026-10-18):「书房桌子中间抽屉」被拆成 [书房,桌子中间,抽屉](方位词向后粘)。
+// 锁定:非末段段尾方位词确定性前移(桌子中间|抽屉→桌子|中间抽屉,逐字锚定);
+// 末段段尾方位词保留(真「桌上中部」语义);前移不锚定则维持原判走整体锚定门。
+test("LOC-SPLIT-DIR2:段尾方位词前移(真机回归「书房桌子中间抽屉」)", async () => {
+  const run = (text, script) => locationSplit(
+    { action: "locationSplit", text },
+    { callLocalLLM: async () => script, callLLM: async () => { throw new Error("OFF"); }, logger: () => {} },
+  );
+  const r = await run("书房桌子中间抽屉", JSON.stringify({ path: ["书房", "桌子中间", "抽屉"] }));
+  assert.deepEqual(r.path, ["书房", "桌子", "中间抽屉"], "向后粘→前移修正");
+  assert.notEqual(r.fallback, true);
+  // 末段段尾方位词:保留(「书房桌子中间」=桌上中部真语义)
+  const rTail = await run("书房桌子中间", JSON.stringify({ path: ["书房", "桌子中间"] }));
+  assert.deepEqual(rTail.path, ["书房", "桌子中间"], "末段方位词保留");
+  // 前移不可锚定:维持模型原判(原判本身锚定合法)
+  const rKeep = await run("书房桌子中间抽屉", JSON.stringify({ path: ["书房", "桌子上", "抽屉"] }));
+  assert.equal(rKeep.fallback, true, "原判锚定不过→单段兜底");
+});

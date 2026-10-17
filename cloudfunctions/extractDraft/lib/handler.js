@@ -886,10 +886,10 @@ const LOCATION_SPLIT_SYSTEM_PROMPT = [
   "规则:",
   "1. 每一段必须逐字取自原文(可跳过连接字/空白,但不得改写、缩写、编造)。",
   "2. 「的」「了」是连接字,绝不出现在任何段内:它前后的实体要拆开成各自独立的段。",
-  "3. 纯方位词(右边/左边/上面/下面/里面/中间等)不能单独成段,必须与它修饰的名词实体合成一段;但「第二层」「上层」这类本身就是层格实体的可以独立成段。",
+  "3. 纯方位词(右边/左边/上面/下面/里面/中间等)不能单独成段,它一律修饰**后一个**实体:输出「中间抽屉」「右边抽屉」,绝不把方位词并入前面的实体(不要输出「桌子中间」);但「第二层」「上层」这类本身就是层格实体的可以独立成段。",
   "4. 最多 6 段,每段 1-30 字。",
   "5. 拆不出层级(单实体)就输出单段整串。",
-  "例子:「书房桌子的右边抽屉」→ [\"书房\",\"桌子\",\"右边抽屉\"];「厨房冰箱第二层」→ [\"厨房\",\"冰箱\",\"第二层\"];「玄关柜」→ [\"玄关柜\"]。",
+  "例子:「书房桌子的右边抽屉」→ [\"书房\",\"桌子\",\"右边抽屉\"];「书房桌子中间抽屉」→ [\"书房\",\"桌子\",\"中间抽屉\"];「厨房冰箱第二层」→ [\"厨房\",\"冰箱\",\"第二层\"];「玄关柜」→ [\"玄关柜\"]。",
   '6. 只输出一个 JSON 对象 {"path":["…"]},不要任何其他文字或围栏。',
 ].join("\n");
 
@@ -948,14 +948,41 @@ function validateLocationSplitOutput(rawText, userText) {
   // 合并结果仍须逐字锚定(拼接恰为原文连续子串),否则维持原判走 fallback。
   const DIR_WORDS = ["上", "下", "左", "右", "左边", "右边", "上面", "下面", "上边", "下边",
     "里面", "里边", "中间", "旁边", "附近", "上方", "下方", "里", "内", "中"];
-  const repaired = [];
+  // 段尾方位词前移(真机 2026-10-18 二次:「书房桌子中间抽屉」被拆成 桌子中间|抽屉):
+  // 非末段以方位词结尾且(方位词+后段)为原文连续子串 → 拆出前移(桌子中间|抽屉→桌子|中间抽屉);
+  // 末段的段尾方位词保留(「书房桌子中间」=桌上中部,真语义);不锚定则不动,交由整体锚定门裁决。
+  const forward = [];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
+    const next = segments[i + 1];
+    if (next === undefined || DIR_WORDS.indexOf(seg) !== -1) {
+      forward.push(seg);
+      continue;
+    }
+    let moved = false;
+    for (const dw of DIR_WORDS) {
+      if (seg.length > dw.length && seg.slice(-dw.length) === dw) {
+        const head = seg.slice(0, -dw.length);
+        if (userText.indexOf(dw + next) !== -1 && userText.indexOf(head) !== -1) {
+          forward.push(head);
+          segments[i + 1] = dw + next;
+          moved = true;
+        }
+        break;
+      }
+    }
+    if (!moved) {
+      forward.push(seg);
+    }
+  }
+  const repaired = [];
+  for (let i = 0; i < forward.length; i++) {
+    const seg = forward[i];
     if (DIR_WORDS.indexOf(seg) === -1) {
       repaired.push(seg);
       continue;
     }
-    const next = segments[i + 1];
+    const next = forward[i + 1];
     if (next !== undefined && userText.indexOf(seg + next) !== -1) {
       repaired.push(seg + next);
       i += 1;
