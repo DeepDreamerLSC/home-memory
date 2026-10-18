@@ -233,7 +233,8 @@ function judgeEssentials(target, essentials) {
   const failed = [];
   for (const e of essentials) {
     const code = judgeOne(target, e);
-    if (code) failed.push({ path: e.path, op: e.op, expect: e.expect, code });
+    // 保留 srcPath(模型层 essentials 的原路径配对;生产层 essentials 无此键,undefined 不落 JSON)
+    if (code) failed.push({ path: e.path, op: e.op, expect: e.expect, code, srcPath: e.srcPath });
   }
   const passedCount = essentials.length - failed.length;
   const verdict = failed.length === 0 ? "PASS" : passedCount > 0 ? "PARTIAL" : "FAIL";
