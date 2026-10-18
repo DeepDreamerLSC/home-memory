@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""#85 S0 最小离线探针:抽帧→时间戳→清晰度→近重复过滤(合成素材,不连产品库,不调模型)。
+"""#85 S0 最小离线探针 v2(评审 B1 修复:解码帧必须进筛选管线)。
+抽帧→ffprobe 时间戳→清晰度→近重复过滤;合成素材;不连产品库,不调模型。
 用法:python3 probe_frames.py --workdir /tmp/video-s0 [--video]
-  --video:先把合成帧编成 mp4,再走「视频解码→ffprobe 时间戳→管线」全链;
-  缺省直接跑帧管线(视频解码段标 SKIP)。退出码 0=自检全过。"""
+  --video:全部合成帧(含模糊/近重复)编入 mp4→解码→**对解码帧**做筛选;
+  缺省直接对目录帧做筛选(无视频段)。退出码 0=自检全过。"""
 import argparse, json, os, subprocess, sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
@@ -16,27 +17,27 @@ def make_frames(d, n=12):
         dr.ellipse([300, 120+i*12, 480, 300+i*12], fill=(240, 160, 40))
         dr.text((30, 20), f"S0-SYNTH frame {i:02d}", fill=(20, 20, 20))
         img.save(f"{d}/f{i:02d}.png")
-    # 3 张模糊版(应被清晰度过滤)与 2 张近重复(轻微平移,应被去重)
     for j, src in enumerate([2, 6, 9]):
         Image.open(f"{d}/f{src:02d}.png").filter(ImageFilter.GaussianBlur(6)).save(f"{d}/blur{j}.png")
     for j, src in enumerate([4, 7]):
         im = Image.open(f"{d}/f{src:02d}.png"); im.paste(im.crop((0,0,600,480)), (12, 0)); im.save(f"{d}/dup{j}.png")
 
 def to_video(d, mp4):
-    r = subprocess.run(["ffmpeg","-y","-framerate","2","-pattern_type","glob","-i",f"{d}/f*.png",
+    r = subprocess.run(["ffmpeg","-y","-framerate","2","-pattern_type","glob","-i",f"{d}/*.png",
                         "-c:v","libx264","-pix_fmt","yuv420p",mp4], capture_output=True, text=True)
     if r.returncode != 0: print("FFMPEG_ENCODE_FAIL:", r.stderr[-300:]); sys.exit(3)
 
-def decode(d, mp4, out):
+def decode(mp4, out):
     os.makedirs(out, exist_ok=True)
     r = subprocess.run(["ffmpeg","-y","-i",mp4,f"{out}/d%03d.png"], capture_output=True, text=True)
     if r.returncode != 0: print("FFMPEG_DECODE_FAIL:", r.stderr[-300:]); sys.exit(3)
     p = subprocess.run(["ffprobe","-select_streams","v","-show_entries","frame=pts_time",
                         "-of","json",mp4], capture_output=True, text=True)
     if p.returncode != 0: print("FFPROBE_FAIL"); sys.exit(3)
-    return [float(f["pts_time"]) for f in json.loads(p.stdout)["frames"]]
-
-def gray(a): return np.dot(a[..., :3], [0.299, 0.587, 0.114])
+    times = [float(f["pts_time"]) for f in json.loads(p.stdout)["frames"]]
+    dfiles = sorted(f for f in os.listdir(out) if f.endswith(".png"))
+    assert len(dfiles) == len(times), f"解码帧数 {len(dfiles)} ≠ pts 数 {len(times)}"
+    return dfiles, times
 
 def sharpness(img):
     g = np.asarray(img.convert("L"), dtype=np.float32)
@@ -53,43 +54,45 @@ def ham(a, b): return bin(a ^ b).count("1")
 def run(workdir, video_mode):
     src = f"{workdir}/frames"; out = f"{workdir}/decoded"
     make_frames(src)
-    files = sorted(os.listdir(src)); files = [f for f in files if f.endswith(".png")]
-    ts = [None]*len(files); decoded = False
+    src_files = sorted(f for f in os.listdir(src) if f.endswith(".png"))
     if video_mode:
+        # B1:全部帧(含 blur/dup)入视频,筛选对象=解码帧
         mp4 = f"{workdir}/synth.mp4"; to_video(src, mp4)
-        times = decode(src, mp4, out)
-        dfiles = sorted(os.listdir(out)); dfiles = [f for f in dfiles if f.endswith(".png")]
-        # 解码帧只含 f*(合成源),按顺序对齐 pts;blur/dup 未入视频
-        vfiles = [f for f in files if f.startswith("f")]
-        assert len(dfiles) == len(vfiles) == len(times), f"帧数不一致 {len(dfiles)}/{len(vfiles)}/{len(times)}"
-        for f, t in zip(vfiles, times): ts[files.index(f)] = t
-        decoded = True
-    rows = []
-    for i, f in enumerate(files):
-        im = Image.open(f"{src}/{f}")
-        rows.append({"file": f, "pts_time": ts[i], "sharpness": round(sharpness(im), 1), "hash": ahash(im)})
+        dfiles, times = decode(mp4, out)
+        judged = [{"file": f, "path": f"{out}/{f}", "pts_time": t,
+                   "src_label": src_files[i].split("_")[0].rstrip("0123456789") if i < len(src_files) else "?"}
+                  for i, (f, t) in enumerate(zip(dfiles, times))]
+        judged_dir = out
+    else:
+        judged = [{"file": f, "path": f"{src}/{f}", "pts_time": None,
+                   "src_label": f.split("_")[0].rstrip("0123456789")} for f in src_files]
+        judged_dir = src
     SHARP_MIN = 120.0; DUP_H = 6
+    for r in judged:
+        im = Image.open(r["path"])
+        r["sharpness"] = round(sharpness(im), 1); r["hash"] = ahash(im)
     kept = []
-    for r in sorted(rows, key=lambda x: -x["sharpness"]):
+    for r in sorted(judged, key=lambda x: -x["sharpness"]):
         if r["sharpness"] < SHARP_MIN: r["drop"] = "blurry"; continue
         if any(ham(r["hash"], k["hash"]) <= DUP_H for k in kept): r["drop"] = "near_dup"; continue
         kept.append(r)
-    for r in rows:
+    for r in judged:
         if "drop" not in r: r["drop"] = "rank_cut"
-    kept = sorted(kept, key=lambda x: (x["pts_time"] if x["pts_time"] is not None else -1))
+    kept = sorted(kept, key=lambda x: x["pts_time"] if x["pts_time"] is not None else -1)
     checks = {
+        "judged_input_is_decoded": (judged_dir == out) if video_mode else True,
         "kept_in_3_8": 3 <= len(kept) <= 8,
-        "no_blur_kept": all("blur" not in k["file"] for k in kept),
+        "no_blur_kept": all(k["src_label"] != "blur" for k in kept),
         "no_dup_pair_kept": all(ham(a["hash"], b["hash"]) > DUP_H for ai, a in enumerate(kept) for b in kept[ai+1:]),
         "ts_monotonic": (all(kept[i]["pts_time"] < kept[i+1]["pts_time"] for i in range(len(kept)-1))
                          if video_mode and len(kept) > 1 else True),
         "ts_present_when_video": (all(k["pts_time"] is not None for k in kept) if video_mode else True),
     }
-    manifest = {"video_mode": video_mode, "decoded": decoded, "sharp_min": SHARP_MIN, "dup_hamming": DUP_H,
-                "total_frames": len(rows), "kept": len(kept),
-                "frames": [{k: r[k] for k in ("file","pts_time","sharpness","drop") if k in r} for r in rows]}
+    manifest = {"video_mode": video_mode, "judged_dir": judged_dir, "sharp_min": SHARP_MIN, "dup_hamming": DUP_H,
+                "total_frames": len(judged), "kept": len(kept),
+                "frames": [{k: r.get(k) for k in ("file","pts_time","sharpness","src_label","drop")} for r in judged]}
     json.dump(manifest, open(f"{workdir}/manifest.json","w"), ensure_ascii=False, indent=1)
-    print(json.dumps({"checks": checks, "summary": {k: manifest[k] for k in ("video_mode","decoded","total_frames","kept")}}, ensure_ascii=False))
+    print(json.dumps({"checks": checks, "summary": {k: manifest[k] for k in ("video_mode","judged_dir","total_frames","kept")}}, ensure_ascii=False))
     return 0 if all(checks.values()) else 4
 
 if __name__ == "__main__":
