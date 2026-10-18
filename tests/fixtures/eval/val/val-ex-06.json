@@ -1,0 +1,16 @@
+{
+  "id": "val-ex-06",
+  "task": "extract",
+  "input": { "text": "挂烫机收在主卧的柜子上", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "挂烫机" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "主卧的柜子" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["主卧", "柜子"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "句尾纯方位后缀「上」剥掉、位置为「主卧的柜子」、层级两段 [主卧,柜子];剥后各段与位置实体仍是原话逐字子串。",
+  "origin": "新构"
+}

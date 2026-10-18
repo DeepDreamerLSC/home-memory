@@ -1,0 +1,17 @@
+{
+  "id": "val-ex-03",
+  "task": "extract",
+  "input": { "text": "今天新买了一个手电筒", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "手电筒" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": false },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_kind", "op": "null" },
+    { "path": "drafts.0.remind_quote", "op": "null" }
+  ],
+  "human_criteria": "「今天」是购买背景不是提醒日期:提醒三项必须全空、绝不换算;vague 标不标「今天」都算诚实(灰行不误导),故不入 essentials。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s10.json;日期三态之「无提醒」态,vague 两可不判。"
+}

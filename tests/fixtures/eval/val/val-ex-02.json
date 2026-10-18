@@ -1,0 +1,16 @@
+{
+  "id": "val-ex-02",
+  "task": "extract",
+  "input": { "text": "那卷宽胶带估计被我塞到不知道哪里去了", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "宽胶带" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": false },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "null" },
+    { "path": "drafts.0.remind_at", "op": "null" }
+  ],
+  "human_criteria": "完全说不清位置:不猜,整体不肯定;量词口癖「那卷」不进物品名。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s08.json,现行 v2 合同下期望不变。"
+}

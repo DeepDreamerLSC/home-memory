@@ -1,0 +1,12 @@
+{
+  "id": "val-ls-04",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "玄关鞋柜上层" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["玄关", "鞋柜", "上层"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "「上层」是层格实体例外:独立成段,不并进「鞋柜」,也不与「上面」这类纯方位词混同。",
+  "origin": "新构",
+  "note": "覆盖矩阵 §2「层格实体独立成段」缺口在 val 的冻结样例(与真实语料 val-ls-03 的「第三个」互为同族)。"
+}

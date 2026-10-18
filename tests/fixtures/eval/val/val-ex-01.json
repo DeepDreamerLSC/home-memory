@@ -1,0 +1,15 @@
+{
+  "id": "val-ex-01",
+  "task": "extract",
+  "input": { "text": "遥控器在电视柜最下层", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "遥控器" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "电视柜最下层" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": ["最下层"] },
+    { "path": "drafts.0.remind_at", "op": "null" }
+  ],
+  "human_criteria": "序数+方位复合限定语「最下层」进 qualifiers 且留在位置实体里(v2 只剥纯方位后缀、不剥复合限定语);无时间信息提醒全空;mount_path 不锁死,以不编造层级为准。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s03.json,现行 v2 合同下期望不变;mount_path 不入 essentials(电视柜是否独立成段两可,交人工判读)。"
+}

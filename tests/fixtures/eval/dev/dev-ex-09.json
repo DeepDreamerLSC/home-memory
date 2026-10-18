@@ -1,0 +1,18 @@
+{
+  "id": "dev-ex-09",
+  "task": "extract",
+  "input": { "text": "感冒药收进药箱了,体温计在床头柜抽屉", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "感冒药" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "药箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.1.name", "op": "equals", "expect": "体温计" },
+    { "path": "drafts.1.location_text", "op": "equals", "expect": "床头柜抽屉" },
+    { "path": "drafts.1.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.1.remind_at", "op": "null" }
+  ],
+  "human_criteria": "一句话两件各自不同位置:逐件提取、按原文归属绝不交叉配对,「了」是连接字不进任何字段。",
+  "origin": "legacy",
+  "note": "文本取自 legacy s06(v1 needs_split 历史合同,2026-10-09);按铁律①在 v2 另立「多件逐件」期望,与 legacy-contract/s06.json 的 v1 判据分开计分、不混判。"
+}

@@ -1,0 +1,951 @@
+{
+  "kind": "home-memory-eval-results",
+  "baseline_statement": "新冻结基线(2026-10-18,本地 A3B via 隧道);不作任何与历史质量的比较论断——历史不可重放(#83 评审铁律 3)。",
+  "generated": "2026-10-18T02:48:22.028Z",
+  "command": "node scripts/eval/run.js --set val --out docs/eval/2026-10-18-val-local.md",
+  "samples_version": "v1",
+  "engine": {
+    "type": "local-mlx-openai-compat",
+    "model": "Qwen3.6-35B-A3B-4bit",
+    "temperature": 0.1,
+    "timeout_ms": 60000,
+    "deepseek_fallback": "disabled(评测注入即抛 stub,本地引擎失败如实记)"
+  },
+  "summary": {
+    "total": 23,
+    "pass": 18,
+    "partial": 3,
+    "fail": 2,
+    "prod_pass_rate": "78%",
+    "model_raw_pass": 16,
+    "rescued_by_repair": 2,
+    "needs_human": 5,
+    "needs_human_ids": [
+      "val-ed-01",
+      "val-ed-02",
+      "val-ed-05",
+      "val-ex-01",
+      "val-ls-03"
+    ],
+    "attribution_incomplete_ids": [],
+    "per_group": [
+      {
+        "set": "val",
+        "task": "extract",
+        "n": 12,
+        "pass": 11,
+        "partial": 1,
+        "fail": 0,
+        "modelPass": 11,
+        "rescued": 0
+      },
+      {
+        "set": "val",
+        "task": "locsplit",
+        "n": 5,
+        "pass": 4,
+        "partial": 1,
+        "fail": 0,
+        "modelPass": 4,
+        "rescued": 0
+      },
+      {
+        "set": "val",
+        "task": "editparse",
+        "n": 6,
+        "pass": 3,
+        "partial": 1,
+        "fail": 2,
+        "modelPass": 1,
+        "rescued": 2
+      }
+    ]
+  },
+  "total_ms": 113979,
+  "cases": [
+    {
+      "id": "val-ed-01",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "PARTIAL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4324,
+        "engine": "local",
+        "judged": {
+          "verdict": "PARTIAL",
+          "failed": [
+            {
+              "path": "edits.0.field",
+              "op": "equals",
+              "expect": "location",
+              "code": "value_diff"
+            },
+            {
+              "path": "edits.0.new",
+              "op": "equals",
+              "expect": "厨房",
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 4,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "edits.0.field",
+            "op": "equals",
+            "expect": "location",
+            "code": "value_diff",
+            "srcPath": "edits.0.field"
+          },
+          {
+            "path": "edits.0.new",
+            "op": "equals",
+            "expect": "厨房",
+            "code": "value_diff",
+            "srcPath": "edits.0.new"
+          }
+        ],
+        "ms": 2945,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ed-02",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "FAIL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2645,
+        "engine": "local",
+        "judged": {
+          "verdict": "FAIL",
+          "failed": [
+            {
+              "path": "needs_pick",
+              "op": "equals",
+              "expect": true,
+              "code": "value_diff"
+            },
+            {
+              "path": "target",
+              "op": "null",
+              "code": "expect_null_got_value"
+            },
+            {
+              "path": "edits.0.field",
+              "op": "null",
+              "code": "expect_null_got_value"
+            },
+            {
+              "path": "picks",
+              "op": "equals",
+              "expect": [
+                {
+                  "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5",
+                  "name": "黑色充电线"
+                },
+                {
+                  "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5",
+                  "name": "白色充电线"
+                }
+              ],
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 0,
+          "total": 4
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "FAIL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": true,
+            "code": "value_diff",
+            "srcPath": "needs_pick"
+          },
+          {
+            "path": "target",
+            "op": "null",
+            "code": "expect_null_got_value",
+            "srcPath": "target"
+          },
+          {
+            "path": "edits.0.field",
+            "op": "null",
+            "code": "expect_null_got_value",
+            "srcPath": "edits.0.field"
+          },
+          {
+            "path": "picks",
+            "op": "equals",
+            "expect": [
+              {
+                "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5",
+                "name": "黑色充电线"
+              },
+              {
+                "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5",
+                "name": "白色充电线"
+              }
+            ],
+            "code": "value_diff",
+            "srcPath": "picks"
+          }
+        ],
+        "ms": 2393,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ed-03",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1650,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 3,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": false,
+            "code": "missing_or_null",
+            "srcPath": "needs_pick"
+          }
+        ],
+        "ms": 1167,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": [
+          "needs_pick"
+        ]
+      },
+      "rescued": true
+    },
+    {
+      "id": "val-ed-04",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1208,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 3,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": false,
+            "code": "missing_or_null",
+            "srcPath": "needs_pick"
+          }
+        ],
+        "ms": 934,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": [
+          "needs_pick"
+        ]
+      },
+      "rescued": true
+    },
+    {
+      "id": "val-ed-05",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "FAIL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2865,
+        "engine": "local",
+        "judged": {
+          "verdict": "FAIL",
+          "failed": [
+            {
+              "path": "needs_pick",
+              "op": "equals",
+              "expect": true,
+              "code": "value_diff"
+            },
+            {
+              "path": "target",
+              "op": "null",
+              "code": "expect_null_got_value"
+            },
+            {
+              "path": "edits.0.field",
+              "op": "null",
+              "code": "expect_null_got_value"
+            }
+          ],
+          "passedCount": 0,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "FAIL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": true,
+            "code": "value_diff",
+            "srcPath": "needs_pick"
+          },
+          {
+            "path": "target",
+            "op": "null",
+            "code": "expect_null_got_value",
+            "srcPath": "target"
+          },
+          {
+            "path": "edits.0.field",
+            "op": "null",
+            "code": "expect_null_got_value",
+            "srcPath": "edits.0.field"
+          }
+        ],
+        "ms": 2402,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ed-06",
+      "task": "editparse",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1587,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 1653,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-01",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PARTIAL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2724,
+        "engine": "local",
+        "judged": {
+          "verdict": "PARTIAL",
+          "failed": [
+            {
+              "path": "drafts.0.location_text",
+              "op": "equals",
+              "expect": "电视柜最下层",
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 4,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "items.0.location_text",
+            "op": "equals",
+            "expect": "电视柜最下层",
+            "code": "value_diff",
+            "srcPath": "drafts.0.location_text"
+          }
+        ],
+        "ms": 2304,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-02",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2577,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 6,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2133,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-03",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2438,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2053,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-04",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2963,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 4,
+          "total": 4
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2541,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-05",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3116,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2310,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-06",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2890,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2481,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-07",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 8002,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 10,
+          "total": 10
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 7439,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-08",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4242,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 6,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 3647,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-09",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4651,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 10,
+          "total": 10
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 3968,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-10",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3098,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 8,
+          "total": 8
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2409,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "ex_server_converted": true,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-11",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3072,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2338,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ex-12",
+      "task": "extract",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3034,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 5,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2466,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ls-01",
+      "task": "locsplit",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1051,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 891,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ls-02",
+      "task": "locsplit",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 962,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 800,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ls-03",
+      "task": "locsplit",
+      "set": "val",
+      "prod": {
+        "verdict": "PARTIAL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1093,
+        "engine": "local",
+        "judged": {
+          "verdict": "PARTIAL",
+          "failed": [
+            {
+              "path": "path",
+              "op": "equals",
+              "expect": [
+                "书房",
+                "桌子",
+                "右边抽屉",
+                "第三个"
+              ],
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 1,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "FAIL",
+        "failed": [
+          {
+            "path": "path",
+            "op": "equals",
+            "expect": [
+              "书房",
+              "桌子",
+              "右边抽屉",
+              "第三个"
+            ],
+            "code": "value_diff",
+            "srcPath": "path"
+          }
+        ],
+        "ms": 969,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ls-04",
+      "task": "locsplit",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1049,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 814,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "val-ls-05",
+      "task": "locsplit",
+      "set": "val",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 911,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 753,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    }
+  ]
+}

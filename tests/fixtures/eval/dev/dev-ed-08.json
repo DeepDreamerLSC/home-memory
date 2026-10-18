@@ -1,0 +1,21 @@
+{
+  "id": "dev-ed-08",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "电池数量改成四节",
+    "batch_location": "书房抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "edit" },
+    { "path": "target.draft_id", "op": "equals", "expect": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5" },
+    { "path": "edits.0.field", "op": "equals", "expect": "qty_note" },
+    { "path": "edits.0.new", "op": "equals", "expect": "四节" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "数量线索走 qty_note 字段(不是名称也不是位置):新值「四节」逐字来自用户话。",
+  "origin": "新构"
+}

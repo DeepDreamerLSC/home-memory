@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-07",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "玄关鞋柜上层" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["玄关", "鞋柜", "上层"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "「上层」是层格实体例外:独立成段,不并进「鞋柜」,也不与「上面」这类纯方位词混同(后者才该并入后段)。",
+  "origin": "新构"
+}

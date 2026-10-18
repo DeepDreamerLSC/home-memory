@@ -1,0 +1,20 @@
+{
+  "id": "val-ed-04",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "这一批都放到玄关柜第二层",
+    "batch_location": "玄关柜",
+    "candidates": [
+      { "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "指甲刀" },
+      { "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "batch_location" },
+    { "path": "new_location", "op": "equals", "expect": "玄关柜第二层" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "改整批默认位置:「玄关柜第二层」逐字来自用户话(层格表述照进新位置值),不挑单个候选。",
+  "origin": "新构"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "s02",
+  "category": "典型一句话",
+  "text": "护照在书房的保险柜里",
+  "expect": {
+    "draft": {
+      "name": "护照",
+      "location_text": "书房的保险柜里",
+      "certain": true,
+      "qualifiers": []
+    }
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "v1 期望 location_text 原样保留纯方位后缀「里」;现行 v2 目标是剥后缀裸实体(「书房的保险柜」),同一输入在两合同下正确答案不同,历史期望不再参评。",
+  "v2_note": "v2 双标判据见 val/val-ex-05.json(铁律①:两套判据分开计分,不混判、不算回归)。"
+}

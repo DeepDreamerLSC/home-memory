@@ -1,0 +1,17 @@
+{
+  "id": "dev-ex-05",
+  "task": "extract",
+  "input": { "text": "伞", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "伞" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": false },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "null" },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "整句只有一个词且不是位置:名称照提、位置绝不猜(最小输入下的诚实行为)。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s14.json,现行 v2 合同下期望不变。"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "s04",
+  "category": "带限定语",
+  "text": "指甲刀在玄关柜第二个抽屉右边",
+  "expect": {
+    "draft": {
+      "name": "指甲刀",
+      "location_text": "玄关柜第二个抽屉右边",
+      "certain": true,
+      "qualifiers": ["第二个", "右边"]
+    }
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "v1 期望 location_text 原样保留句尾纯方位后缀「右边」;现行 v2 目标是剥后缀(「玄关柜第二个抽屉」+ qualifiers 含「右边」),历史期望不再参评。",
+  "v2_note": "如需 v2 判据须另立新样例双标(v1 原样 / v2 剥后缀),不得在本文件上改。"
+}

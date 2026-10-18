@@ -1,0 +1,12 @@
+{
+  "id": "val-ls-01",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "书房桌子的右边抽屉" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["书房", "桌子", "右边抽屉"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "#80 失败族:「的」拆开、方位词「右边」并入后段实体成「右边抽屉」——绝不独立成段、也不粘成「桌子的右边抽屉」。",
+  "origin": "真实语料(本周真机)",
+  "note": "归因分层(铁律②):「的」粘段修补不剥——模型若输出 [书房,桌子的右边抽屉] 会原判直通(靠手动改路径收口),本例专测模型层是否真拆开「的」。"
+}

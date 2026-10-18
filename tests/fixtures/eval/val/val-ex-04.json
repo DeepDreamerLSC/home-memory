@@ -1,0 +1,14 @@
+{
+  "id": "val-ex-04",
+  "task": "extract",
+  "input": { "text": "户口本放在卧室五斗柜最上面的抽屉", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "户口本" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "卧室五斗柜最上面的抽屉" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "null" }
+  ],
+  "human_criteria": "层级位置如实提取:qualifiers 取「最上面」或「最上面的」均可(逐字来自原话即合格);mount_path 不锁死(卧室/五斗柜/最上面的抽屉 的分层以不编造为准)。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s16.json;原 note:2026-10-09 真机校准(qualifiers=最上面,authority=模型实测+人工复核的软金标);v2 下限定语跨度两可,qualifiers 不入 essentials。"
+}

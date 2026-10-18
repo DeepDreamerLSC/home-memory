@@ -1,0 +1,19 @@
+{
+  "id": "dev-ed-05",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "嗯…先这样吧",
+    "batch_location": "玄关抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" },
+      { "draft_id": "1a2b3c4d-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "none" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "口癖/无操作话语绝不硬猜成编辑:如实 intent=none 且不触发点选。",
+  "origin": "新构"
+}

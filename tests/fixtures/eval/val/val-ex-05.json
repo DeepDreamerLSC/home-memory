@@ -1,0 +1,17 @@
+{
+  "id": "val-ex-05",
+  "task": "extract",
+  "input": { "text": "护照在书房的保险柜里", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "护照" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "书房的保险柜" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["书房", "保险柜"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "「里」是纯方位后缀必须剥:位置实体是「书房的保险柜」,层级按「的」拆成 [书房,保险柜];无时间信息。",
+  "origin": "legacy",
+  "note": "铁律①双标样本:同文本 v1 期望「书房的保险柜里」(见 legacy-contract/s02.json,不参评)、v2 期望剥后缀——两套判据分开计分,不得混判成回归。"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "dev-ed-07",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "把第二个改名成充电宝",
+    "batch_location": "书房抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "指甲刀" },
+      { "draft_id": "1a2b3c4d-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" },
+      { "draft_id": "1a2b3c4d-0003-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" }
+    ]
+  },
+  "essentials": [
+    { "path": "needs_pick", "op": "equals", "expect": true },
+    { "path": "target", "op": "null" },
+    { "path": "edits.0.field", "op": "null" }
+  ],
+  "human_criteria": "行号不是锁定依据:用户只说「第二个」时绝不按顺序锁定任何一件(行号会随删行漂移),needs_pick 交点选——服务端硬门兜得住,模型层也必须自觉。",
+  "origin": "新构",
+  "note": "覆盖矩阵 §3「用户说行号时的行为无样例」缺口;注意「充电宝」不在候选内,内容词无从锁定,只能 needs_pick。"
+}

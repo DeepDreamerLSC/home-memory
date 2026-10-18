@@ -1,0 +1,17 @@
+{
+  "id": "dev-ex-03",
+  "task": "extract",
+  "input": { "text": "我又囤了一盒创可贴", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "创可贴" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": false },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "null" },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "只报了物品没说位置:名称照提、位置不猜,数量口癖「一盒」不进名称也不触发任何提醒。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s09.json,现行 v2 合同下期望不变。"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "dev-ed-02",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "那个其实是品客的薯片罐",
+    "batch_location": "书房抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "黄色薯片罐" },
+      { "draft_id": "1a2b3c4d-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "五号电池" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "edit" },
+    { "path": "target.draft_id", "op": "equals", "expect": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5" },
+    { "path": "edits.0.field", "op": "equals", "expect": "name" },
+    { "path": "edits.0.new", "op": "contains", "expect": "品客" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "内容词语义匹配:「品客的薯片罐」应对上候选「黄色薯片罐」(名称相近即可,提示词规则 1 的正例),把名字修正为含「品客」的说法;对不上才 needs_pick。",
+  "origin": "新构",
+  "note": "场景取自 #3 拍照识物的真实交互形态(识别成外观描述、用户口头纠正品牌);覆盖矩阵 §3「语义匹配只有 mock 假设」的模型层样例。"
+}

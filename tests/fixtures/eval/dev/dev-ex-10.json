@@ -1,0 +1,16 @@
+{
+  "id": "dev-ex-10",
+  "task": "extract",
+  "input": { "text": "洗衣液在阳台储物柜,柔顺剂不在阳台,在玄关柜", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "洗衣液" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "阳台储物柜" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.1.name", "op": "equals", "expect": "柔顺剂" },
+    { "path": "drafts.1.location_text", "op": "equals", "expect": "玄关柜" },
+    { "path": "drafts.1.certain", "op": "equals", "expect": true }
+  ],
+  "human_criteria": "否定插入语是归属陷阱:柔顺剂的位置只能是「玄关柜」,把「阳台」配给它是错误交叉配对——锚定门拦不住这种错,模型层必须自己判对。",
+  "origin": "新构",
+  "note": "对应覆盖矩阵 §1「多件逐件提取」中交叉配对防护的模型层样例。"
+}

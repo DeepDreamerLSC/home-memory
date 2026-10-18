@@ -1,0 +1,21 @@
+{
+  "id": "val-ex-09",
+  "task": "extract",
+  "input": { "text": "阿莫西林2028年5月1号过期放在药箱,创可贴也在药箱", "protocol": 2 },
+  "deps": { "today": "2026-10-18", "anchorToday": "2026-10-18" },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "阿莫西林" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "药箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "equals", "expect": "2028-05-01" },
+    { "path": "drafts.0.remind_kind", "op": "equals", "expect": "有效期" },
+    { "path": "drafts.0.remind_quote", "op": "contains", "expect": "2028年5月1号" },
+    { "path": "drafts.1.name", "op": "equals", "expect": "创可贴" },
+    { "path": "drafts.1.location_text", "op": "equals", "expect": "药箱" },
+    { "path": "drafts.1.certain", "op": "equals", "expect": true },
+    { "path": "drafts.1.remind_at", "op": "null" }
+  ],
+  "human_criteria": "日期只归说它的那件:阿莫西林带三项提醒且逐字锚定,同位置的创可贴提醒必须全空(多件日期归属);两件位置各自如实提取。",
+  "origin": "新构",
+  "note": "日期三态之「明确绝对日期」+ B3 跨件日期归属,deps 注入固定「今天」。"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "s11",
+  "category": "可容忍别字",
+  "text": "雨伞挂在玄官的挂钩上",
+  "expect": {
+    "draft": {
+      "name": "雨伞",
+      "location_text": "玄官的挂钩上",
+      "certain": true,
+      "qualifiers": []
+    }
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "v1 期望 location_text 原样保留句尾纯方位后缀「上」;现行 v2 目标是剥后缀(「玄官的挂钩」,ASR 别字「玄官」仍逐字保留),历史期望不再参评。",
+  "v2_note": "v2 双标判据见 val/val-ex-12.json(铁律①)。"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "dev-ex-11",
+  "task": "extract",
+  "input": { "text": "感冒药2027年6月30号过期,放在药箱", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "感冒药" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "药箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "equals", "expect": "2027-06-30" },
+    { "path": "drafts.0.remind_kind", "op": "equals", "expect": "有效期" },
+    { "path": "drafts.0.remind_quote", "op": "contains", "expect": "2027年6月30号" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "原话明确绝对日期(年月日俱全):提醒候选三项齐全、日期逐字锚定原话、归一成 YYYY-MM-DD;不得再额外标 vague。",
+  "origin": "新构"
+}

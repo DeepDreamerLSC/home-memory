@@ -1,0 +1,16 @@
+{
+  "id": "dev-ex-14",
+  "task": "extract",
+  "input": { "text": "滤芯到2027年3月要换,收在储物间", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "滤芯" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "储物间" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_kind", "op": "null" },
+    { "path": "drafts.0.remind_quote", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "contains", "expect": "2027年3月" }
+  ],
+  "human_criteria": "只说到月份的绝不换算:三项提醒全 null,时间表述以 vague 灰行如实标出,日期由用户自己在确认页选。",
+  "origin": "新构"
+}

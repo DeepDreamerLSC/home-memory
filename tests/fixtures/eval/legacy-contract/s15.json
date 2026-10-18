@@ -1,0 +1,14 @@
+{
+  "id": "s15",
+  "category": "无法提取名称",
+  "text": "呃我忘了我要记什么来了",
+  "expect": {
+    "error": "AI_UNAVAILABLE"
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "v1 合同按「空名称→AI_UNAVAILABLE」校准;v2 同类输入走「名称非法整次拒绝」路径,错误面形状不同(模型可输出空 items 导致整次 AI_UNAVAILABLE),跨协议复用需重写 expect,历史期望不再参评。",
+  "v2_note": "错误路径(非语义能力)已由 L0 mock 测试锁定,不花 L1 token(架构评审已裁定)。"
+}

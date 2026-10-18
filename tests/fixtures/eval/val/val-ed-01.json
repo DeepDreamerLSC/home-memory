@@ -1,0 +1,25 @@
+{
+  "id": "val-ed-01",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "书房桌子右边抽屉第三个是品客薯片罐已空了放厨房去",
+    "batch_location": "书房桌子右边抽屉",
+    "candidates": [
+      { "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "品客薯片罐" },
+      { "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" },
+      { "draft_id": "2b3c4d5e-0003-4a5b-8c6d-e0f1a2b3c4d5", "name": "指甲刀" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "edit" },
+    { "path": "target.draft_id", "op": "equals", "expect": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5" },
+    { "path": "target.matched_word", "op": "contains", "expect": "品客" },
+    { "path": "edits.0.field", "op": "equals", "expect": "location" },
+    { "path": "edits.0.new", "op": "equals", "expect": "厨房" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "内容词「品客」唯一锁定薯片罐候选:把那一件的位置改成「厨房」(用户话里的新目的地);「已空了」不误伤数量字段(单意图只取改位置),句首的旧位置描述不当作新位置、更不误判成改批次。",
+  "origin": "真实语料(本周真机)",
+  "note": "本周真机语料(#3 场景原句);覆盖矩阵 §3「按内容词锁定候选」语义匹配的模型层样例;位置前缀的拆分语义见 val-ls-03。"
+}

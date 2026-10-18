@@ -1,0 +1,24 @@
+{
+  "id": "val-ed-02",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "充电线改成两米的那条",
+    "batch_location": "客厅电视柜",
+    "candidates": [
+      { "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "黑色充电线" },
+      { "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "白色充电线" }
+    ]
+  },
+  "essentials": [
+    { "path": "needs_pick", "op": "equals", "expect": true },
+    { "path": "target", "op": "null" },
+    { "path": "edits.0.field", "op": "null" },
+    { "path": "picks", "op": "equals", "expect": [
+      { "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "黑色充电线" },
+      { "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "白色充电线" }
+    ] }
+  ],
+  "human_criteria": "「充电线」两件都匹配、用户给的「两米」没有候选信息可锁定:对不上唯一候选绝不执行,needs_pick+全量 picks 交点选。",
+  "origin": "新构"
+}

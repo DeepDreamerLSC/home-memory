@@ -1,0 +1,14 @@
+{
+  "id": "s06",
+  "category": "多件需拆分",
+  "text": "感冒药收进药箱了,体温计在床头柜抽屉",
+  "expect": {
+    "needs_split": true
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "同 s05:v1 needs_split 历史合同;v2 现行目标是逐件提取进 items[]/drafts[]。",
+  "v2_note": "同文本的 v2 逐件判据见 dev/dev-ex-09.json(铁律①双标,分开计分)。"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "dev-ed-03",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "再加一个遥控器",
+    "batch_location": "玄关抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "add" },
+    { "path": "added.name", "op": "equals", "expect": "遥控器" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "清单里没有的物品补一件:added.name 为「遥控器」,不误判成对既有候选的编辑、不触发点选。",
+  "origin": "新构"
+}

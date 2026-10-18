@@ -1,0 +1,19 @@
+{
+  "id": "dev-ex-13",
+  "task": "extract",
+  "input": { "text": "备用钥匙半年后要还给物业,先放玄关抽屉", "protocol": 2 },
+  "deps": { "today": "2026-10-18", "anchorToday": "2026-10-18" },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "备用钥匙" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "玄关抽屉" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "equals", "expect": "2027-04-18" },
+    { "path": "drafts.0.remind_kind", "op": "equals", "expect": "下次维护" },
+    { "path": "drafts.0.remind_quote", "op": "equals", "expect": "半年后" },
+    { "path": "drafts.0.remind_converted", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "闭集相对时间「半年后」由服务端换算(+6 个月)成 2027-04-18 候选:quote=「半年后」、converted 为真、vague 置空;模型层只许标 vague、绝不许自己折算成日期。",
+  "origin": "新构",
+  "note": "归因分层(铁律②):换算发生在服务端组包层(applyRelativeConversion);若 remind_at 对而 remind_converted 缺失,说明模型越权折算(自报日期过不了对应锚定,将被判 FAIL 而非误 PASS)。"
+}
