@@ -1,0 +1,1052 @@
+{
+  "kind": "home-memory-eval-results",
+  "baseline_statement": "新冻结基线(2026-10-18,本地 A3B via 隧道);不作任何与历史质量的比较论断——历史不可重放(#83 评审铁律 3)。",
+  "generated": "2026-10-18T02:39:03.378Z",
+  "command": "node scripts/eval/run.js --set dev --out docs/eval/2026-10-18-dev-local.md",
+  "samples_version": "v1",
+  "engine": {
+    "type": "local-mlx-openai-compat",
+    "model": "Qwen3.6-35B-A3B-4bit",
+    "temperature": 0.1,
+    "timeout_ms": 60000,
+    "deepseek_fallback": "disabled(评测注入即抛 stub,本地引擎失败如实记)"
+  },
+  "summary": {
+    "total": 30,
+    "pass": 27,
+    "partial": 2,
+    "fail": 1,
+    "prod_pass_rate": "90%",
+    "model_raw_pass": 25,
+    "rescued_by_repair": 2,
+    "needs_human": 3,
+    "needs_human_ids": [
+      "dev-ed-07",
+      "dev-ex-08",
+      "dev-ex-15"
+    ],
+    "attribution_incomplete_ids": [],
+    "per_group": [
+      {
+        "set": "dev",
+        "task": "extract",
+        "n": 15,
+        "pass": 13,
+        "partial": 2,
+        "fail": 0,
+        "modelPass": 13,
+        "rescued": 0
+      },
+      {
+        "set": "dev",
+        "task": "locsplit",
+        "n": 7,
+        "pass": 7,
+        "partial": 0,
+        "fail": 0,
+        "modelPass": 7,
+        "rescued": 0
+      },
+      {
+        "set": "dev",
+        "task": "editparse",
+        "n": 8,
+        "pass": 7,
+        "partial": 0,
+        "fail": 1,
+        "modelPass": 5,
+        "rescued": 2
+      }
+    ]
+  },
+  "total_ms": 134213,
+  "cases": [
+    {
+      "id": "dev-ed-01",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3390,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 5,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2361,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ed-02",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2739,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 5,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2493,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ed-03",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1547,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 3,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 1339,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ed-04",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1117,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 3,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": false,
+            "code": "missing_or_null"
+          }
+        ],
+        "ms": 980,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": true
+    },
+    {
+      "id": "dev-ed-05",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1573,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 1337,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ed-06",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4142,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 4,
+          "total": 4
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "target",
+            "op": "null",
+            "code": "expect_null_got_value"
+          },
+          {
+            "path": "edits.0.field",
+            "op": "null",
+            "code": "expect_null_got_value"
+          }
+        ],
+        "ms": 3821,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": true
+    },
+    {
+      "id": "dev-ed-07",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "FAIL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2614,
+        "engine": "local",
+        "judged": {
+          "verdict": "FAIL",
+          "failed": [
+            {
+              "path": "needs_pick",
+              "op": "equals",
+              "expect": true,
+              "code": "value_diff"
+            },
+            {
+              "path": "target",
+              "op": "null",
+              "code": "expect_null_got_value"
+            },
+            {
+              "path": "edits.0.field",
+              "op": "null",
+              "code": "expect_null_got_value"
+            }
+          ],
+          "passedCount": 0,
+          "total": 3
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "FAIL",
+        "failed": [
+          {
+            "path": "needs_pick",
+            "op": "equals",
+            "expect": true,
+            "code": "value_diff"
+          },
+          {
+            "path": "target",
+            "op": "null",
+            "code": "expect_null_got_value"
+          },
+          {
+            "path": "edits.0.field",
+            "op": "null",
+            "code": "expect_null_got_value"
+          }
+        ],
+        "ms": 2364,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ed-08",
+      "task": "editparse",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2603,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 5,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2361,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-01",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2787,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2384,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-02",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2560,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2094,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-03",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2681,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2260,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-04",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3215,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 6,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2626,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-05",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2397,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2025,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-06",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2537,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 6,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2183,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-07",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2535,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2284,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-08",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PARTIAL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3879,
+        "engine": "local",
+        "judged": {
+          "verdict": "PARTIAL",
+          "failed": [
+            {
+              "path": "drafts.0.mount_path",
+              "op": "equals",
+              "expect": [
+                "玄关",
+                "抽屉"
+              ],
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 8,
+          "total": 9
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "items.0.mount_path",
+            "op": "equals",
+            "expect": [
+              "玄关",
+              "抽屉"
+            ],
+            "code": "value_diff"
+          }
+        ],
+        "ms": 4058,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-09",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4021,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 8,
+          "total": 8
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 3558,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-10",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 4092,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 6,
+          "total": 6
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 3649,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-11",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 3266,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2620,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-12",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2879,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2477,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-13",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2770,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 8,
+          "total": 8
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2330,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "ex_server_converted": true,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-14",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2829,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 7,
+          "total": 7
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 2393,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ex-15",
+      "task": "extract",
+      "set": "dev",
+      "prod": {
+        "verdict": "PARTIAL",
+        "failed": [],
+        "shapeError": null,
+        "ms": 2859,
+        "engine": "local",
+        "judged": {
+          "verdict": "PARTIAL",
+          "failed": [
+            {
+              "path": "drafts.0.location_text",
+              "op": "equals",
+              "expect": "阳台储物柜最里面",
+              "code": "value_diff"
+            }
+          ],
+          "passedCount": 4,
+          "total": 5
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PARTIAL",
+        "failed": [
+          {
+            "path": "items.0.location_text",
+            "op": "equals",
+            "expect": "阳台储物柜最里面",
+            "code": "value_diff"
+          }
+        ],
+        "ms": 2568,
+        "anchorOk": null
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-01",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 954,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 887,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-02",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 966,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 840,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-03",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 936,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 756,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-04",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 978,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 815,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-05",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 999,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 804,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-06",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1000,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 852,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    },
+    {
+      "id": "dev-ls-07",
+      "task": "locsplit",
+      "set": "dev",
+      "prod": {
+        "verdict": "PASS",
+        "failed": [],
+        "shapeError": null,
+        "ms": 1014,
+        "engine": "local",
+        "judged": {
+          "verdict": "PASS",
+          "failed": [],
+          "passedCount": 2,
+          "total": 2
+        }
+      },
+      "model": {
+        "status": "parsed",
+        "verdict": "PASS",
+        "failed": [],
+        "ms": 800,
+        "anchorOk": true
+      },
+      "flags": {
+        "raw_deviation": false,
+        "repair_flipped": []
+      },
+      "rescued": false
+    }
+  ]
+}
