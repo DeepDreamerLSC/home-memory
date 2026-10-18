@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-05",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "主卧衣柜的最上层" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["主卧", "衣柜", "最上层"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "「的」拆开前后实体;「最上层」是序数层格实体保留成段,不是纯方位词也不并入「衣柜」。",
+  "origin": "新构"
+}

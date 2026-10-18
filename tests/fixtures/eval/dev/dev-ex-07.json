@@ -1,0 +1,17 @@
+{
+  "id": "dev-ex-07",
+  "task": "extract",
+  "input": { "text": "冰箱里面有面条", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "面条" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "冰箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["冰箱"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "位置实体不带纯方位后缀:「冰箱里面」的裸实体是「冰箱」(剥后缀后仍是原话逐字子串),绝不能把「冰箱里面」当位置输出。",
+  "origin": "新构",
+  "note": "改编自 0.7.0 真机反馈 Fix 2 的历史原句(非本周),按现行 v2 剥后缀合同立标;v1 合同下此句期望为「冰箱里面」,双标关系见 legacy-contract/README。"
+}

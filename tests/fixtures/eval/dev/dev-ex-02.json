@@ -1,0 +1,17 @@
+{
+  "id": "dev-ex-02",
+  "task": "extract",
+  "input": { "text": "指甲刀好像在卧室某个抽屉里吧,我记不太清", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "指甲刀" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": false },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": [] },
+    { "path": "drafts.0.mount_path", "op": "null" },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "模糊位置绝不信口猜:位置说不清就整体不肯定(位置空、限定语空、路径 null、vague null),物品名照常提取。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s07.json,现行 v2 合同下期望不变。"
+}

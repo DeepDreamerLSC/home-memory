@@ -1,0 +1,14 @@
+{
+  "id": "s05",
+  "category": "多件需拆分",
+  "text": "钥匙放在玄关的碗里,充电线在客厅沙发扶手上",
+  "expect": {
+    "needs_split": true
+  },
+  "task": "extract",
+  "origin": "legacy",
+  "contract": "v1",
+  "retired": true,
+  "retired_reason": "v1 单件合同的多件策略:needs_split=true+固定话术「一次只记一件物品,请分开说」;现行生产语音入口已走 v2 多件逐件提取(items[] 进 drafts),此期望只守旧客户端 v1 合同,不得充当 v2 多件 Gold。",
+  "v2_note": "v2 多件判据另立(dev/dev-ex-08、val/val-ex-07 等);两条责任线并存,不删旧例也不混判(铁律①)。"
+}

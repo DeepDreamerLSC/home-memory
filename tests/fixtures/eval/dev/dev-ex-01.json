@@ -1,0 +1,17 @@
+{
+  "id": "dev-ex-01",
+  "task": "extract",
+  "input": { "text": "降压药放在厨房第二个抽屉", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "降压药" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "厨房第二个抽屉" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": ["第二个"] },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["厨房", "第二个抽屉"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "单件带序号限定:物品与位置逐字来自原话,序号限定语进 qualifiers,厨房→第二个抽屉的层级如实投影进 mount_path,无时间信息则提醒与 vague 全空。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s01.json(v1 冻结 2026-10-09):四基础字段为 legacy 校准金标;mount_path/提醒字段为本轮按现行 v2 合同新构的期望。"
+}

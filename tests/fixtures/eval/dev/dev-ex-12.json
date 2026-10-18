@@ -1,0 +1,18 @@
+{
+  "id": "dev-ex-12",
+  "task": "extract",
+  "input": { "text": "牛奶11月20号过期,放冰箱", "protocol": 2 },
+  "deps": { "today": "2026-10-18", "anchorToday": "2026-10-18" },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "牛奶" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "冰箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "equals", "expect": "2026-11-20" },
+    { "path": "drafts.0.remind_kind", "op": "equals", "expect": "有效期" },
+    { "path": "drafts.0.remind_quote", "op": "contains", "expect": "11月20号" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "没说年份的绝对日期按注入的【今天】(2026-10-18)补全为最近的未来日期 2026-11-20;不得因缺年份降级成 vague 灰行。",
+  "origin": "新构",
+  "note": "deps 注入固定「今天」,冻结期望不随运行日期漂移(runner 把 deps.today/anchorToday 包成 handler 的注入函数,见 README)。"
+}

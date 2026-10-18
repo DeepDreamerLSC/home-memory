@@ -1,0 +1,12 @@
+{
+  "id": "dev-ls-02",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "厨房冰箱第二层" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["厨房", "冰箱", "第二层"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "「第二层」是层格实体:独立成段、不被方位词修补误并,层级为 厨房→冰箱→第二层。",
+  "origin": "真实语料(本周真机)",
+  "note": "本周真机语料;亦是覆盖矩阵 §2「层格实体独立成段」缺口(0 样例 0 测试)的冻结样例——它同时是 locationSplit 提示词的例句,模型答对不算泄题,答错即缺口坐实。"
+}

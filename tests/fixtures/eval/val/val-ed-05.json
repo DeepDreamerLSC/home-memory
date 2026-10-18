@@ -1,0 +1,22 @@
+{
+  "id": "val-ed-05",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "第3个改成小剪刀",
+    "batch_location": "书房抽屉",
+    "candidates": [
+      { "draft_id": "2b3c4d5e-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "指甲刀" },
+      { "draft_id": "2b3c4d5e-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" },
+      { "draft_id": "2b3c4d5e-0003-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" }
+    ]
+  },
+  "essentials": [
+    { "path": "needs_pick", "op": "equals", "expect": true },
+    { "path": "target", "op": "null" },
+    { "path": "edits.0.field", "op": "null" }
+  ],
+  "human_criteria": "行号绝不作锁定依据:「第3个」不锁定任何候选(行号随删行漂移);操作明确(改名)但对象不明 → needs_pick 交点选,绝不猜第三行就是电池。",
+  "origin": "新构",
+  "note": "覆盖矩阵 §3「用户说行号时的行为」负例在 val 的冻结样例;「小剪刀」不在候选内,内容词无从锁定。"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "val-ls-02",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "书房桌子中间抽屉" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["书房", "桌子", "中间抽屉"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "#81 失败族:「中间」修饰后段成「中间抽屉」,绝不输出「桌子中间」这类向后粘;终态 [书房,桌子,中间抽屉] 既可能是模型拆对、也可能是修补前移救的——runner 必须分开计分模型原始输出与生产终态。",
+  "origin": "真实语料(本周真机)",
+  "note": "修补层(#81 后)对「桌子中间|抽屉」会前移救回:essentials 判生产终态,模型层判分用导出的 validateLocationSplitOutput 对原始输出单独跑(见 README 归因分层)。"
+}

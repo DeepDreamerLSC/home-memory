@@ -1,0 +1,20 @@
+{
+  "id": "val-ex-07",
+  "task": "extract",
+  "input": { "text": "工具箱里有螺丝刀、卷尺、扳手、钳子、胶带和电池", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "螺丝刀" },
+    { "path": "drafts.1.name", "op": "equals", "expect": "卷尺" },
+    { "path": "drafts.2.name", "op": "equals", "expect": "扳手" },
+    { "path": "drafts.3.name", "op": "equals", "expect": "钳子" },
+    { "path": "drafts.4.name", "op": "equals", "expect": "胶带" },
+    { "path": "drafts.5.name", "op": "null" },
+    { "path": "truncated", "op": "equals", "expect": true },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "工具箱" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["工具箱"] }
+  ],
+  "human_criteria": "一句话六件超过上限:绝不静默丢件——只取前 5 件且顶层 has_more/truncated 如实为真、第 6 件(电池)留待系统引导分批(drafts.5 必须不存在);前 5 件位置如实归属共享的「工具箱」。",
+  "origin": "新构",
+  "note": "覆盖矩阵 §1「多件逐件提取」的 has_more 截断态;truncated 是生产链对模型 has_more 的透传,模型层判据=has_more:true。"
+}

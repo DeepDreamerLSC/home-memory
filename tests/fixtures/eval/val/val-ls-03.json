@@ -1,0 +1,12 @@
+{
+  "id": "val-ls-03",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "书房桌子右边抽屉第三个是品客薯片罐已空了放厨房去" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["书房", "桌子", "右边抽屉", "第三个"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "整句语音只拆收纳位置层级前缀:物品名「品客薯片罐」与句尾目的地「厨房」都不得进路径,「第三个」是层格序号保留成段——这是最易被句尾「厨房」带偏的对抗例。",
+  "origin": "真实语料(本周真机)",
+  "note": "本周真机语料(#3 场景原句);同句的编辑语义(改位置到厨房)见 val-ed-01——生产链把这句话送 draftEditParse,位置前缀语义送 locationSplit。"
+}

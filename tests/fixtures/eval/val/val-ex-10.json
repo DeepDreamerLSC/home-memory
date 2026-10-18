@@ -1,0 +1,19 @@
+{
+  "id": "val-ex-10",
+  "task": "extract",
+  "input": { "text": "隐形眼镜护理液三个月后过期,放在浴室的柜子里", "protocol": 2 },
+  "deps": { "today": "2026-10-18", "anchorToday": "2026-10-18" },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "隐形眼镜护理液" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "浴室的柜子" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "equals", "expect": "2027-01-18" },
+    { "path": "drafts.0.remind_kind", "op": "equals", "expect": "下次维护" },
+    { "path": "drafts.0.remind_quote", "op": "equals", "expect": "三个月后" },
+    { "path": "drafts.0.remind_converted", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "「三个月后」由服务端闭集换算成 2027-01-18(+3 月)并标 converted、vague 置空;模型层只许标 vague 绝不许自己折算日期(自报日期过不了对应锚定,会被判 FAIL 而非误 PASS);位置剥「里」、层级为 [浴室,柜子]。",
+  "origin": "新构",
+  "note": "日期三态之「模糊时间闭集换算」;归因分层见 README(铁律②)。"
+}

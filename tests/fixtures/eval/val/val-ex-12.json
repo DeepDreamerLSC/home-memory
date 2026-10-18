@@ -1,0 +1,15 @@
+{
+  "id": "val-ex-12",
+  "task": "extract",
+  "input": { "text": "雨伞挂在玄官的挂钩上", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "雨伞" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "玄官的挂钩" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["玄官", "挂钩"] },
+    { "path": "drafts.0.remind_at", "op": "null" }
+  ],
+  "human_criteria": "ASR 别字「玄官」逐字保留(不得自纠成「玄关」),句尾纯方位后缀「上」剥掉、层级 [玄官,挂钩];剥离与纠错是两件事,只做前者。",
+  "origin": "legacy",
+  "note": "铁律①双标样本:文本取自 legacy s11(v1 期望「玄官的挂钩上」含后缀,见 legacy-contract/s11.json 不参评);v2 期望剥「上」。"
+}

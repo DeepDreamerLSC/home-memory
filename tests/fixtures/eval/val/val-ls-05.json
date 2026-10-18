@@ -1,0 +1,12 @@
+{
+  "id": "val-ls-05",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "衣帽间" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["衣帽间"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "单实体整串单段:绝不把「衣帽间」硬拆成「衣帽+间」——单段是正确终态,不是 fallback 兜底。",
+  "origin": "新构",
+  "note": "防「过度拆分」反例:fallback 必须为 false,单段来自模型自觉拆不出层级(与 fallback=true 的整串兜底同形不同因,归因靠 runner 区分)。"
+}

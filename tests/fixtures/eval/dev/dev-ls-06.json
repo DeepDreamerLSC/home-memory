@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-06",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "书房书架第三层的收纳盒" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["书房", "书架", "第三层", "收纳盒"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "四层深路径:层格「第三层」夹在中间也独立成段,末段「收纳盒」是真实体,全程逐字锚定原文。",
+  "origin": "新构"
+}

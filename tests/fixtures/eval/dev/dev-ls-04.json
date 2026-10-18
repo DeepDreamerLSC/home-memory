@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-04",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "卫生间镜柜第二层" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["卫生间", "镜柜", "第二层"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "房间→家具→层格三层逐字拆开,段名不带连接字、层格「第二层」不被误并。",
+  "origin": "新构"
+}

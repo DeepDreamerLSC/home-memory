@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-03",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "玄关柜" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["玄关柜"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "拆不出层级就单段整串:绝不把复合名词「玄关柜」硬拆成「玄关+柜」。",
+  "origin": "新构"
+}

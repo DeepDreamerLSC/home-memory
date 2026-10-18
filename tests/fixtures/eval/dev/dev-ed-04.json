@@ -1,0 +1,20 @@
+{
+  "id": "dev-ed-04",
+  "task": "editparse",
+  "input": {
+    "action": "draftEditParse",
+    "text": "这些统一放到书房抽屉",
+    "batch_location": "玄关抽屉",
+    "candidates": [
+      { "draft_id": "1a2b3c4d-0001-4a5b-8c6d-e0f1a2b3c4d5", "name": "电池" },
+      { "draft_id": "1a2b3c4d-0002-4a5b-8c6d-e0f1a2b3c4d5", "name": "数据线" }
+    ]
+  },
+  "essentials": [
+    { "path": "intent", "op": "equals", "expect": "batch_location" },
+    { "path": "new_location", "op": "equals", "expect": "书房抽屉" },
+    { "path": "needs_pick", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "改的是整批默认位置:new_location 逐字来自用户话,不挑单个候选、不带方位后缀以外的改写。",
+  "origin": "新构"
+}

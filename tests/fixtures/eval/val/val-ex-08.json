@@ -1,0 +1,16 @@
+{
+  "id": "val-ex-08",
+  "task": "extract",
+  "input": { "text": "维生素在书房书架,鱼油不在书房,在厨房橱柜", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "维生素" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "书房书架" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.1.name", "op": "equals", "expect": "鱼油" },
+    { "path": "drafts.1.location_text", "op": "equals", "expect": "厨房橱柜" },
+    { "path": "drafts.1.certain", "op": "equals", "expect": true }
+  ],
+  "human_criteria": "否定插入语防交叉:鱼油的位置只能是「厨房橱柜」,绝不把「书房」配给鱼油——这是模型层责任,服务端锚定门救不了。",
+  "origin": "新构",
+  "note": "覆盖矩阵 §1「交叉配对防护」在 val 的冻结样例。"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "dev-ex-15",
+  "task": "extract",
+  "input": { "text": "充气简放在阳台储物柜最里面", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "充气简" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "阳台储物柜最里面" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.qualifiers", "op": "equals", "expect": ["最里面"] },
+    { "path": "drafts.0.remind_at", "op": "null" }
+  ],
+  "human_criteria": "ASR 同音别字「充气简」逐字保留(名称必须来自原话,不得自作聪明纠正成「充气筒」);「最里面」是序数+方位复合限定语,进 qualifiers 且留在位置实体里(v2 只剥纯方位后缀,不剥复合限定语)。",
+  "origin": "legacy",
+  "note": "迁自 tests/fixtures/samples/s12.json:现行 v2 合同下此例期望不变(区别于 s11 的纯后缀「上」)。"
+}

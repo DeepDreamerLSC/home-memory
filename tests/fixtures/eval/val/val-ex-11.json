@@ -1,0 +1,17 @@
+{
+  "id": "val-ex-11",
+  "task": "extract",
+  "input": { "text": "防晒霜大概快过期了,在浴室镜柜", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "防晒霜" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "浴室镜柜" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_kind", "op": "null" },
+    { "path": "drafts.0.remind_quote", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "contains", "expect": "快过期" }
+  ],
+  "human_criteria": "闭集外模糊时间绝不换算:三项提醒全空,「快过期了」以 vague 灰行如实标出;「大概」不进 qualifiers(模糊词不是限定语)。",
+  "origin": "新构",
+  "note": "日期三态之「模糊时间不换算」;qualifiers 空数组不锁死,以不含「大概」为准。"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "dev-ex-06",
+  "task": "extract",
+  "input": { "text": "口罩放玄关", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "口罩" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "玄关" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["玄关"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.0.remind_vague_quote", "op": "null" }
+  ],
+  "human_criteria": "单层位置:mount_path 给单段数组(确认卡能明示「放进玄关」),绝不编造出第二层。",
+  "origin": "新构"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "dev-ex-08",
+  "task": "extract",
+  "input": { "text": "钥匙和充电宝都在玄关抽屉里", "protocol": 2 },
+  "essentials": [
+    { "path": "drafts.0.name", "op": "equals", "expect": "钥匙" },
+    { "path": "drafts.1.name", "op": "equals", "expect": "充电宝" },
+    { "path": "drafts.0.location_text", "op": "equals", "expect": "玄关抽屉" },
+    { "path": "drafts.1.location_text", "op": "equals", "expect": "玄关抽屉" },
+    { "path": "drafts.0.certain", "op": "equals", "expect": true },
+    { "path": "drafts.1.certain", "op": "equals", "expect": true },
+    { "path": "drafts.0.mount_path", "op": "equals", "expect": ["玄关", "抽屉"] },
+    { "path": "drafts.0.remind_at", "op": "null" },
+    { "path": "drafts.1.remind_at", "op": "null" }
+  ],
+  "human_criteria": "一句话两件共用一个位置:两件都逐件提取、位置如实归属给两件(不合并成一件、不交叉),顺序随原话;句尾「里」剥掉。",
+  "origin": "新构"
+}

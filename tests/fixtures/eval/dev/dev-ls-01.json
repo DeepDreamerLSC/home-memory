@@ -1,0 +1,11 @@
+{
+  "id": "dev-ls-01",
+  "task": "locsplit",
+  "input": { "action": "locationSplit", "text": "主卧的床头柜" },
+  "essentials": [
+    { "path": "path", "op": "equals", "expect": ["主卧", "床头柜"] },
+    { "path": "fallback", "op": "equals", "expect": false }
+  ],
+  "human_criteria": "连接字「的」前后的实体必须拆成两段,「的」绝不出现在任何段内;两段都是原文逐字子串且按原序。",
+  "origin": "新构"
+}
