@@ -4,7 +4,7 @@
 用法:python3 probe_frames.py --workdir /tmp/video-s0 [--video]
   --video:全部合成帧(含模糊/近重复)编入 mp4→解码→**对解码帧**做筛选;
   缺省直接对目录帧做筛选(无视频段)。退出码 0=自检全过。"""
-import argparse, json, os, subprocess, sys
+import argparse, json, os, re, subprocess, sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -60,37 +60,50 @@ def run(workdir, video_mode):
         mp4 = f"{workdir}/synth.mp4"; to_video(src, mp4)
         dfiles, times = decode(mp4, out)
         judged = [{"file": f, "path": f"{out}/{f}", "pts_time": t,
-                   "src_label": src_files[i].split("_")[0].rstrip("0123456789") if i < len(src_files) else "?"}
+                   "src_name": src_files[i] if i < len(src_files) else "?",
+                   "src_label": (re.match(r"^[a-z]+", src_files[i]).group(0) if i < len(src_files) and re.match(r"^[a-z]+", src_files[i]) else "?")}
                   for i, (f, t) in enumerate(zip(dfiles, times))]
         judged_dir = out
     else:
         judged = [{"file": f, "path": f"{src}/{f}", "pts_time": None,
-                   "src_label": f.split("_")[0].rstrip("0123456789")} for f in src_files]
+                   "src_name": f,
+                   "src_label": (re.match(r"^[a-z]+", f).group(0) if re.match(r"^[a-z]+", f) else "?")} for f in src_files]
         judged_dir = src
-    SHARP_MIN = 120.0; DUP_H = 6
+    SHARP_MIN = 120.0; DUP_H = 6; KEEP_MAX = 8
     for r in judged:
         im = Image.open(r["path"])
         r["sharpness"] = round(sharpness(im), 1); r["hash"] = ahash(im)
+    DUP_GROUND_TRUTH = [("f04.png", "dup0.png"), ("f07.png", "dup1.png")]  # 构造期真值(独立于 aHash)
+    ranked = sorted(judged, key=lambda x: -x["sharpness"])
     kept = []
-    for r in sorted(judged, key=lambda x: -x["sharpness"]):
+    for r in ranked:
         if r["sharpness"] < SHARP_MIN: r["drop"] = "blurry"; continue
         if any(ham(r["hash"], k["hash"]) <= DUP_H for k in kept): r["drop"] = "near_dup"; continue
         kept.append(r)
+    if len(kept) > KEEP_MAX:  # 上限真截断(评审:不能只检查不限制)
+        for r in kept[KEEP_MAX:]: r["drop"] = "cap_cut"
+        kept = kept[:KEEP_MAX]
+    kept_ids = {id(r) for r in kept}
     for r in judged:
-        if "drop" not in r: r["drop"] = "rank_cut"
+        if id(r) not in kept_ids and "drop" not in r: r["drop"] = "rank_cut"
+    for r in kept: r["kept"] = True
     kept = sorted(kept, key=lambda x: x["pts_time"] if x["pts_time"] is not None else -1)
+    kept_names = {k["src_name"] for k in kept}
     checks = {
         "judged_input_is_decoded": (judged_dir == out) if video_mode else True,
         "kept_in_3_8": 3 <= len(kept) <= 8,
+        "cap_enforced_by_construction": len(kept) <= KEEP_MAX,
         "no_blur_kept": all(k["src_label"] != "blur" for k in kept),
-        "no_dup_pair_kept": all(ham(a["hash"], b["hash"]) > DUP_H for ai, a in enumerate(kept) for b in kept[ai+1:]),
+        "dup_pairs_ground_truth": all(not (a in kept_names and b in kept_names) for a, b in DUP_GROUND_TRUTH),
+        "kept_marker_consistent": all(r.get("kept") is True and "drop" not in r for r in kept)
+                                  and all(("drop" in r) or r.get("kept") is True for r in judged),
         "ts_monotonic": (all(kept[i]["pts_time"] < kept[i+1]["pts_time"] for i in range(len(kept)-1))
                          if video_mode and len(kept) > 1 else True),
         "ts_present_when_video": (all(k["pts_time"] is not None for k in kept) if video_mode else True),
     }
     manifest = {"video_mode": video_mode, "judged_dir": judged_dir, "sharp_min": SHARP_MIN, "dup_hamming": DUP_H,
-                "total_frames": len(judged), "kept": len(kept),
-                "frames": [{k: r.get(k) for k in ("file","pts_time","sharpness","src_label","drop")} for r in judged]}
+                "total_frames": len(judged), "kept": len(kept), "keep_max": KEEP_MAX,
+                "frames": [{k: r.get(k) for k in ("file","pts_time","sharpness","src_name","src_label","kept","drop")} for r in judged]}
     json.dump(manifest, open(f"{workdir}/manifest.json","w"), ensure_ascii=False, indent=1)
     print(json.dumps({"checks": checks, "summary": {k: manifest[k] for k in ("video_mode","judged_dir","total_frames","kept")}}, ensure_ascii=False))
     return 0 if all(checks.values()) else 4
