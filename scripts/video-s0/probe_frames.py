@@ -67,6 +67,14 @@ def ahash(img):
 def ham(a, b): return bin(a ^ b).count("1")
 
 def run(workdir, video_mode, stress=False):
+    # 场景隔离(终审整理):清掉本脚本已知产物,复用目录不带入上一场景的帧
+    os.makedirs(workdir, exist_ok=True)
+    for stale in ["frames", "decoded", "synth.mp4", "manifest.json"]:
+        target = f"{workdir}/{stale}"
+        if os.path.isdir(target):
+            import shutil; shutil.rmtree(target)
+        elif os.path.exists(target):
+            os.remove(target)
     src = f"{workdir}/frames"; out = f"{workdir}/decoded"
     (make_stress_frames if stress else make_frames)(src)
     src_files = sorted(f for f in os.listdir(src) if f.endswith(".png"))
