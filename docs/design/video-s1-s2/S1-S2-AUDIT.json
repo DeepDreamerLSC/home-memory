@@ -1096,7 +1096,9 @@
    "black": 1,
    "review": 0,
    "n_unmatched": 4,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 1,
+   "call_uid": "S2-P3prod-r1-D1-p1"
   },
   {
    "tag": "P3prod|r1|D1|r1",
@@ -1131,7 +1133,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 2,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 2,
+   "call_uid": "S2-P3prod-r1-D1-p2"
   },
   {
    "tag": "P3prod|r1|D1|r1",
@@ -1166,7 +1170,9 @@
    "black": 2,
    "review": 0,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 3,
+   "call_uid": "S2-P3prod-r1-D1-p3"
   },
   {
    "tag": "P3prod|r1|D2|r1",
@@ -1199,7 +1205,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 4,
+   "call_uid": "S2-P3prod-r1-D2-p4"
   },
   {
    "tag": "P3prod|r1|D2|r1",
@@ -1232,7 +1240,9 @@
    "black": 1,
    "review": 1,
    "n_unmatched": 7,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 5,
+   "call_uid": "S2-P3prod-r1-D2-p5"
   },
   {
    "tag": "P3prod|r1|D2|r1",
@@ -1268,7 +1278,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 6,
+   "call_uid": "S2-P3prod-r1-D2-p6"
   },
   {
    "tag": "P3prod|r1|D3|r1",
@@ -1301,7 +1313,9 @@
    "black": 1,
    "review": 1,
    "n_unmatched": 3,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 7,
+   "call_uid": "S2-P3prod-r1-D3-p7"
   },
   {
    "tag": "P3prod|r1|D3|r1",
@@ -1334,7 +1348,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 3,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 8,
+   "call_uid": "S2-P3prod-r1-D3-p8"
   },
   {
    "tag": "P3prod|r1|D3|r1",
@@ -1367,7 +1383,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 9,
+   "call_uid": "S2-P3prod-r1-D3-p9"
   },
   {
    "tag": "V3batch|r1|D1|r1",
@@ -1413,7 +1431,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 10,
+   "call_uid": "S2-V3batch-r1-D1-b3"
   },
   {
    "tag": "V3batch|r1|D2|r1",
@@ -1449,7 +1469,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 4,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 11,
+   "call_uid": "S2-V3batch-r1-D2-b3"
   },
   {
    "tag": "V3batch|r1|D3|r1",
@@ -1491,7 +1513,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 3,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 12,
+   "call_uid": "S2-V3batch-r1-D3-b3"
   },
   {
    "tag": "V6x2|r1|D1|r1-A",
@@ -1536,7 +1560,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 13,
+   "call_uid": "S2-V6x2-r1-D1-A"
   },
   {
    "tag": "V6x2|r1|D1|r1-B",
@@ -1582,7 +1608,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 14,
+   "call_uid": "S2-V6x2-r1-D1-B"
   },
   {
    "tag": "V6x2|r1|D2|r1-A",
@@ -1618,7 +1646,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 15,
+   "call_uid": "S2-V6x2-r1-D2-A"
   },
   {
    "tag": "V6x2|r1|D2|r1-B",
@@ -1654,7 +1684,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 4,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 16,
+   "call_uid": "S2-V6x2-r1-D2-B"
   },
   {
    "tag": "V6x2|r1|D3|r1-A",
@@ -1696,7 +1728,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 4,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 17,
+   "call_uid": "S2-V6x2-r1-D3-A"
   },
   {
    "tag": "V6x2|r1|D3|r1-B",
@@ -1738,7 +1772,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 18,
+   "call_uid": "S2-V6x2-r1-D3-B"
   },
   {
    "tag": "P3prod|r2|D1|r2",
@@ -1773,7 +1809,9 @@
    "black": 1,
    "review": 0,
    "n_unmatched": 4,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 19,
+   "call_uid": "S2-P3prod-r2-D1-p1"
   },
   {
    "tag": "P3prod|r2|D1|r2",
@@ -1808,7 +1846,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 2,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 20,
+   "call_uid": "S2-P3prod-r2-D1-p2"
   },
   {
    "tag": "P3prod|r2|D1|r2",
@@ -1843,7 +1883,9 @@
    "black": 2,
    "review": 0,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 21,
+   "call_uid": "S2-P3prod-r2-D1-p3"
   },
   {
    "tag": "P3prod|r2|D2|r2",
@@ -1876,7 +1918,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 22,
+   "call_uid": "S2-P3prod-r2-D2-p4"
   },
   {
    "tag": "P3prod|r2|D2|r2",
@@ -1909,7 +1953,9 @@
    "black": 1,
    "review": 1,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 23,
+   "call_uid": "S2-P3prod-r2-D2-p5"
   },
   {
    "tag": "P3prod|r2|D2|r2",
@@ -1945,7 +1991,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 24,
+   "call_uid": "S2-P3prod-r2-D2-p6"
   },
   {
    "tag": "P3prod|r2|D3|r2",
@@ -1978,7 +2026,9 @@
    "black": 1,
    "review": 1,
    "n_unmatched": 4,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 25,
+   "call_uid": "S2-P3prod-r2-D3-p7"
   },
   {
    "tag": "P3prod|r2|D3|r2",
@@ -2011,7 +2061,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 3,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 26,
+   "call_uid": "S2-P3prod-r2-D3-p8"
   },
   {
    "tag": "P3prod|r2|D3|r2",
@@ -2044,7 +2096,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 0,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 27,
+   "call_uid": "S2-P3prod-r2-D3-p9"
   },
   {
    "tag": "V3batch|r2|D1|r2",
@@ -2090,7 +2144,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 28,
+   "call_uid": "S2-V3batch-r2-D1-b3"
   },
   {
    "tag": "V3batch|r2|D2|r2",
@@ -2126,7 +2182,9 @@
    "black": 0,
    "review": 1,
    "n_unmatched": 2,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 29,
+   "call_uid": "S2-V3batch-r2-D2-b3"
   },
   {
    "tag": "V3batch|r2|D3|r2",
@@ -2168,7 +2226,9 @@
    "black": 0,
    "review": 2,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 30,
+   "call_uid": "S2-V3batch-r2-D3-b3"
   },
   {
    "tag": "V6x2|r2|D1|r2-A",
@@ -2213,7 +2273,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 31,
+   "call_uid": "S2-V6x2-r2-D1-A"
   },
   {
    "tag": "V6x2|r2|D1|r2-B",
@@ -2259,7 +2321,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 32,
+   "call_uid": "S2-V6x2-r2-D1-B"
   },
   {
    "tag": "V6x2|r2|D2|r2-A",
@@ -2295,7 +2359,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 0,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 33,
+   "call_uid": "S2-V6x2-r2-D2-A"
   },
   {
    "tag": "V6x2|r2|D2|r2-B",
@@ -2331,7 +2397,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 5,
-   "degenerate": false
+   "degenerate": false,
+   "call_index": 34,
+   "call_uid": "S2-V6x2-r2-D2-B"
   },
   {
    "tag": "V6x2|r2|D3|r2-A",
@@ -2373,7 +2441,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 3,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 35,
+   "call_uid": "S2-V6x2-r2-D3-A"
   },
   {
    "tag": "V6x2|r2|D3|r2-B",
@@ -2415,7 +2485,9 @@
    "black": 0,
    "review": 0,
    "n_unmatched": 1,
-   "degenerate": true
+   "degenerate": true,
+   "call_index": 36,
+   "call_uid": "S2-V6x2-r2-D3-B"
   }
  ],
  "single_frame_replay": {
@@ -5274,6 +5346,33 @@
    }
   }
  },
+ "s1_v3_reconciliation": {
+  "r1": {
+   "frozen_recall_hits": 21,
+   "frozen_den": 46,
+   "replay_per_drawer": 20,
+   "replay_global": 21,
+   "frozen_only": [
+    "D1-028",
+    "D2-015"
+   ],
+   "replay_only": [
+    "D3-016"
+   ],
+   "cause": "matcher_scope: S1 frozen matcher searches all drawers (global, longest alias, D1->D2->D3 tie order); replay matcher is per-drawer. Raw V3 outputs are identical."
+  },
+  "r2": {
+   "frozen_recall_hits": 22,
+   "frozen_den": 46,
+   "replay_per_drawer": 21,
+   "replay_global": 22,
+   "frozen_only": [
+    "D2-015"
+   ],
+   "replay_only": [],
+   "cause": "matcher_scope: S1 frozen matcher searches all drawers (global, longest alias, D1->D2->D3 tie order); replay matcher is per-drawer. Raw V3 outputs are identical."
+  }
+ },
  "batching_entries": {
   "entries": {
    "S1_P3_perframe": {
@@ -5301,7 +5400,8 @@
     "2": 71
    }
   },
-  "note": "S1/S2 提示词不同;V3 同帧,批处理对比;V8/V6 帧集不同,仅参考。"
+  "note": "S1/S2 提示词不同;V3 同帧,批处理对比;V8/V6 帧集不同,仅参考。",
+  "attribution_note": "Batch organization co-varies with prompt and repetition_penalty; no single-variable causal attribution."
  },
  "ambiguity": {
   "alias_overlap_pairs": [],
@@ -5402,29 +5502,182 @@
    "D3-BAT",
    "D3-001"
   ],
+  "target_codes": {
+   "V1": "D1-019",
+   "V2": "D1-020",
+   "V3": "D2-020",
+   "V4": "D2-022",
+   "S1": "D3-BAT",
+   "S2": "D3-001"
+  },
   "target_types": {
    "video_only": [
     "D1-019",
     "D1-020",
-    "D2-020"
+    "D2-020",
+    "D2-022"
    ],
    "shared_photo_video": [
-    "D2-022",
     "D3-BAT",
     "D3-001"
    ]
   },
+  "target_class_note": "D2-022 has vis.p3=0 (video-only under the 9-photo set); v1 protocol misclassified it as shared; v2 corrected.",
   "conditions": [
    "photo_only",
-   "photo_plus_keyframe_timestamp"
+   "photo_plus_keyframe_set"
   ],
+  "keyframe_set": {
+   "size": 6,
+   "target_frames": 1,
+   "distractors": 5,
+   "target_labeled": false,
+   "timestamps_visible": true,
+   "retrieval_time_counted": true
+  },
+  "sequences": {
+   "P1": "ABBABA",
+   "P2": "BAABAB",
+   "P3": "ABABBA",
+   "P4": "BABAAB",
+   "P5": "AABBAB",
+   "P6": "BBAABA"
+  },
+  "target_assignment": {
+   "P1": {
+    "A": [
+     "V1",
+     "V2",
+     "S1"
+    ],
+    "B": [
+     "V3",
+     "V4",
+     "S2"
+    ]
+   },
+   "P2": {
+    "A": [
+     "V3",
+     "V4",
+     "S1"
+    ],
+    "B": [
+     "V1",
+     "V2",
+     "S2"
+    ]
+   },
+   "P3": {
+    "A": [
+     "V1",
+     "V3",
+     "S2"
+    ],
+    "B": [
+     "V2",
+     "V4",
+     "S1"
+    ]
+   },
+   "P4": {
+    "A": [
+     "V2",
+     "V4",
+     "S2"
+    ],
+    "B": [
+     "V1",
+     "V3",
+     "S1"
+    ]
+   },
+   "P5": {
+    "A": [
+     "V1",
+     "V4",
+     "S2"
+    ],
+    "B": [
+     "V2",
+     "V3",
+     "S1"
+    ]
+   },
+   "P6": {
+    "A": [
+     "V2",
+     "V3",
+     "S1"
+    ],
+    "B": [
+     "V1",
+     "V4",
+     "S2"
+    ]
+   }
+  },
+  "task_matrix": {
+   "P1": [
+    "A:V1",
+    "B:V3",
+    "B:V4",
+    "A:V2",
+    "B:S2",
+    "A:S1"
+   ],
+   "P2": [
+    "B:V1",
+    "A:V3",
+    "A:V4",
+    "B:V2",
+    "A:S1",
+    "B:S2"
+   ],
+   "P3": [
+    "A:V1",
+    "B:V2",
+    "A:V3",
+    "B:V4",
+    "B:S1",
+    "A:S2"
+   ],
+   "P4": [
+    "B:V1",
+    "A:V2",
+    "B:V3",
+    "A:V4",
+    "A:S2",
+    "B:S1"
+   ],
+   "P5": [
+    "A:V1",
+    "A:V4",
+    "B:V2",
+    "B:V3",
+    "A:S2",
+    "B:S1"
+   ],
+   "P6": [
+    "B:V1",
+    "B:V4",
+    "A:V2",
+    "A:V3",
+    "B:S2",
+    "A:S1"
+   ]
+  },
   "measures": [
    "time_to_answer",
    "correct_drawer",
+   "correct_position",
    "confidence_1_5",
-   "used_keyframe"
+   "used_keyframe_set",
+   "found_target_frame",
+   "keyframe_retrieval_time_s",
+   "time_after_keyframe_s"
   ],
-  "sample": "5-8 participants, within-subject, counterbalanced",
+  "sample": "6 participants (or 5-8 cycling the 6 sequences); 6 tasks each; 3 A + 3 B; each condition 2 video-only + 1 shared",
   "model_calls": 0
  },
  "audit_gaps": [
@@ -5437,6 +5690,7 @@
   "S1 had external image-review history before the 20:55 local-only approval; raw links are not reproduced here.",
   "S2 official absolute-correct counts include 1 out-of-domain P3 match per round (D2-020); in-domain P3 is 14/round, verdict unchanged.",
   "Single model, single machine, one material set; no generalization claims.",
-  "Gold alias/granularity limits: generic aliases and bundled items (e.g., D3-BAT) mean same-name is not proof of duplicate physical items; no automatic merge is authorized."
+  "Gold alias/granularity limits: generic aliases and bundled items (e.g., D3-BAT) mean same-name is not proof of duplicate physical items; no automatic merge is authorized.",
+  "S1 V3 frozen vs per-drawer replay differs by 1 per round (r1 21 vs 20; r2 22 vs 21); cause is matcher scope (global vs per-drawer), not raw output or Gold change. Frozen scores unchanged."
  ]
 }
