@@ -9,6 +9,7 @@
  *   node scripts/eval/run.js --set val --out docs/eval/2026-10-18-val-local.md
  *   node scripts/eval/run.js --set all --out docs/eval/2026-10-18-all-local.md
  *   node scripts/eval/run.js --set dev --out /tmp/smoke.md --limit 2   # 自测 smoke(小样本)
+ * 报告 .md 旁自动落同名 .json 结果文件(单例记录+汇总统计;同样只含隐私安全字段)。
  * 可选:--timeout-ms <n>(默认 60000;亦尊重 LOCAL_LLM_TIMEOUT_MS)。
  * --set 不含 legacy-contract(铁律①:v1 历史合同存档不参评)。
  *
@@ -523,11 +524,20 @@ function statLine(list) {
   return { pass, partial, fail, modelPass, rescued, rate };
 }
 
+/** 需人工复核 = 生产层非 PASS(PARTIAL/FAIL):机器判非全过,需按各例「人工判据」复核 */
+function needsHumanIds(recs) {
+  return recs.filter((r) => r.prod.verdict !== "PASS").map((r) => r.id);
+}
+
 function buildReport(ctx) {
   const { args, cfg, version, recs, totalMs, chosenCount } = ctx;
   const sets = args.set === "all" ? "dev+val" : args.set;
   const lines = [];
   lines.push("# 本地 A3B 评测报告:" + sets + " 集(样例集 " + version + ")");
+  lines.push("");
+  lines.push(
+    "> 本报告为**新冻结基线**(" + todayLocal() + ",本地 A3B via 隧道),不作任何与历史质量的比较论断——历史不可重放(#83 评审铁律 3)。"
+  );
   lines.push("");
   lines.push("- 生成:" + new Date().toISOString() + ",总耗时 " + totalMs + "ms,共 " + recs.length + " 例" + (args.limit ? "(--limit " + args.limit + ",按任务轮转选取)" : "") + "。");
   lines.push("- 命令:node scripts/eval/run.js --set " + args.set + " --out " + args.out + (args.limit ? " --limit " + args.limit : ""));
@@ -552,6 +562,18 @@ function buildReport(ctx) {
   );
   lines.push("");
   lines.push("说明:「模型层PASS」分母含可判例(parsed);UNPARSE(裸解析失败)/UNAVAIL(直调引擎失败)/SKIP 不计其中,见明细表。生产通过率=PASS/(PASS+PARTIAL+FAIL)。");
+  lines.push("");
+  const human = needsHumanIds(recs);
+  lines.push(
+    "需人工复核:**" + human.length + " 例**" + (human.length ? "(" + human.join(", ") + ")" : "") +
+    "——定义:生产层 PARTIAL/FAIL(机器判非全过),需按失败清单中各例「人工判据」复核是模型真错还是 essentials 锁太死。"
+  );
+  const unavailIds = recs.filter((r) => r.model.status === "unavailable").map((r) => r.id);
+  if (unavailIds.length) {
+    lines.push(
+      "归因不完整(模型层直调引擎失败,不计修补救回):" + unavailIds.length + " 例(" + unavailIds.join(", ") + ")。"
+    );
+  }
   lines.push("");
   lines.push("## 明细");
   lines.push("");
@@ -620,6 +642,47 @@ function buildReport(ctx) {
   return lines.join("\n");
 }
 
+/* ================= JSON 结果文件(与 .md 同名 .json;字段同样隐私安全) ================= */
+
+function buildResultsJson(ctx) {
+  const { args, cfg, version, recs, totalMs } = ctx;
+  const perGroup = groupRecords(recs).map((g) => {
+    const s = statLine(g.list);
+    return { set: g.set, task: g.task, n: g.list.length, pass: s.pass, partial: s.partial, fail: s.fail, modelPass: s.modelPass, rescued: s.rescued };
+  });
+  const all = statLine(recs);
+  return {
+    kind: "home-memory-eval-results",
+    baseline_statement:
+      "新冻结基线(" + todayLocal() + ",本地 A3B via 隧道);不作任何与历史质量的比较论断——历史不可重放(#83 评审铁律 3)。",
+    generated: new Date().toISOString(),
+    command: "node scripts/eval/run.js --set " + args.set + " --out " + args.out + (args.limit ? " --limit " + args.limit : ""),
+    samples_version: version,
+    engine: {
+      type: "local-mlx-openai-compat",
+      model: path.basename(cfg.model),
+      temperature: 0.1,
+      timeout_ms: cfg.timeoutMs,
+      deepseek_fallback: "disabled(评测注入即抛 stub,本地引擎失败如实记)",
+    },
+    summary: {
+      total: recs.length,
+      pass: all.pass,
+      partial: all.partial,
+      fail: all.fail,
+      prod_pass_rate: all.rate,
+      model_raw_pass: all.modelPass,
+      rescued_by_repair: all.rescued,
+      needs_human: needsHumanIds(recs).length,
+      needs_human_ids: needsHumanIds(recs),
+      attribution_incomplete_ids: recs.filter((r) => r.model.status === "unavailable").map((r) => r.id),
+      per_group: perGroup,
+    },
+    total_ms: totalMs,
+    cases: recs,
+  };
+}
+
 /* ================= main ================= */
 
 async function main() {
@@ -680,10 +743,17 @@ async function main() {
   });
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, report, "utf8");
+  const jsonPath = args.out.replace(/\.md$/, "") + ".json";
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify(buildResultsJson({ args, cfg, version, recs, totalMs: Date.now() - t0 }), null, 2),
+    "utf8"
+  );
   const all = statLine(recs);
   process.stdout.write(
     "\n共 " + recs.length + " 例:PASS " + all.pass + " / PARTIAL " + all.partial + " / FAIL " + all.fail +
-      ";修补救回 " + all.rescued + ";报告已写入 " + args.out + "\n"
+    ";修补救回 " + all.rescued + ";需人工复核 " + needsHumanIds(recs).length +
+    ";报告已写入 " + args.out + " 与 " + jsonPath + "\n"
   );
   process.exit(0);
 }
