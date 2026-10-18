@@ -22,6 +22,21 @@ def make_frames(d, n=12):
     for j, src in enumerate([4, 7]):
         im = Image.open(f"{d}/f{src:02d}.png"); im.paste(im.crop((0,0,600,480)), (12, 0)); im.save(f"{d}/dup{j}.png")
 
+def make_stress_frames(d, n=14):
+    """压力场景(评审三轮:cap 必须被真触发):n 张强差异清晰帧,逼出 KEEP_MAX 截断。"""
+    os.makedirs(d, exist_ok=True)
+    for i in range(n):
+        img = Image.new("RGB", (640, 480), ((40*i) % 255, (90*i) % 255, (160*i) % 255))
+        dr = ImageDraw.Draw(img)
+        w = 80 + i * 35
+        dr.rectangle([20, 60, min(w, 620), 420], fill=((200+13*i) % 255, 60, 60))
+        if i % 2 == 0:
+            dr.ellipse([max(620-w, 20), 120, 620, 400], fill=(250, 200, 30))
+        else:
+            dr.polygon([(320, 60), (600, 420), (60, 420)], outline=(255, 255, 255), width=8)
+        dr.text((250, 180), str(i), fill=(0, 0, 0), font_size=160)
+        img.save(f"{d}/f{i:02d}.png")
+
 def to_video(d, mp4):
     r = subprocess.run(["ffmpeg","-y","-framerate","2","-pattern_type","glob","-i",f"{d}/*.png",
                         "-c:v","libx264","-pix_fmt","yuv420p",mp4], capture_output=True, text=True)
@@ -51,9 +66,9 @@ def ahash(img):
 
 def ham(a, b): return bin(a ^ b).count("1")
 
-def run(workdir, video_mode):
+def run(workdir, video_mode, stress=False):
     src = f"{workdir}/frames"; out = f"{workdir}/decoded"
-    make_frames(src)
+    (make_stress_frames if stress else make_frames)(src)
     src_files = sorted(f for f in os.listdir(src) if f.endswith(".png"))
     if video_mode:
         # B1:全部帧(含 blur/dup)入视频,筛选对象=解码帧
@@ -89,12 +104,19 @@ def run(workdir, video_mode):
     for r in kept: r["kept"] = True
     kept = sorted(kept, key=lambda x: x["pts_time"] if x["pts_time"] is not None else -1)
     kept_names = {k["src_name"] for k in kept}
+    by_name = {r["src_name"]: r for r in judged}
     checks = {
         "judged_input_is_decoded": (judged_dir == out) if video_mode else True,
         "kept_in_3_8": 3 <= len(kept) <= 8,
         "cap_enforced_by_construction": len(kept) <= KEEP_MAX,
         "no_blur_kept": all(k["src_label"] != "blur" for k in kept),
-        "dup_pairs_ground_truth": all(not (a in kept_names and b in kept_names) for a, b in DUP_GROUND_TRUTH),
+        "blur_each_dropped_blurry": stress or all(
+            by_name.get(b, {}).get("drop") == "blurry" for b in ["blur0.png", "blur1.png", "blur2.png"]),
+        "dup_pairs_actually_eliminated": stress or all(
+            (by_name.get(a, {}).get("drop") == "near_dup") or (by_name.get(b, {}).get("drop") == "near_dup")
+            for a, b in DUP_GROUND_TRUTH),
+        "stress_cap_cut_fired": (not stress) or (len(kept) == KEEP_MAX and any(
+            r.get("drop") == "cap_cut" for r in judged)),
         "kept_marker_consistent": all(r.get("kept") is True and "drop" not in r for r in kept)
                                   and all(("drop" in r) or r.get("kept") is True for r in judged),
         "ts_monotonic": (all(kept[i]["pts_time"] < kept[i+1]["pts_time"] for i in range(len(kept)-1))
@@ -102,7 +124,7 @@ def run(workdir, video_mode):
         "ts_present_when_video": (all(k["pts_time"] is not None for k in kept) if video_mode else True),
     }
     manifest = {"video_mode": video_mode, "judged_dir": judged_dir, "sharp_min": SHARP_MIN, "dup_hamming": DUP_H,
-                "total_frames": len(judged), "kept": len(kept), "keep_max": KEEP_MAX,
+                "total_frames": len(judged), "kept": len(kept), "keep_max": KEEP_MAX, "stress": stress,
                 "frames": [{k: r.get(k) for k in ("file","pts_time","sharpness","src_name","src_label","kept","drop")} for r in judged]}
     json.dump(manifest, open(f"{workdir}/manifest.json","w"), ensure_ascii=False, indent=1)
     print(json.dumps({"checks": checks, "summary": {k: manifest[k] for k in ("video_mode","judged_dir","total_frames","kept")}}, ensure_ascii=False))
@@ -110,5 +132,5 @@ def run(workdir, video_mode):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--workdir", required=True)
-    ap.add_argument("--video", action="store_true"); a = ap.parse_args()
-    sys.exit(run(a.workdir, a.video))
+    ap.add_argument("--video", action="store_true"); ap.add_argument("--stress", action="store_true")
+    a = ap.parse_args(); sys.exit(run(a.workdir, a.video, a.stress))
