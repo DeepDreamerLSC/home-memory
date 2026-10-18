@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """#85 S0 最小离线探针 v2(评审 B1 修复:解码帧必须进筛选管线)。
 抽帧→ffprobe 时间戳→清晰度→近重复过滤;合成素材;不连产品库,不调模型。
-用法:python3 probe_frames.py --workdir /tmp/video-s0 [--video]
+用法:python3 probe_frames.py --workdir /tmp/video-s0 [--video|--stress]
+注意:--workdir 必须是可清空的专用临时目录——脚本启动会删除其中的已知产物
+(frames/ decoded/ synth.mp4 manifest.json),勿指向含其他文件的目录。
   --video:全部合成帧(含模糊/近重复)编入 mp4→解码→**对解码帧**做筛选;
   缺省直接对目录帧做筛选(无视频段)。退出码 0=自检全过。"""
 import argparse, json, os, re, subprocess, sys
