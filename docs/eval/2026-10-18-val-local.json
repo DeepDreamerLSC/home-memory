@@ -1,7 +1,7 @@
 {
   "kind": "home-memory-eval-results",
   "baseline_statement": "新冻结基线(2026-10-18,本地 A3B via 隧道);不作任何与历史质量的比较论断——历史不可重放(#83 评审铁律 3)。",
-  "generated": "2026-10-18T02:40:56.349Z",
+  "generated": "2026-10-18T02:48:22.028Z",
   "command": "node scripts/eval/run.js --set val --out docs/eval/2026-10-18-val-local.md",
   "samples_version": "v1",
   "engine": {
@@ -61,7 +61,7 @@
       }
     ]
   },
-  "total_ms": 112898,
+  "total_ms": 113979,
   "cases": [
     {
       "id": "val-ed-01",
@@ -71,7 +71,7 @@
         "verdict": "PARTIAL",
         "failed": [],
         "shapeError": null,
-        "ms": 4116,
+        "ms": 4324,
         "engine": "local",
         "judged": {
           "verdict": "PARTIAL",
@@ -101,16 +101,18 @@
             "path": "edits.0.field",
             "op": "equals",
             "expect": "location",
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "edits.0.field"
           },
           {
             "path": "edits.0.new",
             "op": "equals",
             "expect": "厨房",
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "edits.0.new"
           }
         ],
-        "ms": 3137,
+        "ms": 2945,
         "anchorOk": null
       },
       "flags": {
@@ -127,7 +129,7 @@
         "verdict": "FAIL",
         "failed": [],
         "shapeError": null,
-        "ms": 2644,
+        "ms": 2645,
         "engine": "local",
         "judged": {
           "verdict": "FAIL",
@@ -176,17 +178,20 @@
             "path": "needs_pick",
             "op": "equals",
             "expect": true,
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "needs_pick"
           },
           {
             "path": "target",
             "op": "null",
-            "code": "expect_null_got_value"
+            "code": "expect_null_got_value",
+            "srcPath": "target"
           },
           {
             "path": "edits.0.field",
             "op": "null",
-            "code": "expect_null_got_value"
+            "code": "expect_null_got_value",
+            "srcPath": "edits.0.field"
           },
           {
             "path": "picks",
@@ -201,10 +206,11 @@
                 "name": "白色充电线"
               }
             ],
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "picks"
           }
         ],
-        "ms": 2620,
+        "ms": 2393,
         "anchorOk": null
       },
       "flags": {
@@ -221,7 +227,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 1345,
+        "ms": 1650,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -238,15 +244,18 @@
             "path": "needs_pick",
             "op": "equals",
             "expect": false,
-            "code": "missing_or_null"
+            "code": "missing_or_null",
+            "srcPath": "needs_pick"
           }
         ],
-        "ms": 1129,
+        "ms": 1167,
         "anchorOk": null
       },
       "flags": {
         "raw_deviation": false,
-        "repair_flipped": []
+        "repair_flipped": [
+          "needs_pick"
+        ]
       },
       "rescued": true
     },
@@ -258,7 +267,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 1171,
+        "ms": 1208,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -275,15 +284,18 @@
             "path": "needs_pick",
             "op": "equals",
             "expect": false,
-            "code": "missing_or_null"
+            "code": "missing_or_null",
+            "srcPath": "needs_pick"
           }
         ],
-        "ms": 928,
+        "ms": 934,
         "anchorOk": null
       },
       "flags": {
         "raw_deviation": false,
-        "repair_flipped": []
+        "repair_flipped": [
+          "needs_pick"
+        ]
       },
       "rescued": true
     },
@@ -295,7 +307,7 @@
         "verdict": "FAIL",
         "failed": [],
         "shapeError": null,
-        "ms": 2647,
+        "ms": 2865,
         "engine": "local",
         "judged": {
           "verdict": "FAIL",
@@ -329,20 +341,23 @@
             "path": "needs_pick",
             "op": "equals",
             "expect": true,
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "needs_pick"
           },
           {
             "path": "target",
             "op": "null",
-            "code": "expect_null_got_value"
+            "code": "expect_null_got_value",
+            "srcPath": "target"
           },
           {
             "path": "edits.0.field",
             "op": "null",
-            "code": "expect_null_got_value"
+            "code": "expect_null_got_value",
+            "srcPath": "edits.0.field"
           }
         ],
-        "ms": 2552,
+        "ms": 2402,
         "anchorOk": null
       },
       "flags": {
@@ -359,7 +374,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 1562,
+        "ms": 1587,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -372,7 +387,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 1334,
+        "ms": 1653,
         "anchorOk": null
       },
       "flags": {
@@ -389,7 +404,7 @@
         "verdict": "PARTIAL",
         "failed": [],
         "shapeError": null,
-        "ms": 2771,
+        "ms": 2724,
         "engine": "local",
         "judged": {
           "verdict": "PARTIAL",
@@ -413,10 +428,11 @@
             "path": "items.0.location_text",
             "op": "equals",
             "expect": "电视柜最下层",
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "drafts.0.location_text"
           }
         ],
-        "ms": 2289,
+        "ms": 2304,
         "anchorOk": null
       },
       "flags": {
@@ -433,7 +449,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2548,
+        "ms": 2577,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -446,7 +462,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2113,
+        "ms": 2133,
         "anchorOk": null
       },
       "flags": {
@@ -463,7 +479,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2484,
+        "ms": 2438,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -476,7 +492,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2097,
+        "ms": 2053,
         "anchorOk": null
       },
       "flags": {
@@ -493,7 +509,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 3578,
+        "ms": 2963,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -506,7 +522,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2545,
+        "ms": 2541,
         "anchorOk": null
       },
       "flags": {
@@ -523,7 +539,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2788,
+        "ms": 3116,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -536,7 +552,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2285,
+        "ms": 2310,
         "anchorOk": null
       },
       "flags": {
@@ -553,7 +569,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2738,
+        "ms": 2890,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -566,7 +582,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2492,
+        "ms": 2481,
         "anchorOk": null
       },
       "flags": {
@@ -583,7 +599,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 7591,
+        "ms": 8002,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -596,7 +612,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 7180,
+        "ms": 7439,
         "anchorOk": null
       },
       "flags": {
@@ -613,7 +629,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 4109,
+        "ms": 4242,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -626,7 +642,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 3609,
+        "ms": 3647,
         "anchorOk": null
       },
       "flags": {
@@ -643,7 +659,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 4379,
+        "ms": 4651,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -656,7 +672,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 4085,
+        "ms": 3968,
         "anchorOk": null
       },
       "flags": {
@@ -673,7 +689,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2859,
+        "ms": 3098,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -686,7 +702,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2456,
+        "ms": 2409,
         "anchorOk": null
       },
       "flags": {
@@ -704,7 +720,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2807,
+        "ms": 3072,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -717,7 +733,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2590,
+        "ms": 2338,
         "anchorOk": null
       },
       "flags": {
@@ -734,7 +750,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 2871,
+        "ms": 3034,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -747,7 +763,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 2476,
+        "ms": 2466,
         "anchorOk": null
       },
       "flags": {
@@ -764,7 +780,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 1663,
+        "ms": 1051,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -777,7 +793,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 805,
+        "ms": 891,
         "anchorOk": true
       },
       "flags": {
@@ -794,7 +810,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 960,
+        "ms": 962,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -807,7 +823,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 801,
+        "ms": 800,
         "anchorOk": true
       },
       "flags": {
@@ -824,7 +840,7 @@
         "verdict": "PARTIAL",
         "failed": [],
         "shapeError": null,
-        "ms": 1082,
+        "ms": 1093,
         "engine": "local",
         "judged": {
           "verdict": "PARTIAL",
@@ -858,10 +874,11 @@
               "右边抽屉",
               "第三个"
             ],
-            "code": "value_diff"
+            "code": "value_diff",
+            "srcPath": "path"
           }
         ],
-        "ms": 978,
+        "ms": 969,
         "anchorOk": true
       },
       "flags": {
@@ -878,7 +895,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 958,
+        "ms": 1049,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -891,7 +908,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 1040,
+        "ms": 814,
         "anchorOk": true
       },
       "flags": {
@@ -908,7 +925,7 @@
         "verdict": "PASS",
         "failed": [],
         "shapeError": null,
-        "ms": 909,
+        "ms": 911,
         "engine": "local",
         "judged": {
           "verdict": "PASS",
@@ -921,7 +938,7 @@
         "status": "parsed",
         "verdict": "PASS",
         "failed": [],
-        "ms": 762,
+        "ms": 753,
         "anchorOk": true
       },
       "flags": {
