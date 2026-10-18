@@ -6,7 +6,12 @@
     <view class="entry-ico">📷</view>
     <view class="entry-title">拍一张抽屉,我帮你列清单</view>
     <view class="entry-sub">识别会把照片临时发送到云端处理(不保存);你确认保存后,才会存到云端。</view>
-    <view class="btn ink block entry-btn" hover-class="btn-hover" hover-stay-time="80" bindtap="onEntryShotTap">
+    <!-- 识别中:刚拍照片的限高预览(真机反馈 2026-10-18:等待要有对象和去向) -->
+    <view wx:if="{{ recognizing && photoPath }}" class="entry-photo" style="{{ photoExpandStyle }}">
+      <image class="ph-img" src="{{ photoPath }}" mode="aspectFill" />
+      <view class="entry-photo-veil">正在认这张照片…<text class="e2">识别完自动进入核对</text></view>
+    </view>
+    <view class="btn ink block entry-btn {{ recognizing ? 'disabled' : '' }}" hover-class="btn-hover" hover-stay-time="80" bindtap="onEntryShotTap">
       <view class="btn-face">{{ recognizing ? '识别中…' : '拍照 / 从相册选' }}</view>
     </view>
     <view wx:if="{{ entryHint }}" class="entry-hint">{{ entryHint }}</view>

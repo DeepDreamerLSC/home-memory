@@ -2202,3 +2202,20 @@ test("PP-LOCPATH-6:手动改层级——› 分段写入 locPathCache 直接生�
   page.onLocPathEditTap();
   assert.deepEqual(page.locPathCache["书房桌子的右边抽屉"], ["书房", "桌子", "右边抽屉"], "空层级零动作");
 });
+
+// 真机反馈(2026-10-18):①识别等待态=照片限高预览+「识别完自动进核对」预期
+// ②保存确认后自动返回首页(庆祝闪完再退;失败不退)。
+test("PP-SAVE-BACK:保存成功自动返回首页(延迟可注入);页面卸载清计时器", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  page.saveBackDelayMs = 0;
+  page.onQuickVerifyTap({ currentTarget: { dataset: { mode: "all" } } });
+  page.onSaveTap();
+  await page.onSaveGoTap();
+  assert.ok((page.data.celebrateText || "").indexOf("都记住了") !== -1, "庆祝胶囊先出");
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.ok(ctx.env.backs.length >= 1, "庆祝后排自动 navigateBack 返回首页");
+  // onUnload 清理不炸
+  page.onUnload();
+  assert.equal(page.saveBackTimer, null, "卸载清计时器");
+});

@@ -1299,3 +1299,31 @@
   color: var(--text-2);
   margin-top: 2rpx;
 }
+
+/* 入口态识别中:照片限高预览+蒙层文案(2026-10-18;限高由 JS photoExpandStyle 保证) */
+.entry-photo {
+  position: relative;
+  margin: 24rpx auto 0;
+  border-radius: 16rpx;
+  overflow: hidden;
+  background: #000;
+}
+.entry-photo-veil {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16rpx 20rpx calc(16rpx + env(safe-area-inset-bottom) * 0);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.62));
+  color: #ffffff;
+  font-size: 26rpx;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+.entry-photo-veil .e2 {
+  font-size: 20rpx;
+  font-weight: 600;
+  opacity: 0.85;
+}
