@@ -329,6 +329,10 @@ Page<
     pendingEvidence: PhotoPendingEvidence | null;
     /** 庆祝胶囊计时器(onUnload 清理防跨页泄漏) */
     celebrateTimer: ReturnType<typeof setTimeout> | null;
+    /** 保存成功后自动返回首页计时器(庆祝胶囊闪完再退) */
+    saveBackTimer: ReturnType<typeof setTimeout> | null;
+    /** 自动返回延迟(ms;测试可注 0) */
+    saveBackDelayMs: number;
     /** C3:重试关联进行中(门禁用重复点击) */
     evidenceRetryBusy: boolean;
     lastAudioPath: string;
@@ -378,7 +382,8 @@ Page<
     onToggleAllTap(): void;
     onQuickVerifyTap(e: WechatMiniprogram.CustomEvent): void;
     showCelebrate(text: string): void;
-    onManualAddTap(): void;
+      scheduleSaveBack(): void;
+  onManualAddTap(): void;
     rebuildRows(): void;
     /* ---- 位置栏 ---- */
     onBatchLocEditTap(): void;
@@ -513,6 +518,8 @@ Page<
   committing: false,
   pendingEvidence: null as PhotoPendingEvidence | null,
   celebrateTimer: null,
+  saveBackTimer: null,
+  saveBackDelayMs: 1500,
   evidenceRetryBusy: false,
   lastAudioPath: "",
   audioPlayed: false,
@@ -597,6 +604,10 @@ Page<
     if (this.celebrateTimer !== null) {
       clearTimeout(this.celebrateTimer);
       this.celebrateTimer = null;
+    }
+    if (this.saveBackTimer !== null) {
+      clearTimeout(this.saveBackTimer);
+      this.saveBackTimer = null;
     }
     // 全部入库(或空批)**且无证据待关联**才清会话;否则中途退出保留恢复入口
     // (§4.1 photo-session)。pendingEvidence 非空(C3:evidence_failed 待重试关联)
@@ -1037,6 +1048,18 @@ Page<
     this.rowsRaw = quickVerifyRows(this.rowsRaw, mode);
     this.rebuildRows();
     this.persistSession();
+  },
+
+  /** 保存成功自动返回首页(真机反馈 2026-10-18):庆祝胶囊(~1.4s)闪完退回;
+   * 页面已走/再次保存时重置;失败不退(留在本页可重试)。 */
+  scheduleSaveBack() {
+    if (this.saveBackTimer !== null) {
+      clearTimeout(this.saveBackTimer);
+    }
+    this.saveBackTimer = setTimeout(() => {
+      this.saveBackTimer = null;
+      this.navigateBackSafe();
+    }, this.saveBackDelayMs);
   },
 
   /** 保存庆祝胶囊(微交互包 2026-10-17):弹入 1.4s 自动收;连续触发重置计时 */
@@ -2019,6 +2042,8 @@ Page<
       if (this.pendingEvidence === null) {
         clearPhotoSession();
         this.showCelebrate("✓ 都记住了 · " + pending.length + " 件已入库");
+        // 真机反馈 2026-10-18:确认保存后自动回首页(庆祝闪完再退;首页横幅可再进)
+        this.scheduleSaveBack();
       } else {
         // C3:建档全部成功但部分证据待关联——会话保留续联载荷,终态提示 + 重试入口
         this.persistSession();
