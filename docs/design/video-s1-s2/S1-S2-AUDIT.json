@@ -5497,16 +5497,16 @@
   "target_ids": [
    "D1-019",
    "D1-020",
-   "D2-020",
-   "D2-022",
+   "D2-019",
+   "D3-021",
    "D3-BAT",
    "D3-001"
   ],
   "target_codes": {
    "V1": "D1-019",
    "V2": "D1-020",
-   "V3": "D2-020",
-   "V4": "D2-022",
+   "V3": "D2-019",
+   "V4": "D3-021",
    "S1": "D3-BAT",
    "S2": "D3-001"
   },
@@ -5514,15 +5514,135 @@
    "video_only": [
     "D1-019",
     "D1-020",
-    "D2-020",
-    "D2-022"
+    "D2-019",
+    "D3-021"
    ],
    "shared_photo_video": [
     "D3-BAT",
     "D3-001"
    ]
   },
-  "target_class_note": "D2-022 has vis.p3=0 (video-only under the 9-photo set); v1 protocol misclassified it as shared; v2 corrected.",
+  "target_times": {
+   "D1-019": "v1 38.1s",
+   "D1-020": "v1 40.3s",
+   "D2-019": "v3 13.0s",
+   "D3-021": "v4 14.1s",
+   "D3-BAT": "v4 4.0s",
+   "D3-001": "v4 19.2s"
+  },
+  "target_class_note": "Offline screening (2026-10-18, zero model calls) replaced D2-020/D2-022 with D2-019/D3-021 and corrected D1-020 time 43.2s -> 40.3s. D2-020 photo hit was a false positive (box on a different object); D2-022 had only a 3.9% low-confidence edge box. Structure remains 4 video-only + 2 shared.",
+  "offline_screening": {
+   "doc": "H2-OFFLINE-SCREENING.md",
+   "model_calls": 0,
+   "targets": [
+    {
+     "id": "D1-019",
+     "code": "V1",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 2,
+     "distinct_times": 1,
+     "max_box_area": 0.24,
+     "target_index": 5,
+     "sharp_ratio": 1.47,
+     "grade": "strong"
+    },
+    {
+     "id": "D1-020",
+     "code": "V2",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 4,
+     "distinct_times": 2,
+     "max_box_area": 0.257,
+     "target_index": 5,
+     "sharp_ratio": 1.27,
+     "grade": "strong"
+    },
+    {
+     "id": "D2-019",
+     "code": "V3",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 0,
+     "distinct_times": 0,
+     "max_box_area": null,
+     "area_note": "manual visual estimate ~35-40%",
+     "target_index": 4,
+     "sharp_ratio": 1.04,
+     "grade": "strong_manual"
+    },
+    {
+     "id": "D3-021",
+     "code": "V4",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 5,
+     "distinct_times": 4,
+     "max_box_area": 0.094,
+     "target_index": 4,
+     "sharp_ratio": 2.2,
+     "grade": "strong"
+    },
+    {
+     "id": "D3-BAT",
+     "code": "S1",
+     "type": "shared",
+     "photo_hits": 16,
+     "video_boxes": 15,
+     "distinct_times": 3,
+     "max_box_area": 0.56,
+     "target_index": 2,
+     "sharp_ratio": 3.08,
+     "grade": "strong"
+    },
+    {
+     "id": "D3-001",
+     "code": "S2",
+     "type": "shared",
+     "photo_hits": 14,
+     "video_boxes": 17,
+     "distinct_times": 6,
+     "max_box_area": 0.111,
+     "target_index": 6,
+     "sharp_ratio": 1.12,
+     "grade": "strong"
+    }
+   ],
+   "video_only_corpus": {
+    "total": 25,
+    "no_box": 11,
+    "one_box": 6,
+    "ge2_boxes": 8,
+    "ge2_times": 5,
+    "max_area_ge_5pct": 12
+   },
+   "common_corpus": {
+    "total": 21,
+    "photo_recognized": 15,
+    "video_box": 19,
+    "no_photo_ids": [
+     "D1-002",
+     "D1-009",
+     "D2-001",
+     "D2-004",
+     "D3-024",
+     "D3-015"
+    ],
+    "no_video_box_ids": [
+     "D2-015",
+     "D3-024"
+    ]
+   },
+   "findings": [
+    "D1-020 target time 43.2s showed a different title; corrected to 40.3s.",
+    "D2-020 photo hit was a false positive (box on a different object); no video box/target frame; removed.",
+    "D2-022 had only a 3.9% low-confidence edge box at t=0.1s; removed.",
+    "D2-019/D3-021 selected as evidence-backed replacements; D2-019 has no model box but manual visual evidence.",
+    "25 video-only items: 11 no box, 6 one box, 8 >=2 boxes; 12 max box area >=5%.",
+    "21 common items: 15 photo-recognized, 19 video-box."
+   ]
+  },
   "conditions": [
    "photo_only",
    "photo_plus_keyframe_set"
