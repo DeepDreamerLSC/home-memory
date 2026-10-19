@@ -28,7 +28,7 @@
  */
 
 const cloud = require("wx-server-sdk");
-const { handler, vlRecognize, draftEditParse, locationSplit } = require("./lib/handler");
+const { handler, vlRecognize, videoTargetRecognize, draftEditParse, locationSplit } = require("./lib/handler");
 const { callDeepSeek } = require("./lib/deepseek");
 const localLlm = require("./lib/local-llm");
 const vl = require("./lib/vl");
@@ -42,6 +42,17 @@ exports.main = async function (event) {
     // 视觉识别:只依赖 VL 三件套;未配置时不注入 callVL(handler 返回 vl_not_configured)。
     // 图片经 event.image_base64 直传(本地压缩图),不读云存储(隐私红线,无 file_id 路径)。
     return vlRecognize(event, {
+      callVL: vl.isVlConfigured()
+        ? (promptText, imageBase64) => vl.callVlModel(promptText, imageBase64)
+        : undefined,
+      logger: (meta) => console.log(JSON.stringify(meta)),
+    });
+  }
+
+  if (action === "videoTargetRecognize") {
+    // 单帧目标识别:与 vlRecognize 共用现有 VL 三件套/封装,不接文本模型降级;
+    // 图片只存当次调用内存,服务端不落库,日志由 handler 白名单收敛。
+    return videoTargetRecognize(event, {
       callVL: vl.isVlConfigured()
         ? (promptText, imageBase64) => vl.callVlModel(promptText, imageBase64)
         : undefined,

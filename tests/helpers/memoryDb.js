@@ -126,6 +126,19 @@ function createMemoryDb(options) {
         if (id === undefined || id === null) {
           id = "mem-" + docs.length + "-" + Math.random().toString(36).slice(2, 10);
           doc._id = id;
+        } else {
+          // 与真实 CloudBase 一致:_id 为集合内主键,并发 add 同一 _id 必须
+          // 以 E11000 拒绝。物品锁的抢锁 CAS 依赖这一语义。
+          var idClash = docs.some(function (d) { return d._id === id; });
+          if (idClash) {
+            return Promise.reject(
+              new Error(
+                "collection.add:fail -502001 database request fail. [FailedOperation.Insert] " +
+                  "bulk write error: E11000 duplicate key error collection: " + name +
+                  " index: _id_ dup key"
+              )
+            );
+          }
         }
         docs.push(doc);
         return Promise.resolve({ _id: id });

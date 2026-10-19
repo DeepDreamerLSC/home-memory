@@ -22,6 +22,8 @@ import type {
   ExtractDraftMultiEvent,
   ExtractDraftMultiResponse,
   ExtractDraftOkResponse,
+  ExtractDraftVideoTargetEvent,
+  ExtractDraftVideoTargetResponse,
   GetItemResponse,
   LocationSplitEvent,
   LocationSplitResponse,
@@ -42,6 +44,7 @@ import type {
   VideoEvidenceAttachResponse,
   VideoEvidenceDeleteResponse,
   VideoEvidenceGetResponse,
+  VideoEvidenceHighlightSaveResponse,
   VideoUploadBeginResponse,
   VideoUploadCancelResponse,
   VideoUploadReceiptResponse,
@@ -61,6 +64,8 @@ const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 const ITEMS_API_TIMEOUT_MS = 15000;
 /** extractDraft 服务端 LLM 超时 20 秒,客户端放宽到 30 秒,优先让服务端错误回来 */
 const EXTRACT_DRAFT_TIMEOUT_MS = 30000;
+/** 单帧 VL 识别:服务端 config 60s,客户端 70s 让服务端超时/错误先回来 */
+const VIDEO_TARGET_RECOGNIZE_TIMEOUT_MS = 70000;
 
 /** 客户端侧错误码(与服务端契约错误码区分) */
 export const CLIENT_TIMEOUT = "CLIENT_TIMEOUT";
@@ -124,6 +129,13 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
   AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
 };
+
+const VIDEO_TARGET_MESSAGES: Record<string, string> = {
+  AI_UNAVAILABLE: "AI 查找暂不可用,可继续回放视频自己确认",
+  INVALID_INPUT: "这一帧图片不符合识别要求,请重试",
+};
+
+const VIDEO_TARGET_CONFIDENCE_VALUES = ["high", "mid", "low"] as const;
 
 /** 提醒类别冻结词表(issue #36,与服务端 remind_kind 同源) */
 const REMIND_KIND_VALUES: readonly string[] = ["有效期", "开封后", "下次维护"];
@@ -245,6 +257,41 @@ function callCloudFunction(
   });
 }
 
+function validHighlightBox(box: unknown): boolean {
+  if (box === null) return true;
+  if (isRecord(box) === false) return false;
+  const values = [box.x1, box.y1, box.x2, box.y2];
+  if (
+    values.every(
+      (n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1,
+    ) === false
+  ) {
+    return false;
+  }
+  return (box.x2 as number) > (box.x1 as number) && (box.y2 as number) > (box.y1 as number);
+}
+
+/** 服务端已确认高亮形状门:时间窗整数、box null 或 0-1、frame 可选且在窗内、source 固定。 */
+function validVideoHighlight(v: unknown): boolean {
+  if (isRecord(v) === false) return false;
+  if (
+    Number.isInteger(v.start_ms) === false ||
+    Number.isInteger(v.end_ms) === false ||
+    (v.start_ms as number) < 0 ||
+    (v.end_ms as number) <= (v.start_ms as number) ||
+    v.source !== "user_confirmed" ||
+    validHighlightBox(v.box) === false
+  ) {
+    return false;
+  }
+  if (v.frame_ms === undefined) return true;
+  return (
+    Number.isInteger(v.frame_ms) &&
+    (v.frame_ms as number) >= (v.start_ms as number) &&
+    (v.frame_ms as number) < (v.end_ms as number)
+  );
+}
+
 /** 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示) */
 function validVideoEvidenceRow(v: unknown): boolean {
   if (isRecord(v) === false) return false;
@@ -258,6 +305,10 @@ function validVideoEvidenceRow(v: unknown): boolean {
     typeof v.video_h === "number" &&
     typeof v.captured_location_text === "string" &&
     typeof v.consent_version === "string" &&
+    Array.isArray(v.highlights) &&
+    v.highlights.every(validVideoHighlight) &&
+    Number.isInteger(v.highlight_version) &&
+    (v.highlight_version as number) >= 0 &&
     typeof v.created_at === "string"
   );
 }
@@ -380,6 +431,18 @@ function validateItemsOkResponse(
     case "videoEvidenceGet":
       if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false) throw bad();
       break;
+    case "videoEvidenceHighlightSave":
+      if (
+        typeof r.evidence_id !== "string" ||
+        Array.isArray(r.highlights) === false ||
+        r.highlights.every(validVideoHighlight) === false ||
+        Number.isInteger(r.highlight_version) === false ||
+        (r.highlight_version as number) < 0 ||
+        typeof r.duplicated !== "boolean"
+      ) {
+        throw bad();
+      }
+      break;
     case "remindList":
       // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
       // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
@@ -421,6 +484,7 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "videoUploadReceipt",
   "videoUploadCancel",
   "videoEvidenceAttach",
+  "videoEvidenceHighlightSave",
   "videoEvidenceDelete",
 ]);
 
@@ -478,6 +542,9 @@ export function callItemsApi(
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoEvidenceGet" }>,
 ): Promise<VideoEvidenceGetResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceHighlightSave" }>,
+): Promise<VideoEvidenceHighlightSaveResponse>;
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoEvidenceDelete" }>,
 ): Promise<VideoEvidenceDeleteResponse>;
@@ -829,6 +896,49 @@ export async function callLocationSplit(text: string): Promise<LocationSplitResp
   };
 }
 
+
+/**
+ * 单件视频「AI 找这件物品」单帧识别(extractDraft.videoTargetRecognize):
+ * 只走现有 VL,无状态/不落库;客户端只做形状门,服务端已归一 box 到 0..1。
+ * 坏 JSON 的重试与 AI_UNAVAILABLE/INVALID_INPUT 语义由服务端统一裁定。
+ */
+export async function callVideoTargetRecognize(
+  event: ExtractDraftVideoTargetEvent,
+): Promise<ExtractDraftVideoTargetResponse> {
+  const result = await callCloudFunction(
+    EXTRACT_DRAFT_FUNCTION,
+    event,
+    VIDEO_TARGET_RECOGNIZE_TIMEOUT_MS,
+  );
+  if (isRecord(result) === false) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (result.ok === false) {
+    throw toServerError(result.error, result.message, VIDEO_TARGET_MESSAGES);
+  }
+  if (result.ok !== true) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  if (
+    typeof result.hit !== "boolean" ||
+    typeof result.confidence !== "string" ||
+    VIDEO_TARGET_CONFIDENCE_VALUES.indexOf(
+      result.confidence as (typeof VIDEO_TARGET_CONFIDENCE_VALUES)[number],
+    ) === -1 ||
+    validHighlightBox(result.box) === false
+  ) {
+    throw new ApiError(CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+  }
+  return {
+    ok: true,
+    hit: result.hit,
+    box: result.box as ExtractDraftVideoTargetResponse["box"],
+    confidence: result.confidence as ExtractDraftVideoTargetResponse["confidence"],
+  };
+}
+
+/** 兼容按 extractDraft action 命名的调用点。 */
+export const callExtractDraftVideoTarget = callVideoTargetRecognize;
 
 /** 生成 operation_id(uuid v4 形态,36 位,满足契约 ≤64) */
 export function uuid(): string {

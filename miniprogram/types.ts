@@ -119,7 +119,7 @@ export type ItemsApiErrorCode =
   | "OPERATION_CONFLICT";
 
 /** extractDraft 错误码 */
-export type ExtractDraftErrorCode = "AI_UNAVAILABLE";
+export type ExtractDraftErrorCode = "AI_UNAVAILABLE" | "INVALID_INPUT";
 
 /* ---------------- itemsApi 请求 ---------------- */
 
@@ -253,6 +253,25 @@ export type ItemsApiEvent =
       } & ScopeWriteBinding
     )
   | { action: "videoEvidenceGet"; item_ids: string[] }
+  | (
+      {
+        /**
+         * 单件视频「AI 找这件物品」的用户确认高亮保存。
+         * 只接受用户勾选后的时间窗与框；AI 原始候选/目标名/confidence 永不落库。
+         * 整体替换该 evidence 的 highlights；版本 CAS + item 锁防并发/删除竞态；
+         * 同 highlight_update_id 重放幂等。
+         */
+        action: "videoEvidenceHighlightSave";
+        item_id: string;
+        evidence_id: string;
+        /** 页面读到的 highlight_version；初始 0 */
+        expected_highlight_version: number;
+        /** 用户确认保存的幂等键(uuid 8-64) */
+        highlight_update_id: string;
+        /** 1..8 条；服务端固定写入 source:"user_confirmed" 并升序规范化 */
+        highlights: VideoEvidenceHighlightInput[];
+      } & ScopeWriteBinding
+    )
   | (
       {
         /** 删除某件物品的一条或全部视频证据(服务端先删云文件再删行) */
@@ -396,6 +415,7 @@ export type ItemsApiOkResponse =
   | VideoEvidenceAttachResponse
   | VideoUploadCancelResponse
   | VideoEvidenceGetResponse
+  | VideoEvidenceHighlightSaveResponse
   | VideoEvidenceDeleteResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
@@ -404,6 +424,28 @@ export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
 export interface ExtractDraftEvent {
   text: string;
+}
+
+/**
+ * 单帧目标识别(extractDraft.videoTargetRecognize)：只走现有 VL，无状态、不落库。
+ * 时间不由服务端接收；客户端候选 time_ms 来自抽帧计划的 seek 目标。
+ */
+export interface ExtractDraftVideoTargetEvent {
+  action: "videoTargetRecognize";
+  /** 目标物品名，trim 后 1..40 code points；只用于当次 prompt，不落日志 */
+  target_name: string;
+  /** 裸 base64(无 data: 前缀/空白)，≤4,000,000 字符 */
+  image_base64: string;
+  img_w: number;
+  img_h: number;
+}
+
+/** 单帧受控识别结果：hit 且 box 非空才是可确认候选 */
+export interface ExtractDraftVideoTargetResponse {
+  ok: true;
+  hit: boolean;
+  box: Box | null;
+  confidence: "high" | "mid" | "low";
 }
 
 export interface ExtractDraftOkResponse {
@@ -1040,6 +1082,32 @@ export interface PhotoEvidenceGetResponse {
 
 /* ---------------- 单件视频留证:videoUploadBegin / videoEvidenceAttach / videoEvidenceGet ---------------- */
 
+/** 用户确认后的视频高亮；只持久化时间窗+框+固定来源，不存 AI 原始输出 */
+export interface VideoEvidenceHighlight {
+  /** 视频内起始毫秒(含) */
+  start_ms: number;
+  /** 视频内结束毫秒(不含)，<= duration_ms */
+  end_ms: number;
+  /** 0-1，相对完整视频帧左上原点；null = 仅时间窗、无框（不为旧行伪造） */
+  box: Box | null;
+  /**
+   * 框对应的视频内观察帧毫秒（可选，[start_ms,end_ms)）。
+   * 缺省时读取方按 start_ms 处理；保存时客户端可带抽帧时间，避免框与窗口起点错位。
+   */
+  frame_ms?: number;
+  source: "user_confirmed";
+}
+
+/** 保存请求里的候选高亮：来源由服务端固定，客户端不得自报 */
+export interface VideoEvidenceHighlightInput {
+  start_ms: number;
+  end_ms: number;
+  /** 必填但可为 null；null = 仅时间窗、无框 */
+  box: Box | null;
+  /** 可选：框对应观察帧毫秒，携带时须在 [start_ms,end_ms) 内 */
+  frame_ms?: number;
+}
+
 export interface VideoEvidenceRow {
   evidence_id: string;
   item_id: string;
@@ -1052,6 +1120,10 @@ export interface VideoEvidenceRow {
   captured_location_text: string;
   /** 服务端认可的用户授权版本;"" = 旧/异常行,客户端不展示 */
   consent_version: string;
+  /** 用户确认过的高亮；旧行/异常行为 []。AI 候选不会出现在这里 */
+  highlights: VideoEvidenceHighlight[];
+  /** 高亮版本 CAS 基准；旧行/异常行为 0 */
+  highlight_version: number;
   created_at: string;
 }
 
@@ -1085,6 +1157,15 @@ export interface VideoEvidenceGetResponse {
   household_id?: string;
   scope_revision?: number;
   evidence: VideoEvidenceRow[];
+}
+
+export interface VideoEvidenceHighlightSaveResponse {
+  ok: true;
+  evidence_id: string;
+  highlights: VideoEvidenceHighlight[];
+  highlight_version: number;
+  /** true = 同 highlight_update_id 幂等重放，版本未再次递增 */
+  duplicated: boolean;
 }
 
 export interface VideoEvidenceDeleteResponse {
