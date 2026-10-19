@@ -1,0 +1,5840 @@
+{
+ "schema": "s1-s2-audit-v1",
+ "generated_at": "2026-10-18",
+ "scope": "S1/S2 frozen-result audit, zero model calls; sanitized (no item names, raw responses, images, or external links).",
+ "timeline": {
+  "s1_request": "2026-10-18 20:47",
+  "s1_owner_approval": "2026-10-18 20:55:35",
+  "s1_gold_frozen": "2026-10-18 20:59",
+  "s1_run": "2026-10-18 21:02-21:12 (approx; from artifact mtimes)",
+  "s2_owner_delegation": "2026-10-18 21:37:58",
+  "s2_prereg_frozen": "2026-10-18 ~21:43",
+  "s2_run": "2026-10-18 21:44-21:52",
+  "s2_diagnostic": "2026-10-18 21:50-21:51",
+  "architect_review": "2026-10-18 22:15 (issue #85 comment 6250789377)"
+ },
+ "authorization": {
+  "s1": "Owner approved 90 logical / 180 request hard cap at 20:55, with three preconditions (freeze Gold, clarify zoom budget, keep +10pp/-3pp/+5pp thresholds). Formal run used 90/90.",
+  "s2": "Owner message 21:37:58: 'you implement S2'. Pre-registration and the 36-call budget were authored by the runner and executed at 21:44 without separate pre-run approval of thresholds/budget. This is a governance exception, not an approval of S2.1.",
+  "s2_diagnostic": "6 exploratory calls at 21:50-21:51, inside the pre-registered 45-call hard cap but outside the formal protocol; no separate approval; excluded from the STOP verdict.",
+  "s2_1": "Not approved. No new model calls since the 42/45 run."
+ },
+ "privacy": {
+  "s1_history": "Before the 20:55 approval there was external image-review history for some S1 frames; the S1 'zero upload' wording was corrected by the owner. S1 formal run from 20:55 was local-only.",
+  "s2": "All S2 calls used 127.0.0.1:8307 only. No external image recognition, cloud upload, or third-party review.",
+  "archive": "Raw material, frame images, model responses and Gold names remain local under /tmp; this public report contains only IDs, counts, timestamps and hashes."
+ },
+ "frozen_artifacts": {
+  "gold_sha256": "ba9b72d07b4de5e13edef63efaf800c73225e5a7f772f6c1ffcaac46c74f0ef7",
+  "s1_prereg_sha256": "15abefbf40658f0aa56a7213158c418f72cbf82a0ca07c37d73baaaee25b7635",
+  "s1_scorer_sha256": "7ba3b3a7ca361cd9d0b993537c9dfa35be56b7b12e704ebd3cb7ef81e83fa43a",
+  "s2_prereg_sha256": "8a420282b9ee2051d3dc994fc941f9e802f1e3177f42cad3629a3bb5db7869fb",
+  "s2_sampler_sha256": "6360aa186729cb668d721fbb768e43faeefe31e42ddae4c329f0bce967571683",
+  "s2_scorer_sha256": "70d038a005db6e1ebb586eeadc95118ff85108d7f3dc0a1a1523888a0556035d",
+  "s1_script_sha256": "7ba3b3a7ca361cd9d0b993537c9dfa35be56b7b12e704ebd3cb7ef81e83fa43a",
+  "model": "<models>/Qwen3-VL-8B-Instruct-4bit",
+  "endpoint": "127.0.0.1:8307",
+  "s1_params": {
+   "temperature": 0.1,
+   "max_tokens": 2000,
+   "images_per_call": 1
+  },
+  "s2_params": {
+   "temperature": 0.1,
+   "max_tokens": 2000,
+   "repetition_penalty": 1.1,
+   "image_long_side": 1024,
+   "jpeg_quality": 88
+  },
+  "repo_head_at_run": "cc3b837"
+ },
+ "denominators": {
+  "video_c": {
+   "D1": [
+    "D1-001",
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-008",
+    "D1-009",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "D2": [
+    "D2-001",
+    "D2-002",
+    "D2-003",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "D3": [
+    "D3-001",
+    "D3-002",
+    "D3-005",
+    "D3-006",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-015",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021",
+    "D3-024",
+    "D3-BAT"
+   ]
+  },
+  "video_only": {
+   "D1": [
+    "D1-005",
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "D2": [
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "D3": [
+    "D3-002",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021"
+   ]
+  },
+  "p3_c": {
+   "D1": [
+    "D1-001",
+    "D1-002",
+    "D1-006",
+    "D1-008",
+    "D1-009",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015"
+   ],
+   "D2": [
+    "D2-001",
+    "D2-002",
+    "D2-003",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-033"
+   ],
+   "D3": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-014",
+    "D3-015",
+    "D3-024",
+    "D3-BAT"
+   ]
+  },
+  "totals": {
+   "video_c": 46,
+   "video_only": 25,
+   "p3_c": 23,
+   "common": 21
+  }
+ },
+ "material_hashes": {
+  "v1.mp4": {
+   "sha256": "77967165cf6bd4508ef66cde546885801a9bb6f7157dea3ac0fa0997ddbd710c",
+   "bytes": 9581101
+  },
+  "v3.mp4": {
+   "sha256": "61b4e91bcd6c08112257e4ef392ea50a2fc85cf95bd0dbab993f5dca7ca017e6",
+   "bytes": 3936260
+  },
+  "v4.mp4": {
+   "sha256": "69ab1b389458d6181bf425153f31b0fbb060e286190b9e62cdef0cbad59415a3",
+   "bytes": 4320938
+  },
+  "p3/p1.jpg": {
+   "sha256": "f95243edef5fbce5c7bd1b297739c35c691d47828aa760ccde7f38c639fe6a83",
+   "bytes": 354863
+  },
+  "p3/p2.jpg": {
+   "sha256": "98cefe97568c65721bfe19a27df5fbb3c76d816e87f2ae2e658d1d45818288c5",
+   "bytes": 283680
+  },
+  "p3/p3.jpg": {
+   "sha256": "bc9e377bb93de096e5d6cd6e146f466f74bd59805da1fb7f2835b6ad51f05f80",
+   "bytes": 319440
+  },
+  "p3/p4.jpg": {
+   "sha256": "1ac441b84680dc6e0e61f53ec20469a52035297551de7cacffaba9cd5929446f",
+   "bytes": 353974
+  },
+  "p3/p5.jpg": {
+   "sha256": "b2987dfdaedb2df8bc5ab7ed2aee7b3df1c8ae98929050e239d837ed2a7db7a5",
+   "bytes": 282353
+  },
+  "p3/p6.jpg": {
+   "sha256": "0bae9f00e0eec092077c2ff22d39b413b330f4649afd0799967b18893614eab6",
+   "bytes": 277490
+  },
+  "p3/p7.jpg": {
+   "sha256": "34013f86670cd2ce35a8d7882cb5f8c77d1ec7c1096a699b038a08006de0ee32",
+   "bytes": 325671
+  },
+  "p3/p8.jpg": {
+   "sha256": "e1c4427e8ce6010170de3645caa8ba180c0b8c328fe3d00c02e430424b5a8858",
+   "bytes": 286163
+  },
+  "p3/p9.jpg": {
+   "sha256": "91b061dbe423fa0936678f74d565e5378f798b83db7f6c55727d7c83602c2fc8",
+   "bytes": 316948
+  },
+  "p3/old1.jpg": {
+   "sha256": "ca9f9062441fb4e9ee893fae7d2baed147cabd89d9eab17c7092b1bbfbf86999",
+   "bytes": 277094
+  },
+  "p3/old2.jpg": {
+   "sha256": "38936b90970be487ed3153534480bd1da2fdcb1a7148a66af9f791d1222a171e",
+   "bytes": 251242
+  },
+  "p3/old3.jpg": {
+   "sha256": "4904eba023986042c2372377899269206e041edcb1b1646d802bfb3a8406b5b8",
+   "bytes": 250372
+  }
+ },
+ "s1_frame_manifest": {
+  "v3_frames": {
+   "v1-t0.jpg": {
+    "sha256": "ff64319e97ecdc931b321d1b10e821bfbe2161c1557249f913410876a6a58ef7",
+    "bytes": 92197
+   },
+   "v1-t29.jpg": {
+    "sha256": "123b840eb86213a48789b3a9abaf38c2b5af7b199624a7ef3abe9b53f02b6c18",
+    "bytes": 89403
+   },
+   "v1-t40.jpg": {
+    "sha256": "2aa26f498a69bccf560d9a3e7ae26dec157b96ae7807719adf42f4216a7c1318",
+    "bytes": 88454
+   },
+   "v3-t10.jpg": {
+    "sha256": "8e9d4607ca403e0557714492385b952ff9e58fe7229f6a566cb74f99cf7b2f30",
+    "bytes": 87602
+   },
+   "v3-t7.jpg": {
+    "sha256": "bc27c10b7c2cbea9b3321b3b1f07884be597311568b9c907f39b31254d1941b2",
+    "bytes": 101138
+   },
+   "v3-t8.jpg": {
+    "sha256": "be29f9af43785821b34ebcbee612a0fda4fd818632ab935ed50e24a8e3e5c510",
+    "bytes": 81483
+   },
+   "v4-t11.jpg": {
+    "sha256": "25788f33a25fa430944235eda290e0cfebd9c9813acda00fa179b4eedb9d640f",
+    "bytes": 106853
+   },
+   "v4-t14.jpg": {
+    "sha256": "09a01ec2ee884bd311d545727ade6ad3a586b03017feabade8fc368629956419",
+    "bytes": 108340
+   },
+   "v4-t20.jpg": {
+    "sha256": "ed4d9c8335822de9e29b2e1d08a1801a24d615e0cbc206eb2da361c8e3e61d23",
+    "bytes": 117980
+   }
+  },
+  "v8_frame_times": {
+   "v1": [
+    0.07,
+    6.07,
+    7.07,
+    11.07,
+    14.07,
+    22.07,
+    24.07,
+    33.07
+   ],
+   "v3": [
+    0.07,
+    3.07,
+    4.07,
+    5.07,
+    6.07,
+    7.07,
+    8.07,
+    10.07
+   ],
+   "v4": [
+    1.07,
+    4.07,
+    7.07,
+    11.07,
+    12.07,
+    14.07,
+    18.07,
+    20.07
+   ]
+  }
+ },
+ "s2_frame_manifest": [
+  {
+   "video": "v1",
+   "file": "t03.73.jpg",
+   "sha256": "3e55463220d91a1bdbbd61e75fad847833db2134150062d045152a3e493a4f80",
+   "bytes": 176447
+  },
+  {
+   "video": "v1",
+   "file": "t05.87.jpg",
+   "sha256": "5cd49e5a735b67f679f9a85803d5b49046441e65d71de036f5f5ac6b39676b0f",
+   "bytes": 167696
+  },
+  {
+   "video": "v1",
+   "file": "t08.27.jpg",
+   "sha256": "6081f1bb8f3451e4516f20213102e27c8d7217b049aae4da9a94d560dab0be26",
+   "bytes": 157890
+  },
+  {
+   "video": "v1",
+   "file": "t08.53.jpg",
+   "sha256": "ed1166ef1290c76d2e81aea453655d59c48fe422a5e1a78af3c868f6017405b0",
+   "bytes": 165448
+  },
+  {
+   "video": "v1",
+   "file": "t13.87.jpg",
+   "sha256": "e0cfc97c51abf81f0341fe25a9cea7a577ee45eae6e204e838cf2e9777d08e77",
+   "bytes": 191179
+  },
+  {
+   "video": "v1",
+   "file": "t14.13.jpg",
+   "sha256": "575f4e0b0e8ba44a89c427159c028af4ed11b7972e7c56957877bf4cd6dd3f67",
+   "bytes": 204185
+  },
+  {
+   "video": "v1",
+   "file": "t33.07.jpg",
+   "sha256": "c334510f33c80c6dff3458ce694eaab090bb084460f58fb5d74ab8d42ddc3f91",
+   "bytes": 168259
+  },
+  {
+   "video": "v1",
+   "file": "t38.13.jpg",
+   "sha256": "5034b948c23eafb8af37576cdfe61db1b873aa40e3292db159b17f1e295e06a2",
+   "bytes": 169899
+  },
+  {
+   "video": "v1",
+   "file": "t40.27.jpg",
+   "sha256": "8d7246c97ccbd5fa0498ff451966e5eb55f81ce0804526dc00c6993b09a22302",
+   "bytes": 162656
+  },
+  {
+   "video": "v1",
+   "file": "t43.20.jpg",
+   "sha256": "46d1d38a8b6be6546efcee0617244197c86bcbb0e49a866f4ef97d015a17f5b7",
+   "bytes": 158975
+  },
+  {
+   "video": "v1",
+   "file": "t44.80.jpg",
+   "sha256": "8554cb95f3de074c89f32be1d0a45b6113a5872b9dabc4cfc8de0e8fe37e6970",
+   "bytes": 151248
+  },
+  {
+   "video": "v1",
+   "file": "t46.13.jpg",
+   "sha256": "05e7905d51346d63683e3e528fbe4739dd768a30f5461a045b752aa431b0192e",
+   "bytes": 139621
+  },
+  {
+   "video": "v3",
+   "file": "t00.00.jpg",
+   "sha256": "d9e1b53cf1178ef8a5fb5dd4b6e66f476a60d12eca736227a6e4e7ca7b13024e",
+   "bytes": 149352
+  },
+  {
+   "video": "v3",
+   "file": "t05.85.jpg",
+   "sha256": "383fa2516dffe0f15d58e79ee0090f18557956cb2cfd8f5da44d3123db397dfd",
+   "bytes": 170531
+  },
+  {
+   "video": "v3",
+   "file": "t06.79.jpg",
+   "sha256": "a32302909312a064722d6b50b67944ceb891c210d04aab5c7fdf0535d119f2ff",
+   "bytes": 186223
+  },
+  {
+   "video": "v3",
+   "file": "t10.07.jpg",
+   "sha256": "3aaaefc097f443a7cd84675309c3c70debb7f73dc2a3c23eabe359e3ee3be366",
+   "bytes": 158651
+  },
+  {
+   "video": "v3",
+   "file": "t10.54.jpg",
+   "sha256": "103d563370e9350c7cec185ecb489b2873888ce2efbc317956485bbdd77c0c99",
+   "bytes": 116530
+  },
+  {
+   "video": "v3",
+   "file": "t11.01.jpg",
+   "sha256": "4f30ba146b2fe7493d144b0b4fcf026ee97c9643b2c443b10fe8353c37d97700",
+   "bytes": 121745
+  },
+  {
+   "video": "v3",
+   "file": "t13.11.jpg",
+   "sha256": "7c7b3b9fa691dcad0dc47dc5312aff6533cfaa4b9af9ce27a527d5d3b614af43",
+   "bytes": 124126
+  },
+  {
+   "video": "v3",
+   "file": "t14.28.jpg",
+   "sha256": "e2e70f88df23af7a9b62dc9e0dcd3c362e6d149431a23c535bc38f65a353a5e6",
+   "bytes": 113283
+  },
+  {
+   "video": "v3",
+   "file": "t15.22.jpg",
+   "sha256": "a75130c73c7ed867d581e171aba6616b72b7a3646654ef53b43d3be3e0a43dbd",
+   "bytes": 136491
+  },
+  {
+   "video": "v3",
+   "file": "t16.62.jpg",
+   "sha256": "10cded6326cdec22ffe8950753736ce834e42831f1f01767dfda387cc4f6ecf1",
+   "bytes": 117322
+  },
+  {
+   "video": "v3",
+   "file": "t18.26.jpg",
+   "sha256": "19c0c1ee9707fe20d8e725ce4eefd32c4b932fb88c70c9e299d7f682175bc4ac",
+   "bytes": 159581
+  },
+  {
+   "video": "v3",
+   "file": "t18.97.jpg",
+   "sha256": "0f99f60f7b19941cadcc489a84019995e2dc79a76b29a60f757bc306881b7d23",
+   "bytes": 118401
+  },
+  {
+   "video": "v4",
+   "file": "t04.00.jpg",
+   "sha256": "3319d38b0fcd101fea1aa25917609072b094fb13bcf0ce21cafd7336b39b3841",
+   "bytes": 175953
+  },
+  {
+   "video": "v4",
+   "file": "t05.07.jpg",
+   "sha256": "4631f994fe27129bf7b3b7ddc8a170bd98e168793e2f14a31ca0b870806667a9",
+   "bytes": 141344
+  },
+  {
+   "video": "v4",
+   "file": "t06.13.jpg",
+   "sha256": "5269b6b960fafc642326c53929b3b0f52aaee237b61691daaf4c159fea53dc05",
+   "bytes": 148773
+  },
+  {
+   "video": "v4",
+   "file": "t07.20.jpg",
+   "sha256": "6e2e6ea59ebe2b569a09802d0e7f3688ba1b20048d6b16f9ab59dabcf1da10ec",
+   "bytes": 168896
+  },
+  {
+   "video": "v4",
+   "file": "t08.53.jpg",
+   "sha256": "df3ba81d20149cb7305ffde03db4d1ebec5cdf34739bcdbff53c10c12e7ce685",
+   "bytes": 136456
+  },
+  {
+   "video": "v4",
+   "file": "t09.60.jpg",
+   "sha256": "6cc78be931bcd61a1a9d889d8b5f0cb0e9672c74d18abb91a2b6ae3d55ac89b5",
+   "bytes": 178818
+  },
+  {
+   "video": "v4",
+   "file": "t11.20.jpg",
+   "sha256": "5de8b47a0c800d9285b855788ea9fe87b0fe00a3130496d0f11374446e0950da",
+   "bytes": 201057
+  },
+  {
+   "video": "v4",
+   "file": "t14.13.jpg",
+   "sha256": "e5a2bef60e117faf3795ae7d7f34a580109cff931edaf938d068e577209d829e",
+   "bytes": 203252
+  },
+  {
+   "video": "v4",
+   "file": "t17.33.jpg",
+   "sha256": "d823e1cc2f8b3791225ce62431d56caf8c67bcfe325eb1b369078784a025e427",
+   "bytes": 127277
+  },
+  {
+   "video": "v4",
+   "file": "t18.13.jpg",
+   "sha256": "eea421f0f1595334437065322c6418c6a375d217637a57841f461b4597080d4b",
+   "bytes": 184032
+  },
+  {
+   "video": "v4",
+   "file": "t19.20.jpg",
+   "sha256": "0537206c00fc4bf40ec0168d4da172340c751646c0726aa8b62260f4fb9a035b",
+   "bytes": 170813
+  },
+  {
+   "video": "v4",
+   "file": "t20.00.jpg",
+   "sha256": "fd66438e3e94c8647b711c5ac047d2dfcbec0660afd1af6755b60a802188492e",
+   "bytes": 221679
+  }
+ ],
+ "s1_scores": [
+  {
+   "arm": "P1",
+   "round": 1,
+   "medium": "p1",
+   "raw_entries": 30,
+   "distinct_gold_hits": 16,
+   "merge_events": 5,
+   "black_hits": 1,
+   "review_hits": 2,
+   "recall_den": 25,
+   "recall_hits": 15,
+   "missed": [
+    "D1-006",
+    "D1-009",
+    "D1-014",
+    "D2-004",
+    "D2-021",
+    "D2-022",
+    "D2-011",
+    "D3-002",
+    "D3-007",
+    "D3-014"
+   ],
+   "precision": 0.727,
+   "prec_den": 22,
+   "n_unmatched": 5
+  },
+  {
+   "arm": "P3",
+   "round": 1,
+   "medium": "p3",
+   "raw_entries": 82,
+   "distinct_gold_hits": 17,
+   "merge_events": 32,
+   "black_hits": 5,
+   "review_hits": 5,
+   "recall_den": 23,
+   "recall_hits": 15,
+   "missed": [
+    "D1-002",
+    "D1-009",
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-033",
+    "D3-015",
+    "D3-024"
+   ],
+   "precision": 0.415,
+   "prec_den": 41,
+   "n_unmatched": 19
+  },
+  {
+   "arm": "V3",
+   "round": 1,
+   "medium": "v",
+   "raw_entries": 73,
+   "distinct_gold_hits": 21,
+   "merge_events": 28,
+   "black_hits": 0,
+   "review_hits": 4,
+   "recall_den": 46,
+   "recall_hits": 21,
+   "missed": [
+    "D1-006",
+    "D1-015",
+    "D1-018",
+    "D1-019",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-005",
+    "D1-024",
+    "D1-025",
+    "D2-001",
+    "D2-005",
+    "D2-021",
+    "D2-022",
+    "D2-019",
+    "D2-020",
+    "D3-002",
+    "D3-007",
+    "D3-015",
+    "D3-024",
+    "D3-008",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020"
+   ],
+   "precision": 0.525,
+   "prec_den": 40,
+   "n_unmatched": 19
+  },
+  {
+   "arm": "V8",
+   "round": 1,
+   "medium": "v",
+   "raw_entries": 197,
+   "distinct_gold_hits": 30,
+   "merge_events": 83,
+   "black_hits": 1,
+   "review_hits": 18,
+   "recall_den": 46,
+   "recall_hits": 29,
+   "missed": [
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-024",
+    "D1-025",
+    "D2-001",
+    "D2-019",
+    "D2-020",
+    "D3-002",
+    "D3-024",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021"
+   ],
+   "precision": 0.4,
+   "prec_den": 75,
+   "n_unmatched": 44
+  },
+  {
+   "arm": "P1",
+   "round": 2,
+   "medium": "p1",
+   "raw_entries": 30,
+   "distinct_gold_hits": 15,
+   "merge_events": 5,
+   "black_hits": 1,
+   "review_hits": 2,
+   "recall_den": 25,
+   "recall_hits": 15,
+   "missed": [
+    "D1-006",
+    "D1-009",
+    "D1-014",
+    "D2-004",
+    "D2-021",
+    "D2-022",
+    "D2-011",
+    "D3-002",
+    "D3-007",
+    "D3-014"
+   ],
+   "precision": 0.714,
+   "prec_den": 21,
+   "n_unmatched": 5
+  },
+  {
+   "arm": "P3",
+   "round": 2,
+   "medium": "p3",
+   "raw_entries": 88,
+   "distinct_gold_hits": 17,
+   "merge_events": 35,
+   "black_hits": 5,
+   "review_hits": 4,
+   "recall_den": 23,
+   "recall_hits": 16,
+   "missed": [
+    "D1-002",
+    "D1-009",
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D3-015",
+    "D3-024"
+   ],
+   "precision": 0.395,
+   "prec_den": 43,
+   "n_unmatched": 21
+  },
+  {
+   "arm": "V3",
+   "round": 2,
+   "medium": "v",
+   "raw_entries": 84,
+   "distinct_gold_hits": 22,
+   "merge_events": 37,
+   "black_hits": 0,
+   "review_hits": 5,
+   "recall_den": 46,
+   "recall_hits": 22,
+   "missed": [
+    "D1-006",
+    "D1-015",
+    "D1-018",
+    "D1-019",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-005",
+    "D1-024",
+    "D1-025",
+    "D2-001",
+    "D2-005",
+    "D2-021",
+    "D2-022",
+    "D2-019",
+    "D2-020",
+    "D3-002",
+    "D3-007",
+    "D3-015",
+    "D3-024",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020"
+   ],
+   "precision": 0.564,
+   "prec_den": 39,
+   "n_unmatched": 17
+  },
+  {
+   "arm": "V8",
+   "round": 2,
+   "medium": "v",
+   "raw_entries": 185,
+   "distinct_gold_hits": 29,
+   "merge_events": 83,
+   "black_hits": 0,
+   "review_hits": 14,
+   "recall_den": 46,
+   "recall_hits": 28,
+   "missed": [
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-024",
+    "D1-025",
+    "D2-001",
+    "D2-019",
+    "D2-020",
+    "D3-002",
+    "D3-008",
+    "D3-009",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021"
+   ],
+   "precision": 0.42,
+   "prec_den": 69,
+   "n_unmatched": 40
+  }
+ ],
+ "s2_scores": [
+  {
+   "arm": "P3prod",
+   "round": 1,
+   "calls": 9,
+   "elapsed": 65.6,
+   "abs_correct": 15,
+   "own_hits": 14,
+   "own_den": 23,
+   "own_recall": 0.609,
+   "common_hits": 13,
+   "common_den": 21,
+   "common_recall": 0.619,
+   "video_only_hits": 1,
+   "video_only_den": 25,
+   "precision": 0.306,
+   "prec_den": 49,
+   "merges": 30,
+   "dup_unmatched": 1,
+   "unmatched_distinct": 29,
+   "black_hits": 5,
+   "review_hits": 3,
+   "review_actions": 63,
+   "merge_per_hit": 2.07,
+   "degenerate_calls": [
+    {
+     "tag": "P3prod|r1|D2|r1",
+     "n": 14
+    }
+   ],
+   "per_drawer_hits": {
+    "D1": 7,
+    "D2": 3,
+    "D3": 5
+   },
+   "n_unmatched": 29
+  },
+  {
+   "arm": "P3prod",
+   "round": 2,
+   "calls": 9,
+   "elapsed": 69.4,
+   "abs_correct": 15,
+   "own_hits": 14,
+   "own_den": 23,
+   "own_recall": 0.609,
+   "common_hits": 13,
+   "common_den": 21,
+   "common_recall": 0.619,
+   "video_only_hits": 1,
+   "video_only_den": 25,
+   "precision": 0.333,
+   "prec_den": 45,
+   "merges": 29,
+   "dup_unmatched": 3,
+   "unmatched_distinct": 25,
+   "black_hits": 5,
+   "review_hits": 4,
+   "review_actions": 61,
+   "merge_per_hit": 2.13,
+   "degenerate_calls": [
+    {
+     "tag": "P3prod|r2|D2|r2",
+     "n": 14
+    }
+   ],
+   "per_drawer_hits": {
+    "D1": 6,
+    "D2": 4,
+    "D3": 5
+   },
+   "n_unmatched": 25
+  },
+  {
+   "arm": "V3batch",
+   "round": 1,
+   "calls": 3,
+   "elapsed": 33.0,
+   "abs_correct": 12,
+   "own_hits": 12,
+   "own_den": 46,
+   "own_recall": 0.261,
+   "common_hits": 7,
+   "common_den": 21,
+   "common_recall": 0.333,
+   "video_only_hits": 5,
+   "video_only_den": 25,
+   "precision": 0.632,
+   "prec_den": 19,
+   "merges": 14,
+   "dup_unmatched": 0,
+   "unmatched_distinct": 7,
+   "black_hits": 0,
+   "review_hits": 2,
+   "review_actions": 23,
+   "merge_per_hit": 1.17,
+   "degenerate_calls": [
+    {
+     "tag": "V3batch|r1|D1|r1",
+     "n": 11
+    }
+   ],
+   "per_drawer_hits": {
+    "D1": 5,
+    "D2": 2,
+    "D3": 5
+   },
+   "n_unmatched": 7
+  },
+  {
+   "arm": "V3batch",
+   "round": 2,
+   "calls": 3,
+   "elapsed": 29.9,
+   "abs_correct": 10,
+   "own_hits": 10,
+   "own_den": 46,
+   "own_recall": 0.217,
+   "common_hits": 7,
+   "common_den": 21,
+   "common_recall": 0.333,
+   "video_only_hits": 3,
+   "video_only_den": 25,
+   "precision": 0.588,
+   "prec_den": 17,
+   "merges": 8,
+   "dup_unmatched": 2,
+   "unmatched_distinct": 7,
+   "black_hits": 0,
+   "review_hits": 3,
+   "review_actions": 20,
+   "merge_per_hit": 1.0,
+   "degenerate_calls": [],
+   "per_drawer_hits": {
+    "D1": 5,
+    "D2": 2,
+    "D3": 3
+   },
+   "n_unmatched": 7
+  },
+  {
+   "arm": "V6x2",
+   "round": 1,
+   "calls": 6,
+   "elapsed": 74.4,
+   "abs_correct": 12,
+   "own_hits": 12,
+   "own_den": 46,
+   "own_recall": 0.261,
+   "common_hits": 8,
+   "common_den": 21,
+   "common_recall": 0.381,
+   "video_only_hits": 4,
+   "video_only_den": 25,
+   "precision": 0.522,
+   "prec_den": 23,
+   "merges": 17,
+   "dup_unmatched": 30,
+   "unmatched_distinct": 11,
+   "black_hits": 0,
+   "review_hits": 1,
+   "review_actions": 59,
+   "merge_per_hit": 3.92,
+   "degenerate_calls": [
+    {
+     "tag": "V6x2|r1|D1|r1-A",
+     "n": 15
+    },
+    {
+     "tag": "V6x2|r1|D2|r1-A",
+     "n": 13
+    },
+    {
+     "tag": "V6x2|r1|D3|r1-B",
+     "n": 10
+    }
+   ],
+   "per_drawer_hits": {
+    "D1": 4,
+    "D2": 3,
+    "D3": 5
+   },
+   "n_unmatched": 11
+  },
+  {
+   "arm": "V6x2",
+   "round": 2,
+   "calls": 6,
+   "elapsed": 79.5,
+   "abs_correct": 12,
+   "own_hits": 12,
+   "own_den": 46,
+   "own_recall": 0.261,
+   "common_hits": 8,
+   "common_den": 21,
+   "common_recall": 0.381,
+   "video_only_hits": 4,
+   "video_only_den": 25,
+   "precision": 0.522,
+   "prec_den": 23,
+   "merges": 17,
+   "dup_unmatched": 31,
+   "unmatched_distinct": 11,
+   "black_hits": 0,
+   "review_hits": 0,
+   "review_actions": 59,
+   "merge_per_hit": 4.0,
+   "degenerate_calls": [
+    {
+     "tag": "V6x2|r2|D1|r2-A",
+     "n": 15
+    },
+    {
+     "tag": "V6x2|r2|D2|r2-A",
+     "n": 13
+    },
+    {
+     "tag": "V6x2|r2|D3|r2-B",
+     "n": 10
+    }
+   ],
+   "per_drawer_hits": {
+    "D1": 4,
+    "D2": 3,
+    "D3": 5
+   },
+   "n_unmatched": 11
+  }
+ ],
+ "s2_verdict": {
+  "aggregate": {
+   "P3prod": {
+    "abs_correct": 15.0,
+    "own_recall": 0.609,
+    "common_recall": 0.619,
+    "precision": 0.32,
+    "merges": 29.5,
+    "dup_unmatched": 2.0,
+    "unmatched_distinct": 27.0,
+    "review_actions": 62.0,
+    "video_only_hits": 1.0,
+    "merge_per_hit": 2.1,
+    "stability_diff": 0
+   },
+   "V3batch": {
+    "abs_correct": 11.0,
+    "own_recall": 0.239,
+    "common_recall": 0.333,
+    "precision": 0.61,
+    "merges": 11.0,
+    "dup_unmatched": 1.0,
+    "unmatched_distinct": 7.0,
+    "review_actions": 21.5,
+    "video_only_hits": 4.0,
+    "merge_per_hit": 1.08,
+    "stability_diff": 2
+   },
+   "V6x2": {
+    "abs_correct": 12.0,
+    "own_recall": 0.261,
+    "common_recall": 0.381,
+    "precision": 0.522,
+    "merges": 17.0,
+    "dup_unmatched": 30.5,
+    "unmatched_distinct": 11.0,
+    "review_actions": 59.0,
+    "video_only_hits": 4.0,
+    "merge_per_hit": 3.96,
+    "stability_diff": 0
+   }
+  },
+  "gates": {
+   "绝对正确 +3": false,
+   "共同域 ≥ P3-2pp": false,
+   "合并/件 ≤1.0": false,
+   "复核动作 ≤1.5xP3": true
+  },
+  "verdict": "STOP"
+ },
+ "s2_batch_audit": [
+  {
+   "tag": "P3prod|r1|D1|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1",
+   "elapsed": 7.6,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-001",
+    "D1-006",
+    "D1-008",
+    "D1-012",
+    "D1-013"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-009",
+    "D1-014",
+    "D1-015"
+   ],
+   "n_missed": 4,
+   "black": 1,
+   "review": 0,
+   "n_unmatched": 4,
+   "degenerate": false,
+   "call_index": 1,
+   "call_uid": "S2-P3prod-r1-D1-p1"
+  },
+  {
+   "tag": "P3prod|r1|D1|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1",
+   "elapsed": 6.5,
+   "n_items": 8,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 8,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-001",
+    "D1-006",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015"
+   ],
+   "n_gold_hits": 6,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-008",
+    "D1-009"
+   ],
+   "n_missed": 3,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 2,
+   "degenerate": false,
+   "call_index": 2,
+   "call_uid": "S2-P3prod-r1-D1-p2"
+  },
+  {
+   "tag": "P3prod|r1|D1|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1",
+   "elapsed": 7.9,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-006",
+    "D1-012",
+    "D1-013"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-008",
+    "D1-009",
+    "D1-014",
+    "D1-015"
+   ],
+   "n_missed": 6,
+   "black": 2,
+   "review": 0,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 3,
+   "call_uid": "S2-P3prod-r1-D1-p3"
+  },
+  {
+   "tag": "P3prod|r1|D2|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1",
+   "elapsed": 11.1,
+   "n_items": 15,
+   "n_distinct_names": 2,
+   "n_spatial_clusters": 2,
+   "top_name_count": 14,
+   "top_name_clusters": 1,
+   "same_box_repeats": 13,
+   "gold_hits": [
+    "D2-003"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 6,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": true,
+   "call_index": 4,
+   "call_uid": "S2-P3prod-r1-D2-p4"
+  },
+  {
+   "tag": "P3prod|r1|D2|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1",
+   "elapsed": 7.9,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-003"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 6,
+   "black": 1,
+   "review": 1,
+   "n_unmatched": 7,
+   "degenerate": false,
+   "call_index": 5,
+   "call_uid": "S2-P3prod-r1-D2-p5"
+  },
+  {
+   "tag": "P3prod|r1|D2|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1",
+   "elapsed": 6.5,
+   "n_items": 8,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 8,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-003",
+    "D2-005",
+    "D2-020"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [
+    "D2-020"
+   ],
+   "n_ood": 1,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 5,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 6,
+   "call_uid": "S2-P3prod-r1-D2-p6"
+  },
+  {
+   "tag": "P3prod|r1|D3|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1",
+   "elapsed": 7.9,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 9,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 4,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-014",
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 3,
+   "black": 1,
+   "review": 1,
+   "n_unmatched": 3,
+   "degenerate": false,
+   "call_index": 7,
+   "call_uid": "S2-P3prod-r1-D3-p7"
+  },
+  {
+   "tag": "P3prod|r1|D3|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1",
+   "elapsed": 7.8,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-014",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 2,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 3,
+   "degenerate": false,
+   "call_index": 8,
+   "call_uid": "S2-P3prod-r1-D3-p8"
+  },
+  {
+   "tag": "P3prod|r1|D3|r1",
+   "arm": "P3prod",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1",
+   "elapsed": 2.4,
+   "n_items": 2,
+   "n_distinct_names": 2,
+   "n_spatial_clusters": 2,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-BAT"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-014",
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 6,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": false,
+   "call_index": 9,
+   "call_uid": "S2-P3prod-r1-D3-p9"
+  },
+  {
+   "tag": "V3batch|r1|D1|r1",
+   "arm": "V3batch",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1",
+   "elapsed": 14.3,
+   "n_items": 15,
+   "n_distinct_names": 5,
+   "n_spatial_clusters": 4,
+   "top_name_count": 11,
+   "top_name_clusters": 1,
+   "same_box_repeats": 10,
+   "gold_hits": [
+    "D1-001",
+    "D1-008",
+    "D1-009",
+    "D1-017",
+    "D1-020"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-018",
+    "D1-019",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 15,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": true,
+   "call_index": 10,
+   "call_uid": "S2-V3batch-r1-D1-b3"
+  },
+  {
+   "tag": "V3batch|r1|D2|r1",
+   "arm": "V3batch",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1",
+   "elapsed": 7.7,
+   "n_items": 8,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 7,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-002",
+    "D2-004"
+   ],
+   "n_gold_hits": 2,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-003",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 8,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 4,
+   "degenerate": false,
+   "call_index": 11,
+   "call_uid": "S2-V3batch-r1-D2-b3"
+  },
+  {
+   "tag": "V3batch|r1|D3|r1",
+   "arm": "V3batch",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1",
+   "elapsed": 11.0,
+   "n_items": 12,
+   "n_distinct_names": 12,
+   "n_spatial_clusters": 12,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-006",
+    "D3-008",
+    "D3-011",
+    "D3-021"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-007",
+    "D3-009",
+    "D3-015",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-024",
+    "D3-BAT"
+   ],
+   "n_missed": 11,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 3,
+   "degenerate": false,
+   "call_index": 12,
+   "call_uid": "S2-V3batch-r1-D3-b3"
+  },
+  {
+   "tag": "V6x2|r1|D1|r1-A",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1-A",
+   "elapsed": 14.9,
+   "n_items": 15,
+   "n_distinct_names": 1,
+   "n_spatial_clusters": 3,
+   "top_name_count": 15,
+   "top_name_clusters": 3,
+   "same_box_repeats": 12,
+   "gold_hits": [],
+   "n_gold_hits": 0,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-008",
+    "D1-009",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 20,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": true,
+   "call_index": 13,
+   "call_uid": "S2-V6x2-r1-D1-A"
+  },
+  {
+   "tag": "V6x2|r1|D1|r1-B",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D1",
+   "batch": "r1-B",
+   "elapsed": 6.8,
+   "n_items": 5,
+   "n_distinct_names": 5,
+   "n_spatial_clusters": 5,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-009",
+    "D1-019",
+    "D1-020",
+    "D1-021"
+   ],
+   "n_gold_hits": 4,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-008",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-017",
+    "D1-018",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 16,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": false,
+   "call_index": 14,
+   "call_uid": "S2-V6x2-r1-D1-B"
+  },
+  {
+   "tag": "V6x2|r1|D2|r1-A",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1-A",
+   "elapsed": 14.8,
+   "n_items": 15,
+   "n_distinct_names": 3,
+   "n_spatial_clusters": 3,
+   "top_name_count": 13,
+   "top_name_clusters": 1,
+   "same_box_repeats": 12,
+   "gold_hits": [
+    "D2-002",
+    "D2-003",
+    "D2-004"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 7,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": true,
+   "call_index": 15,
+   "call_uid": "S2-V6x2-r1-D2-A"
+  },
+  {
+   "tag": "V6x2|r1|D2|r1-B",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D2",
+   "batch": "r1-B",
+   "elapsed": 7.7,
+   "n_items": 6,
+   "n_distinct_names": 6,
+   "n_spatial_clusters": 6,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-003"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 9,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 4,
+   "degenerate": false,
+   "call_index": 16,
+   "call_uid": "S2-V6x2-r1-D2-B"
+  },
+  {
+   "tag": "V6x2|r1|D3|r1-A",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1-A",
+   "elapsed": 15.4,
+   "n_items": 15,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 8,
+   "top_name_count": 8,
+   "top_name_clusters": 1,
+   "same_box_repeats": 7,
+   "gold_hits": [
+    "D3-001",
+    "D3-015",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-006",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021",
+    "D3-024"
+   ],
+   "n_missed": 13,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 4,
+   "degenerate": true,
+   "call_index": 17,
+   "call_uid": "S2-V6x2-r1-D3-A"
+  },
+  {
+   "tag": "V6x2|r1|D3|r1-B",
+   "arm": "V6x2",
+   "round": 1,
+   "drawer": "D3",
+   "batch": "r1-B",
+   "elapsed": 14.8,
+   "n_items": 15,
+   "n_distinct_names": 6,
+   "n_spatial_clusters": 6,
+   "top_name_count": 10,
+   "top_name_clusters": 1,
+   "same_box_repeats": 9,
+   "gold_hits": [
+    "D3-001",
+    "D3-006",
+    "D3-021",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 4,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-015",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-024"
+   ],
+   "n_missed": 12,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": true,
+   "call_index": 18,
+   "call_uid": "S2-V6x2-r1-D3-B"
+  },
+  {
+   "tag": "P3prod|r2|D1|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2",
+   "elapsed": 8.2,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-001",
+    "D1-006",
+    "D1-008",
+    "D1-012",
+    "D1-013"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-009",
+    "D1-014",
+    "D1-015"
+   ],
+   "n_missed": 4,
+   "black": 1,
+   "review": 0,
+   "n_unmatched": 4,
+   "degenerate": false,
+   "call_index": 19,
+   "call_uid": "S2-P3prod-r2-D1-p1"
+  },
+  {
+   "tag": "P3prod|r2|D1|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2",
+   "elapsed": 6.1,
+   "n_items": 7,
+   "n_distinct_names": 7,
+   "n_spatial_clusters": 7,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-001",
+    "D1-006",
+    "D1-012",
+    "D1-013",
+    "D1-014"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-008",
+    "D1-009",
+    "D1-015"
+   ],
+   "n_missed": 4,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 2,
+   "degenerate": false,
+   "call_index": 20,
+   "call_uid": "S2-P3prod-r2-D1-p2"
+  },
+  {
+   "tag": "P3prod|r2|D1|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2",
+   "elapsed": 8.3,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-006",
+    "D1-012",
+    "D1-013"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-008",
+    "D1-009",
+    "D1-014",
+    "D1-015"
+   ],
+   "n_missed": 6,
+   "black": 2,
+   "review": 0,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 21,
+   "call_uid": "S2-P3prod-r2-D1-p3"
+  },
+  {
+   "tag": "P3prod|r2|D2|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2",
+   "elapsed": 12.3,
+   "n_items": 15,
+   "n_distinct_names": 2,
+   "n_spatial_clusters": 4,
+   "top_name_count": 14,
+   "top_name_clusters": 3,
+   "same_box_repeats": 11,
+   "gold_hits": [
+    "D2-003"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 6,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": true,
+   "call_index": 22,
+   "call_uid": "S2-P3prod-r2-D2-p4"
+  },
+  {
+   "tag": "P3prod|r2|D2|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2",
+   "elapsed": 8.0,
+   "n_items": 9,
+   "n_distinct_names": 9,
+   "n_spatial_clusters": 9,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-002",
+    "D2-003"
+   ],
+   "n_gold_hits": 2,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 5,
+   "black": 1,
+   "review": 1,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 23,
+   "call_uid": "S2-P3prod-r2-D2-p5"
+  },
+  {
+   "tag": "P3prod|r2|D2|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2",
+   "elapsed": 7.3,
+   "n_items": 8,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 8,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-003",
+    "D2-005",
+    "D2-020"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [
+    "D2-020"
+   ],
+   "n_ood": 1,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-015",
+    "D2-033"
+   ],
+   "n_missed": 5,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 24,
+   "call_uid": "S2-P3prod-r2-D2-p6"
+  },
+  {
+   "tag": "P3prod|r2|D3|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2",
+   "elapsed": 8.2,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 9,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-006",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-005",
+    "D3-014",
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 4,
+   "black": 1,
+   "review": 1,
+   "n_unmatched": 4,
+   "degenerate": false,
+   "call_index": 25,
+   "call_uid": "S2-P3prod-r2-D3-p7"
+  },
+  {
+   "tag": "P3prod|r2|D3|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2",
+   "elapsed": 8.3,
+   "n_items": 10,
+   "n_distinct_names": 10,
+   "n_spatial_clusters": 10,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-014",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 2,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 3,
+   "degenerate": false,
+   "call_index": 26,
+   "call_uid": "S2-P3prod-r2-D3-p8"
+  },
+  {
+   "tag": "P3prod|r2|D3|r2",
+   "arm": "P3prod",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2",
+   "elapsed": 2.7,
+   "n_items": 2,
+   "n_distinct_names": 2,
+   "n_spatial_clusters": 2,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-BAT"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-001",
+    "D3-005",
+    "D3-006",
+    "D3-014",
+    "D3-015",
+    "D3-024"
+   ],
+   "n_missed": 6,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 0,
+   "degenerate": false,
+   "call_index": 27,
+   "call_uid": "S2-P3prod-r2-D3-p9"
+  },
+  {
+   "tag": "V3batch|r2|D1|r2",
+   "arm": "V3batch",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2",
+   "elapsed": 6.2,
+   "n_items": 5,
+   "n_distinct_names": 5,
+   "n_spatial_clusters": 4,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-001",
+    "D1-008",
+    "D1-009",
+    "D1-017",
+    "D1-020"
+   ],
+   "n_gold_hits": 5,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-018",
+    "D1-019",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 15,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": false,
+   "call_index": 28,
+   "call_uid": "S2-V3batch-r2-D1-b3"
+  },
+  {
+   "tag": "V3batch|r2|D2|r2",
+   "arm": "V3batch",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2",
+   "elapsed": 9.8,
+   "n_items": 10,
+   "n_distinct_names": 8,
+   "n_spatial_clusters": 7,
+   "top_name_count": 3,
+   "top_name_clusters": 1,
+   "same_box_repeats": 2,
+   "gold_hits": [
+    "D2-002",
+    "D2-003"
+   ],
+   "n_gold_hits": 2,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 8,
+   "black": 0,
+   "review": 1,
+   "n_unmatched": 2,
+   "degenerate": false,
+   "call_index": 29,
+   "call_uid": "S2-V3batch-r2-D2-b3"
+  },
+  {
+   "tag": "V3batch|r2|D3|r2",
+   "arm": "V3batch",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2",
+   "elapsed": 13.9,
+   "n_items": 15,
+   "n_distinct_names": 13,
+   "n_spatial_clusters": 13,
+   "top_name_count": 3,
+   "top_name_clusters": 3,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D3-001",
+    "D3-006",
+    "D3-021"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-015",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-024",
+    "D3-BAT"
+   ],
+   "n_missed": 13,
+   "black": 0,
+   "review": 2,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 30,
+   "call_uid": "S2-V3batch-r2-D3-b3"
+  },
+  {
+   "tag": "V6x2|r2|D1|r2-A",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2-A",
+   "elapsed": 15.5,
+   "n_items": 15,
+   "n_distinct_names": 1,
+   "n_spatial_clusters": 7,
+   "top_name_count": 15,
+   "top_name_clusters": 7,
+   "same_box_repeats": 8,
+   "gold_hits": [],
+   "n_gold_hits": 0,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-008",
+    "D1-009",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-017",
+    "D1-018",
+    "D1-019",
+    "D1-020",
+    "D1-021",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 20,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": true,
+   "call_index": 31,
+   "call_uid": "S2-V6x2-r2-D1-A"
+  },
+  {
+   "tag": "V6x2|r2|D1|r2-B",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D1",
+   "batch": "r2-B",
+   "elapsed": 7.6,
+   "n_items": 5,
+   "n_distinct_names": 5,
+   "n_spatial_clusters": 5,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D1-009",
+    "D1-019",
+    "D1-020",
+    "D1-021"
+   ],
+   "n_gold_hits": 4,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D1-001",
+    "D1-002",
+    "D1-005",
+    "D1-006",
+    "D1-008",
+    "D1-012",
+    "D1-013",
+    "D1-014",
+    "D1-015",
+    "D1-017",
+    "D1-018",
+    "D1-022",
+    "D1-023",
+    "D1-024",
+    "D1-025",
+    "D1-028"
+   ],
+   "n_missed": 16,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": false,
+   "call_index": 32,
+   "call_uid": "S2-V6x2-r2-D1-B"
+  },
+  {
+   "tag": "V6x2|r2|D2|r2-A",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2-A",
+   "elapsed": 15.9,
+   "n_items": 15,
+   "n_distinct_names": 3,
+   "n_spatial_clusters": 3,
+   "top_name_count": 13,
+   "top_name_clusters": 1,
+   "same_box_repeats": 12,
+   "gold_hits": [
+    "D2-002",
+    "D2-003",
+    "D2-004"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 7,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 0,
+   "degenerate": true,
+   "call_index": 33,
+   "call_uid": "S2-V6x2-r2-D2-A"
+  },
+  {
+   "tag": "V6x2|r2|D2|r2-B",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D2",
+   "batch": "r2-B",
+   "elapsed": 8.3,
+   "n_items": 6,
+   "n_distinct_names": 6,
+   "n_spatial_clusters": 6,
+   "top_name_count": 1,
+   "top_name_clusters": 1,
+   "same_box_repeats": 0,
+   "gold_hits": [
+    "D2-003"
+   ],
+   "n_gold_hits": 1,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D2-001",
+    "D2-002",
+    "D2-004",
+    "D2-005",
+    "D2-015",
+    "D2-019",
+    "D2-020",
+    "D2-021",
+    "D2-022"
+   ],
+   "n_missed": 9,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 5,
+   "degenerate": false,
+   "call_index": 34,
+   "call_uid": "S2-V6x2-r2-D2-B"
+  },
+  {
+   "tag": "V6x2|r2|D3|r2-A",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2-A",
+   "elapsed": 16.1,
+   "n_items": 15,
+   "n_distinct_names": 7,
+   "n_spatial_clusters": 7,
+   "top_name_count": 9,
+   "top_name_clusters": 1,
+   "same_box_repeats": 8,
+   "gold_hits": [
+    "D3-001",
+    "D3-015",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 3,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-006",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-021",
+    "D3-024"
+   ],
+   "n_missed": 13,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 3,
+   "degenerate": true,
+   "call_index": 35,
+   "call_uid": "S2-V6x2-r2-D3-A"
+  },
+  {
+   "tag": "V6x2|r2|D3|r2-B",
+   "arm": "V6x2",
+   "round": 2,
+   "drawer": "D3",
+   "batch": "r2-B",
+   "elapsed": 16.1,
+   "n_items": 15,
+   "n_distinct_names": 6,
+   "n_spatial_clusters": 6,
+   "top_name_count": 10,
+   "top_name_clusters": 1,
+   "same_box_repeats": 9,
+   "gold_hits": [
+    "D3-001",
+    "D3-006",
+    "D3-021",
+    "D3-BAT"
+   ],
+   "n_gold_hits": 4,
+   "ood_hits": [],
+   "n_ood": 0,
+   "missed_ids": [
+    "D3-002",
+    "D3-005",
+    "D3-007",
+    "D3-008",
+    "D3-009",
+    "D3-011",
+    "D3-015",
+    "D3-016",
+    "D3-017",
+    "D3-018",
+    "D3-020",
+    "D3-024"
+   ],
+   "n_missed": 12,
+   "black": 0,
+   "review": 0,
+   "n_unmatched": 1,
+   "degenerate": true,
+   "call_index": 36,
+   "call_uid": "S2-V6x2-r2-D3-B"
+  }
+ ],
+ "single_frame_replay": {
+  "v8": {
+   "D1": {
+    "frames": [
+     {
+      "hits": [
+       "D1-001",
+       "D1-002",
+       "D1-008",
+       "D1-009",
+       "D1-013"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 0.066667,
+      "items": 10,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D1-012",
+       "D1-013",
+       "D1-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 6.066667,
+      "items": 8,
+      "n_unmatched": 4
+     },
+     {
+      "hits": [
+       "D1-012",
+       "D1-013"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 7.066667,
+      "items": 8,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 11.066667,
+      "items": 7,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-022",
+       "D1-023"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 2,
+      "t": 14.066667,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-005",
+       "D1-009",
+       "D1-012",
+       "D1-013"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 22.066667,
+      "items": 10,
+      "n_unmatched": 4
+     },
+     {
+      "hits": [
+       "D1-006",
+       "D1-009",
+       "D1-012",
+       "D1-013"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 3,
+      "dup_name": 0,
+      "t": 24.066667,
+      "items": 10,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D1-001",
+       "D1-008",
+       "D1-009"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 33.066667,
+      "items": 10,
+      "n_unmatched": 7
+     }
+    ],
+    "union": [
+     "D1-001",
+     "D1-002",
+     "D1-005",
+     "D1-006",
+     "D1-008",
+     "D1-009",
+     "D1-012",
+     "D1-013",
+     "D1-014",
+     "D1-015",
+     "D1-022",
+     "D1-023"
+    ],
+    "n_union": 12,
+    "in_domain": [
+     "D1-001",
+     "D1-002",
+     "D1-005",
+     "D1-006",
+     "D1-008",
+     "D1-009",
+     "D1-012",
+     "D1-013",
+     "D1-014",
+     "D1-015",
+     "D1-022",
+     "D1-023"
+    ],
+    "n_in_domain": 12,
+    "ood": [],
+    "n_ood": 0,
+    "misses": [
+     "D1-017",
+     "D1-018",
+     "D1-019",
+     "D1-020",
+     "D1-021",
+     "D1-024",
+     "D1-025",
+     "D1-028"
+    ],
+    "n_misses": 8,
+    "video_only": [
+     "D1-005",
+     "D1-022",
+     "D1-023"
+    ],
+    "n_video_only": 3,
+    "max_frame_in_domain": 6,
+    "mean_frame_in_domain": 3.75,
+    "orphans": [
+     "D1-002",
+     "D1-005",
+     "D1-006",
+     "D1-014",
+     "D1-015",
+     "D1-022",
+     "D1-023"
+    ],
+    "cumulative": [
+     {
+      "k": 1,
+      "union_in_domain": 5,
+      "marginal": 5
+     },
+     {
+      "k": 2,
+      "union_in_domain": 7,
+      "marginal": 2
+     },
+     {
+      "k": 3,
+      "union_in_domain": 7,
+      "marginal": 0
+     },
+     {
+      "k": 4,
+      "union_in_domain": 7,
+      "marginal": 0
+     },
+     {
+      "k": 5,
+      "union_in_domain": 10,
+      "marginal": 3
+     },
+     {
+      "k": 6,
+      "union_in_domain": 11,
+      "marginal": 1
+     },
+     {
+      "k": 7,
+      "union_in_domain": 12,
+      "marginal": 1
+     },
+     {
+      "k": 8,
+      "union_in_domain": 12,
+      "marginal": 0
+     }
+    ]
+   },
+   "D2": {
+    "frames": [
+     {
+      "hits": [
+       "D2-003",
+       "D2-005",
+       "D2-022"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 0.066667,
+      "items": 7,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-001",
+       "D2-002"
+      ],
+      "black": 0,
+      "review": 2,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 3.066667,
+      "items": 8,
+      "n_unmatched": 4
+     },
+     {
+      "hits": [
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 4.066667,
+      "items": 6,
+      "n_unmatched": 4
+     },
+     {
+      "hits": [
+       "D2-002",
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 5.066667,
+      "items": 6,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-002"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 6.066667,
+      "items": 5,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-002",
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 7.066667,
+      "items": 6,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-002"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 8.066667,
+      "items": 5,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-004",
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 10.066667,
+      "items": 10,
+      "n_unmatched": 5
+     }
+    ],
+    "union": [
+     "D2-001",
+     "D2-002",
+     "D2-003",
+     "D2-004",
+     "D2-005",
+     "D2-021",
+     "D2-022"
+    ],
+    "n_union": 7,
+    "in_domain": [
+     "D2-001",
+     "D2-002",
+     "D2-003",
+     "D2-004",
+     "D2-005",
+     "D2-021",
+     "D2-022"
+    ],
+    "n_in_domain": 7,
+    "ood": [],
+    "n_ood": 0,
+    "misses": [
+     "D2-015",
+     "D2-019",
+     "D2-020"
+    ],
+    "n_misses": 3,
+    "video_only": [
+     "D2-021",
+     "D2-022"
+    ],
+    "n_video_only": 2,
+    "max_frame_in_domain": 3,
+    "mean_frame_in_domain": 1.88,
+    "orphans": [
+     "D2-001",
+     "D2-004",
+     "D2-005",
+     "D2-022"
+    ],
+    "cumulative": [
+     {
+      "k": 1,
+      "union_in_domain": 3,
+      "marginal": 3
+     },
+     {
+      "k": 2,
+      "union_in_domain": 5,
+      "marginal": 2
+     },
+     {
+      "k": 3,
+      "union_in_domain": 6,
+      "marginal": 1
+     },
+     {
+      "k": 4,
+      "union_in_domain": 6,
+      "marginal": 0
+     },
+     {
+      "k": 5,
+      "union_in_domain": 6,
+      "marginal": 0
+     },
+     {
+      "k": 6,
+      "union_in_domain": 6,
+      "marginal": 0
+     },
+     {
+      "k": 7,
+      "union_in_domain": 6,
+      "marginal": 0
+     },
+     {
+      "k": 8,
+      "union_in_domain": 7,
+      "marginal": 1
+     }
+    ]
+   },
+   "D3": {
+    "frames": [
+     {
+      "hits": [
+       "D3-001",
+       "D3-006"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 1.066667,
+      "items": 10,
+      "n_unmatched": 6
+     },
+     {
+      "hits": [
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 9,
+      "dup_name": 0,
+      "t": 4.066667,
+      "items": 10,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D3-007",
+       "D3-011",
+       "D3-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 7.066667,
+      "items": 6,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-006",
+       "D3-008",
+       "D3-011"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 11.066667,
+      "items": 10,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D3-006",
+       "D3-011"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 12.066667,
+      "items": 10,
+      "n_unmatched": 6
+     },
+     {
+      "hits": [
+       "D3-006",
+       "D3-009",
+       "D3-011",
+       "D3-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 14.066667,
+      "items": 10,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 18.066667,
+      "items": 5,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-005",
+       "D3-006"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 3,
+      "dup_name": 2,
+      "t": 20.066667,
+      "items": 10,
+      "n_unmatched": 1
+     }
+    ],
+    "union": [
+     "D3-001",
+     "D3-005",
+     "D3-006",
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-015",
+     "D3-021",
+     "D3-BAT"
+    ],
+    "n_union": 10,
+    "in_domain": [
+     "D3-001",
+     "D3-005",
+     "D3-006",
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-015",
+     "D3-021",
+     "D3-BAT"
+    ],
+    "n_in_domain": 10,
+    "ood": [],
+    "n_ood": 0,
+    "misses": [
+     "D3-002",
+     "D3-016",
+     "D3-017",
+     "D3-018",
+     "D3-020",
+     "D3-024"
+    ],
+    "n_misses": 6,
+    "video_only": [
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-021"
+    ],
+    "n_video_only": 5,
+    "max_frame_in_domain": 4,
+    "mean_frame_in_domain": 2.5,
+    "orphans": [
+     "D3-005",
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-015",
+     "D3-021"
+    ],
+    "cumulative": [
+     {
+      "k": 1,
+      "union_in_domain": 2,
+      "marginal": 2
+     },
+     {
+      "k": 2,
+      "union_in_domain": 3,
+      "marginal": 1
+     },
+     {
+      "k": 3,
+      "union_in_domain": 6,
+      "marginal": 3
+     },
+     {
+      "k": 4,
+      "union_in_domain": 7,
+      "marginal": 1
+     },
+     {
+      "k": 5,
+      "union_in_domain": 7,
+      "marginal": 0
+     },
+     {
+      "k": 6,
+      "union_in_domain": 9,
+      "marginal": 2
+     },
+     {
+      "k": 7,
+      "union_in_domain": 9,
+      "marginal": 0
+     },
+     {
+      "k": 8,
+      "union_in_domain": 10,
+      "marginal": 1
+     }
+    ]
+   }
+  },
+  "v3": {
+   "r1": {
+    "D1": {
+     "frames": [
+      {
+       "hits": [
+        "D1-001",
+        "D1-002",
+        "D1-008",
+        "D1-013",
+        "D1-014"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "v1-t0.jpg",
+       "items": 8,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D1-009",
+        "D1-012",
+        "D1-013",
+        "D1-014",
+        "D1-017"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "v1-t29.jpg",
+       "items": 6,
+       "n_unmatched": 1
+      },
+      {
+       "hits": [
+        "D1-009",
+        "D1-014",
+        "D1-020"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "v1-t40.jpg",
+       "items": 8,
+       "n_unmatched": 4
+      }
+     ],
+     "union": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-009",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-017",
+      "D1-020"
+     ],
+     "n_union": 9,
+     "in_domain": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-009",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-017",
+      "D1-020"
+     ],
+     "n_in_domain": 9,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D1-005",
+      "D1-006",
+      "D1-015",
+      "D1-018",
+      "D1-019",
+      "D1-021",
+      "D1-022",
+      "D1-023",
+      "D1-024",
+      "D1-025",
+      "D1-028"
+     ],
+     "n_misses": 11,
+     "video_only": [
+      "D1-017",
+      "D1-020"
+     ],
+     "n_video_only": 2,
+     "max_frame_in_domain": 5,
+     "mean_frame_in_domain": 4.33,
+     "orphans": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-012",
+      "D1-017",
+      "D1-020"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 5,
+       "marginal": 5
+      },
+      {
+       "k": 2,
+       "union_in_domain": 8,
+       "marginal": 3
+      },
+      {
+       "k": 3,
+       "union_in_domain": 9,
+       "marginal": 1
+      }
+     ]
+    },
+    "D2": {
+     "frames": [
+      {
+       "hits": [
+        "D2-003",
+        "D2-004"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 8,
+       "dup_name": 0,
+       "file": "v3-t10.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      },
+      {
+       "hits": [
+        "D2-002"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 2,
+       "dup_name": 0,
+       "file": "v3-t7.jpg",
+       "items": 7,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D2-002"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "v3-t8.jpg",
+       "items": 4,
+       "n_unmatched": 2
+      }
+     ],
+     "union": [
+      "D2-002",
+      "D2-003",
+      "D2-004"
+     ],
+     "n_union": 3,
+     "in_domain": [
+      "D2-002",
+      "D2-003",
+      "D2-004"
+     ],
+     "n_in_domain": 3,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D2-001",
+      "D2-005",
+      "D2-015",
+      "D2-019",
+      "D2-020",
+      "D2-021",
+      "D2-022"
+     ],
+     "n_misses": 7,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 2,
+     "mean_frame_in_domain": 1.33,
+     "orphans": [
+      "D2-003",
+      "D2-004"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 2,
+       "marginal": 2
+      },
+      {
+       "k": 2,
+       "union_in_domain": 3,
+       "marginal": 1
+      },
+      {
+       "k": 3,
+       "union_in_domain": 3,
+       "marginal": 0
+      }
+     ]
+    },
+    "D3": {
+     "frames": [
+      {
+       "hits": [
+        "D3-001",
+        "D3-006",
+        "D3-009",
+        "D3-016"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 2,
+       "dup_name": 1,
+       "file": "v4-t11.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D3-006",
+        "D3-009",
+        "D3-011",
+        "D3-021"
+       ],
+       "black": 0,
+       "review": 2,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "v4-t14.jpg",
+       "items": 10,
+       "n_unmatched": 4
+      },
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-BAT"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 5,
+       "dup_name": 0,
+       "file": "v4-t20.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      }
+     ],
+     "union": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-009",
+      "D3-011",
+      "D3-016",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "n_union": 8,
+     "in_domain": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-009",
+      "D3-011",
+      "D3-016",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "n_in_domain": 8,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D3-002",
+      "D3-007",
+      "D3-008",
+      "D3-015",
+      "D3-017",
+      "D3-018",
+      "D3-020",
+      "D3-024"
+     ],
+     "n_misses": 8,
+     "video_only": [
+      "D3-009",
+      "D3-011",
+      "D3-016",
+      "D3-021"
+     ],
+     "n_video_only": 4,
+     "max_frame_in_domain": 4,
+     "mean_frame_in_domain": 4.0,
+     "orphans": [
+      "D3-005",
+      "D3-011",
+      "D3-016",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 4,
+       "marginal": 4
+      },
+      {
+       "k": 2,
+       "union_in_domain": 6,
+       "marginal": 2
+      },
+      {
+       "k": 3,
+       "union_in_domain": 8,
+       "marginal": 2
+      }
+     ]
+    }
+   },
+   "r2": {
+    "D1": {
+     "frames": [
+      {
+       "hits": [
+        "D1-001",
+        "D1-002",
+        "D1-008",
+        "D1-013",
+        "D1-014"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 1,
+       "file": "v1-t0.jpg",
+       "items": 9,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D1-009",
+        "D1-012",
+        "D1-013",
+        "D1-014",
+        "D1-017",
+        "D1-028"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 2,
+       "dup_name": 0,
+       "file": "v1-t29.jpg",
+       "items": 8,
+       "n_unmatched": 0
+      },
+      {
+       "hits": [
+        "D1-009",
+        "D1-014",
+        "D1-020"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "v1-t40.jpg",
+       "items": 10,
+       "n_unmatched": 6
+      }
+     ],
+     "union": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-009",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-017",
+      "D1-020",
+      "D1-028"
+     ],
+     "n_union": 10,
+     "in_domain": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-009",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-017",
+      "D1-020",
+      "D1-028"
+     ],
+     "n_in_domain": 10,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D1-005",
+      "D1-006",
+      "D1-015",
+      "D1-018",
+      "D1-019",
+      "D1-021",
+      "D1-022",
+      "D1-023",
+      "D1-024",
+      "D1-025"
+     ],
+     "n_misses": 10,
+     "video_only": [
+      "D1-017",
+      "D1-020",
+      "D1-028"
+     ],
+     "n_video_only": 3,
+     "max_frame_in_domain": 6,
+     "mean_frame_in_domain": 4.67,
+     "orphans": [
+      "D1-001",
+      "D1-002",
+      "D1-008",
+      "D1-012",
+      "D1-017",
+      "D1-020",
+      "D1-028"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 5,
+       "marginal": 5
+      },
+      {
+       "k": 2,
+       "union_in_domain": 9,
+       "marginal": 4
+      },
+      {
+       "k": 3,
+       "union_in_domain": 10,
+       "marginal": 1
+      }
+     ]
+    },
+    "D2": {
+     "frames": [
+      {
+       "hits": [
+        "D2-003",
+        "D2-004"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 8,
+       "dup_name": 0,
+       "file": "v3-t10.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      },
+      {
+       "hits": [
+        "D2-002"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 2,
+       "dup_name": 0,
+       "file": "v3-t7.jpg",
+       "items": 7,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D2-002"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 9,
+       "dup_name": 0,
+       "file": "v3-t8.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      }
+     ],
+     "union": [
+      "D2-002",
+      "D2-003",
+      "D2-004"
+     ],
+     "n_union": 3,
+     "in_domain": [
+      "D2-002",
+      "D2-003",
+      "D2-004"
+     ],
+     "n_in_domain": 3,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D2-001",
+      "D2-005",
+      "D2-015",
+      "D2-019",
+      "D2-020",
+      "D2-021",
+      "D2-022"
+     ],
+     "n_misses": 7,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 2,
+     "mean_frame_in_domain": 1.33,
+     "orphans": [
+      "D2-003",
+      "D2-004"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 2,
+       "marginal": 2
+      },
+      {
+       "k": 2,
+       "union_in_domain": 3,
+       "marginal": 1
+      },
+      {
+       "k": 3,
+       "union_in_domain": 3,
+       "marginal": 0
+      }
+     ]
+    },
+    "D3": {
+     "frames": [
+      {
+       "hits": [
+        "D3-006",
+        "D3-008",
+        "D3-011"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 1,
+       "dup_name": 1,
+       "file": "v4-t11.jpg",
+       "items": 10,
+       "n_unmatched": 4
+      },
+      {
+       "hits": [
+        "D3-006",
+        "D3-009",
+        "D3-011",
+        "D3-021"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "v4-t14.jpg",
+       "items": 10,
+       "n_unmatched": 5
+      },
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-BAT"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 5,
+       "dup_name": 0,
+       "file": "v4-t20.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      }
+     ],
+     "union": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-008",
+      "D3-009",
+      "D3-011",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "n_union": 8,
+     "in_domain": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-008",
+      "D3-009",
+      "D3-011",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "n_in_domain": 8,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D3-002",
+      "D3-007",
+      "D3-015",
+      "D3-016",
+      "D3-017",
+      "D3-018",
+      "D3-020",
+      "D3-024"
+     ],
+     "n_misses": 8,
+     "video_only": [
+      "D3-008",
+      "D3-009",
+      "D3-011",
+      "D3-021"
+     ],
+     "n_video_only": 4,
+     "max_frame_in_domain": 4,
+     "mean_frame_in_domain": 3.67,
+     "orphans": [
+      "D3-001",
+      "D3-005",
+      "D3-008",
+      "D3-009",
+      "D3-021",
+      "D3-BAT"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 3,
+       "marginal": 3
+      },
+      {
+       "k": 2,
+       "union_in_domain": 5,
+       "marginal": 2
+      },
+      {
+       "k": 3,
+       "union_in_domain": 8,
+       "marginal": 3
+      }
+     ]
+    }
+   }
+  },
+  "p3": {
+   "r1": {
+    "D1": {
+     "frames": [
+      {
+       "hits": [
+        "D1-001",
+        "D1-006",
+        "D1-008",
+        "D1-012",
+        "D1-013"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 1,
+       "file": "p1.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D1-001",
+        "D1-006",
+        "D1-012",
+        "D1-013",
+        "D1-014",
+        "D1-015"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p2.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D1-006",
+        "D1-012",
+        "D1-013",
+        "D1-015"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 2,
+       "dup_name": 0,
+       "file": "p3.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      }
+     ],
+     "union": [
+      "D1-001",
+      "D1-006",
+      "D1-008",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-015"
+     ],
+     "n_union": 7,
+     "in_domain": [
+      "D1-001",
+      "D1-006",
+      "D1-008",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-015"
+     ],
+     "n_in_domain": 7,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D1-002",
+      "D1-009"
+     ],
+     "n_misses": 2,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 6,
+     "mean_frame_in_domain": 5.0,
+     "orphans": [
+      "D1-008",
+      "D1-014"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 5,
+       "marginal": 5
+      },
+      {
+       "k": 2,
+       "union_in_domain": 7,
+       "marginal": 2
+      },
+      {
+       "k": 3,
+       "union_in_domain": 7,
+       "marginal": 0
+      }
+     ]
+    },
+    "D2": {
+     "frames": [
+      {
+       "hits": [
+        "D2-003"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 9,
+       "dup_name": 0,
+       "file": "p4.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      },
+      {
+       "hits": [
+        "D2-003",
+        "D2-005",
+        "D2-015"
+       ],
+       "black": 1,
+       "review": 1,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p5.jpg",
+       "items": 10,
+       "n_unmatched": 5
+      },
+      {
+       "hits": [
+        "D2-003",
+        "D2-005",
+        "D2-020"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p6.jpg",
+       "items": 10,
+       "n_unmatched": 7
+      }
+     ],
+     "union": [
+      "D2-003",
+      "D2-005",
+      "D2-015",
+      "D2-020"
+     ],
+     "n_union": 4,
+     "in_domain": [
+      "D2-003",
+      "D2-005",
+      "D2-015"
+     ],
+     "n_in_domain": 3,
+     "ood": [
+      "D2-020"
+     ],
+     "n_ood": 1,
+     "misses": [
+      "D2-001",
+      "D2-002",
+      "D2-004",
+      "D2-033"
+     ],
+     "n_misses": 4,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 3,
+     "mean_frame_in_domain": 2.0,
+     "orphans": [
+      "D2-015"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 1,
+       "marginal": 1
+      },
+      {
+       "k": 2,
+       "union_in_domain": 3,
+       "marginal": 2
+      },
+      {
+       "k": 3,
+       "union_in_domain": 3,
+       "marginal": 0
+      }
+     ]
+    },
+    "D3": {
+     "frames": [
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-BAT"
+       ],
+       "black": 1,
+       "review": 1,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "p7.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-014"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 3,
+       "dup_name": 0,
+       "file": "p8.jpg",
+       "items": 10,
+       "n_unmatched": 2
+      },
+      {
+       "hits": [
+        "D3-BAT"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p9.jpg",
+       "items": 2,
+       "n_unmatched": 0
+      }
+     ],
+     "union": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-014",
+      "D3-BAT"
+     ],
+     "n_union": 5,
+     "in_domain": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-014",
+      "D3-BAT"
+     ],
+     "n_in_domain": 5,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D3-015",
+      "D3-024"
+     ],
+     "n_misses": 2,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 4,
+     "mean_frame_in_domain": 3.0,
+     "orphans": [
+      "D3-014"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 4,
+       "marginal": 4
+      },
+      {
+       "k": 2,
+       "union_in_domain": 5,
+       "marginal": 1
+      },
+      {
+       "k": 3,
+       "union_in_domain": 5,
+       "marginal": 0
+      }
+     ]
+    }
+   },
+   "r2": {
+    "D1": {
+     "frames": [
+      {
+       "hits": [
+        "D1-001",
+        "D1-006",
+        "D1-008",
+        "D1-012",
+        "D1-013"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 1,
+       "file": "p1.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D1-001",
+        "D1-006",
+        "D1-012",
+        "D1-013",
+        "D1-014"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p2.jpg",
+       "items": 10,
+       "n_unmatched": 4
+      },
+      {
+       "hits": [
+        "D1-006",
+        "D1-012",
+        "D1-013",
+        "D1-015"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p3.jpg",
+       "items": 10,
+       "n_unmatched": 5
+      }
+     ],
+     "union": [
+      "D1-001",
+      "D1-006",
+      "D1-008",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-015"
+     ],
+     "n_union": 7,
+     "in_domain": [
+      "D1-001",
+      "D1-006",
+      "D1-008",
+      "D1-012",
+      "D1-013",
+      "D1-014",
+      "D1-015"
+     ],
+     "n_in_domain": 7,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D1-002",
+      "D1-009"
+     ],
+     "n_misses": 2,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 5,
+     "mean_frame_in_domain": 4.67,
+     "orphans": [
+      "D1-008",
+      "D1-014",
+      "D1-015"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 5,
+       "marginal": 5
+      },
+      {
+       "k": 2,
+       "union_in_domain": 6,
+       "marginal": 1
+      },
+      {
+       "k": 3,
+       "union_in_domain": 7,
+       "marginal": 1
+      }
+     ]
+    },
+    "D2": {
+     "frames": [
+      {
+       "hits": [
+        "D2-003"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 9,
+       "dup_name": 0,
+       "file": "p4.jpg",
+       "items": 10,
+       "n_unmatched": 0
+      },
+      {
+       "hits": [
+        "D2-003",
+        "D2-005",
+        "D2-015"
+       ],
+       "black": 1,
+       "review": 0,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "p5.jpg",
+       "items": 10,
+       "n_unmatched": 5
+      },
+      {
+       "hits": [
+        "D2-003",
+        "D2-005",
+        "D2-033"
+       ],
+       "black": 0,
+       "review": 0,
+       "dup_gold": 0,
+       "dup_name": 0,
+       "file": "p6.jpg",
+       "items": 10,
+       "n_unmatched": 7
+      }
+     ],
+     "union": [
+      "D2-003",
+      "D2-005",
+      "D2-015",
+      "D2-033"
+     ],
+     "n_union": 4,
+     "in_domain": [
+      "D2-003",
+      "D2-005",
+      "D2-015",
+      "D2-033"
+     ],
+     "n_in_domain": 4,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D2-001",
+      "D2-002",
+      "D2-004"
+     ],
+     "n_misses": 3,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 3,
+     "mean_frame_in_domain": 2.33,
+     "orphans": [
+      "D2-015",
+      "D2-033"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 1,
+       "marginal": 1
+      },
+      {
+       "k": 2,
+       "union_in_domain": 3,
+       "marginal": 2
+      },
+      {
+       "k": 3,
+       "union_in_domain": 4,
+       "marginal": 1
+      }
+     ]
+    },
+    "D3": {
+     "frames": [
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-BAT"
+       ],
+       "black": 1,
+       "review": 1,
+       "dup_gold": 1,
+       "dup_name": 0,
+       "file": "p7.jpg",
+       "items": 10,
+       "n_unmatched": 3
+      },
+      {
+       "hits": [
+        "D3-001",
+        "D3-005",
+        "D3-006",
+        "D3-014",
+        "D3-BAT"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 2,
+       "dup_name": 0,
+       "file": "p8.jpg",
+       "items": 10,
+       "n_unmatched": 2
+      },
+      {
+       "hits": [
+        "D3-BAT"
+       ],
+       "black": 0,
+       "review": 1,
+       "dup_gold": 5,
+       "dup_name": 0,
+       "file": "p9.jpg",
+       "items": 8,
+       "n_unmatched": 1
+      }
+     ],
+     "union": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-014",
+      "D3-BAT"
+     ],
+     "n_union": 5,
+     "in_domain": [
+      "D3-001",
+      "D3-005",
+      "D3-006",
+      "D3-014",
+      "D3-BAT"
+     ],
+     "n_in_domain": 5,
+     "ood": [],
+     "n_ood": 0,
+     "misses": [
+      "D3-015",
+      "D3-024"
+     ],
+     "n_misses": 2,
+     "video_only": [],
+     "n_video_only": 0,
+     "max_frame_in_domain": 5,
+     "mean_frame_in_domain": 3.33,
+     "orphans": [
+      "D3-014"
+     ],
+     "cumulative": [
+      {
+       "k": 1,
+       "union_in_domain": 4,
+       "marginal": 4
+      },
+      {
+       "k": 2,
+       "union_in_domain": 5,
+       "marginal": 1
+      },
+      {
+       "k": 3,
+       "union_in_domain": 5,
+       "marginal": 0
+      }
+     ]
+    }
+   }
+  },
+  "dense": {
+   "D1": {
+    "frames": [
+     {
+      "hits": [
+       "D1-002",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 12,
+      "items": 7,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-001",
+       "D1-006",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014"
+      ],
+      "black": 1,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 13,
+      "items": 9,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-023"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 1,
+      "t": 14,
+      "items": 8,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D1-002",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-022",
+       "D1-023"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 15,
+      "items": 8,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-022",
+       "D1-023"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 1,
+      "t": 16,
+      "items": 7,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D1-001",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-024"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 17,
+      "items": 8,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-022",
+       "D1-024"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 18,
+      "items": 8,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-024"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 1,
+      "t": 19,
+      "items": 8,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-015",
+       "D1-025"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 20,
+      "items": 8,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D1-008",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-025"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 21,
+      "items": 7,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D1-005",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014",
+       "D1-028"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 22,
+      "items": 9,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-005",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-015"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 2,
+      "t": 23,
+      "items": 10,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D1-006",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 1,
+      "t": 24,
+      "items": 8,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D1-006",
+       "D1-009",
+       "D1-012",
+       "D1-013",
+       "D1-014"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 2,
+      "t": 25,
+      "items": 9,
+      "n_unmatched": 2
+     }
+    ],
+    "union": [
+     "D1-001",
+     "D1-002",
+     "D1-005",
+     "D1-006",
+     "D1-008",
+     "D1-009",
+     "D1-012",
+     "D1-013",
+     "D1-014",
+     "D1-015",
+     "D1-022",
+     "D1-023",
+     "D1-024",
+     "D1-025",
+     "D1-028"
+    ],
+    "n_union": 15,
+    "in_domain": [
+     "D1-001",
+     "D1-002",
+     "D1-005",
+     "D1-006",
+     "D1-008",
+     "D1-009",
+     "D1-012",
+     "D1-013",
+     "D1-014",
+     "D1-015",
+     "D1-022",
+     "D1-023",
+     "D1-024",
+     "D1-025",
+     "D1-028"
+    ],
+    "n_in_domain": 15,
+    "ood": [],
+    "n_ood": 0,
+    "misses": [
+     "D1-017",
+     "D1-018",
+     "D1-019",
+     "D1-020",
+     "D1-021"
+    ],
+    "n_misses": 5,
+    "video_only": [
+     "D1-005",
+     "D1-022",
+     "D1-023",
+     "D1-024",
+     "D1-025",
+     "D1-028"
+    ],
+    "n_video_only": 6,
+    "max_frame_in_domain": 7,
+    "mean_frame_in_domain": 5.5,
+    "orphans": [
+     "D1-008",
+     "D1-028"
+    ],
+    "cumulative": [],
+    "range": [
+     12,
+     25
+    ],
+    "seconds": 14
+   },
+   "D2": {
+    "frames": [
+     {
+      "hits": [
+       "D2-003",
+       "D2-005",
+       "D2-022"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 0,
+      "items": 8,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-005"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 1,
+      "items": 10,
+      "n_unmatched": 8
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-022"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 1,
+      "dup_name": 4,
+      "t": 2,
+      "items": 10,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-001",
+       "D2-002",
+       "D2-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 3,
+      "items": 5,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D2-002"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 4,
+      "items": 5,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D2-002"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 5,
+      "items": 4,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D2-002",
+       "D2-011",
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 6,
+      "items": 7,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D2-002",
+       "D2-015",
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 7,
+      "items": 7,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D2-002"
+      ],
+      "black": 1,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 8,
+      "items": 5,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D2-004"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 9,
+      "dup_name": 0,
+      "t": 9,
+      "items": 10,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-004"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 8,
+      "dup_name": 0,
+      "t": 10,
+      "items": 10,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D2-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 11,
+      "items": 7,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 12,
+      "items": 6,
+      "n_unmatched": 6
+     },
+     {
+      "hits": [
+       "D2-019"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 13,
+      "items": 4,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-001",
+       "D2-003",
+       "D2-020"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 14,
+      "items": 8,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-004",
+       "D2-005"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 15,
+      "items": 6,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-005"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 16,
+      "items": 6,
+      "n_unmatched": 4
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-004",
+       "D2-005"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 17,
+      "items": 6,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D2-003",
+       "D2-004",
+       "D2-005"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 18,
+      "items": 9,
+      "n_unmatched": 6
+     }
+    ],
+    "union": [
+     "D2-001",
+     "D2-002",
+     "D2-003",
+     "D2-004",
+     "D2-005",
+     "D2-011",
+     "D2-015",
+     "D2-019",
+     "D2-020",
+     "D2-021",
+     "D2-022"
+    ],
+    "n_union": 11,
+    "in_domain": [
+     "D2-001",
+     "D2-002",
+     "D2-003",
+     "D2-004",
+     "D2-005",
+     "D2-015",
+     "D2-019",
+     "D2-020",
+     "D2-021",
+     "D2-022"
+    ],
+    "n_in_domain": 10,
+    "ood": [
+     "D2-011"
+    ],
+    "n_ood": 1,
+    "misses": [],
+    "n_misses": 0,
+    "video_only": [
+     "D2-019",
+     "D2-020",
+     "D2-021",
+     "D2-022"
+    ],
+    "n_video_only": 4,
+    "max_frame_in_domain": 3,
+    "mean_frame_in_domain": 1.95,
+    "orphans": [
+     "D2-019",
+     "D2-020"
+    ],
+    "cumulative": [],
+    "range": [
+     0,
+     18
+    ],
+    "seconds": 19
+   },
+   "D3": {
+    "frames": [
+     {
+      "hits": [
+       "D3-001",
+       "D3-005",
+       "D3-006"
+      ],
+      "black": 1,
+      "review": 1,
+      "dup_gold": 3,
+      "dup_name": 0,
+      "t": 0,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-005",
+       "D3-006",
+       "D3-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 1,
+      "items": 10,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-015",
+       "D3-024",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 2,
+      "items": 8,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D3-015",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 3,
+      "items": 2,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 4,
+      "items": 3,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D3-007",
+       "D3-015",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 5,
+      "items": 5,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D3-007",
+       "D3-011",
+       "D3-015",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 6,
+      "items": 7,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-007",
+       "D3-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 7,
+      "items": 6,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-007",
+       "D3-015"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 8,
+      "items": 6,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-006",
+       "D3-007",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 2,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 9,
+      "items": 10,
+      "n_unmatched": 3
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-011"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 5,
+      "t": 10,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-006",
+       "D3-008",
+       "D3-021"
+      ],
+      "black": 0,
+      "review": 2,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 11,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-006",
+       "D3-021"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 12,
+      "items": 10,
+      "n_unmatched": 6
+     },
+     {
+      "hits": [
+       "D3-006",
+       "D3-008",
+       "D3-016"
+      ],
+      "black": 0,
+      "review": 2,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 13,
+      "items": 10,
+      "n_unmatched": 5
+     },
+     {
+      "hits": [
+       "D3-006",
+       "D3-009",
+       "D3-011",
+       "D3-020",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 1,
+      "t": 14,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-011"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 0,
+      "dup_name": 6,
+      "t": 15,
+      "items": 10,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-007",
+       "D3-015",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 16,
+      "items": 8,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-015",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 0,
+      "dup_name": 0,
+      "t": 17,
+      "items": 5,
+      "n_unmatched": 1
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 1,
+      "dup_name": 0,
+      "t": 18,
+      "items": 6,
+      "n_unmatched": 2
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-006",
+       "D3-017",
+       "D3-018"
+      ],
+      "black": 0,
+      "review": 0,
+      "dup_gold": 6,
+      "dup_name": 0,
+      "t": 19,
+      "items": 10,
+      "n_unmatched": 0
+     },
+     {
+      "hits": [
+       "D3-001",
+       "D3-005",
+       "D3-006",
+       "D3-018",
+       "D3-024",
+       "D3-BAT"
+      ],
+      "black": 0,
+      "review": 1,
+      "dup_gold": 2,
+      "dup_name": 0,
+      "t": 20,
+      "items": 10,
+      "n_unmatched": 1
+     }
+    ],
+    "union": [
+     "D3-001",
+     "D3-005",
+     "D3-006",
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-015",
+     "D3-016",
+     "D3-017",
+     "D3-018",
+     "D3-020",
+     "D3-021",
+     "D3-024",
+     "D3-BAT"
+    ],
+    "n_union": 15,
+    "in_domain": [
+     "D3-001",
+     "D3-005",
+     "D3-006",
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-015",
+     "D3-016",
+     "D3-017",
+     "D3-018",
+     "D3-020",
+     "D3-021",
+     "D3-024",
+     "D3-BAT"
+    ],
+    "n_in_domain": 15,
+    "ood": [],
+    "n_ood": 0,
+    "misses": [
+     "D3-002"
+    ],
+    "n_misses": 1,
+    "video_only": [
+     "D3-007",
+     "D3-008",
+     "D3-009",
+     "D3-011",
+     "D3-016",
+     "D3-017",
+     "D3-018",
+     "D3-020",
+     "D3-021"
+    ],
+    "n_video_only": 9,
+    "max_frame_in_domain": 6,
+    "mean_frame_in_domain": 3.24,
+    "orphans": [
+     "D3-009",
+     "D3-016",
+     "D3-017",
+     "D3-020"
+    ],
+    "cumulative": [],
+    "range": [
+     0,
+     20
+    ],
+    "seconds": 21
+   }
+  }
+ },
+ "s1_v3_reconciliation": {
+  "r1": {
+   "frozen_recall_hits": 21,
+   "frozen_den": 46,
+   "replay_per_drawer": 20,
+   "replay_global": 21,
+   "frozen_only": [
+    "D1-028",
+    "D2-015"
+   ],
+   "replay_only": [
+    "D3-016"
+   ],
+   "cause": "matcher_scope: S1 frozen matcher searches all drawers (global, longest alias, D1->D2->D3 tie order); replay matcher is per-drawer. Raw V3 outputs are identical."
+  },
+  "r2": {
+   "frozen_recall_hits": 22,
+   "frozen_den": 46,
+   "replay_per_drawer": 21,
+   "replay_global": 22,
+   "frozen_only": [
+    "D2-015"
+   ],
+   "replay_only": [],
+   "cause": "matcher_scope: S1 frozen matcher searches all drawers (global, longest alias, D1->D2->D3 tie order); replay matcher is per-drawer. Raw V3 outputs are identical."
+  }
+ },
+ "batching_entries": {
+  "entries": {
+   "S1_P3_perframe": {
+    "1": 82,
+    "2": 88
+   },
+   "S2_P3prod": {
+    "1": 83,
+    "2": 81
+   },
+   "S1_V3_perframe": {
+    "1": 73,
+    "2": 84
+   },
+   "S2_V3batch": {
+    "1": 35,
+    "2": 30
+   },
+   "S1_V8_perframe": {
+    "1": 197,
+    "2": 185
+   },
+   "S2_V6x2": {
+    "1": 71,
+    "2": 71
+   }
+  },
+  "note": "S1/S2 提示词不同;V3 同帧,批处理对比;V8/V6 帧集不同,仅参考。",
+  "attribution_note": "Batch organization co-varies with prompt and repetition_penalty; no single-variable causal attribution."
+ },
+ "ambiguity": {
+  "alias_overlap_pairs": [],
+  "generic_alias_ids": [
+   "D1-002",
+   "D1-006",
+   "D1-009",
+   "D1-014",
+   "D1-015",
+   "D1-025",
+   "D1-028",
+   "D2-002",
+   "D2-003",
+   "D2-005",
+   "D2-011",
+   "D2-015",
+   "D2-019",
+   "D2-020",
+   "D2-021",
+   "D2-022",
+   "D2-033",
+   "D3-001",
+   "D3-002",
+   "D3-005",
+   "D3-006",
+   "D3-007",
+   "D3-008",
+   "D3-009",
+   "D3-011",
+   "D3-015",
+   "D3-016",
+   "D3-017",
+   "D3-020",
+   "D3-021",
+   "D3-024",
+   "D3-BAT"
+  ],
+  "multi_match_candidates_by_drawer": {
+   "D3": 1
+  }
+ },
+ "cost": {
+  "s2": {
+   "P3prod": {
+    "requests": 18,
+    "rounds": 2,
+    "frame_views": 18,
+    "elapsed_seconds": 135.0,
+    "tokens": null
+   },
+   "V3batch": {
+    "requests": 6,
+    "rounds": 2,
+    "frame_views": 18,
+    "elapsed_seconds": 62.9,
+    "tokens": null
+   },
+   "V6x2": {
+    "requests": 12,
+    "rounds": 2,
+    "frame_views": 72,
+    "elapsed_seconds": 153.9,
+    "tokens": null
+   },
+   "diagnostic": {
+    "requests": 6,
+    "frame_views": 36,
+    "elapsed_seconds": 56.0,
+    "tokens": null
+   },
+   "total_requests": 42,
+   "formal_requests": 36,
+   "logical_cap": 45,
+   "request_cap": 90
+  },
+  "s1": {
+   "logical": 90,
+   "requests": 90,
+   "image_calls": 90,
+   "elapsed_seconds": null,
+   "tokens": null
+  },
+  "capture": {
+   "videos_seconds": [
+    46.2,
+    19.4,
+    21.2
+   ],
+   "photos_count": 9
+  }
+ },
+ "h2": {
+  "target_ids": [
+   "D1-019",
+   "D1-020",
+   "D2-019",
+   "D3-021",
+   "D3-BAT",
+   "D3-001"
+  ],
+  "target_codes": {
+   "V1": "D1-019",
+   "V2": "D1-020",
+   "V3": "D2-019",
+   "V4": "D3-021",
+   "S1": "D3-BAT",
+   "S2": "D3-001"
+  },
+  "target_types": {
+   "video_only": [
+    "D1-019",
+    "D1-020",
+    "D2-019",
+    "D3-021"
+   ],
+   "shared_photo_video": [
+    "D3-BAT",
+    "D3-001"
+   ]
+  },
+  "target_times": {
+   "D1-019": "v1 38.1s",
+   "D1-020": "v1 40.3s",
+   "D2-019": "v3 13.0s",
+   "D3-021": "v4 14.1s",
+   "D3-BAT": "v4 4.0s",
+   "D3-001": "v4 19.2s"
+  },
+  "target_class_note": "Offline screening (2026-10-18, zero model calls) replaced D2-020/D2-022 with D2-019/D3-021 and corrected D1-020 time 43.2s -> 40.3s. D2-020 photo hit was a false positive (box on a different object); D2-022 had only a 3.9% low-confidence edge box. Structure remains 4 video-only + 2 shared. Condition B uses a global three-drawer fixed library (2s/45 frames); no target-specific selection or replacement.",
+  "task_type": "visual_location_judgment",
+  "not_measured": [
+   "physical_retrieval",
+   "walking/opening/moving/tactile_confirmation"
+  ],
+  "offline_screening": {
+   "doc": "H2-OFFLINE-SCREENING.md",
+   "model_calls": 0,
+   "qa_target_index_note": "target_index refers to the per-target 6-frame QA set used only for offline evidence verification; it is not the participant-facing library.",
+   "targets": [
+    {
+     "id": "D1-019",
+     "code": "V1",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 2,
+     "distinct_times": 1,
+     "max_box_area": 0.24,
+     "target_index": 5,
+     "sharp_ratio": 1.47,
+     "library_nearest_frame": "D1 38.0s",
+     "library_has_target": true,
+     "grade": "strong"
+    },
+    {
+     "id": "D1-020",
+     "code": "V2",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 4,
+     "distinct_times": 2,
+     "max_box_area": 0.257,
+     "target_index": 5,
+     "sharp_ratio": 1.27,
+     "library_nearest_frame": "D1 40.0s",
+     "library_has_target": true,
+     "grade": "strong"
+    },
+    {
+     "id": "D2-019",
+     "code": "V3",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 0,
+     "distinct_times": 0,
+     "max_box_area": null,
+     "area_note": "manual visual estimate ~35-40%",
+     "target_index": 4,
+     "sharp_ratio": 1.04,
+     "library_nearest_frame": "D2 14.0s",
+     "library_has_target": true,
+     "grade": "strong_manual"
+    },
+    {
+     "id": "D3-021",
+     "code": "V4",
+     "type": "video_only",
+     "photo_hits": 0,
+     "video_boxes": 5,
+     "distinct_times": 4,
+     "max_box_area": 0.094,
+     "target_index": 4,
+     "sharp_ratio": 2.2,
+     "library_nearest_frame": "D3 14.0s",
+     "library_has_target": true,
+     "grade": "strong"
+    },
+    {
+     "id": "D3-BAT",
+     "code": "S1",
+     "type": "shared",
+     "photo_hits": 16,
+     "video_boxes": 15,
+     "distinct_times": 3,
+     "max_box_area": 0.56,
+     "target_index": 2,
+     "sharp_ratio": 3.08,
+     "library_nearest_frame": "D3 4.0s",
+     "library_has_target": true,
+     "grade": "strong"
+    },
+    {
+     "id": "D3-001",
+     "code": "S2",
+     "type": "shared",
+     "photo_hits": 14,
+     "video_boxes": 17,
+     "distinct_times": 6,
+     "max_box_area": 0.111,
+     "target_index": 6,
+     "sharp_ratio": 1.12,
+     "library_nearest_frame": "D3 20.0s",
+     "library_has_target": true,
+     "grade": "strong"
+    }
+   ],
+   "video_only_corpus": {
+    "total": 25,
+    "no_box": 11,
+    "one_box": 6,
+    "ge2_boxes": 8,
+    "ge2_times": 5,
+    "max_area_ge_5pct": 12
+   },
+   "common_corpus": {
+    "total": 21,
+    "photo_recognized": 15,
+    "video_box": 19,
+    "no_photo_ids": [
+     "D1-002",
+     "D1-009",
+     "D2-001",
+     "D2-004",
+     "D3-024",
+     "D3-015"
+    ],
+    "no_video_box_ids": [
+     "D2-015",
+     "D3-024"
+    ]
+   },
+   "findings": [
+    "D1-020 target time 43.2s showed a different title; corrected to 40.3s.",
+    "D2-020 photo hit was a false positive (box on a different object); no video box/target frame; removed.",
+    "D2-022 had only a 3.9% low-confidence edge box at t=0.1s; removed.",
+    "D2-019/D3-021 selected as evidence-backed replacements; D2-019 has no model box but manual visual evidence.",
+    "25 video-only items: 11 no box, 6 one box, 8 >=2 boxes; 12 max box area >=5%.",
+    "21 common items: 15 photo-recognized, 19 video-box."
+   ]
+  },
+  "conditions": [
+   "photo_only",
+   "photo_plus_keyframe_library"
+  ],
+  "keyframe_library": {
+   "all_three_drawers": true,
+   "rule": "fixed 2s interval from 0s to end for each drawer video; generated before target selection; no target-specific frame selection or replacement",
+   "frames": {
+    "D1": 24,
+    "D2": 10,
+    "D3": 11,
+    "total": 45
+   },
+   "drawer_labels_visible": true,
+   "timestamps_visible": true,
+   "target_labeled": false,
+   "retrieval_time_counted": true
+  },
+  "sequences": {
+   "P1": "ABBABA",
+   "P2": "BAABAB",
+   "P3": "ABABBA",
+   "P4": "BABAAB",
+   "P5": "AABBAB",
+   "P6": "BBAABA"
+  },
+  "target_assignment": {
+   "P1": {
+    "A": [
+     "V1",
+     "V2",
+     "S1"
+    ],
+    "B": [
+     "V3",
+     "V4",
+     "S2"
+    ]
+   },
+   "P2": {
+    "A": [
+     "V3",
+     "V4",
+     "S1"
+    ],
+    "B": [
+     "V1",
+     "V2",
+     "S2"
+    ]
+   },
+   "P3": {
+    "A": [
+     "V1",
+     "V3",
+     "S2"
+    ],
+    "B": [
+     "V2",
+     "V4",
+     "S1"
+    ]
+   },
+   "P4": {
+    "A": [
+     "V2",
+     "V4",
+     "S2"
+    ],
+    "B": [
+     "V1",
+     "V3",
+     "S1"
+    ]
+   },
+   "P5": {
+    "A": [
+     "V1",
+     "V4",
+     "S2"
+    ],
+    "B": [
+     "V2",
+     "V3",
+     "S1"
+    ]
+   },
+   "P6": {
+    "A": [
+     "V2",
+     "V3",
+     "S1"
+    ],
+    "B": [
+     "V1",
+     "V4",
+     "S2"
+    ]
+   }
+  },
+  "task_matrix": {
+   "P1": [
+    "A:V1",
+    "B:V3",
+    "B:V4",
+    "A:V2",
+    "B:S2",
+    "A:S1"
+   ],
+   "P2": [
+    "B:V1",
+    "A:V3",
+    "A:V4",
+    "B:V2",
+    "A:S1",
+    "B:S2"
+   ],
+   "P3": [
+    "A:V1",
+    "B:V2",
+    "A:V3",
+    "B:V4",
+    "B:S1",
+    "A:S2"
+   ],
+   "P4": [
+    "B:V1",
+    "A:V2",
+    "B:V3",
+    "A:V4",
+    "A:S2",
+    "B:S1"
+   ],
+   "P5": [
+    "A:V1",
+    "A:V4",
+    "B:V2",
+    "B:V3",
+    "A:S2",
+    "B:S1"
+   ],
+   "P6": [
+    "B:V1",
+    "B:V4",
+    "A:V2",
+    "A:V3",
+    "B:S2",
+    "A:S1"
+   ]
+  },
+  "measures": [
+   "time_to_answer",
+   "correct_drawer",
+   "correct_position",
+   "confidence_1_5",
+   "used_keyframe_set",
+   "found_target_frame",
+   "keyframe_retrieval_time_s",
+   "time_after_keyframe_s"
+  ],
+  "sample": "6 participants (or 5-8 cycling the 6 sequences); 6 tasks each; 3 A + 3 B; each condition 2 video-only + 1 shared",
+  "model_calls": 0
+ },
+ "audit_gaps": [
+  "S2 pre-registration/budget were not separately approved before execution; owner delegation was treated as authorization.",
+  "S2 protocol (6-frame batches, repetition_penalty 1.1) was chosen after pilot probes; it was not pre-specified before any model observation.",
+  "S1 pre-registration did not pin the Gold hash; Gold was frozen at 20:59, before the 21:02 run but after the 20:47 request.",
+  "S1 per-call latency and token usage were not recorded.",
+  "S2 token usage was not recorded; only elapsed time is available.",
+  "No independent recomputation by the architect; this is a runner-side zero-call replay.",
+  "S1 had external image-review history before the 20:55 local-only approval; raw links are not reproduced here.",
+  "S2 official absolute-correct counts include 1 out-of-domain P3 match per round (D2-020); in-domain P3 is 14/round, verdict unchanged.",
+  "Single model, single machine, one material set; no generalization claims.",
+  "Gold alias/granularity limits: generic aliases and bundled items (e.g., D3-BAT) mean same-name is not proof of duplicate physical items; no automatic merge is authorized.",
+  "S1 V3 frozen vs per-drawer replay differs by 1 per round (r1 21 vs 20; r2 22 vs 21); cause is matcher scope (global vs per-drawer), not raw output or Gold change. Frozen scores unchanged."
+ ]
+}
