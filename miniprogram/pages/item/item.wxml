@@ -65,6 +65,7 @@
         <view class="vd-sub">{{ videoEvidence.latest.badge }}</view>
         <view class="vd-sub {{ videoEvidence.latest.changed ? 'moved' : '' }}">{{ videoEvidence.latest.subText }}</view>
         <view class="vd-tip">视频只说明当时记录在哪,不冒充当前位置;播放需你明确点击。</view>
+        <view wx:if="{{ videoEvidence.olderCount > 0 }}" class="vd-tip">另有 {{ videoEvidence.olderCount }} 条更早视频;点「删除视频」会一并清理。</view>
         <view class="vd-actions">
           <view class="vd-textbtn" bindtap="onVideoRetakeTap">重拍</view>
           <view class="vd-textbtn danger" bindtap="onVideoDeleteTap">删除视频</view>
@@ -77,7 +78,7 @@
     </view>
   </view>
   <view wx:elif="{{ videoBusy }}" class="vd-empty">视频处理中…</view>
-  <view wx:else class="vd-empty" bindtap="onAddVideoTap">🎬 给这件物品拍一段视频留证</view>
+  <view wx:elif="{{ videoPending === null }}" class="vd-empty" bindtap="onAddVideoTap">🎬 给这件物品拍一段视频留证</view>
 
   <!-- 照片证据回放(#3):照片是历史证据——只说明拍摄当日记录在哪,不冒充当前位置;
        位置已变更时以文字位置为准、旧照片作证据。拉取失败整卡不渲染(增强露出,静默) -->

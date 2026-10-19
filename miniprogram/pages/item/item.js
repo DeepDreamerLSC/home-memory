@@ -1862,11 +1862,10 @@ Page({
     async onVideoDeleteTap() {
         if (this.data.videoEvidence === null || this.data.videoBusy)
             return;
-        const evidenceId = this.data.videoEvidence.latest.evidenceId;
         const confirmed = await new Promise((resolve) => {
             wx.showModal({
                 title: "删除视频",
-                content: "删除后原视频会从云存储一并删除,不能恢复。确定删除这条视频留证吗?",
+                content: "删除后这件物品的全部视频会从云存储一并删除,不能恢复。确定删除吗?",
                 confirmText: "删除",
                 confirmColor: "#d93025",
                 cancelText: "取消",
@@ -1879,7 +1878,7 @@ Page({
         this.setData({ videoBusy: true });
         try {
             await (0, households_api_1.ensureScopeVerified)();
-            await (0, api_1.callItemsApi)({ action: "videoEvidenceDelete", item_id: this.data.itemId, evidence_id: evidenceId });
+            await (0, api_1.callItemsApi)({ action: "videoEvidenceDelete", item_id: this.data.itemId });
             this.setData({ videoBusy: false });
             await this.refreshVideoEvidence();
             wx.showToast({ title: "已删除视频", icon: "success" });

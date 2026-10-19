@@ -214,3 +214,20 @@ test("VIDEO-READ:读侧家庭隔离;换链失败仍返回证据但 video_url 为
   assert.equal(got.evidence.length, 1);
   assert.equal(got.evidence[0].video_url, "");
 });
+
+test("VIDEO-DELETE-ALL:不加 evidence_id 时清理该物品全部视频", async () => {
+  const db = freshDb();
+  const deleted = [];
+  const deps = makeDeps(db, { deleteCloudFiles: async (ids) => { deleted.push.apply(deleted, ids); } });
+  const itemId = await createItem(deps, "op-a");
+  const one = await handler(beginEvent(itemId), deps);
+  await handler(attachEvent(one, "cloud://bucket/" + one.upload_path), deps);
+  const two = await handler(beginEvent(itemId), deps);
+  assert.ok(one.upload_ticket !== two.upload_ticket);
+  await handler(attachEvent(two, "cloud://bucket/" + two.upload_path), deps);
+  const res = await handler({ action: "videoEvidenceDelete", item_id: itemId }, deps);
+  assert.equal(res.ok, true);
+  assert.equal(res.deleted, 2);
+  assert.equal(deleted.length, 2);
+  assert.equal((await rawDocs(db, "video_evidence")).length, 0);
+});
