@@ -2623,7 +2623,8 @@ var ACTIONS = {
   videoEvidenceAttach: videoActions.videoEvidenceAttach,
   videoEvidenceGet: videoActions.videoEvidenceGet,
   videoEvidenceHighlightSave: videoActions.videoEvidenceHighlightSave,
-  videoEvidenceDelete: videoActions.videoEvidenceDelete
+  videoEvidenceDelete: videoActions.videoEvidenceDelete,
+  videoSceneCommit: videoActions.videoSceneCommit
 };
 
 /**
@@ -2657,7 +2658,8 @@ var WRITE_ACTIONS = {
   videoUploadCancel: true,
   videoEvidenceAttach: true,
   videoEvidenceHighlightSave: true,
-  videoEvidenceDelete: true
+  videoEvidenceDelete: true,
+  videoSceneCommit: true
 };
 
 /**

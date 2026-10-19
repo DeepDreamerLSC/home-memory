@@ -27,14 +27,32 @@ async function deleteStrict(deps, fileId) {
   }
 }
 
+/**
+ * 同一 file_id 可能对应多个 item evidence（PR B 场景扫描）。
+ * 引用检查必须看 ticket.asset_id 或 file_id 下的全部 item，绝不能只看
+ * ticket.item_id；否则场景票会被误判无引用并删掉共享云文件。
+ * 旧 #89 行没有 asset_id，回退按 file_id 查询。
+ */
 async function evidenceRefsTicket(deps, ticket) {
-  if (typeof ticket.file_id !== "string" || ticket.file_id === "") return null;
-  var got = await deps.db.collection(EV).where({
-    household_id: ticket.household_id,
-    item_id: ticket.item_id,
-    file_id: ticket.file_id
-  }).get();
-  return got && got.data && got.data.length > 0 ? got.data[0] : null;
+  var rows = [];
+  var seen = Object.create(null);
+  async function append(cond) {
+    var got = await deps.db.collection(EV).where(cond).get();
+    var list = (got && got.data) || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && typeof list[i]._id === "string" && seen[list[i]._id] !== true) {
+        seen[list[i]._id] = true;
+        rows.push(list[i]);
+      }
+    }
+  }
+  if (typeof ticket.asset_id === "string" && ticket.asset_id !== "") {
+    await append({ household_id: ticket.household_id, asset_id: ticket.asset_id });
+  }
+  if (typeof ticket.file_id === "string" && ticket.file_id !== "") {
+    await append({ household_id: ticket.household_id, file_id: ticket.file_id });
+  }
+  return rows.length > 0 ? rows[0] : null;
 }
 
 async function collectByStatus(deps, status) {

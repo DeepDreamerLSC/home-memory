@@ -221,8 +221,21 @@ export type ItemsApiEvent =
       {
         /** 单件物品视频留证:先申请服务端上传票据,再直传云存储 */
         action: "videoUploadBegin";
+        purpose?: "item";
         item_id: string;
         ext?: "mp4" | "mov" | "m4v";
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** PR B 场景扫描:一张票据在最终确认后为多件物品复用 */
+        action: "videoUploadBegin";
+        purpose: "scene";
+        scene_id: string;
+        ext?: "mp4" | "mov" | "m4v";
+        duration_ms: number;
+        video_w: number;
+        video_h: number;
       } & ScopeWriteBinding
     )
   | (
@@ -272,6 +285,7 @@ export type ItemsApiEvent =
         highlights: VideoEvidenceHighlightInput[];
       } & ScopeWriteBinding
     )
+  | (VideoSceneCommitEvent & ScopeWriteBinding)
   | (
       {
         /** 删除某件物品的一条或全部视频证据(服务端先删云文件再删行) */
@@ -416,6 +430,7 @@ export type ItemsApiOkResponse =
   | VideoUploadCancelResponse
   | VideoEvidenceGetResponse
   | VideoEvidenceHighlightSaveResponse
+  | VideoSceneCommitResponse
   | VideoEvidenceDeleteResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
@@ -1112,6 +1127,10 @@ export interface VideoEvidenceRow {
   evidence_id: string;
   item_id: string;
   file_id: string;
+  /** 同一物理原视频的逻辑组;旧 #89 行可能缺省 */
+  asset_id?: string;
+  /** manual=单件留证,scene=场景扫描批量确认 */
+  source?: "manual" | "scene";
   /** getTempFileURL 临时播放链接;"" = 换链失败,可重试 */
   video_url: string;
   duration_ms: number;
@@ -1132,6 +1151,8 @@ export interface VideoUploadBeginResponse {
   upload_ticket: string;
   upload_path: string;
   expires_at: string;
+  /** 服务端生成的物理文件逻辑组；scene 模式必须随 commit 回传校验 */
+  asset_id?: string;
 }
 
 export interface VideoUploadReceiptResponse {
@@ -1150,6 +1171,9 @@ export interface VideoUploadCancelResponse {
   state: "cancelled" | "bound";
   /** state=bound 时返回正式证据,客户端应恢复为回放态 */
   evidence?: VideoEvidenceRow;
+  /** scene ticket 已绑定多个 item 时列出全部关联 item_id */
+  linked_item_ids?: string[];
+  evidence_count?: number;
 }
 
 export interface VideoEvidenceGetResponse {
@@ -1166,6 +1190,61 @@ export interface VideoEvidenceHighlightSaveResponse {
   highlight_version: number;
   /** true = 同 highlight_update_id 幂等重放，版本未再次递增 */
   duplicated: boolean;
+}
+
+export interface VideoSceneCommitNewItem {
+  draft_key: string;
+  target: "new";
+  operation_id: string;
+  name: string;
+  location_text: string;
+  note?: string;
+  highlights: VideoEvidenceHighlightInput[];
+}
+
+export interface VideoSceneCommitExistingItem {
+  draft_key: string;
+  target: "existing";
+  item_id: string;
+  highlights: VideoEvidenceHighlightInput[];
+}
+
+export type VideoSceneCommitItem = VideoSceneCommitNewItem | VideoSceneCommitExistingItem;
+
+export interface VideoSceneCommitEvent {
+  action: "videoSceneCommit";
+  scene_id: string;
+  upload_ticket: string;
+  /** videoUploadBegin(purpose:"scene") 返回值；必须与票面 asset_id 一致 */
+  asset_id: string;
+  file_id: string;
+  duration_ms: number;
+  video_w: number;
+  video_h: number;
+  consent_version: "v1";
+  items: VideoSceneCommitItem[];
+}
+
+export interface VideoSceneCommitResultRow {
+  draft_key: string;
+  ok: boolean;
+  item_id?: string;
+  created?: boolean;
+  duplicated?: boolean;
+  evidence_saved?: boolean;
+  evidence_duplicated?: boolean;
+  error?: string;
+  message?: string;
+}
+
+export interface VideoSceneCommitResponse {
+  ok: true;
+  scene_id: string;
+  asset_id: string;
+  ticket_state: "bound" | "partial";
+  results: VideoSceneCommitResultRow[];
+  /** 未完成/证据写入失败的 draft_key；客户端用同一冻结载荷重试 */
+  evidence_failed?: string[];
 }
 
 export interface VideoEvidenceDeleteResponse {

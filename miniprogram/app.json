@@ -4,6 +4,7 @@
     "pages/confirm/confirm",
     "pages/photo/photo",
     "pages/item/item",
+    "pages/video-scan/video-scan",
     "pages/locations/locations",
     "pages/locationScan/locationScan",
     "pages/family/family",

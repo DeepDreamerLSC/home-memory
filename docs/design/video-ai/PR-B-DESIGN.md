@@ -1,6 +1,6 @@
 # PR B 设计：视频场景扫描与多物品候选确认
 
-**状态**：方向已获 Lead 批准；接口仍需等 PR A 冻结后实施
+**状态**：已基于 PR A `feat/video-ai-target@f9bd55b` 实施于 `feat/video-scene-scan`；待全量测试与 Lead 评审
 **决策记录（2026-10-19）**：MVP 单次≤12 件；复用 `videoUploadBegin(purpose:"scene")`；commit 目标 20s 客户端/20s 服务端，不调大超时；入口为首页「记录/添加物品」区域的新 `pages/video-scan`，不替换拍照识物；PR B 不先改共享 types/api/itemsApi/item 页。
 **设计分支**：`design/video-scene-scan`
 **范围**：只讨论设计、schema、编排、状态机、测试与验收，不写生产代码。
@@ -674,14 +674,22 @@ interface SceneDraft {
 - commit 不调大 timeout：目标客户端 20s、服务端 itemsApi 20s；commit 内禁止 AI/网络长调用。先实测，12 件确实超时才另行评估缩短批量或提报调整超时。
 - MVP 入口在首页「记录/添加物品」区域，新增独立 `pages/video-scan`；不替换拍照识物入口，只由用户主动进入。
 
-### 12.2 实施前仍需 PR A 冻结确认
+### 12.2 实施确认结果
 
-1. **通用抽帧原语最终导出名**：PR A 需提供场景可复用的 capture-at-time/session-cancel 接口；PR B 不先改 `video-target.*`。
-2. **highlight schema 最终版本**：场景直接复用 PR A 行内 highlights（含 `box:null` 仅时间窗、`source:"user_confirmed"`、`highlight_version`、旧行 []/0）；若字段名变化，本设计同步适配。
-3. **共享文件删除冲突**：PR A 的单件删除路径合入后，PR B 必须在其基础上完成 §7 的引用检查和锁序改造后才可合并；PR B 不与 PR A 并行修改 itemsApi/video.js。
-
-实施任务 task-4 保持 blocked，等 PR A 合入/冻结后再唤起。
+1. **通用抽帧原语**：直接复用 PR A `miniprogram/utils/video-target.ts` 的 `createVideoFrameSession`、`buildFramePlan`、取消/长边/质量/base64 上限；未修改 `video-target.*`。
+2. **highlight schema**：直接复用 PR A 行内 highlights（含 `box:null`、`source:"user_confirmed"`、`highlight_version`、旧行 []/0），场景行首次确认写 version 1。
+3. **共享文件删除**：已在 `cloudfunctions/itemsApi/lib/video.js` 的 `videoEvidenceDelete`/`cleanupForItem` 和 `videoCleanup` 完成引用复核与 item→asset 锁序；新增测试全绿。
 
 ---
 
 **结论**：本设计以最小增量复用 #89 和 PR A：不新建集合、不引入第二套高亮 schema、不把 AI 候选落库；只扩展票据的 scene 分支、evidence 的 asset_id/highlights、共享文件引用删除和确认页状态机。PR B 的实施前提是 PR A 合入/冻结，且不得在 PR A 独占文件上与 PR A 并行修改。
+
+## 13. 实施记录（2026-10-20）
+
+- 基线：`origin/feat/video-ai-target@f9bd55b`（PR A，含 highlights、highlight save、通用 `createVideoFrameSession`、`videoTargetRecognize`）。
+- 服务端：`videoUploadBegin` 增 `purpose:"scene"` 分支并签发 `asset_id`；复用 receipt/cancel 的票据 CAS；新增 `videoSceneCommit` 批量幂等提交；evidence 行写 `asset_id/source/highlights/highlight_version`。
+- 删除硬门槛：`videoEvidenceDelete` 与 deleteItem 级联均走 item 锁 → asset/file 锁；asset 锁内重新查询同 `asset_id/file_id` 的全部 evidence，最后引用才删云文件；`videoCleanup` 改按 asset/file 查全 item 引用。
+- 客户端：新增 `miniprogram/utils/video-scene.ts`（4+4 帧计划、逐帧扫描、同名不自动合并、显式合并/拆分、用户确认 highlights、12 件本地门）；新增独立 `pages/video-scan` 页面和首页「记录/添加物品」区域「🎬 多件」入口，保留拍照识物入口。
+- 隐私：场景识别复用现有 `extractDraft.vlRecognize`，每帧 base64 只在内存；原视频只在最终确认并取得 scene 票据后上传；AI 候选不落库；本地会话/ pending 不含 base64。
+- 测试新增：`tests/video-scene.test.js`（批量提交/同名/幂等/归属/锁）、`tests/video-scene-share.test.js`（共享文件最后引用删除/物品级联/失败保留/清理）、`tests/video-scene-client.test.js`（帧计划/部分失败/取消/拆分合并/提交载荷）和 `tests/video-scene-page.test.js`（首页双入口、独立页面、无自动播放、状态机方法接线）。
+- 已知真机缺口：VideoDecoder + OffscreenCanvas + canvasToTempFilePath 的 iOS/Android 实机链路、8 帧总耗时与内存、弱网/切后台/杀进程恢复、条形码式密集抽屉的漏检率；上线前需按 §10.6 真机清单验证，不宣称准确率。
