@@ -1,6 +1,7 @@
 # PR B 设计：视频场景扫描与多物品候选确认
 
-**状态**：设计预研 · PROVISIONAL（等 PR A 接口冻结后再实施）
+**状态**：方向已获 Lead 批准；接口仍需等 PR A 冻结后实施
+**决策记录（2026-10-19）**：MVP 单次≤12 件；复用 `videoUploadBegin(purpose:"scene")`；commit 目标 20s 客户端/20s 服务端，不调大超时；入口为首页「记录/添加物品」区域的新 `pages/video-scan`，不替换拍照识物；PR B 不先改共享 types/api/itemsApi/item 页。
 **设计分支**：`design/video-scene-scan`
 **范围**：只讨论设计、schema、编排、状态机、测试与验收，不写生产代码。
 
@@ -90,7 +91,7 @@ PR C 可以并行做设计，但其回放实现必须等 PR B 的数据 schema �
 
 ## 3. 用户流程
 
-1. 入口：用户点击“拍一段，找抽屉里的东西”（新页面 `pages/video-scene/video-scene`，入口位置由产品最终定，不在本 PR 改首页信息架构）。
+1. 入口：首页「记录/添加物品」区域新增“拍视频找多件”入口，进入独立页面 `pages/video-scan`；不替换、不遮挡原拍照识物入口，只由用户主动进入，不做自动巡检。
 2. 首次说明与授权：原视频确认前不上传；抽帧会临时发送给云端 AI；确认后保存原视频和每件高亮；视频只作历史证据，不冒充当前位置；默认不自动播放。
 3. 录制/选择一段 5–30 秒抽屉/柜子视频（客户端 `chooseMedia` 上限 30s；服务端沿用 #89 的 10 分钟上限保护，但场景流程主动限制）。
 4. 客户端按 10%/35%/65%/90% 先抽 4 帧；每帧串行识别。完成后可继续补 22.5%/50%/77.5%/97.5% 共 4 帧（总 ≤8），不因某一帧命中就提前结束——目标是找多件，不是找单件。
@@ -250,7 +251,8 @@ interface SceneObservation {
 
 - 继续用 `video_item_locks` 集合，不新建锁集合。
 - 新增逻辑 asset 锁：`_id = "val_" + asset_id`，TTL 60s，文档带 `asset_id` 与 `purpose`。
-- 统一锁序：**所有涉及的 item 锁按 item_id 升序获取 → 最后获取 asset 锁**。`videoSceneCommit`、`videoEvidenceDelete`、`videoCleanup` 的单文件处理、物品删除都遵循此顺序。
+- 统一锁序：**所有涉及的 item 锁按 item_id 升序获取 → 最后获取 asset 锁**。`videoSceneCommit`、普通 `videoEvidenceDelete`、物品级联删除都必须遵循。删除路径同样是先 item 锁（多件按 item_id 排序），再 file/asset 锁；两个 item 并发删除同一文件时，后取得 asset 锁的请求必须在锁内重读剩余 evidence 引用，不能沿用锁外快照。
+- **asset 锁内的删除判定**：①重新查询同 household 下 `asset_id`（旧行回退 `file_id`）的全部 evidence；②若存在其他 item 的引用，只删除当前请求的目标行，云文件零操作；③只有引用集为空时才 `cloud.deleteFile`，且 status 0/-503003 后才允许删最后一行；④云删除失败保留行并返回 `VIDEO_DELETE_FAILED`。
 - 新建物品在锁外先通过现有 `createItem` 幂等建档；拿到 item_id 后再统一抢 item 锁，抢锁后重查物品存活，再写 evidence。进程中断在“建档后、证据写入前”的窗口由本地 pending 会话重试收敛，详见 §8。
 - `videoSceneCommit` 是写类 action，必须加入 `WRITE_ACTIONS` 与 `ITEMS_MUTATING_ACTIONS`，走 `lib/household.js` 双 marker 硬门。
 
@@ -351,6 +353,7 @@ interface SceneObservation {
 - 票据存在、属当前家庭、purpose 为 scene、`file_id` 路径与票据完全一致；`getTempFileURL` 可用；否则 `VIDEO_NOT_AVAILABLE`。
 - pending 且 `expires_at` 已过 → `VIDEO_TICKET_EXPIRED`。binding/bound 的同哈希重试可视作恢复路径，不重复上传。
 - **纯参数错误整批零写入**；运行期单件失败走部分成功结果。
+- **时延合同**：commit 阶段禁止 AI/VL/长网络调用，只允许票据/物品 DB 读写和已有文件的 `getTempFileURL` 快速可用性检查。目标为客户端 `videoSceneCommit` 20s 超时、itemsApi 服务端 20s 超时；不因本功能把 itemsApi 调至 60/70s。若 12 件实测确超 20s，先评估缩短批量/减少串行 DB 往返，再另行提报调整 timeout。
 
 提交编排：
 
@@ -621,6 +624,10 @@ interface SceneDraft {
 | VS-SHARE-08 | scene ticket 清理遇到共享 evidence | 修 bound，不删文件；无引用才允许删 |
 | VS-SHARE-09 | cleanup 恢复 stale binding/cleaning/cancelling | 有 evidence 修复 bound；无 evidence 按 #89 状态机收敛 |
 | VS-SHARE-10 | getTempFileURL 单行失败 | 该行 video_url=""，其他 item 行照常播放；不因共享文件废整次查询 |
+| VS-LOCK-01 | A/B 两 item 并发删除同一 asset | 两者都按 item→asset 锁序；只有最后引用请求调用一次 deleteFile；另一请求只删自己行；不能误删云文件 |
+| VS-LOCK-02 | 删除与 commit 同 item 并发 | item 锁/asset 锁串行化；被删 item 不新增 evidence；commit 返回可解释的 NOT_FOUND/VIDEO_ITEM_BUSY |
+| VS-LOCK-03 | asset 锁忙/云删除失败 | 不误删文件；引用行保留，返回 BUSY 或 VIDEO_DELETE_FAILED 可重试 |
+| VS-API-16 | scene commit 调用面 | 不调用 extractDraft/VL；仅 DB 与 getTempFileURL；测试预算内完成 12 件批量写入 |
 
 ### 10.5 PR A 集成回归
 
@@ -658,13 +665,22 @@ interface SceneDraft {
 11. 日志抽检无物品名、位置、base64、框坐标、candidate 原文。
 12. 真机验收清单（§10.6）在 PR B 合并前完成；未完成时 PR 保持 HOLD，不部署真实家庭。
 
-## 12. 待确认问题
+## 12. 决议与实施门禁
 
-1. **PR A highlight schema 的最终版本**：本设计不依赖额外 `frame_ms`，但要求 `source:"user_confirmed"`、box 为 null 或 0-1 有效框、start<end≤duration、旧行 []/0 与 `videoEvidenceHighlightSave` 同一校验。若 PR A 最终去掉/改名这些字段，本设计需同步调整。
-2. **最终件数上限**：本设计取 12 件（每次场景确认）；超过时 UI 明确要求分批/合并，不得后台静默截断。若产品期望更大批量，需要重新评估 itemsApi 20/60s 超时与 UI 性能。
-3. **场景上传票据是否复用 `videoUploadBegin` 的 `purpose:"scene"` 分支**：本设计建议复用，减少 action 面；若 PR A 实现已改动该 action 签名，需在冻结时锁定兼容写法。
-4. **itemsApi 超时**：12 件串行建档+证据写入可能超过当前 20s 云函数/15s 客户端预算。实施前需用本地/测试环境测时；若不达标，scene commit 使用独立客户端 70s 预算并评估将 itemsApi 云函数 timeout 调到 60s（部署配置变更，需 Lead 批准）。
-5. **场景入口位置**：新页面入口（首页拍照入口下方的“拍视频找多件” vs 物品列表页）待产品定；不影响本设计数据/接口。
+### 12.1 Lead 已决议
+
+- 每次场景确认最多 12 件；超出提示分批/合并，系统不自动拆分、不静默截断。
+- 复用 `videoUploadBegin` 并显式传 `purpose:"scene"`；缺省为 single，不新增独立上传 action。scene commit 必须复核 purpose、upload_ticket、asset_id、file_id、cloud_path 归属，以及 ticket 的 scene_id/payload hash。
+- commit 不调大 timeout：目标客户端 20s、服务端 itemsApi 20s；commit 内禁止 AI/网络长调用。先实测，12 件确实超时才另行评估缩短批量或提报调整超时。
+- MVP 入口在首页「记录/添加物品」区域，新增独立 `pages/video-scan`；不替换拍照识物入口，只由用户主动进入。
+
+### 12.2 实施前仍需 PR A 冻结确认
+
+1. **通用抽帧原语最终导出名**：PR A 需提供场景可复用的 capture-at-time/session-cancel 接口；PR B 不先改 `video-target.*`。
+2. **highlight schema 最终版本**：场景直接复用 PR A 行内 highlights（含 `box:null` 仅时间窗、`source:"user_confirmed"`、`highlight_version`、旧行 []/0）；若字段名变化，本设计同步适配。
+3. **共享文件删除冲突**：PR A 的单件删除路径合入后，PR B 必须在其基础上完成 §7 的引用检查和锁序改造后才可合并；PR B 不与 PR A 并行修改 itemsApi/video.js。
+
+实施任务 task-4 保持 blocked，等 PR A 合入/冻结后再唤起。
 
 ---
 
