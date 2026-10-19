@@ -483,3 +483,96 @@ test("VIDEO-CAS-BUSY:票据处于 binding 时 attach/cancel 都不得并发操�
   assert.equal(deleteCalls, 0);
   assert.equal((await rawDocs(db, "video_evidence")).length, 0);
 });
+
+test("VIDEO-B14-RECEIPT-CAS:取消后 receipt 不得把 file_id 写回已取消票据", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+
+  const cancel = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(cancel.ok, true);
+  assert.equal(cancel.state, "cancelled");
+  const receipt = await handler({
+    action: "videoUploadReceipt",
+    upload_ticket: begin.upload_ticket,
+    file_id: fileId,
+  }, deps);
+  assert.equal(receipt.ok, false);
+  assert.equal(receipt.error, "VIDEO_TICKET_EXPIRED");
+  const ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "cancelled");
+  assert.equal(ticket.file_id, undefined, "已取消票据绝不能被 receipt 写回 file_id");
+});
+
+test("VIDEO-B14-BOUND-RECEIPT:已绑定票据 receipt 幂等成功", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  await attachWithReceipt(begin, deps, fileId);
+  const receipt = await handler({
+    action: "videoUploadReceipt",
+    upload_ticket: begin.upload_ticket,
+    file_id: fileId,
+  }, deps);
+  assert.equal(receipt.ok, true);
+  const ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "bound");
+});
+
+test("VIDEO-B13-ITEM-LOCK:删除与 attach 共用物品锁;未过期锁拒绝双方", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  await db.collection("video_item_locks").add({
+    data: {
+      _id: "vil_" + itemId,
+      household_id: HH_A,
+      item_id: itemId,
+      owner_token: "other",
+      purpose: "attach",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    },
+  });
+
+  const attachBlocked = await handler(attachEvent(begin, fileId), deps);
+  assert.equal(attachBlocked.ok, false);
+  assert.equal(attachBlocked.error, "VIDEO_ITEM_BUSY");
+  const deleteBlocked = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(deleteBlocked.ok, false);
+  assert.equal(deleteBlocked.error, "VIDEO_ITEM_BUSY");
+  const alive = await handler({ action: "get", item_id: itemId }, deps);
+  assert.equal(alive.ok, true);
+  assert.equal((await rawDocs(db, "video_evidence")).length, 0);
+});
+
+test("VIDEO-B13-LOCK-TTL:过期物品锁可被 attach 接管并在成功后释放", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  await db.collection("video_item_locks").add({
+    data: {
+      _id: "vil_" + itemId,
+      household_id: HH_A,
+      item_id: itemId,
+      owner_token: "stale",
+      purpose: "attach",
+      expires_at: "2020-01-01T00:00:00.000Z",
+    },
+  });
+  const attached = await handler(attachEvent(begin, fileId), deps);
+  assert.equal(attached.ok, true, JSON.stringify(attached));
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+  const removed = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(removed.ok, true);
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+});

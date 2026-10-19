@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence` 与 `video_upload_tickets` 七个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks` 八个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -58,7 +58,7 @@ cloudfunctions/
   remindNotify/          到期微信提醒推送(issue #36 V1.5):订阅落库 + 每日 08:00 扫描发送
     index.js             胶水层(OPENID→member_key、三向解析、cloud.openapi 订阅消息注入)
     config.json          超时 20 秒;timer 触发器 dailyExpiryNotify(cron 每天 08:00)
-  videoCleanup/          孤儿视频回收:扫描超过 24h 仍 pending 且已回执 file_id 的票据
+  videoCleanup/          孤儿视频回收:恢复超时中间态 + 扫描超过 24h 仍 pending 且已回执 file_id 的票据
     lib/handler.js       recordSubscription 落库 + 每日扫描(窗口过滤/聚合/资格复核/幂等/发送)
     lib/aggregate.js     纯函数:上海时区自然日、到期窗口、按家庭聚合卡片四字段(20 码点截断)
     lib/eligibility.js   纯函数:发送前资格复核(member_key 重算/在册未解散/个人家庭派生)与幂等
@@ -113,7 +113,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence` 与 `video_upload_tickets`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;视频留证两个集合见 ⑧)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;视频留证三个集合见 ⑧)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -164,11 +164,11 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 **⑧ video_evidence / video_upload_tickets(单件视频留证;先建集合再部署 itemsApi)**:
 
-> 创建 `video_upload_tickets` 与 `video_evidence` 两个集合,权限全部并入 ③(「所有用户不可读不可写」)。`video_evidence` 建组合唯一索引:字段一 `household_id`(升序)+ 字段二 `item_id`(升序)+ 字段三 `file_id`(升序),勾选「**唯一**」;`video_upload_tickets` 无需额外索引(`_id` 天然唯一)。
+> 创建 `video_upload_tickets`、`video_evidence` 与 `video_item_locks` 三个集合,权限全部并入 ③(「所有用户不可读不可写」)。`video_evidence` 建组合唯一索引:字段一 `household_id`(升序)+ 字段二 `item_id`(升序)+ 字段三 `file_id`(升序),勾选「**唯一**」;`video_upload_tickets` 与 `video_item_locks` 无需额外索引(`_id` 天然唯一)。`video_item_locks` 是物品级 attach/delete 互斥锁,60s 过期可接管。
 >
 > 用途:用户在物品详情页明确选择**一件**物品后,申请服务端上传票据 -> 客户端按票据路径上传原视频 -> 凭票据绑定证据。服务端校验票据属于当前家庭与该物品、文件路径与票据完全一致、文件可通过云函数换临时链接;读取端只按家庭 + 未删物品返回。一个视频只绑定用户当前确认的一件物品;首版不做批量识物、不自动合并同名实物、不自动生成高亮框。
 >
-> 保留与删除:视频默认折叠,用户点击后才播放;删除视频时逐文件确认云存储删除成功后才删证据行;删除物品时同样清理 bound 证据与已回执 file_id 的 pending 票据,任一云删除失败则物品删除失败并保持可重试。上传成功后客户端立即回执 file_id 并保留本地 pending。**禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除**;孤儿回收只由 `videoCleanup` 按数据库票据 file_id 选择性执行。
+> 保留与删除:视频默认折叠,用户点击后才播放;删除视频时逐文件确认云存储删除成功后才删证据行;删除物品与 attach 共用 `video_item_locks` 物品锁,清理 bound 证据与已回执 file_id 的 pending 票据,云删除失败则物品删除失败并保持可重试。上传成功后客户端立即回执 file_id 并保留本地 pending。**禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除**;孤儿回收只由 `videoCleanup` 按数据库票据 file_id 选择性执行,并会恢复超时卡在 binding/cleaning/cancelling 的票据。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
@@ -186,7 +186,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 **timer 触发器**:
 - remindNotify:`dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间);
-- videoCleanup:`dailyVideoCleanup`(cron `0 0 4 * * * *`,每天 04:00,北京时间),只删除超过 24h 仍为 pending 且已回执 `file_id` 的孤儿视频,不触碰 bound 证据。
+- videoCleanup:`dailyVideoCleanup`(cron `0 0 4 * * * *`,每天 04:00,北京时间),先恢复超时卡在 binding/cleaning/cancelling 的票据,再删除超过 24h 仍为 pending 且已回执 `file_id` 的孤儿视频,不触碰 bound 证据。
 
 开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建对应触发器,并可在控制台「手动执行」一次验证。
 

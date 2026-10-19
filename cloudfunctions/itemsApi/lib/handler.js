@@ -60,7 +60,8 @@ var ERROR_MESSAGES = {
   VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
   VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
   VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
-  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试"
+  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试",
+  VIDEO_ITEM_BUSY: "这件物品正在被删除或整理,请稍后重试"
 };
 
 function fail(error) {
@@ -1161,15 +1162,10 @@ async function updateItem(event, deps) {
  * 软删除:置 deleted 为 true,并把 name、name_norm、location_text、note 全部抹成空字符串。
  */
 var videoCleanupForItem = null;
+var videoAcquireItemLock = null;
+var videoReleaseItemLock = null;
 
-async function deleteItem(event, deps) {
-  if (!validItemId(event.item_id)) {
-    return fail("INVALID_INPUT");
-  }
-  var existing = await collection(deps)
-    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
-    .get();
-  if (!existing.data || existing.data.length === 0) return fail("NOT_FOUND");
+async function deleteItemLocked(event, deps) {
   if (videoCleanupForItem !== null) {
     var cleanup = await videoCleanupForItem(deps, event.item_id);
     if (cleanup.ok !== true) return fail(cleanup.error || "VIDEO_DELETE_FAILED");
@@ -1179,14 +1175,31 @@ async function deleteItem(event, deps) {
     .update({ data: { deleted: true, name: "", name_norm: "", location_text: "", note: "" } });
   var updated = (res && res.stats && res.stats.updated) || 0;
   if (updated >= 1) {
-    // 级联(issue #36):物品删除后其 active 提醒一并硬删(done 历史保留),
-    // remindList 不再出现该物品;绝不让提醒指向已删物品。同时在途欠账声明
-    // 一并消费——物品已删,任何未落地的再生/补录认领不再有意义
     await removeActiveReminders(deps, event.item_id);
     await consumeAnyClaim(deps, event.item_id);
     return { ok: true };
   }
   return fail("NOT_FOUND");
+}
+
+async function deleteItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var existing = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!existing.data || existing.data.length === 0) return fail("NOT_FOUND");
+  if (videoAcquireItemLock !== null) {
+    var lock = await videoAcquireItemLock(deps, event.item_id, "delete");
+    if (lock.ok !== true) return fail(lock.error || "VIDEO_ITEM_BUSY");
+    try {
+      return await deleteItemLocked(event, deps);
+    } finally {
+      await videoReleaseItemLock(deps, event.item_id, lock.token);
+    }
+  }
+  return deleteItemLocked(event, deps);
 }
 
 /**
@@ -2587,6 +2600,8 @@ var videoActions = createVideoActions({
   NOTE_MAX: NOTE_MAX
 });
 videoCleanupForItem = videoActions.cleanupForItem;
+videoAcquireItemLock = videoActions.acquireItemLock;
+videoReleaseItemLock = videoActions.releaseItemLock;
 
 var ACTIONS = {
   create: createItem,

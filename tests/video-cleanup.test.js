@@ -141,3 +141,84 @@ test("CLEANUP-RACE:已进入 binding 的票据不进入清理集合", async () =
   const after = (await db.collection("video_upload_tickets").doc("vt_binding").get()).data;
   assert.equal(after.status, "binding");
 });
+
+test("CLEANUP-B12:超时 binding/cleaning 无证据恢复后同轮清理;有证据修复 bound", async () => {
+  const db = await seeded([
+    ticket("vt_stale_binding", {
+      status: "binding",
+      binding_at: "2026-10-19T23:00:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/b.mp4",
+    }),
+    ticket("vt_stale_cleaning", {
+      status: "cleaning",
+      cleaning_at: "2026-10-19T23:00:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/c.mp4",
+    }),
+    ticket("vt_stale_binding_bound", {
+      status: "binding",
+      binding_at: "2026-10-19T23:00:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/d.mp4",
+    }),
+    ticket("vt_fresh_binding", {
+      status: "binding",
+      binding_at: "2026-10-19T23:59:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/e.mp4",
+    }),
+  ]);
+  await db.collection("video_evidence").add({
+    data: {
+      _id: "ve_d", household_id: "hh_a", item_id: "it_a",
+      file_id: "cloud://bucket/video-evidence/hh_a/d.mp4",
+      duration_ms: 1, video_w: 1, video_h: 1,
+      captured_location_text: "", consent_version: "v1",
+      created_at: "2026-10-19T23:00:00.000Z",
+    },
+  });
+  const deleted = [];
+  const res = await handler({
+    db, now: () => NOW,
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID, status: 0 })) };
+    },
+  });
+  assert.equal(res.recovery.scanned, 3);
+  assert.equal(res.recovery.to_pending, 2);
+  assert.equal(res.recovery.to_bound, 1);
+  assert.deepEqual(deleted.sort(), [
+    "cloud://bucket/video-evidence/hh_a/b.mp4",
+    "cloud://bucket/video-evidence/hh_a/c.mp4",
+  ]);
+  const byId = Object.fromEntries((await db.collection("video_upload_tickets").where({}).get()).data.map((x) => [x._id, x]));
+  assert.equal(byId.vt_stale_binding.status, "cancelled");
+  assert.equal(byId.vt_stale_cleaning.status, "cancelled");
+  assert.equal(byId.vt_stale_binding_bound.status, "bound");
+  assert.equal(byId.vt_stale_binding_bound.evidence_id, "ve_d");
+  assert.equal(byId.vt_fresh_binding.status, "binding");
+});
+
+test("CLEANUP-B12:超时 cancelling 删除成功收敛 cancelled,失败恢复 pending", async () => {
+  const db = await seeded([
+    ticket("vt_cancel_ok", {
+      status: "cancelling",
+      cancelling_at: "2026-10-19T23:00:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/ok.mp4",
+    }),
+    ticket("vt_cancel_fail", {
+      status: "cancelling",
+      cancelling_at: "2026-10-19T23:00:00.000Z",
+      file_id: "cloud://bucket/video-evidence/hh_a/fail.mp4",
+    }),
+  ]);
+  const res = await handler({
+    db, now: () => NOW,
+    deleteCloudFiles: async (ids) => ({
+      fileList: ids.map((fileID) => ({ fileID, status: fileID.indexOf("fail") === -1 ? 0 : -1 })),
+    }),
+  });
+  assert.equal(res.recovery.to_cancelled, 1);
+  assert.equal(res.recovery.failed, 1);
+  const byId = Object.fromEntries((await db.collection("video_upload_tickets").where({}).get()).data.map((x) => [x._id, x]));
+  assert.equal(byId.vt_cancel_ok.status, "cancelled");
+  assert.equal(byId.vt_cancel_fail.status, "pending");
+});

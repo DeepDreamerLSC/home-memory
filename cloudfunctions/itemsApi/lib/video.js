@@ -4,6 +4,8 @@
 // 不按同名自动合并物理身份,不自动生成高亮框。
 var EV = "video_evidence";
 var TK = "video_upload_tickets";
+var LOCK = "video_item_locks";
+var LOCK_TTL_MS = 60 * 1000;
 var FILE_MAX = 512;
 var DIM_MAX = 10000;
 var DURATION_MAX_MS = 10 * 60 * 1000;
@@ -29,6 +31,63 @@ function createVideoActions(h) {
 
   function evidenceCol(deps) { return deps.db.collection(EV); }
   function ticketCol(deps) { return deps.db.collection(TK); }
+  function lockCol(deps) { return deps.db.collection(LOCK); }
+  function lockId(itemId) { return "vil_" + itemId; }
+
+  /**
+   * 物品级互斥锁:attach 与删除物品都必须先抢同一把锁。
+   * - 单文档 CAS:owner_token + expires_at;
+   * - 正常流程结束释放;进程中断后 60s 过期,可被下一次操作接管;
+   * - 不引入通用事务,只封「删除物品」与「继续写证据」的并发窗口。
+   */
+  async function acquireItemLock(deps, itemId, purpose) {
+    var id = lockId(itemId);
+    var token = "vl_" + deps.genId();
+    var now = deps.now();
+    var nowMs = Date.parse(now);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var got;
+      try {
+        got = await lockCol(deps).doc(id).get();
+      } catch (e) {
+        got = null;
+      }
+      var existing = got && got.data;
+      if (existing === null || existing === undefined) {
+        try {
+          await lockCol(deps).add({ data: {
+            _id: id,
+            item_id: itemId,
+            household_id: deps.householdId,
+            owner_token: token,
+            purpose: purpose,
+            created_at: now,
+            expires_at: new Date(nowMs + LOCK_TTL_MS).toISOString()
+          } });
+          return { ok: true, token: token };
+        } catch (e) {
+          if (h.isDuplicateKeyError(e) === false) throw e;
+          continue;
+        }
+      }
+      var expires = Date.parse(existing.expires_at || "");
+      if (Number.isNaN(expires) === false && expires > nowMs) return { ok: false, error: "VIDEO_ITEM_BUSY" };
+      var claim = await lockCol(deps).where({ _id: id, owner_token: existing.owner_token }).update({ data: {
+        owner_token: token,
+        purpose: purpose,
+        claimed_at: now,
+        expires_at: new Date(nowMs + LOCK_TTL_MS).toISOString()
+      } });
+      if (((claim && claim.stats && claim.stats.updated) || 0) === 1) return { ok: true, token: token };
+    }
+    return { ok: false, error: "VIDEO_ITEM_BUSY" };
+  }
+
+  async function releaseItemLock(deps, itemId, token) {
+    try {
+      await lockCol(deps).where({ _id: lockId(itemId), owner_token: token }).remove();
+    } catch (e) {}
+  }
 
   function projectEvidence(row, videoUrl) {
     return {
@@ -221,14 +280,29 @@ function createVideoActions(h) {
     var ticket = gotTicket && gotTicket.data;
     if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
     if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
-    if (ticket.status === "binding" || ticket.status === "cleaning" || ticket.status === "cancelling") return fail("VIDEO_TICKET_BUSY");
-    if (ticket.status === "cancelled" || ticket.status === "deleted") return fail("VIDEO_TICKET_EXPIRED");
-    if (ticket.status === "pending" && Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
     var actualPath = filePath(event.file_id);
     if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
     if (isString(ticket.file_id) && ticket.file_id !== "" && ticket.file_id !== event.file_id) return fail("FILE_NOT_OWNED");
-    if (ticket.file_id !== event.file_id || ticket.receipt_at === undefined) {
-      await ticketCol(deps).doc(ticket._id).update({ data: { file_id: event.file_id, receipt_at: deps.now() } });
+
+    if (ticket.status === "bound") return { ok: true };
+    if (ticket.status === "binding" || ticket.status === "cleaning" || ticket.status === "cancelling") return fail("VIDEO_TICKET_BUSY");
+    if (ticket.status === "cancelled" || ticket.status === "deleted") return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.status !== "pending") return fail("VIDEO_TICKET_EXPIRED");
+    if (Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
+
+    // 条件更新:如果 receipt 读取票据后,取消已经把 pending 抢走并置 cancelled,
+    // 这次写入不能把 file_id 写回已取消票据,否则会导致视频失回收责任。
+    var receipt = await ticketCol(deps).where({
+      _id: ticket._id,
+      household_id: deps.householdId,
+      status: "pending"
+    }).update({ data: { file_id: event.file_id, receipt_at: deps.now() } });
+    if (((receipt && receipt.stats && receipt.stats.updated) || 0) === 0) {
+      var latestGot = await ticketCol(deps).doc(ticket._id).get();
+      var latest = latestGot && latestGot.data;
+      if (latest !== null && latest !== undefined && latest.status === "bound" && latest.file_id === event.file_id) return { ok: true };
+      if (latest !== null && latest !== undefined && (latest.status === "binding" || latest.status === "cleaning" || latest.status === "cancelling")) return fail("VIDEO_TICKET_BUSY");
+      return fail("VIDEO_TICKET_EXPIRED");
     }
     return { ok: true };
   }
@@ -255,6 +329,12 @@ function createVideoActions(h) {
     if (ticket.file_id !== event.file_id) return fail("INVALID_INPUT");
     var item = await itemAlive(deps, ticket.item_id);
     if (item === null) return fail("NOT_FOUND");
+    var itemLock = await acquireItemLock(deps, ticket.item_id, "attach");
+    if (itemLock.ok !== true) return fail(itemLock.error || "VIDEO_ITEM_BUSY");
+    try {
+      // 抢到物品锁后重查一次,防止 item 在读取票与抢锁之间被删除。
+      item = await itemAlive(deps, ticket.item_id);
+      if (item === null) return fail("NOT_FOUND");
 
     // 先查已有证据:命中即修复票据 bound,绝不重复插入。
     var pre = await findEvidenceForTicket(deps, ticket);
@@ -323,6 +403,9 @@ function createVideoActions(h) {
     // 证据已写成功。即使此处票据状态更新失败,清理任务也会先核对证据引用再删文件。
     await repairTicketBound(deps, ticket, doc._id);
     return { ok: true, evidence: projectEvidence(doc, url), duplicated: false };
+    } finally {
+      await releaseItemLock(deps, ticket.item_id, itemLock.token);
+    }
   }
 
   async function videoUploadCancel(event, deps) {
@@ -439,7 +522,9 @@ function createVideoActions(h) {
     videoUploadCancel: videoUploadCancel,
     videoEvidenceGet: videoEvidenceGet,
     videoEvidenceDelete: videoEvidenceDelete,
-    cleanupForItem: cleanupForItem
+    cleanupForItem: cleanupForItem,
+    acquireItemLock: acquireItemLock,
+    releaseItemLock: releaseItemLock
   };
 }
 

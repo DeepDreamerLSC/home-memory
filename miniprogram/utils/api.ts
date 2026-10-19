@@ -118,6 +118,7 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
   VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
   VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试",
+  VIDEO_ITEM_BUSY: "这件物品正在被删除或整理,请稍后重试",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
