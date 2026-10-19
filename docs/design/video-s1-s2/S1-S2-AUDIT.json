@@ -5530,10 +5530,16 @@
    "D3-BAT": "v4 4.0s",
    "D3-001": "v4 19.2s"
   },
-  "target_class_note": "Offline screening (2026-10-18, zero model calls) replaced D2-020/D2-022 with D2-019/D3-021 and corrected D1-020 time 43.2s -> 40.3s. D2-020 photo hit was a false positive (box on a different object); D2-022 had only a 3.9% low-confidence edge box. Structure remains 4 video-only + 2 shared.",
+  "target_class_note": "Offline screening (2026-10-18, zero model calls) replaced D2-020/D2-022 with D2-019/D3-021 and corrected D1-020 time 43.2s -> 40.3s. D2-020 photo hit was a false positive (box on a different object); D2-022 had only a 3.9% low-confidence edge box. Structure remains 4 video-only + 2 shared. Condition B uses a global three-drawer fixed library (2s/45 frames); no target-specific selection or replacement.",
+  "task_type": "visual_location_judgment",
+  "not_measured": [
+   "physical_retrieval",
+   "walking/opening/moving/tactile_confirmation"
+  ],
   "offline_screening": {
    "doc": "H2-OFFLINE-SCREENING.md",
    "model_calls": 0,
+   "qa_target_index_note": "target_index refers to the per-target 6-frame QA set used only for offline evidence verification; it is not the participant-facing library.",
    "targets": [
     {
      "id": "D1-019",
@@ -5545,6 +5551,8 @@
      "max_box_area": 0.24,
      "target_index": 5,
      "sharp_ratio": 1.47,
+     "library_nearest_frame": "D1 38.0s",
+     "library_has_target": true,
      "grade": "strong"
     },
     {
@@ -5557,6 +5565,8 @@
      "max_box_area": 0.257,
      "target_index": 5,
      "sharp_ratio": 1.27,
+     "library_nearest_frame": "D1 40.0s",
+     "library_has_target": true,
      "grade": "strong"
     },
     {
@@ -5570,6 +5580,8 @@
      "area_note": "manual visual estimate ~35-40%",
      "target_index": 4,
      "sharp_ratio": 1.04,
+     "library_nearest_frame": "D2 14.0s",
+     "library_has_target": true,
      "grade": "strong_manual"
     },
     {
@@ -5582,6 +5594,8 @@
      "max_box_area": 0.094,
      "target_index": 4,
      "sharp_ratio": 2.2,
+     "library_nearest_frame": "D3 14.0s",
+     "library_has_target": true,
      "grade": "strong"
     },
     {
@@ -5594,6 +5608,8 @@
      "max_box_area": 0.56,
      "target_index": 2,
      "sharp_ratio": 3.08,
+     "library_nearest_frame": "D3 4.0s",
+     "library_has_target": true,
      "grade": "strong"
     },
     {
@@ -5606,6 +5622,8 @@
      "max_box_area": 0.111,
      "target_index": 6,
      "sharp_ratio": 1.12,
+     "library_nearest_frame": "D3 20.0s",
+     "library_has_target": true,
      "grade": "strong"
     }
    ],
@@ -5645,14 +5663,20 @@
   },
   "conditions": [
    "photo_only",
-   "photo_plus_keyframe_set"
+   "photo_plus_keyframe_library"
   ],
-  "keyframe_set": {
-   "size": 6,
-   "target_frames": 1,
-   "distractors": 5,
-   "target_labeled": false,
+  "keyframe_library": {
+   "all_three_drawers": true,
+   "rule": "fixed 2s interval from 0s to end for each drawer video; generated before target selection; no target-specific frame selection or replacement",
+   "frames": {
+    "D1": 24,
+    "D2": 10,
+    "D3": 11,
+    "total": 45
+   },
+   "drawer_labels_visible": true,
    "timestamps_visible": true,
+   "target_labeled": false,
    "retrieval_time_counted": true
   },
   "sequences": {
