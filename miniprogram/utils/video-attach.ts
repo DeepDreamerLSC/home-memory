@@ -44,7 +44,6 @@ export interface VideoAttachDeps {
     camera: "back";
   }): Promise<{ tempFiles: Array<{ tempFilePath: string; duration: number; width: number; height: number; size: number }> }>;
   uploadFile(opt: { cloudPath: string; filePath: string }): Promise<{ fileID: string }>;
-  deleteFile(opt: { fileList: string[] }): Promise<{ fileList?: Array<{ fileID: string; status: number; errMsg?: string }> }>;
   begin(itemId: string, ext: "mp4" | "mov" | "m4v"): Promise<{ upload_ticket: string; upload_path: string; expires_at: string }>;
   receipt(event: { upload_ticket: string; file_id: string }): Promise<unknown>;
   attach(event: {
@@ -55,7 +54,7 @@ export interface VideoAttachDeps {
     video_h: number;
     consent_version: "v1";
   }): Promise<{ evidence: VideoEvidenceRow; duplicated: boolean }>;
-  cancel(uploadTicket: string): Promise<unknown>;
+  cancel(uploadTicket: string): Promise<{ state: "cancelled" | "bound"; evidence?: VideoEvidenceRow }>;
   now(): number;
 }
 
@@ -79,14 +78,6 @@ const defaultDeps: VideoAttachDeps = {
         filePath: opt.filePath,
         success: (res) => resolve({ fileID: res.fileID }),
         fail: (err) => reject(new Error((err && err.errMsg) || "uploadFile:fail")),
-      });
-    }),
-  deleteFile: (opt) =>
-    new Promise((resolve, reject) => {
-      wx.cloud.deleteFile({
-        fileList: opt.fileList,
-        success: (res) => resolve(res),
-        fail: (err) => reject(new Error((err && err.errMsg) || "deleteFile:fail")),
       });
     }),
   begin: (itemId, ext) => callItemsApi({ action: "videoUploadBegin", item_id: itemId, ext }),
@@ -200,11 +191,6 @@ function isTicketExpiredError(e: unknown): boolean {
   return isApiError(e) && e.code === "VIDEO_TICKET_EXPIRED";
 }
 
-function deleteItemSucceeded(item: { status: number } | undefined): boolean {
-  if (item === undefined) return false;
-  return item.status === 0 || item.status === -503003;
-}
-
 /**
  * 上传后先回执 file_id 给服务端,再绑定证据。
  * 回执失败也保留 pending;票据过期时返回 expired,页面要求删除后重拍,不无限重试。
@@ -287,23 +273,30 @@ export async function retryPendingVideo(
   return receiptAndAttach(pending, depsOf(partial), "视频仍未关联成功,请稍后重试");
 }
 
+export type DiscardVideoOutcome =
+  | { ok: true; state: "cancelled"; message: "" }
+  | { ok: true; state: "bound"; evidence?: VideoEvidenceRow; message: "" }
+  | { ok: false; message: string };
+
 /**
- * 用户明确放弃待关联视频:先逐文件确认云删除成功,再清本地 pending 并作废票据。
- * status 0 或 -503003(文件已不存在)视为删除完成;其他状态保留 pending。
+ * 用户放弃待关联视频:不再由客户端直接删云文件,统一请求服务端判断。
+ * - 服务端发现证据已绑定 -> state=bound,不删文件,客户端恢复为正式视频;
+ * - 未绑定 -> 服务端确认逐文件删除成功后才会置 cancelled;
+ * - 删除失败 -> 返回错误,本地 pending 保留。
  */
 export async function discardPendingVideo(
   pending: PendingVideoUpload,
   partial?: Partial<VideoAttachDeps>,
-): Promise<{ ok: boolean; message: string }> {
+): Promise<DiscardVideoOutcome> {
   const d = depsOf(partial);
+  let res;
   try {
-    const res = await d.deleteFile({ fileList: [pending.fileId] });
-    const item = (res.fileList || []).find((f) => f.fileID === pending.fileId);
-    if (deleteItemSucceeded(item) === false) return { ok: false, message: "视频文件删除失败,请稍后重试" };
+    res = await d.cancel(pending.uploadTicket);
   } catch (e) {
-    return { ok: false, message: "视频文件删除失败,请稍后重试" };
+    const message = isApiError(e) ? e.message : "视频删除失败,请稍后重试";
+    return { ok: false, message };
   }
-  try { await d.cancel(pending.uploadTicket); } catch (e) {}
   clearPendingVideo(pending.scopeId, pending.itemId);
-  return { ok: true, message: "" };
+  if (res.state === "bound") return { ok: true, state: "bound", evidence: res.evidence, message: "" };
+  return { ok: true, state: "cancelled", message: "" };
 }

@@ -99,6 +99,27 @@ function createVideoActions(h) {
    * 删除命中证据行:只有对应云文件返回 status 0(或文件已不存在 -503003)
    * 的数据库行才删除;其余行原样保留,绝不因 Promise 未抛错而误删证据。
    */
+  async function findEvidenceForTicket(deps, ticket) {
+    var got = await evidenceCol(deps).where({
+      household_id: deps.householdId,
+      item_id: ticket.item_id,
+      file_id: ticket.file_id || ""
+    }).get();
+    return got && got.data && got.data.length > 0 ? got.data[0] : null;
+  }
+
+  async function repairTicketBound(deps, ticket, evidenceId) {
+    try {
+      await ticketCol(deps).where({ _id: ticket._id, household_id: deps.householdId }).update({
+        data: { status: "bound", bound_at: ticket.bound_at || deps.now(), evidence_id: evidenceId || ticket.evidence_id || "" }
+      });
+      return true;
+    } catch (e) {
+      // 证据已存在时的修复失败不掩盖事实;清理任务会再次核对证据引用。
+      return false;
+    }
+  }
+
   async function removeEvidenceRows(deps, itemId, evidenceId) {
     var cond = { household_id: deps.householdId, item_id: itemId };
     if (isString(evidenceId) && evidenceId !== "") cond._id = evidenceId;
@@ -200,8 +221,9 @@ function createVideoActions(h) {
     var ticket = gotTicket && gotTicket.data;
     if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
     if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
-    if (ticket.status !== "pending") return fail("VIDEO_TICKET_EXPIRED");
-    if (Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.status === "binding" || ticket.status === "cleaning" || ticket.status === "cancelling") return fail("VIDEO_TICKET_BUSY");
+    if (ticket.status === "cancelled" || ticket.status === "deleted") return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.status === "pending" && Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
     var actualPath = filePath(event.file_id);
     if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
     if (isString(ticket.file_id) && ticket.file_id !== "" && ticket.file_id !== event.file_id) return fail("FILE_NOT_OWNED");
@@ -222,20 +244,51 @@ function createVideoActions(h) {
     var ticket = gotTicket && gotTicket.data;
     if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
     if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
-    if (ticket.status !== "pending" && ticket.status !== "bound") return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.status === "pending" || ticket.status === "bound" || ticket.status === "binding") {
+      // 合法可继续/等待的状态
+    } else {
+      return fail("VIDEO_TICKET_EXPIRED");
+    }
     if (ticket.status === "pending" && Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
     var actualPath = filePath(event.file_id);
     if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
     if (ticket.file_id !== event.file_id) return fail("INVALID_INPUT");
     var item = await itemAlive(deps, ticket.item_id);
     if (item === null) return fail("NOT_FOUND");
-    var pre = await evidenceCol(deps).where({ household_id: deps.householdId, item_id: ticket.item_id, file_id: event.file_id }).get();
-    if (pre.data && pre.data.length > 0) {
-      return { ok: true, evidence: projectEvidence(pre.data[0], await verifyFile(deps, event.file_id)), duplicated: true };
+
+    // 先查已有证据:命中即修复票据 bound,绝不重复插入。
+    var pre = await findEvidenceForTicket(deps, ticket);
+    if (pre !== null) {
+      await repairTicketBound(deps, ticket, pre._id);
+      return { ok: true, evidence: projectEvidence(pre, await verifyFile(deps, event.file_id)), duplicated: true };
     }
+    if (ticket.status === "binding") return fail("VIDEO_TICKET_BUSY");
+
     var url = await verifyFile(deps, event.file_id);
     if (url === "") return fail("VIDEO_NOT_AVAILABLE");
     var now = deps.now();
+
+    // pending -> binding CAS:与定时清理/取消抢同一个独占状态。
+    if (ticket.status === "pending") {
+      var claim = await ticketCol(deps).where({
+        _id: ticket._id,
+        household_id: deps.householdId,
+        status: "pending"
+      }).update({ data: { status: "binding", binding_at: now } });
+      if (((claim && claim.stats && claim.stats.updated) || 0) === 0) {
+        var latestGot = await ticketCol(deps).doc(ticket._id).get();
+        var latest = latestGot && latestGot.data;
+        if (latest !== null && latest !== undefined) {
+          var latestEvidence = await findEvidenceForTicket(deps, latest);
+          if (latestEvidence !== null) {
+            await repairTicketBound(deps, latest, latestEvidence._id);
+            return { ok: true, evidence: projectEvidence(latestEvidence, url), duplicated: true };
+          }
+        }
+        return fail("VIDEO_TICKET_BUSY");
+      }
+    }
+
     var doc = {
       _id: "ve_" + deps.genId(),
       household_id: deps.householdId,
@@ -253,14 +306,22 @@ function createVideoActions(h) {
     try {
       await evidenceCol(deps).add({ data: doc });
     } catch (e) {
-      if (h.isDuplicateKeyError(e) === false) throw e;
-      var twin = await evidenceCol(deps).where({ household_id: deps.householdId, item_id: ticket.item_id, file_id: event.file_id }).get();
-      if (twin.data && twin.data.length > 0) {
-        return { ok: true, evidence: projectEvidence(twin.data[0], url), duplicated: true };
+      if (h.isDuplicateKeyError(e) === false) {
+        // 证据插入失败:尽量把票据退回 pending,避免卡在 binding。
+        try {
+          await ticketCol(deps).where({ _id: ticket._id, status: "binding" }).update({ data: { status: "pending", bind_failed_at: now } });
+        } catch (e2) {}
+        throw e;
+      }
+      var twin = await findEvidenceForTicket(deps, ticket);
+      if (twin !== null) {
+        await repairTicketBound(deps, ticket, twin._id);
+        return { ok: true, evidence: projectEvidence(twin, url), duplicated: true };
       }
       throw e;
     }
-    await ticketCol(deps).doc(ticket._id).update({ data: { status: "bound", bound_at: now, evidence_id: doc._id } });
+    // 证据已写成功。即使此处票据状态更新失败,清理任务也会先核对证据引用再删文件。
+    await repairTicketBound(deps, ticket, doc._id);
     return { ok: true, evidence: projectEvidence(doc, url), duplicated: false };
   }
 
@@ -269,10 +330,57 @@ function createVideoActions(h) {
     var got = await ticketCol(deps).doc(event.upload_ticket).get();
     var ticket = got && got.data;
     if (ticket === null || ticket === undefined || ticket.household_id !== deps.householdId) return fail("NOT_FOUND");
-    if (ticket.status === "pending") {
-      await ticketCol(deps).doc(ticket._id).update({ data: { status: "cancelled", cancelled_at: deps.now() } });
+
+    // 已绑定(或证据已存在):取消不能删文件,修复票据并返回 bound。
+    var pre = await findEvidenceForTicket(deps, ticket);
+    if (pre !== null) {
+      await repairTicketBound(deps, ticket, pre._id);
+      return { ok: true, state: "bound", evidence: projectEvidence(pre, await verifyFile(deps, pre.file_id)) };
     }
-    return { ok: true };
+    if (ticket.status === "bound") return fail("VIDEO_TICKET_BUSY");
+    if (ticket.status === "cancelled" || ticket.status === "deleted") return { ok: true, state: "cancelled" };
+    if (ticket.status !== "pending") return fail("VIDEO_TICKET_BUSY");
+
+    // pending -> cancelling CAS:与 attach 的 pending -> binding 互斥。
+    var claim = await ticketCol(deps).where({
+      _id: ticket._id,
+      household_id: deps.householdId,
+      status: "pending"
+    }).update({ data: { status: "cancelling", cancelling_at: deps.now() } });
+    if (((claim && claim.stats && claim.stats.updated) || 0) === 0) {
+      var latestGot = await ticketCol(deps).doc(ticket._id).get();
+      var latest = latestGot && latestGot.data;
+      if (latest !== null && latest !== undefined) {
+        var latestEvidence = await findEvidenceForTicket(deps, latest);
+        if (latestEvidence !== null) {
+          await repairTicketBound(deps, latest, latestEvidence._id);
+          return { ok: true, state: "bound", evidence: projectEvidence(latestEvidence, await verifyFile(deps, latestEvidence.file_id)) };
+        }
+        if (latest.status === "cancelled" || latest.status === "deleted") return { ok: true, state: "cancelled" };
+      }
+      return fail("VIDEO_TICKET_BUSY");
+    }
+
+    // 抢到独占状态后再核对一次证据,封住「查询 pending 与删除文件」之间的竞态。
+    var afterClaim = await findEvidenceForTicket(deps, ticket);
+    if (afterClaim !== null) {
+      await repairTicketBound(deps, ticket, afterClaim._id);
+      return { ok: true, state: "bound", evidence: projectEvidence(afterClaim, await verifyFile(deps, afterClaim.file_id)) };
+    }
+
+    if (isString(ticket.file_id) && ticket.file_id !== "") {
+      var del = await deleteFilesStrict(deps, [ticket.file_id]);
+      if (del.ok === false) {
+        try {
+          await ticketCol(deps).where({ _id: ticket._id, status: "cancelling" }).update({ data: { status: "pending", cancel_failed_at: deps.now() } });
+        } catch (e) {}
+        return fail("VIDEO_DELETE_FAILED");
+      }
+    }
+    await ticketCol(deps).where({ _id: ticket._id, status: "cancelling" }).update({
+      data: { status: "cancelled", cancelled_at: deps.now(), cleanup_reason: "user_cancel" }
+    });
+    return { ok: true, state: "cancelled" };
   }
 
   async function videoEvidenceGet(event, deps) {

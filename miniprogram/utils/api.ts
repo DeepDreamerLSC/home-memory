@@ -117,6 +117,7 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
   VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
   VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
+  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -369,6 +370,8 @@ function validateItemsOkResponse(
       if (validVideoEvidenceRow(r.evidence) === false || typeof r.duplicated !== "boolean") throw bad();
       break;
     case "videoUploadCancel":
+      if (r.state !== "cancelled" && r.state !== "bound") throw bad();
+      if (r.state === "bound" && validVideoEvidenceRow(r.evidence) === false) throw bad();
       break;
     case "videoEvidenceDelete":
       if (typeof r.deleted !== "number") throw bad();

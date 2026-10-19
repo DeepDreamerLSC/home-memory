@@ -40,13 +40,6 @@ const defaultDeps = {
             fail: (err) => reject(new Error((err && err.errMsg) || "uploadFile:fail")),
         });
     }),
-    deleteFile: (opt) => new Promise((resolve, reject) => {
-        wx.cloud.deleteFile({
-            fileList: opt.fileList,
-            success: (res) => resolve(res),
-            fail: (err) => reject(new Error((err && err.errMsg) || "deleteFile:fail")),
-        });
-    }),
     begin: (itemId, ext) => (0, api_1.callItemsApi)({ action: "videoUploadBegin", item_id: itemId, ext }),
     receipt: (event) => (0, api_1.callItemsApi)({ action: "videoUploadReceipt", ...event }),
     attach: (event) => (0, api_1.callItemsApi)({ action: "videoEvidenceAttach", ...event }),
@@ -148,11 +141,6 @@ function clearPendingVideo(scopeId, itemId) {
 function isTicketExpiredError(e) {
     return (0, api_1.isApiError)(e) && e.code === "VIDEO_TICKET_EXPIRED";
 }
-function deleteItemSucceeded(item) {
-    if (item === undefined)
-        return false;
-    return item.status === 0 || item.status === -503003;
-}
 /**
  * 上传后先回执 file_id 给服务端,再绑定证据。
  * 回执失败也保留 pending;票据过期时返回 expired,页面要求删除后重拍,不无限重试。
@@ -230,24 +218,23 @@ async function retryPendingVideo(pending, partial) {
     return receiptAndAttach(pending, depsOf(partial), "视频仍未关联成功,请稍后重试");
 }
 /**
- * 用户明确放弃待关联视频:先逐文件确认云删除成功,再清本地 pending 并作废票据。
- * status 0 或 -503003(文件已不存在)视为删除完成;其他状态保留 pending。
+ * 用户放弃待关联视频:不再由客户端直接删云文件,统一请求服务端判断。
+ * - 服务端发现证据已绑定 -> state=bound,不删文件,客户端恢复为正式视频;
+ * - 未绑定 -> 服务端确认逐文件删除成功后才会置 cancelled;
+ * - 删除失败 -> 返回错误,本地 pending 保留。
  */
 async function discardPendingVideo(pending, partial) {
     const d = depsOf(partial);
+    let res;
     try {
-        const res = await d.deleteFile({ fileList: [pending.fileId] });
-        const item = (res.fileList || []).find((f) => f.fileID === pending.fileId);
-        if (deleteItemSucceeded(item) === false)
-            return { ok: false, message: "视频文件删除失败,请稍后重试" };
+        res = await d.cancel(pending.uploadTicket);
     }
     catch (e) {
-        return { ok: false, message: "视频文件删除失败,请稍后重试" };
+        const message = (0, api_1.isApiError)(e) ? e.message : "视频删除失败,请稍后重试";
+        return { ok: false, message };
     }
-    try {
-        await d.cancel(pending.uploadTicket);
-    }
-    catch (e) { }
     clearPendingVideo(pending.scopeId, pending.itemId);
-    return { ok: true, message: "" };
+    if (res.state === "bound")
+        return { ok: true, state: "bound", evidence: res.evidence, message: "" };
+    return { ok: true, state: "cancelled", message: "" };
 }

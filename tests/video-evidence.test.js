@@ -383,3 +383,103 @@ test("VIDEO-CASCADE-PARTIAL:已绑定删除失败时先不动 pending 票据,重
   tickets = await rawDocs(db, "video_upload_tickets");
   assert.equal(tickets.find((x) => x._id === pending.upload_ticket).status, "cancelled");
 });
+
+test("VIDEO-B9-REPAIR:已有证据但票据仍 pending 时,attach 重试修复 bound", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  const first = await attachWithReceipt(begin, deps, fileId);
+  assert.equal(first.ok, true);
+
+  // 模拟「证据已写入,但票据状态更新失败」
+  await db.collection("video_upload_tickets").doc(begin.upload_ticket).update({ data: { status: "pending" } });
+  const receiptRetry = await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  assert.equal(receiptRetry.ok, true);
+  const retried = await handler(attachEvent(begin, fileId), deps);
+  assert.equal(retried.ok, true);
+  assert.equal(retried.duplicated, true);
+  const ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "bound");
+  assert.equal(ticket.evidence_id, first.evidence.evidence_id);
+});
+
+test("VIDEO-B10-CANCEL-BOUND:绑定成功票据即使 pending,取消也只修复不删文件", async () => {
+  const db = freshDb();
+  const deleted = [];
+  const deps = makeDeps(db, {
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID: fileID, status: 0 })) };
+    },
+  });
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  const attached = await attachWithReceipt(begin, deps, fileId);
+  await db.collection("video_upload_tickets").doc(begin.upload_ticket).update({ data: { status: "pending" } });
+
+  const cancelled = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(cancelled.ok, true);
+  assert.equal(cancelled.state, "bound");
+  assert.equal(cancelled.evidence.evidence_id, attached.evidence.evidence_id);
+  assert.deepEqual(deleted, []);
+  assert.equal((await rawDocs(db, "video_evidence")).length, 1);
+  const ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "bound");
+});
+
+test("VIDEO-B11-CANCEL:取消 pending 必须先逐文件删除;失败保留票据可回收", async () => {
+  const db = freshDb();
+  const deleted = [];
+  let fail = true;
+  const deps = makeDeps(db, {
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID: fileID, status: fail ? -1 : 0 })) };
+    },
+  });
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  const receipt = await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  assert.equal(receipt.ok, true);
+
+  const failed = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, "VIDEO_DELETE_FAILED");
+  let ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "pending");
+
+  fail = false;
+  const ok = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.state, "cancelled");
+  ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "cancelled");
+  assert.deepEqual(deleted, [fileId, fileId]);
+});
+
+test("VIDEO-CAS-BUSY:票据处于 binding 时 attach/cancel 都不得并发操作", async () => {
+  const db = freshDb();
+  let deleteCalls = 0;
+  const deps = makeDeps(db, { deleteCloudFiles: async (ids) => {
+    deleteCalls += 1;
+    return { fileList: ids.map((fileID) => ({ fileID: fileID, status: 0 })) };
+  } });
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  await db.collection("video_upload_tickets").doc(begin.upload_ticket).update({ data: { status: "binding" } });
+
+  const attached = await handler(attachEvent(begin, fileId), deps);
+  assert.equal(attached.ok, false);
+  assert.equal(attached.error, "VIDEO_TICKET_BUSY");
+  const cancelled = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.error, "VIDEO_TICKET_BUSY");
+  assert.equal(deleteCalls, 0);
+  assert.equal((await rawDocs(db, "video_evidence")).length, 0);
+});

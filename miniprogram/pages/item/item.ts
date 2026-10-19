@@ -2306,6 +2306,11 @@ Page<
       return;
     }
     this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
+    if (outcome.state === "bound") {
+      await this.refreshVideoEvidence();
+      wx.showToast({ title: "视频已关联成功,未删除", icon: "none" });
+      return;
+    }
     wx.showToast({ title: "已删除待关联视频", icon: "success" });
   },
 

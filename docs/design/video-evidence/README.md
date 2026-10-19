@@ -25,6 +25,8 @@
 - 证据行保存 `consent_version:"v1"`,客户端只展示该版本。
 - 客户端只通过 `videoEvidenceGet` 获得云函数换取的临时链接;集合权限对所有用户不可读不可写。
 - 删除视频:`videoEvidenceDelete` 逐文件解析 `cloud.deleteFile.fileList[].status`,仅 status 0(成功)或 -503003(文件已不存在)对应的证据行才删除;有失败时返回 `VIDEO_DELETE_FAILED` 并保留失败行。
+- 绑定/清理/取消共享票据 CAS:`pending → binding`、`pending → cleaning`、`pending → cancelling` 只能有一个赢家。attach 命中已有证据时修复 bound;cleanup 抢到 cleaning 后必须二次核对 `video_evidence` 引用,有引用则只修复 bound,绝不删正式视频。
+- 客户端删除待关联视频不再直接删云文件:统一调 `videoUploadCancel`。服务端若发现证据已绑定,返回 `state:"bound"` 且不删除;未绑定才 CAS 到 cancelling、逐文件删除成功后再置 cancelled,删除失败恢复 pending。
 - 删除物品:服务端在软删前清理 bound 证据,以及已回执 `file_id` 的 pending 票据;任一云删除失败则物品不删、返回可重试错误。避免「物品已隐藏、私密视频仍留存」。
 - 票据过期:attach/receipt 返回 `VIDEO_TICKET_EXPIRED`;客户端提示删除待关联视频后重拍,不再无限重试。
 - 上传成功但绑定失败:客户端在本地按家庭作用域保存 pending 记录,详情页展示「视频待关联」,可重试关联或删除待关联视频。
@@ -32,7 +34,7 @@
 
 ## 4. 仍存在的残余风险
 
-- 客户端 uploadFile 成功到 `videoUploadReceipt` 之间仍有极小的进程被杀窗口;服务端此时尚不知道 fileID。首版通过「上传后立即回执 + 本地 pending」把窗口压到最小,但无法在纯客户端直传模型下彻底消除。
+- 客户端 uploadFile 成功到 `videoUploadReceipt` 之间仍有极小的进程被杀窗口;服务端此时尚不知道 fileID。首版通过「上传后立即回执 + 本地 pending」把窗口压到最小,但无法在纯客户端直传模型下彻底消除。该残余风险必须由运营巡检与所有者明确接受,不能仅依赖定时任务。
 - 已实现 `videoCleanup` 定时云函数:每日扫描超过 24h 仍为 pending 且已回执 file_id 的票据,只删这些文件;bound 证据不进入该清理集。禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除。
 - 跨家庭成员退出后,原有临时链接可能在有效期内继续可播;本版依赖临时链接短时有效,不在客户端缓存永久链接。
 

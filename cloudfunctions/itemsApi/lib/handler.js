@@ -59,7 +59,8 @@ var ERROR_MESSAGES = {
   EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
   VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
   VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
-  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄"
+  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
+  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试"
 };
 
 function fail(error) {

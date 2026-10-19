@@ -86,3 +86,58 @@ test("CLEANUP:逐文件删除失败时票继续保持 pending;文件已不存在
   assert.equal(byId.vt_fail.status, "pending");
   assert.equal(byId.vt_missing.status, "cancelled");
 });
+
+test("CLEANUP-B9:删除前核对证据引用;正式证据存在时只修复票据不删文件", async () => {
+  const db = await seeded([
+    ticket("vt_bound_late", { file_id: "cloud://bucket/video-evidence/hh_a/bound.mp4" }),
+  ]);
+  await db.collection("video_evidence").add({
+    data: {
+      _id: "ve_bound",
+      household_id: "hh_a",
+      item_id: "it_a",
+      file_id: "cloud://bucket/video-evidence/hh_a/bound.mp4",
+      duration_ms: 12000,
+      video_w: 1280,
+      video_h: 720,
+      captured_location_text: "书房",
+      consent_version: "v1",
+      created_at: "2026-10-19T00:00:00.000Z",
+    },
+  });
+  const deleted = [];
+  const res = await handler({
+    db,
+    now: () => NOW,
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID, status: 0 })) };
+    },
+  });
+  assert.equal(res.scanned, 1);
+  assert.equal(res.repaired_bound, 1);
+  assert.equal(res.cleaned, 0);
+  assert.deepEqual(deleted, []);
+  const after = (await db.collection("video_upload_tickets").doc("vt_bound_late").get()).data;
+  assert.equal(after.status, "bound");
+  assert.equal(after.evidence_id, "ve_bound");
+});
+
+test("CLEANUP-RACE:已进入 binding 的票据不进入清理集合", async () => {
+  const db = await seeded([
+    ticket("vt_binding", {
+      file_id: "cloud://bucket/video-evidence/hh_a/binding.mp4",
+      status: "binding",
+    }),
+  ]);
+  let calls = 0;
+  const res = await handler({
+    db,
+    now: () => NOW,
+    deleteCloudFiles: async () => { calls += 1; return { fileList: [] }; },
+  });
+  assert.equal(res.scanned, 0);
+  assert.equal(calls, 0);
+  const after = (await db.collection("video_upload_tickets").doc("vt_binding").get()).data;
+  assert.equal(after.status, "binding");
+});

@@ -1074,6 +1074,10 @@ export interface VideoEvidenceAttachResponse {
 
 export interface VideoUploadCancelResponse {
   ok: true;
+  /** cancelled=确实清理;bound=服务端发现证据已绑定,文件不可删 */
+  state: "cancelled" | "bound";
+  /** state=bound 时返回正式证据,客户端应恢复为回放态 */
+  evidence?: VideoEvidenceRow;
 }
 
 export interface VideoEvidenceGetResponse {

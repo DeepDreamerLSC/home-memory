@@ -2,6 +2,7 @@
 // 孤儿视频回收:只处理 24h 前过期且状态仍 pending、并且已回执 file_id 的票据。
 // 已绑定证据不在此删除;没有 file_id 的票据只能标记取消,无法定位云对象。
 var TK = "video_upload_tickets";
+var EV = "video_evidence";
 var PAGE_SIZE = 100;
 var MAX_PAGES = 100;
 var GRACE_MS = 24 * 60 * 60 * 1000;
@@ -21,6 +22,16 @@ async function deleteStrict(deps, fileId) {
   } catch (e) {
     return false;
   }
+}
+
+async function evidenceRefsTicket(deps, ticket) {
+  if (typeof ticket.file_id !== "string" || ticket.file_id === "") return null;
+  var got = await deps.db.collection(EV).where({
+    household_id: ticket.household_id,
+    item_id: ticket.item_id,
+    file_id: ticket.file_id
+  }).get();
+  return got && got.data && got.data.length > 0 ? got.data[0] : null;
 }
 
 async function collectExpired(deps, cutoffMs) {
@@ -50,16 +61,48 @@ async function handler(deps) {
   var tickets = await collectExpired(deps, cutoffMs);
   var cleaned = 0;
   var cancelledWithoutFile = 0;
+  var repaired = 0;
+  var skippedClaimed = 0;
   var failed = 0;
   for (var i = 0; i < tickets.length; i++) {
     var t = tickets[i];
+    // 与 attach 的 pending -> binding 抢同一张票;抢不到说明已进入绑定/取消流程。
+    var claim = await deps.db.collection(TK).where({
+      _id: t._id,
+      status: "pending"
+    }).update({ data: { status: "cleaning", cleaning_at: now } });
+    if (((claim && claim.stats && claim.stats.updated) || 0) === 0) {
+      skippedClaimed += 1;
+      continue;
+    }
+    // 抢到独占状态后再核对证据引用。即使绑定流程先写证据后更新票据失败,
+    // 这里也会修复票据并跳过文件删除。
+    var evidence = null;
+    try {
+      evidence = await evidenceRefsTicket(deps, t);
+    } catch (e) {
+      await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({ data: { status: "pending", cleanup_failed_at: now } });
+      failed += 1;
+      continue;
+    }
+    if (evidence !== null) {
+      await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({
+        data: { status: "bound", bound_at: t.bound_at || now, evidence_id: evidence._id, cleanup_reason: "evidence_ref_found" }
+      });
+      repaired += 1;
+      continue;
+    }
     if (typeof t.file_id === "string" && t.file_id !== "") {
       var deleted = await deleteStrict(deps, t.file_id);
-      if (deleted === false) { failed += 1; continue; }
+      if (deleted === false) {
+        await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({ data: { status: "pending", cleanup_failed_at: now } });
+        failed += 1;
+        continue;
+      }
     } else {
       cancelledWithoutFile += 1;
     }
-    await deps.db.collection(TK).doc(t._id).update({
+    await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({
       data: { status: "cancelled", cleanup_at: now, cleanup_reason: "expired_pending" }
     });
     cleaned += 1;
@@ -69,6 +112,8 @@ async function handler(deps) {
     scanned: tickets.length,
     cleaned: cleaned,
     cancelled_without_file: cancelledWithoutFile,
+    repaired_bound: repaired,
+    skipped_claimed: skippedClaimed,
     failed: failed,
     ms: Date.now() - startedAt
   };
