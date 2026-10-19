@@ -196,3 +196,21 @@ test("VIDEO-CASCADE:删除物品前清理视频;云删除失败时物品保持�
   assert.equal(gone.ok, false);
   assert.equal(gone.error, "NOT_FOUND");
 });
+
+test("VIDEO-READ:读侧家庭隔离;换链失败仍返回证据但 video_url 为空", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  await handler(attachEvent(begin, "cloud://bucket/" + begin.upload_path), deps);
+
+  const otherHome = makeDeps(db, { householdId: HH_B });
+  const hidden = await handler({ action: "videoEvidenceGet", item_ids: [itemId] }, otherHome);
+  assert.deepEqual(hidden.evidence, []);
+
+  const noUrl = makeDeps(db, { getTempFileUrls: async () => ({ fileList: [] }) });
+  const got = await handler({ action: "videoEvidenceGet", item_ids: [itemId] }, noUrl);
+  assert.equal(got.ok, true);
+  assert.equal(got.evidence.length, 1);
+  assert.equal(got.evidence[0].video_url, "");
+});
