@@ -216,56 +216,73 @@ function createVideoActions(h) {
     }
     var ticketsRes = await ticketCol(deps).where({ household_id: deps.householdId, item_id: itemId }).get();
     var tickets = (ticketsRes && ticketsRes.data) || [];
-    var extraFileIds = [];
+    var fileIds = [];
     for (var i = 0; i < tickets.length; i++) {
-      if (tickets[i].status === "pending" && isString(tickets[i].file_id) && tickets[i].file_id !== "") {
-        extraFileIds.push(tickets[i].file_id);
+      var t = tickets[i];
+      if ((t.status === "pending" || t.status === "binding" || t.status === "cleaning" || t.status === "cancelling" || t.status === "bound") &&
+          isString(t.file_id) && t.file_id !== "") {
+        fileIds.push(t.file_id);
       }
     }
-    var pendingDel = await deleteFilesStrict(deps, extraFileIds);
-    var pendingDeleted = Object.create(null);
-    for (var j = 0; j < pendingDel.deleted.length; j++) pendingDeleted[pendingDel.deleted[j]] = true;
+    var fileDel = await deleteFilesStrict(deps, fileIds);
+    var deletedFiles = Object.create(null);
+    for (var j = 0; j < fileDel.deleted.length; j++) deletedFiles[fileDel.deleted[j]] = true;
     var now = deps.now();
+    var failedFileIds = [];
     for (var k = 0; k < tickets.length; k++) {
-      var t = tickets[k];
-      if (t.status === "pending") {
-        if (isString(t.file_id) && t.file_id !== "" && pendingDeleted[t.file_id] !== true) continue;
-        await ticketCol(deps).doc(t._id).update({ data: { status: "cancelled", cancelled_at: now } });
-      } else if (t.status === "bound") {
-        await ticketCol(deps).doc(t._id).update({ data: { status: "deleted", deleted_at: now } });
+      var ticket = tickets[k];
+      if (ticket.status === "cancelled" || ticket.status === "deleted") continue;
+      var hasFile = isString(ticket.file_id) && ticket.file_id !== "";
+      if (hasFile && deletedFiles[ticket.file_id] !== true) {
+        failedFileIds.push(ticket.file_id);
+        continue;
       }
+      // 删除物品持有 item 锁,begin/attach 无法再进入;所有非终态票据统一收口。
+      await ticketCol(deps).where({
+        _id: ticket._id,
+        household_id: deps.householdId,
+        status: ticket.status
+      }).update({ data: { status: "deleted", deleted_at: now, cleanup_reason: "item_deleted" } });
     }
-    var result = { ok: pendingDel.ok, deleted: ev.deleted };
-    if (pendingDel.ok === false) {
+    var ok = fileDel.ok && failedFileIds.length === 0;
+    var result = { ok: ok, deleted: ev.deleted };
+    if (ok === false) {
       result.error = "VIDEO_DELETE_FAILED";
-      result.failed_file_ids = pendingDel.failed;
+      result.failed_file_ids = failedFileIds.concat(fileDel.failed);
     }
     return result;
   }
 
   async function videoUploadBegin(event, deps) {
     if (h.validItemId(event.item_id) === false) return fail("INVALID_INPUT");
-    var item = await itemAlive(deps, event.item_id);
-    if (item === null) return fail("NOT_FOUND");
     var ext = event.ext === undefined || event.ext === null ? "mp4" : event.ext;
     if (isString(ext) === false || EXTS.indexOf(ext) === -1) return fail("INVALID_INPUT");
-    var now = deps.now();
-    var nowMs = Date.parse(now);
-    // 每次申请新票据:不复用同物品旧 pending 票据,避免新旧上传互相覆盖/取消。
-    var ticket = "vt_" + deps.genId();
-    var path = PATH_PREFIX + deps.householdId + "/" + ticket + "." + ext;
-    var doc = {
-      _id: ticket,
-      household_id: deps.householdId,
-      item_id: event.item_id,
-      cloud_path: path,
-      ext: ext,
-      status: "pending",
-      created_at: now,
-      expires_at: new Date(nowMs + TICKET_TTL_MS).toISOString()
-    };
-    await ticketCol(deps).add({ data: doc });
-    return { ok: true, upload_ticket: ticket, upload_path: path, expires_at: doc.expires_at };
+    // B16:begin 也抢物品锁,防止「删除物品软删完成后又新建一张 pending 票据」。
+    var itemLock = await acquireItemLock(deps, event.item_id, "begin");
+    if (itemLock.ok !== true) return fail(itemLock.error || "VIDEO_ITEM_BUSY");
+    try {
+      var item = await itemAlive(deps, event.item_id);
+      if (item === null) return fail("NOT_FOUND");
+      var now = deps.now();
+      var nowMs = Date.parse(now);
+      // 每次申请新票据:不复用同物品旧 pending 票据,避免新旧上传互相覆盖/取消。
+      var ticket = "vt_" + deps.genId();
+      var path = PATH_PREFIX + deps.householdId + "/" + ticket + "." + ext;
+      var doc = {
+        _id: ticket,
+        household_id: deps.householdId,
+        item_id: event.item_id,
+        cloud_path: path,
+        ext: ext,
+        status: "pending",
+        created_at: now,
+        expires_at: new Date(nowMs + TICKET_TTL_MS).toISOString()
+      };
+      await ticketCol(deps).add({ data: doc });
+      return { ok: true, upload_ticket: ticket, upload_path: path, expires_at: doc.expires_at };
+    } finally {
+      await releaseItemLock(deps, event.item_id, itemLock.token);
+    }
   }
 
   /**
@@ -444,15 +461,20 @@ function createVideoActions(h) {
       return fail("VIDEO_TICKET_BUSY");
     }
 
-    // 抢到独占状态后再核对一次证据,封住「查询 pending 与删除文件」之间的竞态。
-    var afterClaim = await findEvidenceForTicket(deps, ticket);
+    // B15:抢到 cancelling 后必须重读票据。CAS 之前可能有 receipt 刚写入 file_id,
+    // 旧快照没有 file_id 会漏删真实视频;后续判断一律使用最新快照。
+    var freshGot = await ticketCol(deps).doc(ticket._id).get();
+    var fresh = freshGot && freshGot.data;
+    if (fresh === null || fresh === undefined) return { ok: true, state: "cancelled" };
+    // 再核对一次证据,封住「查询 pending 与删除文件」之间的竞态。
+    var afterClaim = await findEvidenceForTicket(deps, fresh);
     if (afterClaim !== null) {
-      await repairTicketBound(deps, ticket, afterClaim._id);
+      await repairTicketBound(deps, fresh, afterClaim._id);
       return { ok: true, state: "bound", evidence: projectEvidence(afterClaim, await verifyFile(deps, afterClaim.file_id)) };
     }
 
-    if (isString(ticket.file_id) && ticket.file_id !== "") {
-      var del = await deleteFilesStrict(deps, [ticket.file_id]);
+    if (isString(fresh.file_id) && fresh.file_id !== "") {
+      var del = await deleteFilesStrict(deps, [fresh.file_id]);
       if (del.ok === false) {
         try {
           await ticketCol(deps).where({ _id: ticket._id, status: "cancelling" }).update({ data: { status: "pending", cancel_failed_at: deps.now() } });

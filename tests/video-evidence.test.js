@@ -346,7 +346,7 @@ test("VIDEO-CLEANUP-PENDING:删除物品时清理已回执但未绑定的视频"
   assert.deepEqual(deleted, [fileId]);
   const tickets = await rawDocs(db, "video_upload_tickets");
   assert.equal(tickets.length, 1);
-  assert.equal(tickets[0].status, "cancelled");
+  assert.equal(tickets[0].status, "deleted");
 });
 
 test("VIDEO-CASCADE-PARTIAL:已绑定删除失败时先不动 pending 票据,重试一起收敛", async () => {
@@ -381,7 +381,7 @@ test("VIDEO-CASCADE-PARTIAL:已绑定删除失败时先不动 pending 票据,重
   assert.equal(removed.ok, true);
   assert.equal((await rawDocs(db, "video_evidence")).length, 0);
   tickets = await rawDocs(db, "video_upload_tickets");
-  assert.equal(tickets.find((x) => x._id === pending.upload_ticket).status, "cancelled");
+  assert.equal(tickets.find((x) => x._id === pending.upload_ticket).status, "deleted");
 });
 
 test("VIDEO-B9-REPAIR:已有证据但票据仍 pending 时,attach 重试修复 bound", async () => {
@@ -574,5 +574,145 @@ test("VIDEO-B13-LOCK-TTL:过期物品锁可被 attach 接管并在成功后释�
   assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
   const removed = await handler({ action: "delete", item_id: itemId }, deps);
   assert.equal(removed.ok, true);
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+});
+
+test("VIDEO-B15-CANCEL-FRESH:抢到 cancelling 后重读票据,补删竞态中新增的 file_id", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  const deleted = [];
+  deps.deleteCloudFiles = async (ids) => {
+    deleted.push.apply(deleted, ids);
+    return { fileList: ids.map((fileID) => ({ fileID: fileID, status: 0 })) };
+  };
+
+  // 第一次读取票据时返回「receipt 前」的旧快照(没有 file_id),模拟 read 与 CAS 交错。
+  let firstTicketRead = true;
+  const realDb = db;
+  deps.db = {
+    collection(name) {
+      const real = realDb.collection(name);
+      if (name !== "video_upload_tickets") return real;
+      return {
+        doc(id) {
+          const d = real.doc(id);
+          return {
+            get: async () => {
+              const r = await d.get();
+              if (firstTicketRead && r.data) {
+                firstTicketRead = false;
+                const copy = JSON.parse(JSON.stringify(r.data));
+                delete copy.file_id;
+                delete copy.receipt_at;
+                return { data: copy };
+              }
+              return r;
+            },
+            update: d.update.bind(d),
+          };
+        },
+        where: real.where.bind(real),
+        add: real.add.bind(real),
+      };
+    },
+  };
+
+  const res = await handler({ action: "videoUploadCancel", upload_ticket: begin.upload_ticket }, deps);
+  assert.equal(res.ok, true);
+  assert.equal(res.state, "cancelled");
+  assert.deepEqual(deleted, [fileId], "必须使用 CAS 后重读的票据 file_id 删除");
+  const ticket = (await realDb.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "cancelled");
+});
+
+test("VIDEO-B16-BEGIN-LOCK:持物品锁时 begin 拒绝且不创建票据", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db);
+  const itemId = await createItem(deps, "op-a");
+  await db.collection("video_item_locks").add({
+    data: {
+      _id: "vil_" + itemId,
+      household_id: HH_A,
+      item_id: itemId,
+      owner_token: "other",
+      purpose: "delete",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    },
+  });
+  const begin = await handler(beginEvent(itemId), deps);
+  assert.equal(begin.ok, false);
+  assert.equal(begin.error, "VIDEO_ITEM_BUSY");
+  assert.equal((await rawDocs(db, "video_upload_tickets")).length, 0);
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 1);
+});
+
+test("VIDEO-B16-DELETE-INTERMEDIATE:删除物品清理 pending/binding/cleaning/cancelling/bound 全部票据", async () => {
+  const db = freshDb();
+  const deleted = [];
+  const deps = makeDeps(db, {
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID: fileID, status: 0 })) };
+    },
+  });
+  const itemId = await createItem(deps, "op-a");
+  const statuses = ["pending", "binding", "cleaning", "cancelling", "bound"];
+  for (let i = 0; i < statuses.length; i++) {
+    await db.collection("video_upload_tickets").add({
+      data: {
+        _id: "vt_mid_" + i,
+        household_id: HH_A,
+        item_id: itemId,
+        cloud_path: "video-evidence/" + HH_A + "/mid-" + i + ".mp4",
+        file_id: "cloud://bucket/video-evidence/" + HH_A + "/mid-" + i + ".mp4",
+        status: statuses[i],
+        created_at: "2026-10-19T00:00:00.000Z",
+        expires_at: "2026-10-19T00:15:00.000Z",
+      },
+    });
+  }
+  const res = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(deleted.length, statuses.length);
+  const tickets = await rawDocs(db, "video_upload_tickets");
+  assert.equal(tickets.length, statuses.length);
+  for (const t of tickets) assert.equal(t.status, "deleted");
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+  const gone = await handler({ action: "get", item_id: itemId }, deps);
+  assert.equal(gone.ok, false);
+  assert.equal(gone.error, "NOT_FOUND");
+});
+
+test("VIDEO-B16-DELETE-INTERMEDIATE-FAIL:中间态文件删除失败时物品与票据保留,锁释放", async () => {
+  const db = freshDb();
+  const deps = makeDeps(db, {
+    deleteCloudFiles: async (ids) => ({
+      fileList: ids.map((fileID) => ({ fileID: fileID, status: -1 })),
+    }),
+  });
+  const itemId = await createItem(deps, "op-a");
+  await db.collection("video_upload_tickets").add({
+    data: {
+      _id: "vt_binding_fail",
+      household_id: HH_A,
+      item_id: itemId,
+      cloud_path: "video-evidence/" + HH_A + "/fail.mp4",
+      file_id: "cloud://bucket/video-evidence/" + HH_A + "/fail.mp4",
+      status: "binding",
+      created_at: "2026-10-19T00:00:00.000Z",
+      expires_at: "2026-10-19T00:15:00.000Z",
+    },
+  });
+  const res = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "VIDEO_DELETE_FAILED");
+  const alive = await handler({ action: "get", item_id: itemId }, deps);
+  assert.equal(alive.ok, true);
+  const ticket = (await db.collection("video_upload_tickets").doc("vt_binding_fail").get()).data;
+  assert.equal(ticket.status, "binding");
   assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
 });
