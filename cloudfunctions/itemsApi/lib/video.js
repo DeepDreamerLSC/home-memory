@@ -79,7 +79,9 @@ function createVideoActions(h) {
     var tickets = await ticketCol(deps).where({ household_id: deps.householdId, item_id: itemId }).get();
     for (var i = 0; i < ((tickets && tickets.data) || []).length; i++) {
       var t = tickets.data[i];
-      if (t.status === "bound" && rows.some(function (r) { return r._id === t.evidence_id; })) {
+      if (t.status === "pending") {
+        await ticketCol(deps).doc(t._id).update({ data: { status: "cancelled", cancelled_at: deps.now() } });
+      } else if (t.status === "bound" && rows.some(function (r) { return r._id === t.evidence_id; })) {
         await ticketCol(deps).doc(t._id).update({ data: { status: "deleted" } });
       }
     }

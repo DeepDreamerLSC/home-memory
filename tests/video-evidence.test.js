@@ -192,6 +192,9 @@ test("VIDEO-CASCADE:删除物品前清理视频;云删除失败时物品保持�
   const removed = await handler({ action: "delete", item_id: itemId }, deps);
   assert.equal(removed.ok, true);
   assert.equal((await rawDocs(db, "video_evidence")).length, 0);
+  const tickets = await rawDocs(db, "video_upload_tickets");
+  assert.equal(tickets.length, 1);
+  assert.equal(tickets[0].status, "deleted");
   const gone = await handler({ action: "get", item_id: itemId }, deps);
   assert.equal(gone.ok, false);
   assert.equal(gone.error, "NOT_FOUND");
