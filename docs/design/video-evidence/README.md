@@ -26,7 +26,7 @@
 - 客户端只通过 `videoEvidenceGet` 获得云函数换取的临时链接;集合权限对所有用户不可读不可写。
 - 删除视频:`videoEvidenceDelete` 逐文件解析 `cloud.deleteFile.fileList[].status`,仅 status 0(成功)或 -503003(文件已不存在)对应的证据行才删除;有失败时返回 `VIDEO_DELETE_FAILED` 并保留失败行。
 - 绑定/清理/取消共享票据 CAS:`pending → binding`、`pending → cleaning`、`pending → cancelling` 只能有一个赢家。attach 命中已有证据时修复 bound;cleanup 抢到 cleaning 后必须二次核对 `video_evidence` 引用,有引用则只修复 bound,绝不删正式视频。
-- begin、attach 与删除物品共用 `video_item_locks` 物品级锁:删除锁覆盖视频清理 + 软删 + 提醒级联;begin 锁覆盖票据创建;attach 锁覆盖票据 binding + 证据写入。锁 60s 过期可接管,防止删后继续建票/写证据。
+- begin、receipt、attach 与删除物品共用 `video_item_locks` 物品级锁:删除锁覆盖视频清理 + 软删 + 提醒级联;begin 锁覆盖票据创建;receipt 锁覆盖 fileID 回执与 CAS;attach 锁覆盖票据 binding + 证据写入。锁 60s 过期可接管,防止删后继续建票/回执/写证据。
 - 删除物品时清理 bound 证据与 pending/binding/cleaning/cancelling 全部非终态票据;逐文件删除成功后才把票据置 deleted,失败则物品与票据都保留。
 - `videoUploadReceipt` 使用 CAS `status:"pending"` 条件写入 fileID;若 receipt 读到旧 pending 后被 cancel 抢先,条件更新失败,绝不把 fileID 写回 cancelled 票据。
 - `videoUploadCancel` CAS 到 cancelling 后强制重读票据最新快照,按最新 file_id 删除;封住 receipt 在 cancel 初读后写入 file_id、旧快照漏删的反向交错。

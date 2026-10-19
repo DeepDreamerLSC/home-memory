@@ -293,35 +293,47 @@ function createVideoActions(h) {
   async function videoUploadReceipt(event, deps) {
     if (isString(event.upload_ticket) === false || event.upload_ticket.length < 8 || event.upload_ticket.length > 128) return fail("INVALID_INPUT");
     if (isString(event.file_id) === false || event.file_id.length < 1 || event.file_id.length > FILE_MAX) return fail("INVALID_INPUT");
-    var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
-    var ticket = gotTicket && gotTicket.data;
-    if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
-    if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
-    var actualPath = filePath(event.file_id);
-    if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
-    if (isString(ticket.file_id) && ticket.file_id !== "" && ticket.file_id !== event.file_id) return fail("FILE_NOT_OWNED");
+    var initialGot = await ticketCol(deps).doc(event.upload_ticket).get();
+    var initial = initialGot && initialGot.data;
+    if (initial === null || initial === undefined) return fail("VIDEO_TICKET_EXPIRED");
+    if (initial.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
 
-    if (ticket.status === "bound") return { ok: true };
-    if (ticket.status === "binding" || ticket.status === "cleaning" || ticket.status === "cancelling") return fail("VIDEO_TICKET_BUSY");
-    if (ticket.status === "cancelled" || ticket.status === "deleted") return fail("VIDEO_TICKET_EXPIRED");
-    if (ticket.status !== "pending") return fail("VIDEO_TICKET_EXPIRED");
-    if (Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
+    // B17:receipt 与删除物品共用 item 锁。删除持锁时 receipt 不能写入 file_id;
+    // 反之 receipt 持锁完成 CAS 后,删除流程才会读取到最新 file_id 并清理。
+    var itemLock = await acquireItemLock(deps, initial.item_id, "receipt");
+    if (itemLock.ok === false) return fail(itemLock.error || "VIDEO_ITEM_BUSY");
+    try {
+      var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
+      var ticket = gotTicket && gotTicket.data;
+      if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
+      if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
+      var actualPath = filePath(event.file_id);
+      if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
+      if (isString(ticket.file_id) && ticket.file_id !== "" && ticket.file_id !== event.file_id) return fail("FILE_NOT_OWNED");
 
-    // 条件更新:如果 receipt 读取票据后,取消已经把 pending 抢走并置 cancelled,
-    // 这次写入不能把 file_id 写回已取消票据,否则会导致视频失回收责任。
-    var receipt = await ticketCol(deps).where({
-      _id: ticket._id,
-      household_id: deps.householdId,
-      status: "pending"
-    }).update({ data: { file_id: event.file_id, receipt_at: deps.now() } });
-    if (((receipt && receipt.stats && receipt.stats.updated) || 0) === 0) {
-      var latestGot = await ticketCol(deps).doc(ticket._id).get();
-      var latest = latestGot && latestGot.data;
-      if (latest !== null && latest !== undefined && latest.status === "bound" && latest.file_id === event.file_id) return { ok: true };
-      if (latest !== null && latest !== undefined && (latest.status === "binding" || latest.status === "cleaning" || latest.status === "cancelling")) return fail("VIDEO_TICKET_BUSY");
-      return fail("VIDEO_TICKET_EXPIRED");
+      if (ticket.status === "bound") return { ok: true };
+      if (ticket.status === "binding" || ticket.status === "cleaning" || ticket.status === "cancelling") return fail("VIDEO_TICKET_BUSY");
+      if (ticket.status === "cancelled" || ticket.status === "deleted") return fail("VIDEO_TICKET_EXPIRED");
+      if (ticket.status !== "pending") return fail("VIDEO_TICKET_EXPIRED");
+      if (Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
+
+      // 条件更新:持锁后再 CAS,若取消已抢走 pending,绝不把 file_id 写回。
+      var receipt = await ticketCol(deps).where({
+        _id: ticket._id,
+        household_id: deps.householdId,
+        status: "pending"
+      }).update({ data: { file_id: event.file_id, receipt_at: deps.now() } });
+      if (((receipt && receipt.stats && receipt.stats.updated) || 0) === 0) {
+        var latestGot = await ticketCol(deps).doc(ticket._id).get();
+        var latest = latestGot && latestGot.data;
+        if (latest !== null && latest !== undefined && latest.status === "bound" && latest.file_id === event.file_id) return { ok: true };
+        if (latest !== null && latest !== undefined && (latest.status === "binding" || latest.status === "cleaning" || latest.status === "cancelling")) return fail("VIDEO_TICKET_BUSY");
+        return fail("VIDEO_TICKET_EXPIRED");
+      }
+      return { ok: true };
+    } finally {
+      await releaseItemLock(deps, initial.item_id, itemLock.token);
     }
-    return { ok: true };
   }
 
   async function videoEvidenceAttach(event, deps) {

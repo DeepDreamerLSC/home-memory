@@ -716,3 +716,50 @@ test("VIDEO-B16-DELETE-INTERMEDIATE-FAIL:中间态文件删除失败时物品与
   assert.equal(ticket.status, "binding");
   assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
 });
+
+test("VIDEO-B17-RECEIPT-LOCK:receipt 与删除物品共用物品锁,锁释放后已回执文件可被删除", async () => {
+  const db = freshDb();
+  const deleted = [];
+  const deps = makeDeps(db, {
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID: fileID, status: 0 })) };
+    },
+  });
+  const itemId = await createItem(deps, "op-a");
+  const begin = await handler(beginEvent(itemId), deps);
+  const fileId = "cloud://bucket/" + begin.upload_path;
+  const lockId = "vil_" + itemId;
+  await db.collection("video_item_locks").add({
+    data: {
+      _id: lockId,
+      household_id: HH_A,
+      item_id: itemId,
+      owner_token: "delete-owner",
+      purpose: "delete",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    },
+  });
+
+  const blockedReceipt = await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  assert.equal(blockedReceipt.ok, false);
+  assert.equal(blockedReceipt.error, "VIDEO_ITEM_BUSY");
+  let ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.file_id, undefined);
+
+  const blockedDelete = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(blockedDelete.ok, false);
+  assert.equal(blockedDelete.error, "VIDEO_ITEM_BUSY");
+
+  await db.collection("video_item_locks").doc(lockId).remove();
+  const receipt = await handler({ action: "videoUploadReceipt", upload_ticket: begin.upload_ticket, file_id: fileId }, deps);
+  assert.equal(receipt.ok, true);
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+
+  const removed = await handler({ action: "delete", item_id: itemId }, deps);
+  assert.equal(removed.ok, true, JSON.stringify(removed));
+  assert.deepEqual(deleted, [fileId]);
+  ticket = (await db.collection("video_upload_tickets").doc(begin.upload_ticket).get()).data;
+  assert.equal(ticket.status, "deleted");
+  assert.equal((await rawDocs(db, "video_item_locks")).length, 0);
+});
