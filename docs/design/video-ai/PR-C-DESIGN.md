@@ -1,6 +1,6 @@
 # PR C 设计：搜索命中后定位到用户确认的视频片段
 
-**状态**：设计预研（PROVISIONAL，待 PR A highlights/read contract 冻结、Lead 确认）
+**状态**：设计预研（Lead 设计方向已批准；待 PR A highlights/read contract 冻结后实施）
 **范围**：搜索/详情入口、最佳已确认高亮时间窗定位、时间轴证据点、多证据与多 item 降级、测试矩阵与验收标准。
 **非范围**：生产代码、云函数部署、PR A 的 AI 候选确认流程、PR B 的多物品扫描流程、自动播放、自动把候选写成事实。
 
@@ -8,8 +8,8 @@
 
 1. 搜索角标和详情定位只使用 `video_evidence.highlights` 中 `source:"user_confirmed"` 的数据；AI candidate、confidence、target name 不进入读模型，也不参与排序或文案。
 2. 搜索行保留普通“进详情”入口；有视频时另给一个可独立点击的视频角标。角标只携带 `evidence_id + start/end` 提示，详情页重新拉取并校验，不携带临时 URL、框或任何未经服务端确认的数据。
-3. 所有入口首屏仍折叠，不自动展开、不自动 seek、不调用 `play()`。用户点折叠条只展开到目标时间附近的暂停画面；真正播放只能由用户点原生播放器按钮触发。时间点 chip、切换证据视频同理，只 seek/换源，不开始播放。
-4. “最佳片段”采用确定性、可解释的降级链：显式且有效的搜索提示优先；否则取该 item 最新一行的可播放证据中含用户确认 highlights 的最新一条；没有确认高亮则回退同一条视频 0s；只有不可播放行时显示重试，不伪造时间窗。
+3. 普通入口首屏折叠。视频 badge 是用户明确发起的视频入口：进入详情后允许一次性滚动并展开到目标 `start-300ms` 的暂停态，但绝不自动 `play()`；普通入口仍需用户点折叠条才展开。时间点 chip、切换证据视频同理，只 seek/换源，不开始播放；真正播放只能由用户点原生播放器按钮触发。
+4. “最佳片段”采用确定性、可解释的降级链：显式且有效的搜索提示优先；否则取该 item 最新一行的可播放证据中含用户确认 highlights 的最新一条；没有确认高亮则回退同一条视频 0s；只有不可播放行时显示重试，不伪造时间窗。显式目标行换链失败时可回退同 item 更早可播行，但必须提示并保留原目标行重试入口。
 5. 同一 `file_id` 可能因 PR B 对应多个 item 的多行证据。PR C 全部按 `item_id` 隔离，且按 `evidence_id` 区分行；绝不按 `file_id` 把别的 item 的 highlights 合并或复用。
 6. 不新增播放侧写接口。PR C 依赖 PR A 在 `videoEvidenceGet` 行投影中返回 `highlights`/`highlight_version`；PR B 继续返回 flat `evidence[]`、每行 `item_id` 和各自 highlights，即可兼容。
 
@@ -54,7 +54,7 @@
 ### 2.2 播放边界
 
 - 页面首次进入、`onShow` 刷新、搜索 badge 深链、切换证据、点时间点、重试换链，都不得调用 `play()`。
-- 折叠态不渲染原生 `<video>`（或至少不加载/不播放）；只有用户点击折叠条后才渲染播放器。
+- 普通入口首屏折叠，不渲染原生 `<video>`（或至少不加载/不播放）；只有用户点击折叠条后才渲染播放器。search badge 是用户明确点击的视频入口，允许一次性展开并定位到暂停态，但仍不得开始播放。
 - 程序只允许 `seek`。`seek` 前后若视频原本暂停，则保持暂停；若用户已经在播放，点时间点可以继续播放，但页面不能主动开始播放。
 - WXML 中不得出现 `autoplay="{{ true }}"`。真正的播放起点只能是原生播放器按钮/用户手势。
 
@@ -94,7 +94,7 @@ interface VideoEvidenceRow {
 }
 ```
 
-PR A 当前计划 box 必填；PR C 为兼容历史/未来无框已确认窗口，可把 `box` 缺失或 null 当作“只跳时间、不画框”。**绝不自行补框或把模型候选框填进来。**
+Lead 已接受 PR A 将 highlights 的 `box` 定义为可选；PR C 把 `box` 缺失或 null 当作“只跳时间、不画框”。**绝不自行补框或把模型候选框填进来。**
 
 ### 3.2 客户端 highlight 规范化
 
@@ -138,7 +138,9 @@ interface PlaybackEvidenceView extends VideoEvidenceView {
 
 ### 3.4 “最佳已确认时间窗”的选择算法
 
-输入：当前 item 的 rows（API 最多 3 条）、可选的深链 hint、当前 item_id。输出：
+输入：当前 item 的 rows（API 最多 3 条）、可选的深链 hint、当前 item_id。当前 `videoEvidenceGet` 每 item 最多返回最新 3 条；第 4 条及更早证据不参与默认选择。这是 PR C 先接受的已知限制，PR B 再评估是否扩大读取；PR C 不得为此增加额外网络请求。
+
+输出：
 
 ```ts
 type PlaybackFallbackReason =
@@ -153,6 +155,7 @@ interface PlaybackTarget {
   mode: "highlight" | "video" | "unavailable" | "none";
   itemId: string;
   evidenceId: string | null;
+  requestedEvidenceId: string | null; // 显式 badge 原目标；回退后仍用于展示重试入口
   highlightKey: string | null;
   startMs: number;           // mode=highlight 时为窗口起点；mode=video 时为 0
   fallbackReason: PlaybackFallbackReason;
@@ -166,7 +169,7 @@ interface PlaybackTarget {
    - hint 的 `evidence_id` 必须命中当前 item 的某一行；
    - 若 hint 带 `start_ms/end_ms`，必须在同一行合法 highlights 中精确命中同一个左闭右开窗口；
    - 该行 `playable === true` 才可直接采用。
-   - 任一条件不满足 → 记录 fallback reason，进入默认选择；绝不拿 query 中的时间直接 seek。
+   - 任一条件不满足 → 记录 fallback reason 与 `requestedEvidenceId`，进入默认选择；绝不拿 query 中的时间直接 seek。若原目标行只是换链失败，回退后仍保留该行的重试入口，不得从证据选择器消失。
 3. **默认“含确认高亮的可播放行”**：
    - 只在 `playable === true` 的行中找含至少一条合法 user_confirmed highlight 的行；
    - 按 `created_at` 降序取最新；非法时间视为最旧；同时间保持服务端返回顺序。
@@ -177,6 +180,8 @@ interface PlaybackTarget {
    - 再按 `start_ms` 升序、`end_ms` 升序；
    - 取第一条作为默认定位点。
    这不是 AI 置信度排序，也不宣称“唯一正确片段”；该行所有合法 points 仍显示在时间点条中，用户可切换。
+
+若显式 badge 目标行换链失败、但同 item 存在更早可播行，按上述默认链回退到更早可播行，并设置 `fallbackReason:"explicit_url_failed"`。UI 必须明确提示“原目标视频暂不可用，已回退到更早的一条留证”，同时保留原目标行的重试按钮；不得静默换行或让用户误以为仍在原视频。
 
 > “最佳”的边界：PR A 没有 `highlight_id`/`primary` 字段，所以客户端只能用上述确定性默认点。若 Lead 决定增加“用户指定的最佳/主片段”字段，选择器应优先该字段，但仍不改变“不自动播放”约束。
 
@@ -233,7 +238,7 @@ WXML 语义示意（只是设计，不是生产代码）：
 
 | 参数 | 必需 | 说明 |
 | --- | --- | --- |
-| `video_entry` | 是 | 固定 `search_badge`；仅用于一次性 scroll/强调，不改变折叠/播放边界 |
+| `video_entry` | 是 | 固定 `search_badge`；允许一次性 scroll + 展开到暂停态，但不得改变“绝不自动播放”边界 |
 | `video_evidence_id` | 否 | 搜索角标选中的 `evidence_id`，长度受限，只作候选定位 |
 | `video_hint_start_ms` | 否 | 合法确认高亮起点；必须与 `video_hint_end_ms` 成对 |
 | `video_hint_end_ms` | 否 | 合法确认高亮终点；与 start 一起精确匹配服务端 highlights |
@@ -249,17 +254,18 @@ WXML 语义示意（只是设计，不是生产代码）：
 
 ### 4.3 详情页进入后的首屏行为
 
-- 普通入口（搜索结果整行、直接打开详情）：拉取成功后视频卡默认折叠；若有确认高亮，折叠条显示“🎬 你确认过的片段 00:12–00:15 · 点开回看”；没有高亮显示“🎬 点开当时视频”。
-- search badge 入口：仍然默认折叠；拉取后滚动到视频卡并高亮折叠条（一次性），不展开、不 seek、不播放。用户下一次点击折叠条才进入暂停的目标画面。
+- 普通入口（搜索结果整行、直接打开详情）：拉取成功后视频卡默认折叠；若有确认高亮，折叠条显示“🎬 你确认过的片段 00:12–00:15 · 点开回看”；没有高亮显示“🎬 点开当时视频”。普通行点击始终只是进详情，不触发自动展开。
+- search badge 入口：badge 是用户明确发起的视频手势。拉取成功后滚动到视频卡，并展开到目标 `max(0,start_ms-300ms)` 的暂停态；这可作为 badge 的一次性展开/定位例外，但绝不调用 `play()`，真正播放仍需用户点原生播放器按钮。
+- badge 原目标行换链失败、但同 item 有更早可播行时：可回退到更早可播行，并显示“原目标视频暂不可用，已回退到更早的一条留证”；同时在多证据列表中保留原目标行的重试入口。不得静默换行。
 - 如果 badge 入口拉取失败，提供一条可重试的轻量失败提示；普通入口拉取失败继续静默整卡不渲染（视频是增强露出）。
-- 首次成功定位后 `video_entry` hint 的 scroll/强调只消费一次；`onShow` 返回时不得重复滚动或自动展开。
+- 首次成功定位后 `video_entry` hint 的 scroll/展开只消费一次；后续 `onShow` 返回重拉时恢复折叠，不得再次滚动、展开或自动播放。
 - `onShow` 重拉时先收起播放器/清空旧 URL；保留当前 item 作用域校验，绝不把上个 item/家庭的目标上屏。
 
 ## 5. 详情播放状态与 UI
 
 ### 5.1 折叠态
 
-- 视频存在且可播放：一张折叠卡，展示目标片段的确认时间（若有）、拍摄日期/当时位置、操作说明。
+- 普通入口首屏使用折叠态；badge 入口按 §4.3 展开一次暂停态。视频存在且可播放时：一张折叠卡，展示目标片段的确认时间（若有）、拍摄日期/当时位置、操作说明。
 - 视频存在但全部不可播放：折叠卡显示“🎬 视频暂时无法加载 · 点按重试”，点击触发重新拉取；不展开空播放器。
 - 无证据：沿用 #89 当前“给这件物品拍一段视频留证”入口；PR C 不凭空造卡。
 - 折叠态仅为文字卡；不挂载 `<video>`，避免无意加载和播放。
@@ -296,6 +302,7 @@ WXML 语义示意（只是设计，不是生产代码）：
   - 重新计算该行默认 point；播放器重新进入暂停态并定位；
   - 不调用 `play()`，不沿用上一条视频的当前时间/框。
 - `video_url:""` 的 evidence chip 仍可见并标“暂不可播”；点选后显示重试，不默默跳到别行。若默认目标因最新行换链失败而落到更早可播放行，展开态显示一句如实说明：“最新一条视频暂时无法加载，当前查看更早的一条留证。”
+- 若显式 badge 目标行换链失败而回退到更早可播行，除回退说明外，原目标行必须一直保留独立重试入口；用户重试成功后重新校验原 hint，仍保持暂停，不自动播放。
 - 删除/重拍不在 PR C 增加任何新写动作；沿用 #89 的删除入口和确认文案。PR B 共享文件引用计数由 PR B 负责。
 
 ### 5.5 用户可见文案纪律
@@ -320,6 +327,7 @@ WXML 语义示意（只是设计，不是生产代码）：
 | 全部行 `video_url:""` | `▶ 暂不可播` | 显示重试卡，不渲染空播放器 | 不 seek、不画框 |
 | 播放器运行期 `binderror` | 已显示的角标保留 | 原位置显示“加载失败，点按重试” | 保留目标；重试成功后重新定位且保持暂停 |
 | 显式 search hint 失效 | 不影响搜索页 | 回退默认目标；badge 入口给非阻断说明 | 不用 query 时间直接 seek |
+| 显式 badge 目标行换链失败、旧行可播 | badge 可显示可播旧行时间/普通视频 | 回退旧可播行 + 明确提示；原目标行保留重试入口 | 不静默换行；不用原目标时间 seek 无链接视频 |
 | 同一 file_id、多 item | 各 item 独立 badge | 只取当前 item 行/高亮 | 不按 file_id 合并；不显示他 item 的时间点 |
 | PR B 共享文件被错误提前删除 | 受影响行显示 `▶ 暂不可播` | 行级换链失败/重试 | 其他 item 行若仍有 URL 仍可独立播放 |
 | 旧云端未返回 highlights 字段 | `▶ 视频` | 普通视频回放 | `[]` 兼容，不报错 |
@@ -331,7 +339,7 @@ WXML 语义示意（只是设计，不是生产代码）：
 
 PR C 实施前置门槛：
 
-1. `VideoEvidenceRow` 至少含 `highlights` 与 `highlight_version`，且 `videoEvidenceGet` 返回它们；旧行返回 `[]`/`0`。
+1. `VideoEvidenceRow` 至少含 `highlights` 与 `highlight_version`，且 `videoEvidenceGet` 返回它们；旧行返回 `[]`/`0`。Lead 已要求 PR A 将 `box` 定义为可选；缺失/null 表示仅时间窗、无框。
 2. 读出的 highlights 只含用户确认数据，`source:"user_confirmed"`；服务端 write action 已做 item 归属、时间窗、box、整体替换和版本 CAS 校验。
 3. API 客户端 validator 接受合法 highlights，不因新增字段把整次读判坏；滚动部署期缺字段按空数组兼容。
 4. PR A 的时间窗边界按左闭右开写清，PR C seek/框显示使用同一语义。
@@ -343,7 +351,7 @@ PR C 实施前置门槛：
 - 客户端按 `item_id` 和 `evidence_id` 双键隔离；`asset_id` 即使存在也不用于跨 item 合并。展示层如需说明“同一原视频”，只能做文字提示，不能把多个 item 的框/时间点混在一起。
 - 搜索 badge、详情默认目标、多证据选择均按当前 item 的行集合计算。
 - PR B 的 `frame_ms`（若加入）PR C 可忽略；未来若要精确帧级框再接，不在本 PR 引入依赖。
-- 共享 `file_id` 的删除范围/引用计数是 PR B 的实现门槛：删一个 item 的证据不能提前删掉仍被其他 item 引用的云文件。PR C 只负责在最终拿到 `video_url:""` 时安全降级，不负责引用计数。
+- 共享 `file_id` 的删除范围/引用计数是 Lead 已确认的 PR B 硬门槛：同一 `file_id` 被多个 evidence 引用时，删除前必须检查引用计数，只有最后一条证据删除时才能删云文件。PR C 只负责在最终拿到 `video_url:""` 时安全降级，不负责引用计数。
 - 若 PR B 最终改为共享 evidence 单文档 + 多 item 绑定，则必须保持 `videoEvidenceGet` 对客户端输出“每 item 独立、行内 highlights 只属该 item”的 flat 投影；否则 PR C 的兼容假设不成立，应重新评审。
 
 ## 9. 安全、隐私与性能
@@ -365,7 +373,7 @@ PR C 实施前置门槛：
 | C-P2 | 非 user_confirmed、缺 source、confidence-only、非法 start/end、非法 box | 非法 highlight 被丢弃；其余合法项仍可用；不崩溃 |
 | C-P3 | 最新行无 highlights，旧行有 highlights | 选旧行确认点；不选择最新普通行作为首选 |
 | C-P4 | 同一行多个 highlights，有的有框 | 默认选有框且 start 最早者；所有合法点按 start 出现 |
-| C-P5 | 有确认高亮但最新行 `video_url:""`，旧行可播 | 选旧可播行并产生“最新暂不可播”的 fallback notice |
+| C-P5 | 有确认高亮但最新行 `video_url:""`，旧行可播 | 选旧可播行并产生“最新暂不可播”的 fallback notice；原目标行仍可重试 |
 | C-P6 | 全部行 `video_url:""` | target=unavailable；无 start/seek；不伪造时间窗 |
 | C-P7 | 显式 hint 精确匹配 | 选 hint 的 evidence/highlight |
 | C-P8 | 显式 hint evidence 不存在、时间窗不存在、start/end 不成对或跨 item | 回退默认目标；fallback reason 正确；不使用 hint 时间直接 seek |
@@ -405,7 +413,7 @@ PR C 实施前置门槛：
 | --- | --- | --- |
 | C-D1 | 普通进入有视频 | `videoOpen=false`；`<video>` 未挂载；不调用 `play()` |
 | C-D2 | 普通进入有确认高亮 | 折叠条显示默认范围；仅用户点折叠后才展开 |
-| C-D3 | search badge 进入 | 拉取后滚动/强调视频卡，但仍折叠；不 seek、不 play；只滚动一次 |
+| C-D3 | search badge 进入 | 拉取后滚动到视频卡并展开到 start‑0.3s 暂停态；无 `play()` 调用；scroll/展开只一次 |
 | C-D4 | 点击折叠条 | `videoOpen=true`；`initial-time` 为目标 start‑0.3s；无 `play()` 调用 |
 | C-D5 | 无高亮点击展开 | 从 0s 暂停；无点条/无框；文案如实“尚未确认命中时刻” |
 | C-D6 | 点时间点 chip | 只 `seek`；暂停时不开始播放；时间更新进入区间后显示框、离开后移除 |
@@ -417,7 +425,8 @@ PR C 实施前置门槛：
 | C-D12 | 同 file_id 多 item | 当前详情只显示当前 item 的时间点/框；无其他 item 数据上屏 |
 | C-D13 | 家庭切换/旧 scope 响应 | 旧家庭视频不上屏；新 family scope 下重新拉取 |
 | C-D14 | PR A 整体替换 highlights 后从旧 hint 进入 | 精确匹配失败 → 回退；不把已删除的时间窗当成事实 |
-| C-D15 | WXML/代码静态检查 | 无 `autoplay=true`；播放相关路径无程序化 `play()`；折叠态不挂载 video |
+| C-D15 | WXML/代码静态检查 | 无 `autoplay=true`；播放相关路径无程序化 `play()`；普通入口折叠态不挂载 video |
+| C-D16 | 显式 badge 目标行换链失败、旧行可播 | 回退旧行并显示明确提示；原目标行重试入口保留；无 play |
 
 ### 10.5 手工/真机验收（实施 PR 必做）
 
@@ -427,7 +436,7 @@ PR C 实施前置门槛：
 - 多条证据、无高亮、最新链接失败、播放中链接失败/重试、旧 hint 失效各走一次。
 - PR B 同一原视频绑定两个 item 后：分别搜索两个 item，只看到各自时间点；A 的片段不因 B 的视频/文件而串台。
 - 弱网/临时链接过期后重进或重试，不显示假成功、不自动播放；页面无崩溃。
-- 搜索 badge 点击后只滚动/强调折叠卡，不展开、不播放。
+- 搜索 badge 点击后进入详情并滚动到视频卡，展开到 start‑0.3s 暂停态；不自动播放。普通行点击仍只进入折叠详情。
 - 未登录/家庭切换/退出家庭后看不到上一家庭视频。
 
 ### 10.6 实施 PR 的自动验证命令
@@ -450,12 +459,12 @@ npm run build:mp
 PR C 实施 PR 必须全部满足：
 
 1. **只认用户确认**：搜索时间角标、默认目标、时间点、框都只来自 `highlight.source === "user_confirmed"`；代码中没有任何 confidence/候选排序或候选展示。
-2. **绝不自动播放**：所有正常/深链/刷新/切换/重试路径首屏折叠；无 `autoplay`、无程序化 `play()`；实际播放只能由原生播放器上的用户手势开始。
-3. **定位正确且有限**：有效 hint 精确命中后展开位置为 `max(0,start_ms-300ms)`；无高亮从 0s；非法/过期 hint 安全回退；所有 seek 时间都重新以服务端当前行为准。
+2. **绝不自动播放**：普通入口首屏折叠；badge 手势只允许一次性展开到目标暂停态；任何正常/深链/刷新/切换/重试路径均无 `autoplay`、无程序化 `play()`；实际播放只能由原生播放器上的用户手势开始。
+3. **定位正确且有限**：有效 badge hint 精确命中后展开位置为 `max(0,start_ms-300ms)`；普通入口仅在用户点折叠条后展开定位；无高亮从 0s；非法/过期 hint 安全回退；所有 seek 时间都重新以服务端当前行为准。
 4. **默认最佳策略可解释**：按“显式 hint > 最新含确认高亮的可播放行 > 最新可播放行 > 不可播放重试”工作；同行内“有框优先、start/end 升序”；结果不依赖 AI confidence。
-5. **多证据与多 item 不串台**：按 `item_id + evidence_id` 隔离；同 file_id 不同 item 的 highlights 不合并；换链失败只影响对应行。
+5. **多证据与多 item 不串台**：按 `item_id + evidence_id` 隔离；同 file_id 不同 item 的 highlights 不合并；换链失败只影响对应行。显式目标行失败回退旧行时必须提示并保留原目标行重试入口，不得静默换行。
 6. **降级如实**：无高亮、全部换链失败、运行期换链失败、旧云函数缺字段、整体读失败都有明确、非误导的 UI/静默策略；不把失败说成无视频/没有物品。
-7. **兼容 PR A/B**：PR A 的 highlights/highlight_version 读取契约冻结且测试通过；PR B flat 多 item 行可被正确按 item 分组；PR C 不写 highlights、不写产品数据。
+7. **兼容 PR A/B**：PR A 的 highlights/highlight_version 读取契约冻结且测试通过，`box` 可空按仅时间窗处理；PR B flat 多 item 行可被正确按 item 分组，共享 file_id 的引用计数/最后引用删除是硬门槛；PR C 不写 highlights、不写产品数据。
 8. **回归与真机**：`npm test`、`npm run typecheck`、`npm run build:mp` 全绿；§10.5 真机清单完成并留证据；不部署云端、不创建产品 PR 前的设计阶段只提交本设计文档。
 
 ## 12. 后续实施改动面（仅供拆分，不在本设计 PR 实施）
@@ -468,11 +477,13 @@ PR C 实施 PR 必须全部满足：
 - `tests/*`：按 §10 增补；服务端读合同归 PR A 合入后的测试扩展。
 - PR B 的共享删除引用计数与可选 frame_ms 属 PR B 文件/合同，PR C 不越界修改。
 
-## 13. 待 Lead 确认的问题
+## 13. Lead 评审结论（已批准）
 
-1. **默认点选择**：PR A 没有 `highlight_id`/`primary`。是否接受 PR C 的“有框优先 + start/end 升序”作为同一 evidence 内默认点，并让用户通过时间点条切换？若需要“用户指定最佳片段”，建议 PR A 以后向兼容字段增加，但不阻塞 PR C。
-2. **搜索 badge 首屏**：本设计选择“badge 点击也只滚动到折叠视频卡，仍不展开、不 seek、不播放”。是否同意这一最严格口径，还是希望 badge 点击展开到暂停态（仍不自动播放）？
-3. **默认搜索范围**：沿用当前 `videoEvidenceGet` 每 item 最多 3 条证据；第 4 条及更早视频不参与搜索最佳定位。是否接受，还是需 PR A/B 扩读接口？
-4. **换链失败回退**：显式 badge 指向的行 URL 失败、但同 item 有更早可播行时，本设计回退到更早行并提示。是否同意“回退可播行”而不是“停留在原行只给重试”？
-5. **box 可空与 frame_ms**：PR A 当前计划 box 必填；PR C 容错按“无框仅时间窗”处理。PR B 可能新增可选 frame_ms，PR C 计划忽略。请确认兼容边界。
-6. **PR B 共享文件删除前置**：请确认共享 `file_id` 的引用计数/最后引用才删云文件是 PR B 的实施门槛；否则 PR C 只能按行级换链失败降级，不能保证 A 删除不影响 B。
+1. **行内默认点**：接受无 `highlight_id`/`primary` 时使用“有框优先 + `start_ms/end_ms` 升序”；所有合法用户确认点必须可手动切换。
+2. **badge 首屏**：badge 点击进入详情后允许滚动到视频卡并展开到默认 `start-300ms` 的暂停态，但绝不自动 `play()`；普通行点击仍只是进入折叠详情。
+3. **搜索读取范围**：PR C 先接受 `videoEvidenceGet` 每 item 最多 3 条证据的现状；第 4 条及更早可能漏选作为 PR 已知限制写明，PR B 再评估。
+4. **换链失败回退**：显式目标行换链失败时，允许回退到同 item 更早可播行，但必须明确提示，并保留原目标行的重试入口；不得静默换行。
+5. **box/frame_ms**：接受 `box` 缺失/null 表示仅时间窗、无框；PR B 的 `frame_ms` PR C 忽略。Lead 将要求 PR A 把 `highlights.box` 定义为可选。
+6. **PR B 删除硬门槛**：同一 `file_id` 被多个 evidence 引用时必须引用计数/删除前检查最后引用，最后一条证据删除后才能删云文件；该结论已转 PR B owner。
+
+**后续**：等 PR A 接口冻结后再开 PR C 实施，不在本设计任务中写生产代码。
