@@ -219,6 +219,26 @@ export type ItemsApiEvent =
     )
   | (
       {
+        /** 视频建档:确认后上传一次原视频,批量写物品 + video_evidence 证据行 */
+        action: "videoCommit";
+        /** 客户端 uuid(8-64),仅日志聚合口径,不落库 */
+        batch_id: string;
+        video: VideoInput;
+        /** 1-10 件;任一件参数非法服务端整批零写入 */
+        items: VideoCommitItem[];
+      } & ScopeWriteBinding
+    )
+  | { action: "videoEvidenceGet"; item_ids: string[] }
+  | (
+      {
+        /** 视频证据写入失败后的幂等补关联 */
+        action: "videoEvidenceRetry";
+        video: VideoInput;
+        items: VideoEvidenceRetryItem[];
+      } & ScopeWriteBinding
+    )
+  | (
+      {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
         action: "remindSet";
         item_id: string;
@@ -346,7 +366,10 @@ export type ItemsApiOkResponse =
   | RemindSetResponse
   | PhotoCommitResponse
   | PhotoEvidenceGetResponse
-  | PhotoEvidenceRetryResponse;
+  | PhotoEvidenceRetryResponse
+  | VideoCommitResponse
+  | VideoEvidenceGetResponse
+  | VideoEvidenceRetryResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -986,6 +1009,96 @@ export interface PhotoEvidenceGetResponse {
   household_id?: string;
   scope_revision?: number;
   evidence: PhotoEvidenceRow[];
+}
+
+/* ---------------- 视频证据:videoCommit / videoEvidenceGet ---------------- */
+
+export interface VideoInput {
+  file_id: string;
+  duration_ms: number;
+  video_w: number;
+  video_h: number;
+}
+
+export interface VideoHighlightInput {
+  start_ms: number;
+  end_ms: number;
+  /** 0-1 相对视频帧;null/缺省=该时间窗不画框 */
+  box?: Box | null;
+  source?: "vl" | "manual" | "circle";
+}
+
+export interface VideoHighlight {
+  start_ms: number;
+  end_ms: number;
+  box: Box | null;
+  source: "vl" | "manual" | "circle";
+}
+
+export interface VideoCommitItem {
+  operation_id: string;
+  name: string;
+  location_text: string;
+  note?: string;
+  reminder?: ReminderInput;
+  highlights?: VideoHighlightInput[];
+}
+
+export interface VideoCommitResultRow {
+  index: number;
+  ok: boolean;
+  item_id?: string;
+  duplicated?: boolean;
+  evidence_saved?: boolean;
+  version?: number;
+  error?: string;
+  message?: string;
+}
+
+export interface VideoCommitResponse {
+  ok: true;
+  results: VideoCommitResultRow[];
+  evidence_failed?: string[];
+}
+
+export interface VideoEvidenceRetryItem {
+  item_id: string;
+  highlights?: VideoHighlightInput[];
+}
+
+export interface VideoEvidenceRetryResultRow {
+  index: number;
+  item_id: string;
+  ok: boolean;
+  evidence_saved?: boolean;
+  error?: string;
+  message?: string;
+}
+
+export interface VideoEvidenceRetryResponse {
+  ok: true;
+  results: VideoEvidenceRetryResultRow[];
+}
+
+export interface VideoEvidenceRow {
+  item_id: string;
+  file_id: string;
+  /** getTempFileURL 临时播放链接;"" = 换链失败,可重试 */
+  video_url: string;
+  duration_ms: number;
+  video_w: number;
+  video_h: number;
+  highlights: VideoHighlight[];
+  captured_location_text: string;
+  source: "vl" | "manual" | "circle";
+  created_at: string;
+}
+
+export interface VideoEvidenceGetResponse {
+  ok: true;
+  household_id?: string;
+  scope_revision?: number;
+  evidence: VideoEvidenceRow[];
 }
 
 /* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */

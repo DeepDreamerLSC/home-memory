@@ -42,9 +42,17 @@ import type {
   PhotoEvidenceRow,
   RemindKind,
   RemindRow,
+  VideoEvidenceRow,
 } from "../../types";
 import { mapEvidenceView } from "../../utils/evidence-view";
 import type { EvidenceView } from "../../utils/evidence-view";
+import {
+  highlightBoxAt,
+  mapVideoEvidenceView,
+  type VideoEvidenceCollectionView,
+  type VideoEvidenceView,
+  type VideoHighlightView,
+} from "../../utils/video-evidence";
 import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
   clearNotifyAccepted,
@@ -217,6 +225,13 @@ Page<
     evidenceOlderOpen: boolean;
     /** 证据卡渲染视图(mapEvidenceView 派生;evidenceReady 才有意义) */
     evidence: EvidenceView | null;
+    /** 视频证据卡:有视频才渲染并自动播放;失败静默不打扰详情 */
+    videoReady: boolean;
+    videoOpen: boolean;
+    videoEvidence: VideoEvidenceCollectionView | null;
+    videoInitialTime: number;
+    videoCurrentMs: number;
+    videoHighlightBox: VideoHighlightView | null;
   },
   {
     original: { name: string; location: string; note: string };
@@ -327,6 +342,13 @@ Page<
     onEvidenceOlderToggle(): void;
     /** 「📸 重拍更新 / 去补拍」:进拍照页开新一批(不带恢复参数) */
     onRetakeTap(): void;
+    /* ---------------- 视频证据回放 ---------------- */
+    fetchVideoEvidenceRows(): Promise<VideoEvidenceRow[] | undefined>;
+    refreshVideoEvidence(): Promise<void>;
+    onVideoToggle(): void;
+    onVideoTimeUpdate(e: WechatMiniprogram.CustomEvent<{ currentTime: number; duration: number }>): void;
+    onVideoRetry(): void;
+    onVideoMoreTap(): void;
   }
 >({
   data: {
@@ -370,6 +392,12 @@ Page<
     evidenceOpen: false,
     evidenceOlderOpen: false,
     evidence: null as EvidenceView | null,
+    videoReady: false,
+    videoOpen: true,
+    videoEvidence: null as VideoEvidenceCollectionView | null,
+    videoInitialTime: 0,
+    videoCurrentMs: 0,
+    videoHighlightBox: null as VideoHighlightView | null,
   },
 
   /** 最近一次加载到的内容,用于判断是否有修改 */
@@ -469,6 +497,8 @@ Page<
     // 照片证据回放卡(#3 §6):进页/回页拉取;applySummary/update 后不自动重拉
     //(onShow 再拉)。失败静默(增强露出,不影响详情主体)
     void this.refreshEvidence();
+    // 视频证据:查找/进入详情时自动翻出并播放(有视频才显示)
+    void this.refreshVideoEvidence();
   },
 
   onNameInput(e) {
@@ -2049,6 +2079,68 @@ Page<
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },
+    });
+  },
+
+  /* ---------------- 视频证据回放 ---------------- */
+
+  async fetchVideoEvidenceRows(): Promise<VideoEvidenceRow[] | undefined> {
+    if (this.data.itemId === "") return undefined;
+    try {
+      await ensureScopeVerified();
+    } catch (e) {
+      return undefined;
+    }
+    const scopeGen = captureScopeGeneration();
+    try {
+      const res = await callItemsApi({ action: "videoEvidenceGet", item_ids: [this.data.itemId] });
+      if (isScopeGenerationCurrent(scopeGen) === false) return undefined;
+      return res.evidence;
+    } catch (e) {
+      return undefined;
+    }
+  },
+
+  async refreshVideoEvidence(): Promise<void> {
+    this.setData({ videoReady: false, videoEvidence: null, videoHighlightBox: null });
+    const rows = await this.fetchVideoEvidenceRows();
+    if (rows === undefined || rows.length === 0) return;
+    const view = mapVideoEvidenceView(rows, this.data.locationText);
+    if (view === null) return;
+    this.setData({
+      videoReady: true,
+      videoEvidence: view,
+      videoInitialTime: Math.max(0, Math.round(view.latest.firstHighlightMs / 1000)),
+      videoCurrentMs: 0,
+      videoHighlightBox: null,
+    });
+  },
+
+  onVideoToggle() {
+    if (this.data.videoEvidence !== null && this.data.videoEvidence.latest.urlFail) {
+      void this.refreshVideoEvidence();
+      return;
+    }
+    this.setData({ videoOpen: this.data.videoOpen === false });
+  },
+
+  onVideoTimeUpdate(e) {
+    if (this.data.videoEvidence === null) return;
+    const ms = Math.max(0, Math.round((e.detail.currentTime || 0) * 1000));
+    const box = highlightBoxAt(this.data.videoEvidence.latest, ms);
+    this.setData({ videoCurrentMs: ms, videoHighlightBox: box });
+  },
+
+  onVideoRetry() {
+    void this.refreshVideoEvidence();
+  },
+
+  onVideoMoreTap() {
+    wx.showModal({
+      title: "视频证据",
+      content:
+        "视频是你当时记录时拍下的画面,只说明当时东西在哪;如果位置后来变了,以文字记录为准。高亮框来自识别候选,可能有偏差。",
+      showCancel: false,
     });
   },
 

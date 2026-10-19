@@ -1,0 +1,61 @@
+<view class="page video-page">
+  <view class="video-head">
+    <view class="video-title">视频记一件</view>
+    <view class="video-sub">录一段翻找过程,下次查东西时直接翻出当时画面</view>
+  </view>
+
+  <block wx:if="{{ stage === 'pick' }}">
+    <view class="video-pick-card">
+      <view class="video-pick-ico">🎬</view>
+      <view class="video-pick-title">拍一段 5–15 秒的视频</view>
+      <view class="video-pick-desc">比如打开抽屉、翻一翻、把物品露出来。识别只是候选,你确认后才会记住。</view>
+      <button class="btn primary video-pick-btn" bindtap="onChooseVideo" disabled="{{ pickDisabled }}">
+        <view class="btn-face">拍摄或从相册选视频</view>
+      </button>
+      <view class="video-privacy">识别时只临时上传抽出的帧;原视频在你确认保存后才上传。</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{ stage === 'analyzing' }}">
+    <view class="video-analyze-card">
+      <view class="video-spinner">◌</view>
+      <view class="video-analyze-title">{{ analyzeText }}</view>
+      <view class="video-analyze-desc">{{ analyzeDetail }}</view>
+      <view class="video-meta">{{ videoText }}</view>
+    </view>
+  </block>
+
+  <block wx:elif="{{ stage === 'review' || stage === 'saving' || stage === 'done' }}">
+    <view wx:if="{{ noticeText }}" class="video-notice">{{ noticeText }}</view>
+    <view wx:if="{{ errorText }}" class="video-error">{{ errorText }}</view>
+    <view class="video-video-meta">{{ videoText }}</view>
+
+    <view class="video-location">
+      <view class="video-label">这批物品放在</view>
+      <input class="video-input" placeholder="例如:书房 · 右侧抽屉" value="{{ batchLocation }}" bindinput="onBatchLocationInput" maxlength="200" />
+    </view>
+
+    <view class="video-section">
+      <view class="video-section-title">识别到 {{ rows.length }} 件,请逐件核对</view>
+      <view wx:for="{{ rows }}" wx:key="draftId" class="video-row {{ item.checked ? '' : 'off' }}">
+        <view class="video-check" data-index="{{ index }}" bindtap="onToggle">{{ item.checked ? '✓' : '' }}</view>
+        <view class="video-row-main">
+          <input class="video-name" data-index="{{ index }}" value="{{ item.name }}" placeholder="物品名称" bindinput="onNameInput" maxlength="50" />
+          <view class="video-row-meta">{{ item.confText }}</view>
+          <view class="video-row-note">{{ item.seenText }}</view>
+        </view>
+        <view class="video-qty">
+          <view class="video-qty-btn" data-index="{{ index }}" data-dir="-1" bindtap="onQtyStep">−</view>
+          <view class="video-qty-num">{{ item.qty }}</view>
+          <view class="video-qty-btn" data-index="{{ index }}" data-dir="1" bindtap="onQtyStep">+</view>
+        </view>
+      </view>
+      <view class="video-add" bindtap="onAddManual">＋ 手动添加一件</view>
+    </view>
+
+    <button class="btn primary video-save" bindtap="onSave" disabled="{{ stage === 'saving' || stage === 'done' }}">
+      <view class="btn-face">{{ saveText }}</view>
+    </button>
+    <view wx:if="{{ stage === 'done' }}" class="video-done">已保存,正在返回…</view>
+  </block>
+</view>

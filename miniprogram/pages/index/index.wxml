@@ -141,7 +141,7 @@
                 <block wx:else>{{ item.name[0] }}</block>
               </view>
               <view class="item-main">
-                <view class="item-name">{{ item.name }}</view>
+                <view class="item-name">{{ item.name }}<text wx:if="{{ item.hasVideo }}" class="video-badge">▶ 视频</text></view>
                 <view class="item-location">{{ item.location_text }} · 记录更新于 {{ item.updated_at_short }}</view>
               </view>
               <view class="chevron">›</view>
@@ -298,5 +298,8 @@
 <voice-bar>
   <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
     <view class="vb-photo-face">📷 拍照</view>
+  </view>
+  <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onVideoRecordTap">
+    <view class="vb-photo-face">🎬 视频</view>
   </view>
 </voice-bar>

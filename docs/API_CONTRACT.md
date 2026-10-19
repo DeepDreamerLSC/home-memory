@@ -64,6 +64,14 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 - **级联**:itemsApi delete 软删物品时同步硬删其全部 active 提醒(done 历史保留)并消费 slot 上未消费的欠账声明(物品已删,任何未落地的再生/补录认领不再有意义),remindList 不再出现该物品。
 - **作用域绑定(#34 全沿用,不另起炉灶)**:remindComplete/remindClear/remindSet 为写类 action,与 create/update/delete 同走 checkWriteScopeBinding——共享家庭必须携带一致 expected_household_id + expected_scope_revision(缺失/不一致 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持宽松口径零回归。提醒读写全部以服务端解析的 household_id 为 where 条件,家庭解析失败关闭(HOUSEHOLD_UNAVAILABLE)同样先于一切提醒读写(宁拒一次操作,不错写一个家庭)。
 
+### 视频证据(itemsApi.videoCommit / videoEvidenceGet / videoEvidenceRetry)
+
+- **集合**:`video_evidence`;权限「所有用户不可读不可写」;唯一索引 `(household_id, item_id, file_id)`。每件物品每段视频一行,行内 `highlights` 为 `[{ start_ms, end_ms, box(0-1|null), source("vl"|"manual"|"circle") }]`,最多 12 段;`captured_location_text` 是保存时该件位置。
+- **videoCommit**(写类,走 F2 双 marker):入参 `{ action, batch_id(8-64), video:{ file_id, duration_ms(1-600000), video_w, video_h }, items:[{ operation_id, name, location_text, note?, reminder?, highlights? }] }`,1-10 件。任一件纯参数非法 → 整批 INVALID_INPUT 零写入;逐件复用 create 幂等/提醒语义;证据写入失败只进 `evidence_failed`,物品保留。`file_id` 路径前缀必须为 `video-evidence/<当前 household_id>/`,否则 `FILE_NOT_OWNED`。
+- **videoEvidenceRetry**(写类):`{ action, video, items:[{ item_id, highlights? }] }`;重验物品存活后幂等补证据行,唯一索引冲突=已存在=成功。
+- **videoEvidenceGet**(只读):`{ action, item_ids(1-10) }`;每件按 `created_at` 倒序取最新 3 条,只返回未删除物品;云存储 fileID 批量换临时播放链接,单链接失败 `video_url:""` 且不废整次查询;响应带 `household_id`/共享家庭 `scope_revision`。
+- **隐私与证据语义**:识别阶段只临时传输抽出的帧,原视频只在用户确认保存后上传;视频是历史证据,只说明当时记录在哪,不冒充当前位置;高亮框来自识别候选,不构成事实。
+
 ## extractDraft 协议
 ### v2 多件拆分协议(Issue #14,2026-10-10)
 event = { text, protocol: 2 }:显式 protocol:2 时走多件拆分;不带 protocol 的旧客户端完全维持 v1 单件行为(兼容硬门,旧客户端不受影响)。v2 prompt 要求把一句话里的 1-5 件物品逐件输出到 items 数组,每件含 name/location_text/certain/qualifiers/source_quote;多件共用位置合法(按原文归属,不确定则该件 certain=false);**位置实体剥方位后缀(0.7.0 真机反馈 Fix 2)**:prompt 规则要求 location_text 只写位置实体本身、剥掉段尾纯方位后缀(里/里面/上/左边等闭集)输出裸实体名——「冰箱里面有面条」→ location_text「冰箱」;剥后的位置仍须逐字出现在原话中(服务端位置锚定校验零放松,天然通过);source_quote 必须是原话逐字子串(去空白比对),不是则服务端置空字符串(确认页标「来源不充分」,不废整件);items 为空或超 5 件返回 AI_UNAVAILABLE(重试机制兜底);某件名称等硬校验失败整次拒绝(不静默丢件)。位置锚定校验:certain=true 时 location_text 必须出现在该件 source_quote 内(证据为空时以整句原话为锚),否则降级 certain=false 并清空位置(交用户补填,不废件);anchor_shared 标记该件证据片段同时含其他物品名称(典型:整句原话)——归属无法确定性排除交叉配对,前端默认不勾选、标「位置请核对」。has_more 透传 truncated(超 5 件),且前端对恰好 5 件也显示核对提示(不信任模型自报)。成功返回 { ok:true, drafts:[{ name, location_text, certain, qualifiers, source_quote, anchor_shared }], original_text, truncated },单件时 drafts 长度为 1。前端:草稿经 utils/draft-session 会话传给确认页(URL 只带 sid;持久层只存最新一个会话,24 小时恢复窗口),确认页列表式批量确认,逐行走 create(行内固定 operation_id,失败单行重试幂等,已保存行不再提交);保存中行状态逐行回写会话,中途退出/进程回收后首页显示「继续核对」恢复入口——沿用原 operation_id 与已保存状态,已保存行不再提交,不重复建档;全部完成或放弃离场即清会话。

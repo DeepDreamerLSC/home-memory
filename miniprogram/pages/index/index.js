@@ -5,6 +5,7 @@ const voice_entry_1 = require("../../utils/voice-entry");
 const draft_session_1 = require("../../utils/draft-session");
 const photo_session_1 = require("../../utils/photo-session");
 const evidence_view_1 = require("../../utils/evidence-view");
+const video_evidence_1 = require("../../utils/video-evidence");
 const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
 const households_api_1 = require("../../utils/households-api");
@@ -250,7 +251,9 @@ Page({
                 queryResults: toDisplayItems(res.items),
             });
             // 证据缩略(#3):结果先以纯文字上屏,缩略异步补(失败静默不补)
-            void this.attachQueryEvidence(res.items.map((it) => it.item_id), scopeGen);
+            const resultIds = res.items.map((it) => it.item_id);
+            void this.attachQueryEvidence(resultIds, scopeGen);
+            void this.attachQueryVideo(resultIds, scopeGen);
         }
         catch (e) {
             if (!(0, household_scope_1.isScopeGenerationCurrent)(scopeGen)) {
@@ -296,6 +299,22 @@ Page({
         }
         catch (e) {
             // 静默:缩略属增强露出,拉不到就保持纯文字行,绝不出错提示
+        }
+    },
+    async attachQueryVideo(ids, scopeGen) {
+        const top = ids.slice(0, 10);
+        if (top.length === 0)
+            return;
+        try {
+            const res = await (0, api_1.callItemsApi)({ action: "videoEvidenceGet", item_ids: top });
+            if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen) === false || this.queriedScopeGen !== scopeGen)
+                return;
+            const videos = (0, video_evidence_1.pickVideoEvidence)(res.evidence, top);
+            const rows = this.data.queryResults.map((r) => videos[r.item_id] !== undefined ? { ...r, hasVideo: true } : r);
+            this.setData({ queryResults: rows });
+        }
+        catch (e) {
+            // 视频角标是增强露出,失败静默
         }
     },
     onResultTap(e) {
@@ -363,6 +382,14 @@ Page({
     onPhotoRecordTap() {
         wx.navigateTo({
             url: "/pages/photo/photo",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
+    onVideoRecordTap() {
+        wx.navigateTo({
+            url: "/pages/video/video",
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },

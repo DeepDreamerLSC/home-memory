@@ -215,6 +215,49 @@ function validateItemsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "videoCommit":
+            if (!Array.isArray(r.results) ||
+                !r.results.every((row) => isRecord(row) &&
+                    typeof row.index === "number" &&
+                    typeof row.ok === "boolean" &&
+                    (row.error === undefined || typeof row.error === "string")) ||
+                (r.evidence_failed !== undefined &&
+                    (!Array.isArray(r.evidence_failed) ||
+                        !r.evidence_failed.every((id) => typeof id === "string")))) {
+                throw bad();
+            }
+            break;
+        case "videoEvidenceRetry":
+            if (!Array.isArray(r.results) ||
+                !r.results.every((row) => isRecord(row) &&
+                    typeof row.index === "number" &&
+                    typeof row.item_id === "string" &&
+                    typeof row.ok === "boolean" &&
+                    (row.error === undefined || typeof row.error === "string"))) {
+                throw bad();
+            }
+            break;
+        case "videoEvidenceGet":
+            if (!Array.isArray(r.evidence) ||
+                !r.evidence.every((row) => isRecord(row) &&
+                    typeof row.item_id === "string" &&
+                    typeof row.file_id === "string" &&
+                    typeof row.video_url === "string" &&
+                    typeof row.duration_ms === "number" &&
+                    typeof row.video_w === "number" &&
+                    typeof row.video_h === "number" &&
+                    typeof row.captured_location_text === "string" &&
+                    typeof row.created_at === "string" &&
+                    Array.isArray(row.highlights) &&
+                    row.highlights.every((h) => isRecord(h) &&
+                        typeof h.start_ms === "number" &&
+                        typeof h.end_ms === "number" &&
+                        (h.box === null ||
+                            (isRecord(h.box) &&
+                                [h.box.x1, h.box.y1, h.box.x2, h.box.y2].every((n) => typeof n === "number" && n >= 0 && n <= 1)))))) {
+                throw bad();
+            }
+            break;
         case "remindList":
             // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
             // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
@@ -246,6 +289,8 @@ const ITEMS_MUTATING_ACTIONS = new Set([
     "remindSet",
     "photoCommit",
     "photoEvidenceRetry",
+    "videoCommit",
+    "videoEvidenceRetry",
 ]);
 async function callItemsApi(event) {
     // F2 客户端半边:写类 action 自动附 expected_household_id / expected_scope_revision
@@ -281,7 +326,8 @@ async function callItemsApi(event) {
     validateItemsOkResponse(event.action, result);
     if (event.action === "list" ||
         event.action === "remindList" ||
-        event.action === "photoEvidenceGet") {
+        event.action === "photoEvidenceGet" ||
+        event.action === "videoEvidenceGet") {
         // issue #34 P0/P1-B:从 list / remindList 响应捕获服务端解析的家庭作用域
         // (household_id 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,
         // 把家庭切换显式接入 locations-cache 既有失效代数(F2);
@@ -294,7 +340,9 @@ async function callItemsApi(event) {
     if (event.action === "create" ||
         event.action === "update" ||
         event.action === "delete" ||
-        event.action === "photoCommit") {
+        event.action === "photoCommit" ||
+        event.action === "videoCommit" ||
+        event.action === "videoEvidenceRetry") {
         // 物品写入会影响空间树各层数据(create 影响「未归位」计数,update/delete
         // 影响层级物品摘要):整树缓存失效,失效收口在 API 层(issue #23)
         (0, locations_cache_1.clearLocationsCache)();

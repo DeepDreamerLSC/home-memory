@@ -7,6 +7,7 @@ const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
 const evidence_view_1 = require("../../utils/evidence-view");
+const video_evidence_1 = require("../../utils/video-evidence");
 const subscribe_1 = require("../../utils/subscribe");
 const notify_accepted_1 = require("../../utils/notify-accepted");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
@@ -94,6 +95,12 @@ Page({
         evidenceOpen: false,
         evidenceOlderOpen: false,
         evidence: null,
+        videoReady: false,
+        videoOpen: true,
+        videoEvidence: null,
+        videoInitialTime: 0,
+        videoCurrentMs: 0,
+        videoHighlightBox: null,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -183,6 +190,8 @@ Page({
         // 照片证据回放卡(#3 §6):进页/回页拉取;applySummary/update 后不自动重拉
         //(onShow 再拉)。失败静默(增强露出,不影响详情主体)
         void this.refreshEvidence();
+        // 视频证据:查找/进入详情时自动翻出并播放(有视频才显示)
+        void this.refreshVideoEvidence();
     },
     onNameInput(e) {
         const value = e.detail && e.detail.value ? e.detail.value : "";
@@ -1729,6 +1738,67 @@ Page({
             fail: () => {
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },
+        });
+    },
+    /* ---------------- 视频证据回放 ---------------- */
+    async fetchVideoEvidenceRows() {
+        if (this.data.itemId === "")
+            return undefined;
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+        }
+        catch (e) {
+            return undefined;
+        }
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
+        try {
+            const res = await (0, api_1.callItemsApi)({ action: "videoEvidenceGet", item_ids: [this.data.itemId] });
+            if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen) === false)
+                return undefined;
+            return res.evidence;
+        }
+        catch (e) {
+            return undefined;
+        }
+    },
+    async refreshVideoEvidence() {
+        this.setData({ videoReady: false, videoEvidence: null, videoHighlightBox: null });
+        const rows = await this.fetchVideoEvidenceRows();
+        if (rows === undefined || rows.length === 0)
+            return;
+        const view = (0, video_evidence_1.mapVideoEvidenceView)(rows, this.data.locationText);
+        if (view === null)
+            return;
+        this.setData({
+            videoReady: true,
+            videoEvidence: view,
+            videoInitialTime: Math.max(0, Math.round(view.latest.firstHighlightMs / 1000)),
+            videoCurrentMs: 0,
+            videoHighlightBox: null,
+        });
+    },
+    onVideoToggle() {
+        if (this.data.videoEvidence !== null && this.data.videoEvidence.latest.urlFail) {
+            void this.refreshVideoEvidence();
+            return;
+        }
+        this.setData({ videoOpen: this.data.videoOpen === false });
+    },
+    onVideoTimeUpdate(e) {
+        if (this.data.videoEvidence === null)
+            return;
+        const ms = Math.max(0, Math.round((e.detail.currentTime || 0) * 1000));
+        const box = (0, video_evidence_1.highlightBoxAt)(this.data.videoEvidence.latest, ms);
+        this.setData({ videoCurrentMs: ms, videoHighlightBox: box });
+    },
+    onVideoRetry() {
+        void this.refreshVideoEvidence();
+    },
+    onVideoMoreTap() {
+        wx.showModal({
+            title: "视频证据",
+            content: "视频是你当时记录时拍下的画面,只说明当时东西在哪;如果位置后来变了,以文字记录为准。高亮框来自识别候选,可能有偏差。",
+            showCancel: false,
         });
     },
     noop() { },

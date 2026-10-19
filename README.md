@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions` 五个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions` 与 `video_evidence` 六个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -29,6 +29,7 @@ miniprogram/             小程序端(TypeScript,strict)
   pages/item             详情页:查看 / 修改 / 删除 / 挂到空间
   pages/locations        我的家:空间树逐层浏览 + 节点管理 + 位置选择模式
   pages/locationScan     生成空间树向导:候选树确认 → 一次 applyScan 入库
+  pages/video            视频记一件:抽帧识别 → 人工确认 → 上传原视频 + 视频证据行
 cloudfunctions/
   itemsApi/              items 集合的 create/update/delete/get/query/list + reminders 提醒实体(issue #36)
     index.js             薄适配层(wx-server-sdk 胶水,可信家庭解析,注入写硬门上下文)
@@ -112,7 +113,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions` 与 `video_evidence`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;video_evidence 为视频证据/高亮时间窗,见 ⑧)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -161,6 +162,12 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 该集合是「谁授权了到期微信提醒」的记录(仅 `remindNotify` 云函数读写):小程序端在保存带提醒的物品时经 `wx.requestSubscribeMessage` 请求授权,用户同意后 `recordSubscription` 落一条(openid、household_id、member_key、template_id、updated_at、last_sent_date);每日 08:00 timer 扫描「今天/明天到期」的 active 提醒,按家庭聚合成一条订阅消息卡片发送给该家庭全部合格订阅者。**落 openid 的原因**:微信订阅消息 `touser` 只接受 openid,云函数侧无 openid 即无法发送;隔离措施:集合权限对所有用户不可读不可写(仅云函数管理端可访问),云函数日志绝不落 openid/member_key,发送前逐条资格复核(订阅后被移出家庭/家庭解散即停止推送)。安全披露详见对应 PR 描述。
 
+**⑧ video_evidence 视频证据集合(视频记一件;先建集合再部署 itemsApi)**:
+
+> 按上文创建集合 `video_evidence`,权限并入 ③(「所有用户不可读不可写」),并建组合唯一索引:字段一 `household_id`(升序)+ 字段二 `item_id`(升序)+ 字段三 `file_id`(升序),勾选「**唯一**」。
+>
+> 用途:同一段视频可为多件物品各存一行,行内 `highlights` 保存时间窗与 0-1 归一框;查找物品时详情页自动播放原视频,并按时间窗显示高亮框。原视频上传路径为 `video-evidence/<household_id>/...`,服务端按路径前缀做家庭归属校验。视频识别采用客户端抽帧 + 现有 `vlRecognize` 逐帧识别,原视频只在用户最终确认保存后上传。
+
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
 云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
@@ -193,6 +200,18 @@ issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` �
 4. 部署 `transcribe` 云函数(同步骤 6 的方式,或 CLI:`cli cloud functions deploy --env <环境ID> --names transcribe --project <项目根> -r`)
 
 未配密钥时语音如实返回「识别暂不可用」并引导文字输入;麦克风授权(`scope.record`)首次使用会弹窗,后台「用户隐私保护指引」需声明麦克风用途(提审前必办)。语音耗时埋点见 `docs/PR2.md`。
+
+### 9. 视频记一件(抽帧识别 + 视频证据回放)
+
+首页底部语音条新增「🎬 视频」入口。流程:
+
+1. 拍摄/选择一个 5–15 秒视频(最长 60 秒);
+2. 客户端用 `wx.createVideoDecoder` 均匀抽取最多 8 帧,逐帧调用现有 `extractDraft.vlRecognize` 识别;
+3. 同名候选跨帧聚合,但**只按名称归并、不按跨帧框位置自动判同物**;用户逐件勾选、改名、补手动件并填写批次位置;
+4. 用户最终确认后,原视频才 `wx.cloud.uploadFile` 上传一次,`itemsApi.videoCommit` 批量建档并为每件写一条 `video_evidence`(时间窗 + 0-1 高亮框);
+5. 搜索命中物品时结果行显示「▶ 视频」角标;进入详情页自动播放最新视频,播放到高亮时间窗时叠加黄框。高亮框只是识别候选,可能有偏差,页面如实提示。
+
+失败降级:抽帧或识别失败不阻断视频保存,用户可手动补物品名;视频换链失败可点按重试;证据写入失败走 `videoEvidenceRetry` 幂等补关联。识别发生在用户确认保存前,只临时传输抽出的帧;原视频上传路径以当前 `household_id` 为首段,服务端校验归属。
 
 ## 真实样例试运行(npm run samples:live)
 

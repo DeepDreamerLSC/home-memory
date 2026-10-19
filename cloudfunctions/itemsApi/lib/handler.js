@@ -16,6 +16,7 @@
 
 var normalizeName = require("./normalize").normalizeName;
 var checkWriteScopeBinding = require("./household").checkWriteScopeBinding;
+var createVideoActions = require("./video").createVideoActions;
 
 var COLLECTION = "items";
 var REMINDERS_COLLECTION = "reminders";
@@ -2552,6 +2553,26 @@ async function photoEvidenceGetItem(event, deps) {
   return res;
 }
 
+var videoActions = createVideoActions({
+  isString: isString,
+  fail: fail,
+  parseBoxInput: parseBoxInput,
+  parseReminderInput: parseReminderInput,
+  cleanRequired: cleanRequired,
+  cleanOptional: cleanOptional,
+  validItemId: validItemId,
+  collection: collection,
+  createItem: createItem,
+  isDuplicateKeyError: isDuplicateKeyError,
+  byCreatedDesc: byCreatedDesc,
+  mapTempUrls: mapTempUrls,
+  ERROR_MESSAGES: ERROR_MESSAGES,
+  OPERATION_ID_MAX: OPERATION_ID_MAX,
+  NAME_MAX: NAME_MAX,
+  LOCATION_MAX: LOCATION_MAX,
+  NOTE_MAX: NOTE_MAX
+});
+
 var ACTIONS = {
   create: createItem,
   update: updateItem,
@@ -2565,7 +2586,10 @@ var ACTIONS = {
   remindSet: remindSetItem,
   photoCommit: photoCommitItem,
   photoEvidenceGet: photoEvidenceGetItem,
-  photoEvidenceRetry: photoEvidenceRetryItem
+  photoEvidenceRetry: photoEvidenceRetryItem,
+  videoCommit: videoActions.videoCommit,
+  videoEvidenceGet: videoActions.videoEvidenceGet,
+  videoEvidenceRetry: videoActions.videoEvidenceRetry
 };
 
 /**
@@ -2593,7 +2617,9 @@ var WRITE_ACTIONS = {
   remindClear: true,
   remindSet: true,
   photoCommit: true,
-  photoEvidenceRetry: true
+  photoEvidenceRetry: true,
+  videoCommit: true,
+  videoEvidenceRetry: true
 };
 
 /**
