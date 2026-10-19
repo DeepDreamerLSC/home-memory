@@ -756,3 +756,27 @@
 .vd-empty { margin: 14px 0; padding: 16px; border-radius: 16px; background: var(--card-bg); color: var(--text-secondary); font-size: 13px; text-align: center; }
 .vd-textbtn { padding: 6px 10px; border-radius: 9px; background: var(--input-bg); font-size: 12px; font-weight: 700; }
 .vd-textbtn.danger { color: #b3261e; }
+
+/* 单件视频 AI 定位:候选需用户确认后才保存高亮 */
+.vd-ai-saved { margin-top: 10px; padding: 9px 10px; border-radius: 10px; background: #eef8ee; color: #245b2c; }
+.vd-ai-saved-title { font-size: 12px; font-weight: 800; }
+.vd-ai-saved-row { margin-top: 3px; font-size: 11px; line-height: 1.45; }
+.vd-ai-zone { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.vd-ai-entry { padding: 10px 12px; border-radius: 10px; background: #e8f0fe; color: #1a5bc4; font-size: 12.5px; font-weight: 800; text-align: center; }
+.vd-ai-progress { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border-radius: 10px; background: var(--input-bg); color: var(--text-secondary); font-size: 12px; }
+.vd-ai-cancel { padding: 4px 8px; border-radius: 8px; color: #1a5bc4; font-weight: 700; }
+.vd-ai-error { margin-top: 8px; padding: 8px 10px; border-radius: 9px; background: #fdecea; color: #a1261d; font-size: 12px; line-height: 1.45; }
+.vd-ai-tip { margin-top: 8px; padding: 8px 10px; border-radius: 9px; background: #fff5d6; color: #6b5a1d; font-size: 12px; line-height: 1.45; }
+.vd-ai-panel { margin-top: 8px; }
+.vd-ai-panel-title { margin-bottom: 7px; font-size: 12px; font-weight: 800; }
+.vd-ai-scroll { width: 100%; white-space: nowrap; }
+.vd-ai-card { display: inline-block; width: 146px; margin-right: 8px; vertical-align: top; border: 2px solid transparent; border-radius: 12px; overflow: hidden; background: var(--input-bg); }
+.vd-ai-card.selected { border-color: #1a73e8; }
+.vd-ai-thumb { position: relative; width: 100%; height: 96px; overflow: hidden; background: #000; }
+.vd-ai-img { width: 100%; height: 100%; display: block; }
+.vd-ai-thumb .vd-box { border: 2px solid #ffe15a; box-shadow: 0 0 0 9999px rgba(0,0,0,.18), 0 0 12px rgba(255,225,90,.75); }
+.vd-ai-check { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 14px; line-height: 20px; text-align: center; }
+.vd-ai-time { padding: 5px 7px 0; font-size: 11px; font-weight: 800; }
+.vd-ai-conf { padding: 1px 7px 6px; font-size: 10.5px; color: var(--text-secondary); }
+.vd-ai-actions { margin-top: 8px; display: flex; justify-content: flex-end; gap: 10px; }
+.vd-textbtn.primary { background: #1a73e8; color: #fff; }

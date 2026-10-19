@@ -3,6 +3,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toVideoEvidenceView = toVideoEvidenceView;
 exports.mapVideoEvidenceView = mapVideoEvidenceView;
 exports.pickVideoEvidence = pickVideoEvidence;
+function secondsText(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(total / 60);
+    const sec = total % 60;
+    return m + ":" + (sec < 10 ? "0" + sec : String(sec));
+}
+function mapHighlightViews(row) {
+    const list = Array.isArray(row.highlights) ? row.highlights : [];
+    return list.map((h, index) => ({
+        key: h.start_ms + "-" + h.end_ms + "-" + index,
+        startMs: h.start_ms,
+        endMs: h.end_ms,
+        timeText: secondsText(h.start_ms) + " - " + secondsText(h.end_ms),
+        hasBox: h.box !== null && h.box !== undefined,
+    }));
+}
 function monthDay(iso) {
     const t = Date.parse(iso);
     if (Number.isNaN(t))
@@ -33,6 +49,10 @@ function toVideoEvidenceView(row, currentLocationText) {
             ? "现在:" + currentLocationText.trim() + "(以文字为准);旧视频仅作证据"
             : "视频与当前记录一致",
         createdAt: row.created_at,
+        durationMs: typeof row.duration_ms === "number" && Number.isFinite(row.duration_ms) ? row.duration_ms : 0,
+        highlightVersion: Number.isInteger(row.highlight_version) && row.highlight_version >= 0 ? row.highlight_version : 0,
+        highlightCount: Array.isArray(row.highlights) ? row.highlights.length : 0,
+        highlights: mapHighlightViews(row),
     };
 }
 function mapVideoEvidenceView(rows, currentLocationText) {

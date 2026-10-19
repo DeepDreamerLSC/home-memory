@@ -764,6 +764,27 @@ export async function findVideoTargetCandidates(
   };
 }
 
+export function videoTimeText(ms: number): string {
+  const total = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m + ":" + (sec < 10 ? "0" + sec : String(sec));
+}
+
+export function highlightWindowText(startMs: number, endMs: number): string {
+  return videoTimeText(startMs) + " - " + videoTimeText(endMs);
+}
+
+export function boxPercentStyle(box: VideoTargetBox | null): string {
+  if (box === null) return "display:none";
+  const pct = (value: number): number => Math.round(value * 100) / 100;
+  const left = pct(Math.max(0, Math.min(100, box.x1 * 100)));
+  const top = pct(Math.max(0, Math.min(100, box.y1 * 100)));
+  const width = pct(Math.max(0, Math.min(100 - left, (box.x2 - box.x1) * 100)));
+  const height = pct(Math.max(0, Math.min(100 - top, (box.y2 - box.y1) * 100)));
+  return "left:" + left + "%;top:" + top + "%;width:" + width + "%;height:" + height + "%";
+}
+
 export function videoTargetEntryState(wxLike?: VideoTargetWxLike): VideoTargetEntryState {
   if (VIDEO_TARGET_FEATURE_ENABLED === false) {
     return { enabled: false, supported: true, available: false, reason: "disabled", message: "AI 查物品已关闭，可正常回放" };

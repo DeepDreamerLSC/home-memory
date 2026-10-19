@@ -8,9 +8,54 @@ const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
 const evidence_view_1 = require("../../utils/evidence-view");
 const video_evidence_1 = require("../../utils/video-evidence");
+const video_target_1 = require("../../utils/video-target");
 const video_attach_1 = require("../../utils/video-attach");
 const subscribe_1 = require("../../utils/subscribe");
 const notify_accepted_1 = require("../../utils/notify-accepted");
+let activeVideoAiSession = null;
+let activeVideoAiItemId = "";
+let activeVideoAiRunToken = 0;
+async function cancelActiveVideoAi(itemId) {
+    if (itemId !== undefined && activeVideoAiItemId !== itemId)
+        return;
+    activeVideoAiRunToken += 1;
+    const session = activeVideoAiSession;
+    activeVideoAiSession = null;
+    activeVideoAiItemId = "";
+    if (session !== null) {
+        await session.cancel();
+    }
+}
+function videoAiErrorText(error) {
+    if ((0, video_target_1.isVideoTargetError)(error)) {
+        if (error.code === "cancelled")
+            return "已取消本次识别";
+        if (error.code === "unsupported")
+            return "当前基础库不支持视频抽帧,可正常回放";
+        if (error.code === "too_large")
+            return "视频帧过大,无法识别,请尝试更短的视频";
+        if (error.code === "recognize_unavailable")
+            return "AI 暂不可用,请稍后再试";
+        if (error.code === "extract_failed")
+            return "视频抽帧失败,请换一段视频再试";
+    }
+    return (0, api_1.errorMessage)(error);
+}
+function aiCandidateView(candidate) {
+    return {
+        key: String(candidate.frameIndex),
+        frameIndex: candidate.frameIndex,
+        timeMs: candidate.timeMs,
+        windowStartMs: candidate.windowStartMs,
+        windowEndMs: candidate.windowEndMs,
+        timeText: (0, video_target_1.highlightWindowText)(candidate.windowStartMs, candidate.windowEndMs),
+        framePath: candidate.framePath,
+        box: candidate.box,
+        boxStyle: (0, video_target_1.boxPercentStyle)(candidate.box),
+        confidenceText: candidate.confidence === "high" ? "高置信" : candidate.confidence === "mid" ? "中置信" : "低置信",
+        selected: false,
+    };
+}
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s) {
     try {
@@ -103,6 +148,11 @@ Page({
         videoPending: null,
         videoPendingExpired: false,
         videoPendingText: "",
+        videoAiBusy: false,
+        videoAiProgress: "",
+        videoAiCandidates: [],
+        videoAiError: "",
+        videoAiNoHit: false,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -195,6 +245,21 @@ Page({
         // 视频证据:进入详情只拉取并默认折叠;用户点击后才播放(有视频才显示)
         void this.refreshVideoEvidence();
         this.refreshVideoPending();
+    },
+    onHide() {
+        if (this.data.videoAiBusy || this.data.videoAiCandidates.length > 0) {
+            void cancelActiveVideoAi(this.data.itemId);
+            this.setData({
+                videoAiBusy: false,
+                videoAiProgress: "",
+                videoAiCandidates: [],
+                videoAiError: "",
+                videoAiNoHit: false,
+            });
+        }
+    },
+    onUnload() {
+        void cancelActiveVideoAi(this.data.itemId);
     },
     onNameInput(e) {
         const value = e.detail && e.detail.value ? e.detail.value : "";
@@ -1802,6 +1867,16 @@ Page({
             void this.refreshVideoEvidence();
             return;
         }
+        if (this.data.videoOpen) {
+            void cancelActiveVideoAi(this.data.itemId);
+            this.setData({
+                videoAiBusy: false,
+                videoAiProgress: "",
+                videoAiCandidates: [],
+                videoAiError: "",
+                videoAiNoHit: false,
+            });
+        }
         this.setData({ videoOpen: this.data.videoOpen === false });
     },
     onVideoRetry() {
@@ -1814,9 +1889,176 @@ Page({
             showCancel: false,
         });
     },
+    async onVideoAiTap() {
+        if (this.data.videoAiBusy || this.data.videoBusy)
+            return;
+        const collection = this.data.videoEvidence;
+        if (collection === null)
+            return;
+        const latest = collection.latest;
+        if (latest.urlFail || latest.videoUrl === "") {
+            wx.showToast({ title: "视频暂时无法加载,请先重试", icon: "none" });
+            return;
+        }
+        const entry = (0, video_target_1.videoTargetEntryState)();
+        if (entry.available === false) {
+            wx.showModal({ title: "AI 查找暂不可用", content: entry.message, showCancel: false });
+            return;
+        }
+        if (latest.durationMs <= 0) {
+            wx.showToast({ title: "视频时长未知,暂时无法定位", icon: "none" });
+            return;
+        }
+        const consent = await new Promise((resolve) => {
+            wx.showModal({
+                title: "AI 找这件物品",
+                content: "会从这段视频抽取最多 8 帧,在本机云端 AI 服务中判断物品是否出现。抽取帧不保存,识别候选需要你确认后才会保存为高亮;视频不会自动播放。继续吗?",
+                confirmText: "开始识别",
+                cancelText: "取消",
+                success: (r) => resolve(r.confirm === true),
+                fail: () => resolve(false),
+            });
+        });
+        if (consent === false)
+            return;
+        await cancelActiveVideoAi(this.data.itemId);
+        const itemId = this.data.itemId;
+        const runToken = activeVideoAiRunToken + 1;
+        activeVideoAiRunToken = runToken;
+        let session = null;
+        this.setData({
+            videoAiBusy: true,
+            videoAiProgress: "正在抽帧…",
+            videoAiCandidates: [],
+            videoAiError: "",
+            videoAiNoHit: false,
+        });
+        try {
+            session = (0, video_target_1.createVideoFrameSession)(latest.videoUrl, { durationMs: latest.durationMs });
+            activeVideoAiSession = session;
+            activeVideoAiItemId = itemId;
+            const result = await (0, video_target_1.findVideoTargetCandidates)({
+                durationMs: latest.durationMs,
+                targetName: this.data.name,
+                session: session,
+                callRecognize: (input) => (0, api_1.callVideoTargetRecognize)({
+                    action: "videoTargetRecognize",
+                    target_name: input.target_name,
+                    image_base64: input.image_base64,
+                    img_w: input.img_w,
+                    img_h: input.img_h,
+                }),
+                onProgress: (done, total) => {
+                    if (activeVideoAiRunToken !== runToken)
+                        return;
+                    this.setData({ videoAiProgress: "识别第 " + done + "/" + total + " 帧…" });
+                },
+            });
+            if (activeVideoAiRunToken !== runToken || (this.data.itemId === itemId) === false) {
+                await session.cancel();
+                return;
+            }
+            if (result.candidates.length === 0) {
+                await session.cancel();
+                activeVideoAiSession = null;
+                activeVideoAiItemId = "";
+                this.setData({
+                    videoAiBusy: false,
+                    videoAiProgress: "",
+                    videoAiCandidates: [],
+                    videoAiNoHit: true,
+                });
+                return;
+            }
+            this.setData({
+                videoAiBusy: false,
+                videoAiProgress: "",
+                videoAiCandidates: result.candidates.map(aiCandidateView),
+            });
+        }
+        catch (e) {
+            if (session !== null)
+                await session.cancel();
+            if (activeVideoAiRunToken !== runToken)
+                return;
+            activeVideoAiSession = null;
+            activeVideoAiItemId = "";
+            this.setData({
+                videoAiBusy: false,
+                videoAiProgress: "",
+                videoAiCandidates: [],
+                videoAiError: videoAiErrorText(e),
+            });
+        }
+    },
+    onVideoAiCandidateToggle(e) {
+        const key = e && e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.key : "";
+        const idx = this.data.videoAiCandidates.findIndex((c) => c.key === key);
+        if (idx < 0)
+            return;
+        const next = this.data.videoAiCandidates[idx].selected === false;
+        this.setData({ ["videoAiCandidates[" + idx + "].selected"]: next });
+    },
+    async onVideoAiCancel() {
+        await cancelActiveVideoAi(this.data.itemId);
+        this.setData({
+            videoAiBusy: false,
+            videoAiProgress: "",
+            videoAiCandidates: [],
+            videoAiError: "",
+            videoAiNoHit: false,
+        });
+    },
+    async onVideoAiSave() {
+        if (this.data.videoAiBusy)
+            return;
+        const collection = this.data.videoEvidence;
+        if (collection === null)
+            return;
+        const selected = this.data.videoAiCandidates.filter((c) => c.selected === true);
+        if (selected.length === 0) {
+            wx.showToast({ title: "请先选择要保存的高亮", icon: "none" });
+            return;
+        }
+        const highlights = selected.map((c) => ({
+            start_ms: c.windowStartMs,
+            end_ms: c.windowEndMs,
+            box: c.box,
+            frame_ms: c.timeMs,
+        }));
+        this.setData({ videoAiBusy: true, videoAiError: "" });
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+            await (0, api_1.callItemsApi)({
+                action: "videoEvidenceHighlightSave",
+                item_id: this.data.itemId,
+                evidence_id: collection.latest.evidenceId,
+                expected_highlight_version: collection.latest.highlightVersion,
+                highlight_update_id: (0, api_1.uuid)(),
+                highlights: highlights,
+            });
+            await cancelActiveVideoAi(this.data.itemId);
+            this.setData({
+                videoAiBusy: false,
+                videoAiCandidates: [],
+                videoAiProgress: "",
+                videoAiNoHit: false,
+            });
+            await this.refreshVideoEvidence();
+            this.setData({ videoOpen: true });
+            wx.showToast({ title: "已保存高亮", icon: "success" });
+        }
+        catch (e) {
+            this.setData({ videoAiBusy: false, videoAiError: (0, api_1.errorMessage)(e) });
+        }
+    },
     async onAddVideoTap() {
         if (this.data.videoBusy)
             return;
+        if (this.data.videoAiBusy || this.data.videoAiCandidates.length > 0) {
+            wx.showToast({ title: "请先结束 AI 识别", icon: "none" });
+            return;
+        }
         if (this.data.videoPending !== null) {
             wx.showModal({
                 title: "先处理待关联视频",
@@ -1888,7 +2130,15 @@ Page({
         });
         if (confirmed === false)
             return;
-        this.setData({ videoBusy: true });
+        await cancelActiveVideoAi(this.data.itemId);
+        this.setData({
+            videoAiBusy: false,
+            videoAiProgress: "",
+            videoAiCandidates: [],
+            videoAiError: "",
+            videoAiNoHit: false,
+            videoBusy: true,
+        });
         try {
             await (0, households_api_1.ensureScopeVerified)();
             await (0, api_1.callItemsApi)({ action: "videoEvidenceDelete", item_id: this.data.itemId });

@@ -71,6 +71,47 @@
           <view class="vd-textbtn danger" bindtap="onVideoDeleteTap">删除视频</view>
           <view class="vd-collapse" bindtap="onVideoToggle">收起</view>
         </view>
+
+        <view wx:if="{{videoEvidence.latest.highlightCount > 0}}" class="vd-ai-saved">
+          <view class="vd-ai-saved-title">✅ 已确认 {{videoEvidence.latest.highlightCount}} 段高亮</view>
+          <view wx:for="{{videoEvidence.latest.highlights}}" wx:key="key" class="vd-ai-saved-row">
+            {{item.timeText}}<text wx:if="{{item.hasBox}}"> · 有物品框</text>
+          </view>
+        </view>
+
+        <view class="vd-ai-zone">
+          <view wx:if="{{videoAiBusy === false && videoAiCandidates.length === 0}}" class="vd-ai-entry" bindtap="onVideoAiTap">🔎 AI 找这件物品</view>
+          <view wx:if="{{videoAiBusy}}" class="vd-ai-progress">
+            {{videoAiProgress}}
+            <text class="vd-ai-cancel" catchtap="onVideoAiCancel">取消</text>
+          </view>
+          <view wx:if="{{videoAiError}}" class="vd-ai-error">{{videoAiError}}</view>
+          <view wx:if="{{videoAiNoHit}}" class="vd-ai-tip">这段视频里没找到清晰目标。可换一段更清楚的视频再试。</view>
+          <view wx:if="{{videoAiCandidates.length > 0}}" class="vd-ai-panel">
+            <view class="vd-ai-panel-title">AI 候选：勾选要保存的时间点</view>
+            <scroll-view scroll-x="{{true}}" class="vd-ai-scroll">
+              <view
+                wx:for="{{videoAiCandidates}}"
+                wx:key="key"
+                class="vd-ai-card {{item.selected ? 'selected' : ''}}"
+                bindtap="onVideoAiCandidateToggle"
+                data-key="{{item.key}}"
+              >
+                <view class="vd-ai-thumb">
+                  <image class="vd-ai-img" src="{{item.framePath}}" mode="aspectFill" />
+                  <view wx:if="{{item.box}}" class="vd-box" style="{{item.boxStyle}}"></view>
+                  <view class="vd-ai-check">{{item.selected ? '✓' : ''}}</view>
+                </view>
+                <view class="vd-ai-time">{{item.timeText}}</view>
+                <view class="vd-ai-conf">{{item.confidenceText}}</view>
+              </view>
+            </scroll-view>
+            <view class="vd-ai-actions">
+              <view class="vd-textbtn" catchtap="onVideoAiCancel">放弃</view>
+              <view class="vd-textbtn primary" catchtap="onVideoAiSave">保存选中高亮</view>
+            </view>
+          </view>
+        </view>
       </view>
     </block>
     <view wx:else class="vd-fold" bindtap="onVideoToggle">

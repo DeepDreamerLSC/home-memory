@@ -11,6 +11,9 @@ exports.buildFramePlan = buildFramePlan;
 exports.planFrameTimes = planFrameTimes;
 exports.createVideoFrameSession = createVideoFrameSession;
 exports.findVideoTargetCandidates = findVideoTargetCandidates;
+exports.videoTimeText = videoTimeText;
+exports.highlightWindowText = highlightWindowText;
+exports.boxPercentStyle = boxPercentStyle;
 exports.videoTargetEntryState = videoTargetEntryState;
 /**
  * 通用视频抽帧与「在单条视频里找目标物品」客户端原语。
@@ -570,6 +573,25 @@ async function findVideoTargetCandidates(options) {
         stoppedEarly: foundStrongHit && processed < plans.length,
         session: session,
     };
+}
+function videoTimeText(ms) {
+    const total = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000));
+    const m = Math.floor(total / 60);
+    const sec = total % 60;
+    return m + ":" + (sec < 10 ? "0" + sec : String(sec));
+}
+function highlightWindowText(startMs, endMs) {
+    return videoTimeText(startMs) + " - " + videoTimeText(endMs);
+}
+function boxPercentStyle(box) {
+    if (box === null)
+        return "display:none";
+    const pct = (value) => Math.round(value * 100) / 100;
+    const left = pct(Math.max(0, Math.min(100, box.x1 * 100)));
+    const top = pct(Math.max(0, Math.min(100, box.y1 * 100)));
+    const width = pct(Math.max(0, Math.min(100 - left, (box.x2 - box.x1) * 100)));
+    const height = pct(Math.max(0, Math.min(100 - top, (box.y2 - box.y1) * 100)));
+    return "left:" + left + "%;top:" + top + "%;width:" + width + "%;height:" + height + "%";
 }
 function videoTargetEntryState(wxLike) {
     if (exports.VIDEO_TARGET_FEATURE_ENABLED === false) {

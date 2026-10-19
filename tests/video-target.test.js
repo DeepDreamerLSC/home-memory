@@ -220,3 +220,14 @@ test("目标编排:AI 不可用时抛 recognize_unavailable", async () => {
     (error) => error && error.code === "recognize_unavailable"
   );
 });
+
+test("候选展示:时间文案与 0-1 框转百分比样式", () => {
+  assert.equal(target.videoTimeText(0), "0:00");
+  assert.equal(target.videoTimeText(65000), "1:05");
+  assert.equal(target.highlightWindowText(1000, 2250), "0:01 - 0:02");
+  assert.equal(
+    target.boxPercentStyle({ x1: 0.1, y1: 0.2, x2: 0.6, y2: 0.8 }),
+    "left:10%;top:20%;width:50%;height:60%"
+  );
+  assert.equal(target.boxPercentStyle(null), "display:none");
+});
