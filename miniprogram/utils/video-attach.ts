@@ -133,8 +133,8 @@ function storage(): WechatMiniprogram.Wx | null {
   return wx;
 }
 
-function pendingKey(scopeId: string): string {
-  return PENDING_PREFIX + (scopeId || "default");
+function pendingKey(scopeId: string, itemId: string): string {
+  return PENDING_PREFIX + (scopeId || "default") + ":" + itemId;
 }
 
 function validPending(v: unknown): v is PendingVideoUpload {
@@ -153,11 +153,11 @@ function validPending(v: unknown): v is PendingVideoUpload {
   );
 }
 
-export function loadPendingVideo(scopeId: string): PendingVideoUpload | null {
+export function loadPendingVideo(scopeId: string, itemId: string): PendingVideoUpload | null {
   const s = storage();
   if (s === null) return null;
   try {
-    const raw = s.getStorageSync(pendingKey(scopeId));
+    const raw = s.getStorageSync(pendingKey(scopeId, itemId));
     return validPending(raw) ? raw : null;
   } catch (e) {
     return null;
@@ -168,16 +168,16 @@ export function savePendingVideo(p: PendingVideoUpload): void {
   const s = storage();
   if (s === null) return;
   try {
-    s.setStorageSync(pendingKey(p.scopeId), p);
+    s.setStorageSync(pendingKey(p.scopeId, p.itemId), p);
   } catch (e) {}
 }
 
-export function clearPendingVideo(scopeId: string): void {
+export function clearPendingVideo(scopeId: string, itemId: string): void {
   const s = storage();
   if (s === null) return;
   try {
-    if (typeof s.removeStorageSync === "function") s.removeStorageSync(pendingKey(scopeId));
-    else s.setStorageSync(pendingKey(scopeId), null);
+    if (typeof s.removeStorageSync === "function") s.removeStorageSync(pendingKey(scopeId, itemId));
+    else s.setStorageSync(pendingKey(scopeId, itemId), null);
   } catch (e) {}
 }
 
@@ -235,7 +235,7 @@ export async function attachVideoToItem(
       video_h: pending.height,
       consent_version: VIDEO_CONSENT_VERSION,
     });
-    clearPendingVideo(input.scopeId);
+    clearPendingVideo(input.scopeId, input.itemId);
     return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
   } catch (e) {
     return { ok: false, message: "视频已上传但暂未关联成功,可点重试;不会当作已保存", pending };
@@ -256,7 +256,7 @@ export async function retryPendingVideo(
       video_h: pending.height,
       consent_version: VIDEO_CONSENT_VERSION,
     });
-    clearPendingVideo(pending.scopeId);
+    clearPendingVideo(pending.scopeId, pending.itemId);
     return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
   } catch (e) {
     return { ok: false, message: "视频仍未关联成功,请稍后重试", pending };
@@ -278,6 +278,6 @@ export async function discardPendingVideo(
     return { ok: false, message: "视频文件删除失败,请稍后重试" };
   }
   try { await d.cancel(pending.uploadTicket); } catch (e) {}
-  clearPendingVideo(pending.scopeId);
+  clearPendingVideo(pending.scopeId, pending.itemId);
   return { ok: true, message: "" };
 }

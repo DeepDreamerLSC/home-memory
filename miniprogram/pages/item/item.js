@@ -1782,7 +1782,7 @@ Page({
         this.setData({ videoReady: true, videoEvidence: view, videoOpen: false });
     },
     refreshVideoPending() {
-        const pending = (0, video_attach_1.loadPendingVideo)((0, household_scope_1.householdScopeId)());
+        const pending = (0, video_attach_1.loadPendingVideo)((0, household_scope_1.householdScopeId)(), this.data.itemId);
         if (pending !== null && pending.itemId === this.data.itemId) {
             this.setData({
                 videoPending: pending,

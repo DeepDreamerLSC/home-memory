@@ -61,7 +61,7 @@ test("VA-OK:上传成功后绑定成功,pending 被清理", async () => {
       baseDeps(),
     );
     assert.equal(out.ok, true);
-    assert.equal(attach.loadPendingVideo("hh_a"), null);
+    assert.equal(attach.loadPendingVideo("hh_a", "it_1"), null);
   } finally {
     restore();
   }
@@ -88,13 +88,13 @@ test("VA-PENDING:上传成功但绑定失败时保留 pending,重试成功后才
     });
     const out = await attach.attachVideoToItem({ itemId: "it_1", scopeId: "hh_a", file: file() }, deps);
     assert.equal(out.ok, false);
-    const pending = attach.loadPendingVideo("hh_a");
+    const pending = attach.loadPendingVideo("hh_a", "it_1");
     assert.ok(pending);
     assert.equal(pending.uploadTicket, "vt_12345678");
     fail = false;
     const retry = await attach.retryPendingVideo(pending, deps);
     assert.equal(retry.ok, true);
-    assert.equal(attach.loadPendingVideo("hh_a"), null);
+    assert.equal(attach.loadPendingVideo("hh_a", "it_1"), null);
   } finally {
     restore();
   }
@@ -113,15 +113,15 @@ test("VA-DISCARD:删除云文件失败保留 pending;成功后清理", async () 
     });
     const out = await attach.attachVideoToItem({ itemId: "it_1", scopeId: "hh_a", file: file() }, deps);
     assert.equal(out.ok, false);
-    const pending = attach.loadPendingVideo("hh_a");
+    const pending = attach.loadPendingVideo("hh_a", "it_1");
     assert.ok(pending);
     const bad = await attach.discardPendingVideo(pending, deps);
     assert.equal(bad.ok, false);
-    assert.ok(attach.loadPendingVideo("hh_a"));
+    assert.ok(attach.loadPendingVideo("hh_a", "it_1"));
     fail = false;
     const ok = await attach.discardPendingVideo(pending, deps);
     assert.equal(ok.ok, true);
-    assert.equal(attach.loadPendingVideo("hh_a"), null);
+    assert.equal(attach.loadPendingVideo("hh_a", "it_1"), null);
   } finally {
     restore();
   }

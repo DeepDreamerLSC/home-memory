@@ -2132,7 +2132,7 @@ Page<
   },
 
   refreshVideoPending(): void {
-    const pending = loadPendingVideo(householdScopeId());
+    const pending = loadPendingVideo(householdScopeId(), this.data.itemId);
     if (pending !== null && pending.itemId === this.data.itemId) {
       this.setData({
         videoPending: pending,

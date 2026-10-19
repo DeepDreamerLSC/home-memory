@@ -93,8 +93,8 @@ function storage() {
         return null;
     return wx;
 }
-function pendingKey(scopeId) {
-    return PENDING_PREFIX + (scopeId || "default");
+function pendingKey(scopeId, itemId) {
+    return PENDING_PREFIX + (scopeId || "default") + ":" + itemId;
 }
 function validPending(v) {
     if (typeof v !== "object" || v === null || Array.isArray(v))
@@ -110,12 +110,12 @@ function validPending(v) {
         typeof p.scopeId === "string" &&
         typeof p.createdAt === "number");
 }
-function loadPendingVideo(scopeId) {
+function loadPendingVideo(scopeId, itemId) {
     const s = storage();
     if (s === null)
         return null;
     try {
-        const raw = s.getStorageSync(pendingKey(scopeId));
+        const raw = s.getStorageSync(pendingKey(scopeId, itemId));
         return validPending(raw) ? raw : null;
     }
     catch (e) {
@@ -127,19 +127,19 @@ function savePendingVideo(p) {
     if (s === null)
         return;
     try {
-        s.setStorageSync(pendingKey(p.scopeId), p);
+        s.setStorageSync(pendingKey(p.scopeId, p.itemId), p);
     }
     catch (e) { }
 }
-function clearPendingVideo(scopeId) {
+function clearPendingVideo(scopeId, itemId) {
     const s = storage();
     if (s === null)
         return;
     try {
         if (typeof s.removeStorageSync === "function")
-            s.removeStorageSync(pendingKey(scopeId));
+            s.removeStorageSync(pendingKey(scopeId, itemId));
         else
-            s.setStorageSync(pendingKey(scopeId), null);
+            s.setStorageSync(pendingKey(scopeId, itemId), null);
     }
     catch (e) { }
 }
@@ -189,7 +189,7 @@ async function attachVideoToItem(input, partial) {
             video_h: pending.height,
             consent_version: exports.VIDEO_CONSENT_VERSION,
         });
-        clearPendingVideo(input.scopeId);
+        clearPendingVideo(input.scopeId, input.itemId);
         return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
     }
     catch (e) {
@@ -207,7 +207,7 @@ async function retryPendingVideo(pending, partial) {
             video_h: pending.height,
             consent_version: exports.VIDEO_CONSENT_VERSION,
         });
-        clearPendingVideo(pending.scopeId);
+        clearPendingVideo(pending.scopeId, pending.itemId);
         return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
     }
     catch (e) {
@@ -230,6 +230,6 @@ async function discardPendingVideo(pending, partial) {
         await d.cancel(pending.uploadTicket);
     }
     catch (e) { }
-    clearPendingVideo(pending.scopeId);
+    clearPendingVideo(pending.scopeId, pending.itemId);
     return { ok: true, message: "" };
 }
