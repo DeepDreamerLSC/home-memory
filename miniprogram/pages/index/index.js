@@ -387,14 +387,6 @@ Page({
             },
         });
     },
-    onVideoRecordTap() {
-        wx.navigateTo({
-            url: "/pages/video/video",
-            fail: () => {
-                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
-            },
-        });
-    },
     /* ---------------- 家庭地图(H1:容器视图整页切换,X1/X2 全守卫) ---------------- */
     /**
      * 拉取当前视图层:缓存先行 + 条件刷新(issue #23 分层缓存),迟到响应不上屏

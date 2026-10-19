@@ -56,7 +56,9 @@ var ERROR_MESSAGES = {
   FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存",
   // PR #67 C3:photoEvidenceRetry 单件证据写入失败(非唯一索引冲突的基础设施
   // 错误)——物品已建、证据行未落,可幂等重试
-  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试"
+  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
+  VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
+  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试"
 };
 
 function fail(error) {
@@ -1156,9 +1158,19 @@ async function updateItem(event, deps) {
  * delete:入参 { action, item_id }
  * 软删除:置 deleted 为 true,并把 name、name_norm、location_text、note 全部抹成空字符串。
  */
+var videoCleanupForItem = null;
+
 async function deleteItem(event, deps) {
   if (!validItemId(event.item_id)) {
     return fail("INVALID_INPUT");
+  }
+  var existing = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!existing.data || existing.data.length === 0) return fail("NOT_FOUND");
+  if (videoCleanupForItem !== null) {
+    var cleanup = await videoCleanupForItem(deps, event.item_id);
+    if (cleanup.ok !== true) return fail(cleanup.error || "VIDEO_DELETE_FAILED");
   }
   var res = await collection(deps)
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
@@ -2572,6 +2584,7 @@ var videoActions = createVideoActions({
   LOCATION_MAX: LOCATION_MAX,
   NOTE_MAX: NOTE_MAX
 });
+videoCleanupForItem = videoActions.cleanupForItem;
 
 var ACTIONS = {
   create: createItem,
@@ -2587,9 +2600,11 @@ var ACTIONS = {
   photoCommit: photoCommitItem,
   photoEvidenceGet: photoEvidenceGetItem,
   photoEvidenceRetry: photoEvidenceRetryItem,
-  videoCommit: videoActions.videoCommit,
+  videoUploadBegin: videoActions.videoUploadBegin,
+  videoUploadCancel: videoActions.videoUploadCancel,
+  videoEvidenceAttach: videoActions.videoEvidenceAttach,
   videoEvidenceGet: videoActions.videoEvidenceGet,
-  videoEvidenceRetry: videoActions.videoEvidenceRetry
+  videoEvidenceDelete: videoActions.videoEvidenceDelete
 };
 
 /**
@@ -2618,8 +2633,10 @@ var WRITE_ACTIONS = {
   remindSet: true,
   photoCommit: true,
   photoEvidenceRetry: true,
-  videoCommit: true,
-  videoEvidenceRetry: true
+  videoUploadBegin: true,
+  videoUploadCancel: true,
+  videoEvidenceAttach: true,
+  videoEvidenceDelete: true
 };
 
 /**

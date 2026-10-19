@@ -39,9 +39,11 @@ import type {
   RemindKind,
   RemindSetResponse,
   UpdateItemResponse,
-  VideoCommitResponse,
+  VideoEvidenceAttachResponse,
+  VideoEvidenceDeleteResponse,
   VideoEvidenceGetResponse,
-  VideoEvidenceRetryResponse,
+  VideoUploadBeginResponse,
+  VideoUploadCancelResponse,
 } from "../types";
 import { clearLocationsCache } from "./locations-cache";
 import {
@@ -111,6 +113,8 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   SCOPE_MISMATCH: "家庭已切换,本批未保存",
   /** PR #67 C3:photoEvidenceRetry 单件证据写入失败(服务端 message 优先) */
   EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
+  VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
+  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -238,6 +242,22 @@ function callCloudFunction(
 }
 
 /** 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示) */
+function validVideoEvidenceRow(v: unknown): boolean {
+  if (isRecord(v) === false) return false;
+  return (
+    typeof v.evidence_id === "string" &&
+    typeof v.item_id === "string" &&
+    typeof v.file_id === "string" &&
+    typeof v.video_url === "string" &&
+    typeof v.duration_ms === "number" &&
+    typeof v.video_w === "number" &&
+    typeof v.video_h === "number" &&
+    typeof v.captured_location_text === "string" &&
+    typeof v.consent_version === "string" &&
+    typeof v.created_at === "string"
+  );
+}
+
 function validateItemsOkResponse(
   action: string,
   r: Record<string, unknown>,
@@ -332,68 +352,25 @@ function validateItemsOkResponse(
         throw bad();
       }
       break;
-    case "videoCommit":
+    case "videoUploadBegin":
       if (
-        !Array.isArray(r.results) ||
-        !r.results.every(
-          (row) =>
-            isRecord(row) &&
-            typeof row.index === "number" &&
-            typeof row.ok === "boolean" &&
-            (row.error === undefined || typeof row.error === "string"),
-        ) ||
-        (r.evidence_failed !== undefined &&
-          (!Array.isArray(r.evidence_failed) ||
-            !r.evidence_failed.every((id) => typeof id === "string")))
+        typeof r.upload_ticket !== "string" ||
+        typeof r.upload_path !== "string" ||
+        typeof r.expires_at !== "string"
       ) {
         throw bad();
       }
       break;
-    case "videoEvidenceRetry":
-      if (
-        !Array.isArray(r.results) ||
-        !r.results.every(
-          (row) =>
-            isRecord(row) &&
-            typeof row.index === "number" &&
-            typeof row.item_id === "string" &&
-            typeof row.ok === "boolean" &&
-            (row.error === undefined || typeof row.error === "string"),
-        )
-      ) {
-        throw bad();
-      }
+    case "videoEvidenceAttach":
+      if (validVideoEvidenceRow(r.evidence) === false || typeof r.duplicated !== "boolean") throw bad();
+      break;
+    case "videoUploadCancel":
+      break;
+    case "videoEvidenceDelete":
+      if (typeof r.deleted !== "number") throw bad();
       break;
     case "videoEvidenceGet":
-      if (
-        !Array.isArray(r.evidence) ||
-        !r.evidence.every(
-          (row) =>
-            isRecord(row) &&
-            typeof row.item_id === "string" &&
-            typeof row.file_id === "string" &&
-            typeof row.video_url === "string" &&
-            typeof row.duration_ms === "number" &&
-            typeof row.video_w === "number" &&
-            typeof row.video_h === "number" &&
-            typeof row.captured_location_text === "string" &&
-            typeof row.created_at === "string" &&
-            Array.isArray(row.highlights) &&
-            row.highlights.every(
-              (h) =>
-                isRecord(h) &&
-                typeof h.start_ms === "number" &&
-                typeof h.end_ms === "number" &&
-                (h.box === null ||
-                  (isRecord(h.box) &&
-                    [h.box.x1, h.box.y1, h.box.x2, h.box.y2].every(
-                      (n) => typeof n === "number" && n >= 0 && n <= 1,
-                    ))),
-            ),
-        )
-      ) {
-        throw bad();
-      }
+      if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false) throw bad();
       break;
     case "remindList":
       // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
@@ -432,8 +409,10 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "remindSet",
   "photoCommit",
   "photoEvidenceRetry",
-  "videoCommit",
-  "videoEvidenceRetry",
+  "videoUploadBegin",
+  "videoUploadCancel",
+  "videoEvidenceAttach",
+  "videoEvidenceDelete",
 ]);
 
 export function callItemsApi(
@@ -476,14 +455,20 @@ export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "photoEvidenceRetry" }>,
 ): Promise<PhotoEvidenceRetryResponse>;
 export function callItemsApi(
-  event: Extract<ItemsApiEvent, { action: "videoCommit" }>,
-): Promise<VideoCommitResponse>;
+  event: Extract<ItemsApiEvent, { action: "videoUploadBegin" }>,
+): Promise<VideoUploadBeginResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoUploadCancel" }>,
+): Promise<VideoUploadCancelResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceAttach" }>,
+): Promise<VideoEvidenceAttachResponse>;
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoEvidenceGet" }>,
 ): Promise<VideoEvidenceGetResponse>;
 export function callItemsApi(
-  event: Extract<ItemsApiEvent, { action: "videoEvidenceRetry" }>,
-): Promise<VideoEvidenceRetryResponse>;
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceDelete" }>,
+): Promise<VideoEvidenceDeleteResponse>;
 export async function callItemsApi(
   event: ItemsApiEvent,
 ): Promise<ItemsApiOkResponse> {
@@ -543,9 +528,7 @@ export async function callItemsApi(
     event.action === "create" ||
     event.action === "update" ||
     event.action === "delete" ||
-    event.action === "photoCommit" ||
-    event.action === "videoCommit" ||
-    event.action === "videoEvidenceRetry"
+    event.action === "photoCommit"
   ) {
     // 物品写入会影响空间树各层数据(create 影响「未归位」计数,update/delete
     // 影响层级物品摘要):整树缓存失效,失效收口在 API 层(issue #23)

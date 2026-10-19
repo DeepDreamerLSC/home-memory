@@ -219,22 +219,38 @@ export type ItemsApiEvent =
     )
   | (
       {
-        /** 视频建档:确认后上传一次原视频,批量写物品 + video_evidence 证据行 */
-        action: "videoCommit";
-        /** 客户端 uuid(8-64),仅日志聚合口径,不落库 */
-        batch_id: string;
-        video: VideoInput;
-        /** 1-10 件;任一件参数非法服务端整批零写入 */
-        items: VideoCommitItem[];
+        /** 单件物品视频留证:先申请服务端上传票据,再直传云存储 */
+        action: "videoUploadBegin";
+        item_id: string;
+        ext?: "mp4" | "mov" | "m4v";
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** 上传成功后凭票据绑定证据;服务端校验票据路径与文件可用性 */
+        action: "videoEvidenceAttach";
+        upload_ticket: string;
+        file_id: string;
+        duration_ms: number;
+        video_w: number;
+        video_h: number;
+        consent_version: "v1";
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** 上传失败/用户取消时作废票据(云文件由客户端删除后调用) */
+        action: "videoUploadCancel";
+        upload_ticket: string;
       } & ScopeWriteBinding
     )
   | { action: "videoEvidenceGet"; item_ids: string[] }
   | (
       {
-        /** 视频证据写入失败后的幂等补关联 */
-        action: "videoEvidenceRetry";
-        video: VideoInput;
-        items: VideoEvidenceRetryItem[];
+        /** 删除某件物品的一条或全部视频证据(服务端先删云文件再删行) */
+        action: "videoEvidenceDelete";
+        item_id: string;
+        evidence_id?: string;
       } & ScopeWriteBinding
     )
   | (
@@ -367,9 +383,11 @@ export type ItemsApiOkResponse =
   | PhotoCommitResponse
   | PhotoEvidenceGetResponse
   | PhotoEvidenceRetryResponse
-  | VideoCommitResponse
+  | VideoUploadBeginResponse
+  | VideoEvidenceAttachResponse
+  | VideoUploadCancelResponse
   | VideoEvidenceGetResponse
-  | VideoEvidenceRetryResponse;
+  | VideoEvidenceDeleteResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -1011,76 +1029,10 @@ export interface PhotoEvidenceGetResponse {
   evidence: PhotoEvidenceRow[];
 }
 
-/* ---------------- 视频证据:videoCommit / videoEvidenceGet ---------------- */
-
-export interface VideoInput {
-  file_id: string;
-  duration_ms: number;
-  video_w: number;
-  video_h: number;
-}
-
-export interface VideoHighlightInput {
-  start_ms: number;
-  end_ms: number;
-  /** 0-1 相对视频帧;null/缺省=该时间窗不画框 */
-  box?: Box | null;
-  source?: "vl" | "manual" | "circle";
-}
-
-export interface VideoHighlight {
-  start_ms: number;
-  end_ms: number;
-  box: Box | null;
-  source: "vl" | "manual" | "circle";
-}
-
-export interface VideoCommitItem {
-  operation_id: string;
-  name: string;
-  location_text: string;
-  note?: string;
-  reminder?: ReminderInput;
-  highlights?: VideoHighlightInput[];
-}
-
-export interface VideoCommitResultRow {
-  index: number;
-  ok: boolean;
-  item_id?: string;
-  duplicated?: boolean;
-  evidence_saved?: boolean;
-  version?: number;
-  error?: string;
-  message?: string;
-}
-
-export interface VideoCommitResponse {
-  ok: true;
-  results: VideoCommitResultRow[];
-  evidence_failed?: string[];
-}
-
-export interface VideoEvidenceRetryItem {
-  item_id: string;
-  highlights?: VideoHighlightInput[];
-}
-
-export interface VideoEvidenceRetryResultRow {
-  index: number;
-  item_id: string;
-  ok: boolean;
-  evidence_saved?: boolean;
-  error?: string;
-  message?: string;
-}
-
-export interface VideoEvidenceRetryResponse {
-  ok: true;
-  results: VideoEvidenceRetryResultRow[];
-}
+/* ---------------- 单件视频留证:videoUploadBegin / videoEvidenceAttach / videoEvidenceGet ---------------- */
 
 export interface VideoEvidenceRow {
+  evidence_id: string;
   item_id: string;
   file_id: string;
   /** getTempFileURL 临时播放链接;"" = 换链失败,可重试 */
@@ -1088,10 +1040,27 @@ export interface VideoEvidenceRow {
   duration_ms: number;
   video_w: number;
   video_h: number;
-  highlights: VideoHighlight[];
   captured_location_text: string;
-  source: "vl" | "manual" | "circle";
+  /** 服务端认可的用户授权版本;"" = 旧/异常行,客户端不展示 */
+  consent_version: string;
   created_at: string;
+}
+
+export interface VideoUploadBeginResponse {
+  ok: true;
+  upload_ticket: string;
+  upload_path: string;
+  expires_at: string;
+}
+
+export interface VideoEvidenceAttachResponse {
+  ok: true;
+  evidence: VideoEvidenceRow;
+  duplicated: boolean;
+}
+
+export interface VideoUploadCancelResponse {
+  ok: true;
 }
 
 export interface VideoEvidenceGetResponse {
@@ -1099,6 +1068,11 @@ export interface VideoEvidenceGetResponse {
   household_id?: string;
   scope_revision?: number;
   evidence: VideoEvidenceRow[];
+}
+
+export interface VideoEvidenceDeleteResponse {
+  ok: true;
+  deleted: number;
 }
 
 /* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */

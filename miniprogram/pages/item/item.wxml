@@ -33,6 +33,15 @@
     <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
   </view>
 
+  <view wx:if="{{ videoPending }}" class="vd-pending">
+    <view class="vd-pending-title">🎬 视频待关联</view>
+    <view class="vd-pending-sub">{{ videoPendingText }}</view>
+    <view class="vd-pending-actions">
+      <view class="vd-textbtn" bindtap="onVideoPendingRetryTap">重试关联</view>
+      <view class="vd-textbtn danger" bindtap="onVideoPendingDiscardTap">删除待关联视频</view>
+    </view>
+  </view>
+
   <view wx:if="{{ videoReady && videoEvidence }}" class="vd-card">
     <view class="vd-head">
       <view class="vd-title">🎬 当时的视频</view>
@@ -41,31 +50,25 @@
     <block wx:if="{{ videoOpen }}">
       <view class="vd-wrap" style="aspect-ratio: {{ videoEvidence.latest.aspect }};">
         <video
-          wx:if="{{ !videoEvidence.latest.urlFail }}"
+          wx:if="{{ videoEvidence.latest.urlFail === false }}"
           class="vd-video"
           src="{{ videoEvidence.latest.videoUrl }}"
-          autoplay="{{ true }}"
-          initial-time="{{ videoInitialTime }}"
           controls="{{ true }}"
           object-fit="contain"
           show-center-play-btn="{{ true }}"
           enable-progress-gesture="{{ true }}"
-          bindtimeupdate="onVideoTimeUpdate"
         ></video>
         <view wx:else class="vd-fail" bindtap="onVideoRetry">视频加载失败,点按重试</view>
-        <view
-          wx:if="{{ videoHighlightBox }}"
-          class="vd-box"
-          style="left:{{ videoHighlightBox.left }}%;top:{{ videoHighlightBox.top }}%;width:{{ videoHighlightBox.width }}%;height:{{ videoHighlightBox.height }}%"
-        ></view>
       </view>
       <view class="vd-meta">
         <view wx:if="{{ videoEvidence.latest.changed }}" class="vd-changed">位置已变更</view>
         <view class="vd-sub">{{ videoEvidence.latest.badge }}</view>
         <view class="vd-sub {{ videoEvidence.latest.changed ? 'moved' : '' }}">{{ videoEvidence.latest.subText }}</view>
-        <view class="vd-tip">高亮框来自识别候选,可能有偏差;视频只说明当时记录在哪。</view>
+        <view class="vd-tip">视频只说明当时记录在哪,不冒充当前位置;播放需你明确点击。</view>
         <view class="vd-actions">
-          <view class="vd-collapse" bindtap="onVideoToggle">收起视频</view>
+          <view class="vd-textbtn" bindtap="onVideoRetakeTap">重拍</view>
+          <view class="vd-textbtn danger" bindtap="onVideoDeleteTap">删除视频</view>
+          <view class="vd-collapse" bindtap="onVideoToggle">收起</view>
         </view>
       </view>
     </block>
@@ -73,6 +76,8 @@
       <view class="vd-fold-face">🎬 点开当时视频 · {{ videoEvidence.latest.badge }}</view>
     </view>
   </view>
+  <view wx:elif="{{ videoBusy }}" class="vd-empty">视频处理中…</view>
+  <view wx:else class="vd-empty" bindtap="onAddVideoTap">🎬 给这件物品拍一段视频留证</view>
 
   <!-- 照片证据回放(#3):照片是历史证据——只说明拍摄当日记录在哪,不冒充当前位置;
        位置已变更时以文字位置为准、旧照片作证据。拉取失败整卡不渲染(增强露出,静默) -->

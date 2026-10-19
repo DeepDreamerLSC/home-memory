@@ -208,8 +208,6 @@ Page<
     onPhotoResumeTap(): void;
     /** 拍照识物入口(#3):进 photo 页新批拍照 */
     onPhotoRecordTap(): void;
-    /** 视频识物入口:进 video 页录一段并抽帧识别 */
-    onVideoRecordTap(): void;
     /** 地图当前层加载(X1/X2 与分层缓存、防旧覆盖守卫全在这里) */
     requestSeq: LocationsRequestSeq;
     /** 当前视图层是否已有内容上屏(决定骨架还是轻量刷新) */
@@ -631,15 +629,6 @@ Page<
   onPhotoRecordTap() {
     wx.navigateTo({
       url: "/pages/photo/photo",
-      fail: () => {
-        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
-      },
-    });
-  },
-
-  onVideoRecordTap() {
-    wx.navigateTo({
-      url: "/pages/video/video",
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },

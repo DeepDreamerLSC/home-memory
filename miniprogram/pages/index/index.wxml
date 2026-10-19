@@ -299,7 +299,4 @@
   <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
     <view class="vb-photo-face">📷 拍照</view>
   </view>
-  <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onVideoRecordTap">
-    <view class="vb-photo-face">🎬 视频</view>
-  </view>
 </voice-bar>
