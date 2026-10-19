@@ -202,13 +202,21 @@ var itemConfig = null;
   require(path.join(ROOT, "miniprogram", "pages", "item", "item.js"));
 })();
 
+function ymdDaysFromNow(days) {
+  var d = new Date();
+  d.setDate(d.getDate() + days);
+  var m = String(d.getMonth() + 1).padStart(2, "0");
+  var day = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + m + "-" + day;
+}
+
 function remindRow(overrides) {
   return Object.assign(
     {
       item_id: "it-r1",
       name: "感冒药",
       location_text: "药箱第一格",
-      due_date: "2026-10-18",
+      due_date: ymdDaysFromNow(3),
       kind: "有效期",
       generation: 2,
     },
