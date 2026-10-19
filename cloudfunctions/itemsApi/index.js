@@ -73,6 +73,10 @@ exports.main = async function (event) {
     getTempFileUrls: function (fileIds) {
       return cloud.getTempFileURL({ fileList: fileIds });
     },
+    // 视频证据删除:先删云存储原视频,成功后才删证据行;失败保持可重试。
+    deleteCloudFiles: function (fileIds) {
+      return cloud.deleteFile({ fileList: fileIds });
+    },
     logger: makeLogger()
   };
   return handler(event, deps);

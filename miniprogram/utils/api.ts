@@ -39,6 +39,12 @@ import type {
   RemindKind,
   RemindSetResponse,
   UpdateItemResponse,
+  VideoEvidenceAttachResponse,
+  VideoEvidenceDeleteResponse,
+  VideoEvidenceGetResponse,
+  VideoUploadBeginResponse,
+  VideoUploadCancelResponse,
+  VideoUploadReceiptResponse,
 } from "../types";
 import { clearLocationsCache } from "./locations-cache";
 import {
@@ -108,6 +114,11 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   SCOPE_MISMATCH: "家庭已切换,本批未保存",
   /** PR #67 C3:photoEvidenceRetry 单件证据写入失败(服务端 message 优先) */
   EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
+  VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
+  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
+  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
+  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试",
+  VIDEO_ITEM_BUSY: "这件物品正在被删除或整理,请稍后重试",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -235,6 +246,22 @@ function callCloudFunction(
 }
 
 /** 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示) */
+function validVideoEvidenceRow(v: unknown): boolean {
+  if (isRecord(v) === false) return false;
+  return (
+    typeof v.evidence_id === "string" &&
+    typeof v.item_id === "string" &&
+    typeof v.file_id === "string" &&
+    typeof v.video_url === "string" &&
+    typeof v.duration_ms === "number" &&
+    typeof v.video_w === "number" &&
+    typeof v.video_h === "number" &&
+    typeof v.captured_location_text === "string" &&
+    typeof v.consent_version === "string" &&
+    typeof v.created_at === "string"
+  );
+}
+
 function validateItemsOkResponse(
   action: string,
   r: Record<string, unknown>,
@@ -329,6 +356,30 @@ function validateItemsOkResponse(
         throw bad();
       }
       break;
+    case "videoUploadBegin":
+      if (
+        typeof r.upload_ticket !== "string" ||
+        typeof r.upload_path !== "string" ||
+        typeof r.expires_at !== "string"
+      ) {
+        throw bad();
+      }
+      break;
+    case "videoUploadReceipt":
+      break;
+    case "videoEvidenceAttach":
+      if (validVideoEvidenceRow(r.evidence) === false || typeof r.duplicated !== "boolean") throw bad();
+      break;
+    case "videoUploadCancel":
+      if (r.state !== "cancelled" && r.state !== "bound") throw bad();
+      if (r.state === "bound" && validVideoEvidenceRow(r.evidence) === false) throw bad();
+      break;
+    case "videoEvidenceDelete":
+      if (typeof r.deleted !== "number") throw bad();
+      break;
+    case "videoEvidenceGet":
+      if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false) throw bad();
+      break;
     case "remindList":
       // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
       // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
@@ -366,6 +417,11 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "remindSet",
   "photoCommit",
   "photoEvidenceRetry",
+  "videoUploadBegin",
+  "videoUploadReceipt",
+  "videoUploadCancel",
+  "videoEvidenceAttach",
+  "videoEvidenceDelete",
 ]);
 
 export function callItemsApi(
@@ -407,6 +463,24 @@ export function callItemsApi(
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "photoEvidenceRetry" }>,
 ): Promise<PhotoEvidenceRetryResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoUploadBegin" }>,
+): Promise<VideoUploadBeginResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoUploadReceipt" }>,
+): Promise<VideoUploadReceiptResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoUploadCancel" }>,
+): Promise<VideoUploadCancelResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceAttach" }>,
+): Promise<VideoEvidenceAttachResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceGet" }>,
+): Promise<VideoEvidenceGetResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoEvidenceDelete" }>,
+): Promise<VideoEvidenceDeleteResponse>;
 export async function callItemsApi(
   event: ItemsApiEvent,
 ): Promise<ItemsApiOkResponse> {
@@ -450,7 +524,8 @@ export async function callItemsApi(
   if (
     event.action === "list" ||
     event.action === "remindList" ||
-    event.action === "photoEvidenceGet"
+    event.action === "photoEvidenceGet" ||
+    event.action === "videoEvidenceGet"
   ) {
     // issue #34 P0/P1-B:从 list / remindList 响应捕获服务端解析的家庭作用域
     // (household_id 必带;共享家庭另带 scope_revision)。捕获到作用域切换时清整树缓存,

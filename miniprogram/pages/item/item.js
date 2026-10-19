@@ -7,6 +7,8 @@ const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
 const conflict_1 = require("../../utils/conflict");
 const evidence_view_1 = require("../../utils/evidence-view");
+const video_evidence_1 = require("../../utils/video-evidence");
+const video_attach_1 = require("../../utils/video-attach");
 const subscribe_1 = require("../../utils/subscribe");
 const notify_accepted_1 = require("../../utils/notify-accepted");
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
@@ -94,6 +96,13 @@ Page({
         evidenceOpen: false,
         evidenceOlderOpen: false,
         evidence: null,
+        videoReady: false,
+        videoOpen: false,
+        videoEvidence: null,
+        videoBusy: false,
+        videoPending: null,
+        videoPendingExpired: false,
+        videoPendingText: "",
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -183,6 +192,9 @@ Page({
         // 照片证据回放卡(#3 §6):进页/回页拉取;applySummary/update 后不自动重拉
         //(onShow 再拉)。失败静默(增强露出,不影响详情主体)
         void this.refreshEvidence();
+        // 视频证据:进入详情只拉取并默认折叠;用户点击后才播放(有视频才显示)
+        void this.refreshVideoEvidence();
+        this.refreshVideoPending();
     },
     onNameInput(e) {
         const value = e.detail && e.detail.value ? e.detail.value : "";
@@ -728,6 +740,14 @@ Page({
     onDeleteTap() {
         this.setData({ moreOpen: false });
         if (this.data.saving || this.data.deleting) {
+            return;
+        }
+        if (this.data.videoPending !== null) {
+            wx.showModal({
+                title: "先处理待关联视频",
+                content: "这件物品还有一段已上传但未关联成功的视频。请先重试关联或删除待关联视频,再删除物品,避免云端留下无归属的私密视频。",
+                showCancel: false,
+            });
             return;
         }
         const name = this.data.name.trim() || "这条记录";
@@ -1730,6 +1750,218 @@ Page({
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },
         });
+    },
+    /* ---------------- 单件视频留证与回放 ---------------- */
+    async fetchVideoEvidenceRows() {
+        if (this.data.itemId === "")
+            return undefined;
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+        }
+        catch (e) {
+            return undefined;
+        }
+        const scopeGen = (0, household_scope_1.captureScopeGeneration)();
+        try {
+            const res = await (0, api_1.callItemsApi)({ action: "videoEvidenceGet", item_ids: [this.data.itemId] });
+            if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen) === false)
+                return undefined;
+            return res.evidence;
+        }
+        catch (e) {
+            return undefined;
+        }
+    },
+    async refreshVideoEvidence() {
+        this.setData({ videoReady: false, videoEvidence: null, videoOpen: false });
+        const rows = await this.fetchVideoEvidenceRows();
+        if (rows === undefined || rows.length === 0)
+            return;
+        const view = (0, video_evidence_1.mapVideoEvidenceView)(rows, this.data.locationText);
+        if (view === null)
+            return;
+        this.setData({ videoReady: true, videoEvidence: view, videoOpen: false });
+    },
+    refreshVideoPending() {
+        const pending = (0, video_attach_1.loadPendingVideo)((0, household_scope_1.householdScopeId)(), this.data.itemId);
+        if (pending !== null && pending.itemId === this.data.itemId) {
+            const expired = Date.parse(pending.expiresAt) <= Date.now();
+            this.setData({
+                videoPending: pending,
+                videoPendingExpired: expired,
+                videoPendingText: expired
+                    ? "视频上传凭据已过期,不能再关联。请删除待关联视频后重新拍摄。"
+                    : "视频已上传,但还没有确认关联到这件物品。可重试关联;不再需要时请删除待关联视频。",
+            });
+            return;
+        }
+        this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
+    },
+    onVideoToggle() {
+        if (this.data.videoEvidence !== null && this.data.videoEvidence.latest.urlFail) {
+            void this.refreshVideoEvidence();
+            return;
+        }
+        this.setData({ videoOpen: this.data.videoOpen === false });
+    },
+    onVideoRetry() {
+        void this.refreshVideoEvidence();
+    },
+    onVideoMoreTap() {
+        wx.showModal({
+            title: "视频留证说明",
+            content: "视频只作为这件物品的历史证据,说明拍摄当时东西在哪,不冒充当前位置。视频默认折叠,你点击后才播放;删除这件物品或手动删除视频时,原视频会一起删除。",
+            showCancel: false,
+        });
+    },
+    async onAddVideoTap() {
+        if (this.data.videoBusy)
+            return;
+        if (this.data.videoPending !== null) {
+            wx.showModal({
+                title: "先处理待关联视频",
+                content: "这件物品已有一段上传后还没关联成功的视频。请先重试关联或删除待关联视频,再拍摄新视频。",
+                showCancel: false,
+            });
+            return;
+        }
+        const itemId = this.data.itemId;
+        if (itemId === "")
+            return;
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+        }
+        catch (e) {
+            wx.showToast({ title: "暂时无法确认当前家庭,请稍后重试", icon: "none" });
+            return;
+        }
+        const consent = await new Promise((resolve) => {
+            wx.showModal({
+                title: "保存视频留证",
+                content: "视频会保存为这件物品的历史证据,仅你和家人可通过云函数换临时链接回放;删除这件物品或手动删除视频时,原视频会一起删除。现在拍摄或选择视频?",
+                confirmText: "继续",
+                cancelText: "取消",
+                success: (r) => resolve(r.confirm === true),
+                fail: () => resolve(false),
+            });
+        });
+        if (consent === false)
+            return;
+        this.setData({ videoBusy: true });
+        const file = await (0, video_attach_1.chooseVideoFile)();
+        if (file === null) {
+            this.setData({ videoBusy: false });
+            return;
+        }
+        const scopeId = (0, household_scope_1.householdScopeId)();
+        const outcome = await (0, video_attach_1.attachVideoToItem)({ itemId: itemId, scopeId: scopeId, file: file });
+        if (outcome.ok) {
+            this.setData({ videoBusy: false, videoPending: null, videoPendingText: "" });
+            await this.refreshVideoEvidence();
+            wx.showToast({ title: "视频已留证", icon: "success" });
+            return;
+        }
+        this.setData({ videoBusy: false, videoPendingExpired: outcome.expired === true });
+        this.refreshVideoPending();
+        wx.showModal({
+            title: outcome.expired === true ? "上传凭据已过期" : "视频还没关联成功",
+            content: outcome.message,
+            showCancel: false,
+        });
+    },
+    async onVideoRetakeTap() {
+        await this.onAddVideoTap();
+    },
+    async onVideoDeleteTap() {
+        if (this.data.videoEvidence === null || this.data.videoBusy)
+            return;
+        const confirmed = await new Promise((resolve) => {
+            wx.showModal({
+                title: "删除视频",
+                content: "删除后这件物品的全部视频会从云存储一并删除,不能恢复。确定删除吗?",
+                confirmText: "删除",
+                confirmColor: "#d93025",
+                cancelText: "取消",
+                success: (r) => resolve(r.confirm === true),
+                fail: () => resolve(false),
+            });
+        });
+        if (confirmed === false)
+            return;
+        this.setData({ videoBusy: true });
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+            await (0, api_1.callItemsApi)({ action: "videoEvidenceDelete", item_id: this.data.itemId });
+            this.setData({ videoBusy: false });
+            await this.refreshVideoEvidence();
+            wx.showToast({ title: "已删除视频", icon: "success" });
+        }
+        catch (e) {
+            this.setData({ videoBusy: false });
+            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+        }
+    },
+    async onVideoPendingRetryTap() {
+        if (this.data.videoPending === null || this.data.videoBusy)
+            return;
+        if (this.data.videoPendingExpired) {
+            wx.showModal({
+                title: "上传凭据已过期",
+                content: "请删除待关联视频后重新拍摄。继续重试不会成功。",
+                showCancel: false,
+            });
+            return;
+        }
+        try {
+            await (0, households_api_1.ensureScopeVerified)();
+        }
+        catch (e) {
+            wx.showToast({ title: "暂时无法确认当前家庭,请稍后重试", icon: "none" });
+            return;
+        }
+        this.setData({ videoBusy: true });
+        const outcome = await (0, video_attach_1.retryPendingVideo)(this.data.videoPending);
+        this.setData({ videoBusy: false });
+        if (outcome.ok) {
+            this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
+            await this.refreshVideoEvidence();
+            wx.showToast({ title: "视频已关联", icon: "success" });
+            return;
+        }
+        this.setData({ videoPendingExpired: outcome.expired === true });
+        this.refreshVideoPending();
+        wx.showModal({ title: outcome.expired === true ? "上传凭据已过期" : "还没关联成功", content: outcome.message, showCancel: false });
+    },
+    async onVideoPendingDiscardTap() {
+        if (this.data.videoPending === null || this.data.videoBusy)
+            return;
+        const confirmed = await new Promise((resolve) => {
+            wx.showModal({
+                title: "删除待关联视频",
+                content: "会删除已经上传但还没关联成功的原视频。确定删除吗?",
+                confirmText: "删除",
+                confirmColor: "#d93025",
+                cancelText: "取消",
+                success: (r) => resolve(r.confirm === true),
+                fail: () => resolve(false),
+            });
+        });
+        if (confirmed === false)
+            return;
+        this.setData({ videoBusy: true });
+        const outcome = await (0, video_attach_1.discardPendingVideo)(this.data.videoPending);
+        this.setData({ videoBusy: false });
+        if (outcome.ok === false) {
+            wx.showModal({ title: "删除失败", content: outcome.message, showCancel: false });
+            return;
+        }
+        this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
+        if (outcome.state === "bound") {
+            await this.refreshVideoEvidence();
+            wx.showToast({ title: "视频已关联成功,未删除", icon: "none" });
+            return;
+        }
+        wx.showToast({ title: "已删除待关联视频", icon: "success" });
     },
     noop() { },
 });

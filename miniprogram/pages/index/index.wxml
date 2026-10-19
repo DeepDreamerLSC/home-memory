@@ -141,7 +141,7 @@
                 <block wx:else>{{ item.name[0] }}</block>
               </view>
               <view class="item-main">
-                <view class="item-name">{{ item.name }}</view>
+                <view class="item-name">{{ item.name }}<text wx:if="{{ item.hasVideo }}" class="video-badge">▶ 视频</text></view>
                 <view class="item-location">{{ item.location_text }} · 记录更新于 {{ item.updated_at_short }}</view>
               </view>
               <view class="chevron">›</view>

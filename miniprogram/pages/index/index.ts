@@ -8,6 +8,7 @@ import type {
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
 import { getUnfinishedPhotoSession } from "../../utils/photo-session";
 import { pickEvidenceUrls } from "../../utils/evidence-view";
+import { pickVideoEvidence } from "../../utils/video-evidence";
 import {
   countDue,
   dueBannerText,
@@ -69,6 +70,7 @@ function toUnmountedRows(
 type DisplayItem = ItemSummary & {
   updated_at_short: string;
   evidenceUrl?: string;
+  hasVideo?: boolean;
 };
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
@@ -195,6 +197,7 @@ Page<
      * 首字图标;失败/无证据静默保持纯文字行(增强露出,绝不出错提示)。
      */
     attachQueryEvidence(ids: string[], scopeGen: number): Promise<void>;
+    attachQueryVideo(ids: string[], scopeGen: number): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
     /** 收起搜索结果,回家里地图 */
     onCollapseResultsTap(): void;
@@ -486,10 +489,9 @@ Page<
         queryResults: toDisplayItems(res.items),
       });
       // 证据缩略(#3):结果先以纯文字上屏,缩略异步补(失败静默不补)
-      void this.attachQueryEvidence(
-        res.items.map((it) => it.item_id),
-        scopeGen,
-      );
+      const resultIds = res.items.map((it) => it.item_id);
+      void this.attachQueryEvidence(resultIds, scopeGen);
+      void this.attachQueryVideo(resultIds, scopeGen);
     } catch (e) {
       if (!isScopeGenerationCurrent(scopeGen)) {
         return; // 同上:旧家庭的失败提示也不上屏
@@ -537,6 +539,22 @@ Page<
       this.setData({ queryResults: rows });
     } catch (e) {
       // 静默:缩略属增强露出,拉不到就保持纯文字行,绝不出错提示
+    }
+  },
+
+  async attachQueryVideo(ids: string[], scopeGen: number) {
+    const top = ids.slice(0, 10);
+    if (top.length === 0) return;
+    try {
+      const res = await callItemsApi({ action: "videoEvidenceGet", item_ids: top });
+      if (isScopeGenerationCurrent(scopeGen) === false || this.queriedScopeGen !== scopeGen) return;
+      const videos = pickVideoEvidence(res.evidence, top);
+      const rows = this.data.queryResults.map((r) =>
+        videos[r.item_id] !== undefined ? { ...r, hasVideo: true } : r,
+      );
+      this.setData({ queryResults: rows });
+    } catch (e) {
+      // 视频角标是增强露出,失败静默
     }
   },
 

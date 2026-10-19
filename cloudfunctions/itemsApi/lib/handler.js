@@ -16,6 +16,7 @@
 
 var normalizeName = require("./normalize").normalizeName;
 var checkWriteScopeBinding = require("./household").checkWriteScopeBinding;
+var createVideoActions = require("./video").createVideoActions;
 
 var COLLECTION = "items";
 var REMINDERS_COLLECTION = "reminders";
@@ -55,7 +56,12 @@ var ERROR_MESSAGES = {
   FILE_NOT_OWNED: "照片文件不属于当前家庭,本批未保存",
   // PR #67 C3:photoEvidenceRetry 单件证据写入失败(非唯一索引冲突的基础设施
   // 错误)——物品已建、证据行未落,可幂等重试
-  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试"
+  EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
+  VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
+  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
+  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
+  VIDEO_TICKET_BUSY: "视频正在关联或清理,请稍后刷新重试",
+  VIDEO_ITEM_BUSY: "这件物品正在被删除或整理,请稍后重试"
 };
 
 function fail(error) {
@@ -1155,23 +1161,45 @@ async function updateItem(event, deps) {
  * delete:入参 { action, item_id }
  * 软删除:置 deleted 为 true,并把 name、name_norm、location_text、note 全部抹成空字符串。
  */
-async function deleteItem(event, deps) {
-  if (!validItemId(event.item_id)) {
-    return fail("INVALID_INPUT");
+var videoCleanupForItem = null;
+var videoAcquireItemLock = null;
+var videoReleaseItemLock = null;
+
+async function deleteItemLocked(event, deps) {
+  if (videoCleanupForItem !== null) {
+    var cleanup = await videoCleanupForItem(deps, event.item_id);
+    if (cleanup.ok !== true) return fail(cleanup.error || "VIDEO_DELETE_FAILED");
   }
   var res = await collection(deps)
     .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
     .update({ data: { deleted: true, name: "", name_norm: "", location_text: "", note: "" } });
   var updated = (res && res.stats && res.stats.updated) || 0;
   if (updated >= 1) {
-    // 级联(issue #36):物品删除后其 active 提醒一并硬删(done 历史保留),
-    // remindList 不再出现该物品;绝不让提醒指向已删物品。同时在途欠账声明
-    // 一并消费——物品已删,任何未落地的再生/补录认领不再有意义
     await removeActiveReminders(deps, event.item_id);
     await consumeAnyClaim(deps, event.item_id);
     return { ok: true };
   }
   return fail("NOT_FOUND");
+}
+
+async function deleteItem(event, deps) {
+  if (!validItemId(event.item_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var existing = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!existing.data || existing.data.length === 0) return fail("NOT_FOUND");
+  if (videoAcquireItemLock !== null) {
+    var lock = await videoAcquireItemLock(deps, event.item_id, "delete");
+    if (lock.ok !== true) return fail(lock.error || "VIDEO_ITEM_BUSY");
+    try {
+      return await deleteItemLocked(event, deps);
+    } finally {
+      await videoReleaseItemLock(deps, event.item_id, lock.token);
+    }
+  }
+  return deleteItemLocked(event, deps);
 }
 
 /**
@@ -2552,6 +2580,29 @@ async function photoEvidenceGetItem(event, deps) {
   return res;
 }
 
+var videoActions = createVideoActions({
+  isString: isString,
+  fail: fail,
+  parseBoxInput: parseBoxInput,
+  parseReminderInput: parseReminderInput,
+  cleanRequired: cleanRequired,
+  cleanOptional: cleanOptional,
+  validItemId: validItemId,
+  collection: collection,
+  createItem: createItem,
+  isDuplicateKeyError: isDuplicateKeyError,
+  byCreatedDesc: byCreatedDesc,
+  mapTempUrls: mapTempUrls,
+  ERROR_MESSAGES: ERROR_MESSAGES,
+  OPERATION_ID_MAX: OPERATION_ID_MAX,
+  NAME_MAX: NAME_MAX,
+  LOCATION_MAX: LOCATION_MAX,
+  NOTE_MAX: NOTE_MAX
+});
+videoCleanupForItem = videoActions.cleanupForItem;
+videoAcquireItemLock = videoActions.acquireItemLock;
+videoReleaseItemLock = videoActions.releaseItemLock;
+
 var ACTIONS = {
   create: createItem,
   update: updateItem,
@@ -2565,7 +2616,13 @@ var ACTIONS = {
   remindSet: remindSetItem,
   photoCommit: photoCommitItem,
   photoEvidenceGet: photoEvidenceGetItem,
-  photoEvidenceRetry: photoEvidenceRetryItem
+  photoEvidenceRetry: photoEvidenceRetryItem,
+  videoUploadBegin: videoActions.videoUploadBegin,
+  videoUploadReceipt: videoActions.videoUploadReceipt,
+  videoUploadCancel: videoActions.videoUploadCancel,
+  videoEvidenceAttach: videoActions.videoEvidenceAttach,
+  videoEvidenceGet: videoActions.videoEvidenceGet,
+  videoEvidenceDelete: videoActions.videoEvidenceDelete
 };
 
 /**
@@ -2593,7 +2650,12 @@ var WRITE_ACTIONS = {
   remindClear: true,
   remindSet: true,
   photoCommit: true,
-  photoEvidenceRetry: true
+  photoEvidenceRetry: true,
+  videoUploadBegin: true,
+  videoUploadReceipt: true,
+  videoUploadCancel: true,
+  videoEvidenceAttach: true,
+  videoEvidenceDelete: true
 };
 
 /**

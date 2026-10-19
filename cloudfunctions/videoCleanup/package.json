@@ -1,0 +1,10 @@
+{
+  "name": "videoCleanup",
+  "version": "1.0.0",
+  "description": "home-memory 单件视频留证:清理超时未绑定且已回执 file_id 的孤儿视频",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

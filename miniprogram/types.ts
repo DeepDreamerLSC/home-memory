@@ -219,6 +219,50 @@ export type ItemsApiEvent =
     )
   | (
       {
+        /** 单件物品视频留证:先申请服务端上传票据,再直传云存储 */
+        action: "videoUploadBegin";
+        item_id: string;
+        ext?: "mp4" | "mov" | "m4v";
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** 上传成功后立即回执 file_id,服务端据此清理未绑定孤儿视频 */
+        action: "videoUploadReceipt";
+        upload_ticket: string;
+        file_id: string;
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** 上传成功后凭票据绑定证据;服务端校验票据路径与文件可用性 */
+        action: "videoEvidenceAttach";
+        upload_ticket: string;
+        file_id: string;
+        duration_ms: number;
+        video_w: number;
+        video_h: number;
+        consent_version: "v1";
+      } & ScopeWriteBinding
+    )
+  | (
+      {
+        /** 上传失败/用户取消时作废票据(云文件由客户端删除后调用) */
+        action: "videoUploadCancel";
+        upload_ticket: string;
+      } & ScopeWriteBinding
+    )
+  | { action: "videoEvidenceGet"; item_ids: string[] }
+  | (
+      {
+        /** 删除某件物品的一条或全部视频证据(服务端先删云文件再删行) */
+        action: "videoEvidenceDelete";
+        item_id: string;
+        evidence_id?: string;
+      } & ScopeWriteBinding
+    )
+  | (
+      {
         /** 给已有物品把提醒设为所选日子(issue #36):无则补录、有则改期(替换该 item 的提醒) */
         action: "remindSet";
         item_id: string;
@@ -346,7 +390,13 @@ export type ItemsApiOkResponse =
   | RemindSetResponse
   | PhotoCommitResponse
   | PhotoEvidenceGetResponse
-  | PhotoEvidenceRetryResponse;
+  | PhotoEvidenceRetryResponse
+  | VideoUploadBeginResponse
+  | VideoUploadReceiptResponse
+  | VideoEvidenceAttachResponse
+  | VideoUploadCancelResponse
+  | VideoEvidenceGetResponse
+  | VideoEvidenceDeleteResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -986,6 +1036,60 @@ export interface PhotoEvidenceGetResponse {
   household_id?: string;
   scope_revision?: number;
   evidence: PhotoEvidenceRow[];
+}
+
+/* ---------------- 单件视频留证:videoUploadBegin / videoEvidenceAttach / videoEvidenceGet ---------------- */
+
+export interface VideoEvidenceRow {
+  evidence_id: string;
+  item_id: string;
+  file_id: string;
+  /** getTempFileURL 临时播放链接;"" = 换链失败,可重试 */
+  video_url: string;
+  duration_ms: number;
+  video_w: number;
+  video_h: number;
+  captured_location_text: string;
+  /** 服务端认可的用户授权版本;"" = 旧/异常行,客户端不展示 */
+  consent_version: string;
+  created_at: string;
+}
+
+export interface VideoUploadBeginResponse {
+  ok: true;
+  upload_ticket: string;
+  upload_path: string;
+  expires_at: string;
+}
+
+export interface VideoUploadReceiptResponse {
+  ok: true;
+}
+
+export interface VideoEvidenceAttachResponse {
+  ok: true;
+  evidence: VideoEvidenceRow;
+  duplicated: boolean;
+}
+
+export interface VideoUploadCancelResponse {
+  ok: true;
+  /** cancelled=确实清理;bound=服务端发现证据已绑定,文件不可删 */
+  state: "cancelled" | "bound";
+  /** state=bound 时返回正式证据,客户端应恢复为回放态 */
+  evidence?: VideoEvidenceRow;
+}
+
+export interface VideoEvidenceGetResponse {
+  ok: true;
+  household_id?: string;
+  scope_revision?: number;
+  evidence: VideoEvidenceRow[];
+}
+
+export interface VideoEvidenceDeleteResponse {
+  ok: true;
+  deleted: number;
 }
 
 /* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */

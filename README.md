@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions` 五个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks` 八个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -58,6 +58,7 @@ cloudfunctions/
   remindNotify/          到期微信提醒推送(issue #36 V1.5):订阅落库 + 每日 08:00 扫描发送
     index.js             胶水层(OPENID→member_key、三向解析、cloud.openapi 订阅消息注入)
     config.json          超时 20 秒;timer 触发器 dailyExpiryNotify(cron 每天 08:00)
+  videoCleanup/          孤儿视频回收:恢复超时中间态 + 扫描超过 24h 仍 pending 且已回执 file_id 的票据
     lib/handler.js       recordSubscription 落库 + 每日扫描(窗口过滤/聚合/资格复核/幂等/发送)
     lib/aggregate.js     纯函数:上海时区自然日、到期窗口、按家庭聚合卡片四字段(20 码点截断)
     lib/eligibility.js   纯函数:发送前资格复核(member_key 重算/在册未解散/个人家庭派生)与幂等
@@ -112,7 +113,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders` 与 `remind_subscriptions`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;视频留证三个集合见 ⑧)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -161,6 +162,14 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 该集合是「谁授权了到期微信提醒」的记录(仅 `remindNotify` 云函数读写):小程序端在保存带提醒的物品时经 `wx.requestSubscribeMessage` 请求授权,用户同意后 `recordSubscription` 落一条(openid、household_id、member_key、template_id、updated_at、last_sent_date);每日 08:00 timer 扫描「今天/明天到期」的 active 提醒,按家庭聚合成一条订阅消息卡片发送给该家庭全部合格订阅者。**落 openid 的原因**:微信订阅消息 `touser` 只接受 openid,云函数侧无 openid 即无法发送;隔离措施:集合权限对所有用户不可读不可写(仅云函数管理端可访问),云函数日志绝不落 openid/member_key,发送前逐条资格复核(订阅后被移出家庭/家庭解散即停止推送)。安全披露详见对应 PR 描述。
 
+**⑧ video_evidence / video_upload_tickets(单件视频留证;先建集合再部署 itemsApi)**:
+
+> 创建 `video_upload_tickets`、`video_evidence` 与 `video_item_locks` 三个集合,权限全部并入 ③(「所有用户不可读不可写」)。`video_evidence` 建组合唯一索引:字段一 `household_id`(升序)+ 字段二 `item_id`(升序)+ 字段三 `file_id`(升序),勾选「**唯一**」;`video_upload_tickets` 与 `video_item_locks` 无需额外索引(`_id` 天然唯一)。`video_item_locks` 是物品级 attach/delete 互斥锁,60s 过期可接管。
+>
+> 用途:用户在物品详情页明确选择**一件**物品后,申请服务端上传票据 -> 客户端按票据路径上传原视频 -> 凭票据绑定证据。服务端校验票据属于当前家庭与该物品、文件路径与票据完全一致、文件可通过云函数换临时链接;读取端只按家庭 + 未删物品返回。一个视频只绑定用户当前确认的一件物品;首版不做批量识物、不自动合并同名实物、不自动生成高亮框。
+>
+> 保留与删除:视频默认折叠,用户点击后才播放;删除视频时逐文件确认云存储删除成功后才删证据行;删除物品与 attach 共用 `video_item_locks` 物品锁,清理 bound 证据与已回执 file_id 的 pending 票据,云删除失败则物品删除失败并保持可重试。上传成功后客户端立即回执 file_id 并保留本地 pending。**禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除**;孤儿回收只由 `videoCleanup` 按数据库票据 file_id 选择性执行,并会恢复超时卡在 binding/cleaning/cancelling 的票据。
+
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
 云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
@@ -171,11 +180,15 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households` 与 `cloudfunctions/remindNotify` →「**上传并部署:云端安装依赖**」。五个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify` 与 `cloudfunctions/videoCleanup` →「**上传并部署:云端安装依赖**」。六个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
-**remindNotify 的 timer 触发器**:部署后到云开发控制台 → 云函数 → remindNotify → 触发器,确认存在 `dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间)。开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建(名称 `dailyExpiryNotify`、类型「定时触发」、cron 同上),并可在控制台「手动执行」一次验证推送链路。
+**timer 触发器**:
+- remindNotify:`dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间);
+- videoCleanup:`dailyVideoCleanup`(cron `0 0 4 * * * *`,每天 04:00,北京时间),先恢复超时卡在 binding/cleaning/cancelling 的票据,再删除超过 24h 仍为 pending 且已回执 `file_id` 的孤儿视频,不触碰 bound 证据。
+
+开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建对应触发器,并可在控制台「手动执行」一次验证。
 
 issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` 四个函数持有逐字节同源的家庭解析副本,**升级时四者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
 
@@ -193,6 +206,20 @@ issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` �
 4. 部署 `transcribe` 云函数(同步骤 6 的方式,或 CLI:`cli cloud functions deploy --env <环境ID> --names transcribe --project <项目根> -r`)
 
 未配密钥时语音如实返回「识别暂不可用」并引导文字输入;麦克风授权(`scope.record`)首次使用会弹窗,后台「用户隐私保护指引」需声明麦克风用途(提审前必办)。语音耗时埋点见 `docs/PR2.md`。
+
+### 9. 单件视频留证(受控试验)
+
+首版只做「单件物品的视频历史证据 + 查找后主动回放」:
+
+1. 打开某件物品详情,点「🎬 给这件物品拍一段视频留证」;
+2. 明确同意视频保存/删除说明后,拍摄或选择视频;
+3. 客户端先调 `itemsApi.videoUploadBegin` 申请服务端上传票据,再按票据路径 `wx.cloud.uploadFile`;
+4. 上传成功后先调 `videoUploadReceipt` 回执 fileID,再调 `videoEvidenceAttach` 绑定该物品;服务端校验票据归属、文件路径与文件可用性,并以 CAS 与清理/取消互斥;
+5. 绑定成功后详情页出现折叠视频卡;默认不播放,用户明确点击后展开并用原生 `<video>` 播放;
+6. 搜索命中物品时结果行显示「▶ 视频」角标,用于提示可回看;
+7. 删除待关联视频由服务端 `videoUploadCancel` 判断:若已绑定则只修复状态不删文件;未绑定才逐文件确认删除,失败保留 pending 与回收责任。
+
+首版明确不做:批量抽屉识物、跨帧同名自动合并、自动高亮框、默认自动播放。上传成功但绑定失败会留在「视频待关联」状态,可重试或删除;不会以 toast 宣告保存成功。
 
 ## 真实样例试运行(npm run samples:live)
 
