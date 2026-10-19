@@ -227,6 +227,14 @@ export type ItemsApiEvent =
     )
   | (
       {
+        /** 上传成功后立即回执 file_id,服务端据此清理未绑定孤儿视频 */
+        action: "videoUploadReceipt";
+        upload_ticket: string;
+        file_id: string;
+      } & ScopeWriteBinding
+    )
+  | (
+      {
         /** 上传成功后凭票据绑定证据;服务端校验票据路径与文件可用性 */
         action: "videoEvidenceAttach";
         upload_ticket: string;
@@ -384,6 +392,7 @@ export type ItemsApiOkResponse =
   | PhotoEvidenceGetResponse
   | PhotoEvidenceRetryResponse
   | VideoUploadBeginResponse
+  | VideoUploadReceiptResponse
   | VideoEvidenceAttachResponse
   | VideoUploadCancelResponse
   | VideoEvidenceGetResponse
@@ -1051,6 +1060,10 @@ export interface VideoUploadBeginResponse {
   upload_ticket: string;
   upload_path: string;
   expires_at: string;
+}
+
+export interface VideoUploadReceiptResponse {
+  ok: true;
 }
 
 export interface VideoEvidenceAttachResponse {

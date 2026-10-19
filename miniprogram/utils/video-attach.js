@@ -48,6 +48,7 @@ const defaultDeps = {
         });
     }),
     begin: (itemId, ext) => (0, api_1.callItemsApi)({ action: "videoUploadBegin", item_id: itemId, ext }),
+    receipt: (event) => (0, api_1.callItemsApi)({ action: "videoUploadReceipt", ...event }),
     attach: (event) => (0, api_1.callItemsApi)({ action: "videoEvidenceAttach", ...event }),
     cancel: (uploadTicket) => (0, api_1.callItemsApi)({ action: "videoUploadCancel", upload_ticket: uploadTicket }),
     now: () => Date.now(),
@@ -108,7 +109,8 @@ function validPending(v) {
         typeof p.width === "number" &&
         typeof p.height === "number" &&
         typeof p.scopeId === "string" &&
-        typeof p.createdAt === "number");
+        typeof p.createdAt === "number" &&
+        typeof p.expiresAt === "string");
 }
 function loadPendingVideo(scopeId, itemId) {
     const s = storage();
@@ -143,9 +145,50 @@ function clearPendingVideo(scopeId, itemId) {
     }
     catch (e) { }
 }
+function isTicketExpiredError(e) {
+    return (0, api_1.isApiError)(e) && e.code === "VIDEO_TICKET_EXPIRED";
+}
+function deleteItemSucceeded(item) {
+    if (item === undefined)
+        return false;
+    return item.status === 0 || item.status === -503003;
+}
 /**
- * 申请票据 -> 上传 -> 绑定。上传成功但绑定失败时保留 pending,不假装成功。
- * 上传失败时作废票据并清理可能的空文件;用户可重新选择。
+ * 上传后先回执 file_id 给服务端,再绑定证据。
+ * 回执失败也保留 pending;票据过期时返回 expired,页面要求删除后重拍,不无限重试。
+ */
+async function receiptAndAttach(pending, d, failureMessage) {
+    try {
+        await d.receipt({ upload_ticket: pending.uploadTicket, file_id: pending.fileId });
+    }
+    catch (e) {
+        if (isTicketExpiredError(e)) {
+            return { ok: false, message: "视频上传凭据已过期,请删除待关联视频后重新拍摄", pending, expired: true };
+        }
+        return { ok: false, message: "视频已上传但回执未确认,可点重试;不会当作已保存", pending };
+    }
+    try {
+        const attached = await d.attach({
+            upload_ticket: pending.uploadTicket,
+            file_id: pending.fileId,
+            duration_ms: pending.durationMs,
+            video_w: pending.width,
+            video_h: pending.height,
+            consent_version: exports.VIDEO_CONSENT_VERSION,
+        });
+        clearPendingVideo(pending.scopeId, pending.itemId);
+        return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
+    }
+    catch (e) {
+        if (isTicketExpiredError(e)) {
+            return { ok: false, message: "视频上传凭据已过期,请删除待关联视频后重新拍摄", pending, expired: true };
+        }
+        return { ok: false, message: failureMessage, pending };
+    }
+}
+/**
+ * 申请票据 -> 上传 -> 回执 file_id -> 绑定。上传/回执/绑定任一步失败都保留
+ * pending(上传本身失败除外),不假装成功。
  */
 async function attachVideoToItem(input, partial) {
     const d = depsOf(partial);
@@ -178,50 +221,25 @@ async function attachVideoToItem(input, partial) {
         height: input.file.height,
         scopeId: input.scopeId,
         createdAt: d.now(),
+        expiresAt: begin.expires_at,
     };
     savePendingVideo(pending);
-    try {
-        const attached = await d.attach({
-            upload_ticket: pending.uploadTicket,
-            file_id: pending.fileId,
-            duration_ms: pending.durationMs,
-            video_w: pending.width,
-            video_h: pending.height,
-            consent_version: exports.VIDEO_CONSENT_VERSION,
-        });
-        clearPendingVideo(input.scopeId, input.itemId);
-        return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
-    }
-    catch (e) {
-        return { ok: false, message: "视频已上传但暂未关联成功,可点重试;不会当作已保存", pending };
-    }
+    return receiptAndAttach(pending, d, "视频已上传但暂未关联成功,可点重试;不会当作已保存");
 }
 async function retryPendingVideo(pending, partial) {
-    const d = depsOf(partial);
-    try {
-        const attached = await d.attach({
-            upload_ticket: pending.uploadTicket,
-            file_id: pending.fileId,
-            duration_ms: pending.durationMs,
-            video_w: pending.width,
-            video_h: pending.height,
-            consent_version: exports.VIDEO_CONSENT_VERSION,
-        });
-        clearPendingVideo(pending.scopeId, pending.itemId);
-        return { ok: true, evidence: attached.evidence, duplicated: attached.duplicated };
-    }
-    catch (e) {
-        return { ok: false, message: "视频仍未关联成功,请稍后重试", pending };
-    }
+    return receiptAndAttach(pending, depsOf(partial), "视频仍未关联成功,请稍后重试");
 }
 /**
- * 用户明确放弃待关联视频:先删云文件,成功后再清本地 pending 并作废票据。
- * 云删除失败时保留 pending,绝不把「可能仍存在」说成已删除。
+ * 用户明确放弃待关联视频:先逐文件确认云删除成功,再清本地 pending 并作废票据。
+ * status 0 或 -503003(文件已不存在)视为删除完成;其他状态保留 pending。
  */
 async function discardPendingVideo(pending, partial) {
     const d = depsOf(partial);
     try {
-        await d.deleteFile({ fileList: [pending.fileId] });
+        const res = await d.deleteFile({ fileList: [pending.fileId] });
+        const item = (res.fileList || []).find((f) => f.fileID === pending.fileId);
+        if (deleteItemSucceeded(item) === false)
+            return { ok: false, message: "视频文件删除失败,请稍后重试" };
     }
     catch (e) {
         return { ok: false, message: "视频文件删除失败,请稍后重试" };

@@ -58,6 +58,7 @@ cloudfunctions/
   remindNotify/          到期微信提醒推送(issue #36 V1.5):订阅落库 + 每日 08:00 扫描发送
     index.js             胶水层(OPENID→member_key、三向解析、cloud.openapi 订阅消息注入)
     config.json          超时 20 秒;timer 触发器 dailyExpiryNotify(cron 每天 08:00)
+  videoCleanup/          孤儿视频回收:扫描超过 24h 仍 pending 且已回执 file_id 的票据
     lib/handler.js       recordSubscription 落库 + 每日扫描(窗口过滤/聚合/资格复核/幂等/发送)
     lib/aggregate.js     纯函数:上海时区自然日、到期窗口、按家庭聚合卡片四字段(20 码点截断)
     lib/eligibility.js   纯函数:发送前资格复核(member_key 重算/在册未解散/个人家庭派生)与幂等
@@ -167,7 +168,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 >
 > 用途:用户在物品详情页明确选择**一件**物品后,申请服务端上传票据 -> 客户端按票据路径上传原视频 -> 凭票据绑定证据。服务端校验票据属于当前家庭与该物品、文件路径与票据完全一致、文件可通过云函数换临时链接;读取端只按家庭 + 未删物品返回。一个视频只绑定用户当前确认的一件物品;首版不做批量识物、不自动合并同名实物、不自动生成高亮框。
 >
-> 保留与删除:视频默认折叠,用户点击后才播放;删除视频时先删云存储文件、成功后才删证据行;删除物品时同样先清理视频,云删除失败则物品删除失败并保持可重试。上传成功但绑定失败时客户端保留本地 pending 记录,页面可重试关联或删除待关联视频。
+> 保留与删除:视频默认折叠,用户点击后才播放;删除视频时逐文件确认云存储删除成功后才删证据行;删除物品时同样清理 bound 证据与已回执 file_id 的 pending 票据,任一云删除失败则物品删除失败并保持可重试。上传成功后客户端立即回执 file_id 并保留本地 pending。**禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除**;孤儿回收只由 `videoCleanup` 按数据库票据 file_id 选择性执行。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
@@ -179,11 +180,15 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households` 与 `cloudfunctions/remindNotify` →「**上传并部署:云端安装依赖**」。五个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify` 与 `cloudfunctions/videoCleanup` →「**上传并部署:云端安装依赖**」。六个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
-**remindNotify 的 timer 触发器**:部署后到云开发控制台 → 云函数 → remindNotify → 触发器,确认存在 `dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间)。开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建(名称 `dailyExpiryNotify`、类型「定时触发」、cron 同上),并可在控制台「手动执行」一次验证推送链路。
+**timer 触发器**:
+- remindNotify:`dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间);
+- videoCleanup:`dailyVideoCleanup`(cron `0 0 4 * * * *`,每天 04:00,北京时间),只删除超过 24h 仍为 pending 且已回执 `file_id` 的孤儿视频,不触碰 bound 证据。
+
+开发者工具上传部署会带 `config.json` 里的 triggers;若用 CLI 部署后发现触发器缺失,在控制台手动新建对应触发器,并可在控制台「手动执行」一次验证。
 
 issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` 四个函数持有逐字节同源的家庭解析副本,**升级时四者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
 

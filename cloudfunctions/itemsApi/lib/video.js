@@ -60,36 +60,107 @@ function createVideoActions(h) {
     }
   }
 
+  function isCloudDeleteSuccess(item) {
+    return item && (item.status === 0 || item.status === -503003 || item.status === "0" || item.status === "-503003");
+  }
+
+  async function deleteFilesStrict(deps, fileIds) {
+    var unique = [];
+    var seen = Object.create(null);
+    for (var i = 0; i < fileIds.length; i++) {
+      if (isString(fileIds[i]) && fileIds[i] !== "" && seen[fileIds[i]] !== true) {
+        seen[fileIds[i]] = true;
+        unique.push(fileIds[i]);
+      }
+    }
+    if (unique.length === 0) return { ok: true, deleted: [], failed: [] };
+    if (typeof deps.deleteCloudFiles !== "function") return { ok: false, deleted: [], failed: unique };
+    var result;
+    try {
+      result = await deps.deleteCloudFiles(unique);
+    } catch (e) {
+      return { ok: false, deleted: [], failed: unique };
+    }
+    var list = result && Array.isArray(result.fileList) ? result.fileList : [];
+    var byId = Object.create(null);
+    for (var j = 0; j < list.length; j++) {
+      if (list[j] && isString(list[j].fileID)) byId[list[j].fileID] = list[j];
+    }
+    var deleted = [];
+    var failed = [];
+    for (var k = 0; k < unique.length; k++) {
+      if (isCloudDeleteSuccess(byId[unique[k]])) deleted.push(unique[k]);
+      else failed.push(unique[k]);
+    }
+    return { ok: failed.length === 0, deleted: deleted, failed: failed };
+  }
+
+  /**
+   * 删除命中证据行:只有对应云文件返回 status 0(或文件已不存在 -503003)
+   * 的数据库行才删除;其余行原样保留,绝不因 Promise 未抛错而误删证据。
+   */
   async function removeEvidenceRows(deps, itemId, evidenceId) {
     var cond = { household_id: deps.householdId, item_id: itemId };
     if (isString(evidenceId) && evidenceId !== "") cond._id = evidenceId;
     var got = await evidenceCol(deps).where(cond).get();
     var rows = (got && got.data) || [];
-    if (rows.length === 0) return { ok: true, deleted: 0 };
+    if (rows.length === 0) return { ok: true, deleted: 0, failed_file_ids: [] };
     var fileIds = rows.map(function (r) { return r.file_id; }).filter(function (id) { return isString(id) && id !== ""; });
-    if (fileIds.length > 0) {
-      if (typeof deps.deleteCloudFiles !== "function") return { ok: false, error: "VIDEO_DELETE_FAILED" };
-      try {
-        await deps.deleteCloudFiles(fileIds);
-      } catch (e) {
-        return { ok: false, error: "VIDEO_DELETE_FAILED" };
+    var del = await deleteFilesStrict(deps, fileIds);
+    var deletedSet = Object.create(null);
+    for (var i = 0; i < del.deleted.length; i++) deletedSet[del.deleted[i]] = true;
+    var deletedCount = 0;
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j];
+      var fileOk = row.file_id === undefined || row.file_id === null || row.file_id === "" || deletedSet[row.file_id] === true;
+      if (fileOk) {
+        await evidenceCol(deps).where({ _id: row._id, household_id: deps.householdId, item_id: itemId }).remove();
+        deletedCount += 1;
       }
     }
-    await evidenceCol(deps).where(cond).remove();
-    var tickets = await ticketCol(deps).where({ household_id: deps.householdId, item_id: itemId }).get();
-    for (var i = 0; i < ((tickets && tickets.data) || []).length; i++) {
-      var t = tickets.data[i];
-      if (t.status === "pending") {
-        await ticketCol(deps).doc(t._id).update({ data: { status: "cancelled", cancelled_at: deps.now() } });
-      } else if (t.status === "bound" && rows.some(function (r) { return r._id === t.evidence_id; })) {
-        await ticketCol(deps).doc(t._id).update({ data: { status: "deleted" } });
-      }
-    }
-    return { ok: true, deleted: rows.length };
+    return { ok: del.ok, deleted: deletedCount, failed_file_ids: del.failed };
   }
 
+  /**
+   * 删除物品前清理:
+   * - 已绑定证据:逐文件删除成功后删证据行;
+   * - pending 票据:如果已收到过 upload receipt(记录 file_id),同样逐文件删除;
+   * - 删除失败的票据/证据都保留,物品删除被阻断,可重试。
+   * 只有数据库中可归属的 file_id 会被删除;未知 file_id 的极端窗口由
+   * videoCleanup 定时任务和生命周期兜底处理。
+   */
   async function cleanupForItem(deps, itemId) {
-    return removeEvidenceRows(deps, itemId, "");
+    var ev = await removeEvidenceRows(deps, itemId, "");
+    if (ev.ok === false) {
+      return { ok: false, error: "VIDEO_DELETE_FAILED", deleted: ev.deleted, failed_file_ids: ev.failed_file_ids };
+    }
+    var ticketsRes = await ticketCol(deps).where({ household_id: deps.householdId, item_id: itemId }).get();
+    var tickets = (ticketsRes && ticketsRes.data) || [];
+    var extraFileIds = [];
+    for (var i = 0; i < tickets.length; i++) {
+      if (tickets[i].status === "pending" && isString(tickets[i].file_id) && tickets[i].file_id !== "") {
+        extraFileIds.push(tickets[i].file_id);
+      }
+    }
+    var pendingDel = await deleteFilesStrict(deps, extraFileIds);
+    var pendingDeleted = Object.create(null);
+    for (var j = 0; j < pendingDel.deleted.length; j++) pendingDeleted[pendingDel.deleted[j]] = true;
+    var now = deps.now();
+    for (var k = 0; k < tickets.length; k++) {
+      var t = tickets[k];
+      if (t.status === "pending") {
+        if (isString(t.file_id) && t.file_id !== "" && pendingDeleted[t.file_id] !== true) continue;
+        await ticketCol(deps).doc(t._id).update({ data: { status: "cancelled", cancelled_at: now } });
+      } else if (t.status === "bound") {
+        await ticketCol(deps).doc(t._id).update({ data: { status: "deleted", deleted_at: now } });
+      }
+    }
+    var result = { ok: pendingDel.ok, deleted: ev.deleted };
+    if (pendingDel.ok === false) {
+      result.error = "VIDEO_DELETE_FAILED";
+      result.failed_file_ids = pendingDel.failed;
+    }
+    return result;
   }
 
   async function videoUploadBegin(event, deps) {
@@ -100,13 +171,7 @@ function createVideoActions(h) {
     if (isString(ext) === false || EXTS.indexOf(ext) === -1) return fail("INVALID_INPUT");
     var now = deps.now();
     var nowMs = Date.parse(now);
-    var pending = await ticketCol(deps).where({ household_id: deps.householdId, item_id: event.item_id, status: "pending" }).get();
-    var rows = (pending && pending.data) || [];
-    for (var i = 0; i < rows.length; i++) {
-      if (Date.parse(rows[i].expires_at) > nowMs && rows[i].ext === ext) {
-        return { ok: true, upload_ticket: rows[i]._id, upload_path: rows[i].cloud_path, expires_at: rows[i].expires_at };
-      }
-    }
+    // 每次申请新票据:不复用同物品旧 pending 票据,避免新旧上传互相覆盖/取消。
     var ticket = "vt_" + deps.genId();
     var path = PATH_PREFIX + deps.householdId + "/" + ticket + "." + ext;
     var doc = {
@@ -123,6 +188,29 @@ function createVideoActions(h) {
     return { ok: true, upload_ticket: ticket, upload_path: path, expires_at: doc.expires_at };
   }
 
+  /**
+   * 上传回执:客户端 uploadFile 成功后立即调用,把 file_id 落到服务端票据。
+   * 这样即使客户端 pending 丢失或换设备,服务端仍知道该未绑定视频的 file_id,
+   * 可在删除物品或定时清理时删除;不再只能依赖客户端本地记忆。
+   */
+  async function videoUploadReceipt(event, deps) {
+    if (isString(event.upload_ticket) === false || event.upload_ticket.length < 8 || event.upload_ticket.length > 128) return fail("INVALID_INPUT");
+    if (isString(event.file_id) === false || event.file_id.length < 1 || event.file_id.length > FILE_MAX) return fail("INVALID_INPUT");
+    var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
+    var ticket = gotTicket && gotTicket.data;
+    if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
+    if (ticket.status !== "pending") return fail("VIDEO_TICKET_EXPIRED");
+    if (Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
+    var actualPath = filePath(event.file_id);
+    if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
+    if (isString(ticket.file_id) && ticket.file_id !== "" && ticket.file_id !== event.file_id) return fail("FILE_NOT_OWNED");
+    if (ticket.file_id !== event.file_id || ticket.receipt_at === undefined) {
+      await ticketCol(deps).doc(ticket._id).update({ data: { file_id: event.file_id, receipt_at: deps.now() } });
+    }
+    return { ok: true };
+  }
+
   async function videoEvidenceAttach(event, deps) {
     if (isString(event.upload_ticket) === false || event.upload_ticket.length < 8 || event.upload_ticket.length > 128) return fail("INVALID_INPUT");
     if (isString(event.file_id) === false || event.file_id.length < 1 || event.file_id.length > FILE_MAX) return fail("INVALID_INPUT");
@@ -132,12 +220,13 @@ function createVideoActions(h) {
     if (event.consent_version !== CONSENT_VERSION) return fail("INVALID_INPUT");
     var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
     var ticket = gotTicket && gotTicket.data;
-    if (ticket === null || ticket === undefined) return fail("INVALID_INPUT");
+    if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
     if (ticket.household_id !== deps.householdId) return fail("FILE_NOT_OWNED");
-    if (ticket.status !== "pending" && ticket.status !== "bound") return fail("INVALID_INPUT");
-    if (ticket.status === "pending" && Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("INVALID_INPUT");
+    if (ticket.status !== "pending" && ticket.status !== "bound") return fail("VIDEO_TICKET_EXPIRED");
+    if (ticket.status === "pending" && Date.parse(ticket.expires_at) < Date.parse(deps.now())) return fail("VIDEO_TICKET_EXPIRED");
     var actualPath = filePath(event.file_id);
     if (actualPath === null || actualPath !== ticket.cloud_path) return fail("FILE_NOT_OWNED");
+    if (ticket.file_id !== event.file_id) return fail("INVALID_INPUT");
     var item = await itemAlive(deps, ticket.item_id);
     if (item === null) return fail("NOT_FOUND");
     var pre = await evidenceCol(deps).where({ household_id: deps.householdId, item_id: ticket.item_id, file_id: event.file_id }).get();
@@ -226,12 +315,18 @@ function createVideoActions(h) {
     if (h.validItemId(event.item_id) === false) return fail("INVALID_INPUT");
     if (event.evidence_id !== undefined && event.evidence_id !== null && isString(event.evidence_id) === false) return fail("INVALID_INPUT");
     var res = await removeEvidenceRows(deps, event.item_id, event.evidence_id || "");
-    if (res.ok === false) return fail(res.error);
+    if (res.ok === false) {
+      var failed = fail("VIDEO_DELETE_FAILED");
+      failed.deleted = res.deleted;
+      failed.failed_file_ids = res.failed_file_ids;
+      return failed;
+    }
     return { ok: true, deleted: res.deleted };
   }
 
   return {
     videoUploadBegin: videoUploadBegin,
+    videoUploadReceipt: videoUploadReceipt,
     videoEvidenceAttach: videoEvidenceAttach,
     videoUploadCancel: videoUploadCancel,
     videoEvidenceGet: videoEvidenceGet,

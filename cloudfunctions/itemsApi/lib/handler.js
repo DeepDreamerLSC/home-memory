@@ -58,7 +58,8 @@ var ERROR_MESSAGES = {
   // 错误)——物品已建、证据行未落,可幂等重试
   EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
   VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
-  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试"
+  VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
+  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄"
 };
 
 function fail(error) {
@@ -2601,6 +2602,7 @@ var ACTIONS = {
   photoEvidenceGet: photoEvidenceGetItem,
   photoEvidenceRetry: photoEvidenceRetryItem,
   videoUploadBegin: videoActions.videoUploadBegin,
+  videoUploadReceipt: videoActions.videoUploadReceipt,
   videoUploadCancel: videoActions.videoUploadCancel,
   videoEvidenceAttach: videoActions.videoEvidenceAttach,
   videoEvidenceGet: videoActions.videoEvidenceGet,
@@ -2634,6 +2636,7 @@ var WRITE_ACTIONS = {
   photoCommit: true,
   photoEvidenceRetry: true,
   videoUploadBegin: true,
+  videoUploadReceipt: true,
   videoUploadCancel: true,
   videoEvidenceAttach: true,
   videoEvidenceDelete: true

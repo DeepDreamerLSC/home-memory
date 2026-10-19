@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const attach = require("../miniprogram/utils/video-attach.js");
+const { ApiError } = require("../miniprogram/utils/api.js");
 
 function installStorage() {
   const store = new Map();
@@ -17,12 +18,13 @@ function installStorage() {
 function baseDeps(overrides) {
   return Object.assign({
     uploadFile: async () => ({ fileID: "cloud://bucket/video-evidence/hh_a/vt_12345678.mp4" }),
-    deleteFile: async () => ({ fileList: [] }),
+    deleteFile: async () => ({ fileList: [{ fileID: "cloud://bucket/video-evidence/hh_a/vt_12345678.mp4", status: 0 }] }),
     begin: async () => ({
       upload_ticket: "vt_12345678",
       upload_path: "video-evidence/hh_a/vt_12345678.mp4",
       expires_at: "2099-01-01T00:00:00.000Z",
     }),
+    receipt: async () => ({ ok: true }),
     attach: async () => ({
       duplicated: false,
       evidence: {
@@ -91,6 +93,7 @@ test("VA-PENDING:上传成功但绑定失败时保留 pending,重试成功后才
     const pending = attach.loadPendingVideo("hh_a", "it_1");
     assert.ok(pending);
     assert.equal(pending.uploadTicket, "vt_12345678");
+    assert.equal(pending.expiresAt, "2099-01-01T00:00:00.000Z");
     fail = false;
     const retry = await attach.retryPendingVideo(pending, deps);
     assert.equal(retry.ok, true);
@@ -107,7 +110,7 @@ test("VA-DISCARD:删除云文件失败保留 pending;成功后清理", async () 
     const deps = baseDeps({
       deleteFile: async () => {
         if (fail) throw new Error("cloud");
-        return { fileList: [] };
+        return { fileList: [{ fileID: "cloud://bucket/video-evidence/hh_a/vt_12345678.mp4", status: 0 }] };
       },
       attach: async () => { throw new Error("network"); },
     });
@@ -122,6 +125,42 @@ test("VA-DISCARD:删除云文件失败保留 pending;成功后清理", async () 
     const ok = await attach.discardPendingVideo(pending, deps);
     assert.equal(ok.ok, true);
     assert.equal(attach.loadPendingVideo("hh_a", "it_1"), null);
+  } finally {
+    restore();
+  }
+});
+
+test("VA-EXPIRED:票据过期时返回明确 expired,保留 pending 供删除", async () => {
+  const restore = installStorage();
+  try {
+    const deps = baseDeps({
+      receipt: async () => { throw new ApiError("VIDEO_TICKET_EXPIRED", "过期"); },
+    });
+    const out = await attach.attachVideoToItem({ itemId: "it_1", scopeId: "hh_a", file: file() }, deps);
+    assert.equal(out.ok, false);
+    assert.equal(out.expired, true);
+    assert.ok(attach.loadPendingVideo("hh_a", "it_1"));
+  } finally {
+    restore();
+  }
+});
+
+test("VA-DELETE-STATUS:云删除逐文件 status 非 0 时保留 pending", async () => {
+  const restore = installStorage();
+  try {
+    const deps = baseDeps({
+      deleteFile: async () => ({
+        fileList: [{ fileID: "cloud://bucket/video-evidence/hh_a/vt_12345678.mp4", status: -1 }],
+      }),
+      attach: async () => { throw new Error("network"); },
+    });
+    const out = await attach.attachVideoToItem({ itemId: "it_1", scopeId: "hh_a", file: file() }, deps);
+    assert.equal(out.ok, false);
+    const pending = attach.loadPendingVideo("hh_a", "it_1");
+    assert.ok(pending);
+    const discarded = await attach.discardPendingVideo(pending, deps);
+    assert.equal(discarded.ok, false);
+    assert.ok(attach.loadPendingVideo("hh_a", "it_1"));
   } finally {
     restore();
   }

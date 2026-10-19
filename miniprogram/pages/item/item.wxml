@@ -37,7 +37,7 @@
     <view class="vd-pending-title">🎬 视频待关联</view>
     <view class="vd-pending-sub">{{ videoPendingText }}</view>
     <view class="vd-pending-actions">
-      <view class="vd-textbtn" bindtap="onVideoPendingRetryTap">重试关联</view>
+      <view wx:if="{{ videoPendingExpired === false }}" class="vd-textbtn" bindtap="onVideoPendingRetryTap">重试关联</view>
       <view class="vd-textbtn danger" bindtap="onVideoPendingDiscardTap">删除待关联视频</view>
     </view>
   </view>

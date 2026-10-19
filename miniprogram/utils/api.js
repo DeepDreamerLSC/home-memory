@@ -54,6 +54,7 @@ const ITEMS_API_MESSAGES = {
     EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
     VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
     VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
+    VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
 };
 const EXTRACT_DRAFT_MESSAGES = {
     AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
@@ -238,6 +239,8 @@ function validateItemsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "videoUploadReceipt":
+            break;
         case "videoEvidenceAttach":
             if (validVideoEvidenceRow(r.evidence) === false || typeof r.duplicated !== "boolean")
                 throw bad();
@@ -284,6 +287,7 @@ const ITEMS_MUTATING_ACTIONS = new Set([
     "photoCommit",
     "photoEvidenceRetry",
     "videoUploadBegin",
+    "videoUploadReceipt",
     "videoUploadCancel",
     "videoEvidenceAttach",
     "videoEvidenceDelete",

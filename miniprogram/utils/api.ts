@@ -44,6 +44,7 @@ import type {
   VideoEvidenceGetResponse,
   VideoUploadBeginResponse,
   VideoUploadCancelResponse,
+  VideoUploadReceiptResponse,
 } from "../types";
 import { clearLocationsCache } from "./locations-cache";
 import {
@@ -115,6 +116,7 @@ const ITEMS_API_MESSAGES: Record<string, string> = {
   EVIDENCE_WRITE_FAILED: "照片关联失败,请重试",
   VIDEO_NOT_AVAILABLE: "视频文件暂时不可用,请重试",
   VIDEO_DELETE_FAILED: "视频文件删除失败,请重试",
+  VIDEO_TICKET_EXPIRED: "视频上传凭据已过期,请删除待关联视频后重新拍摄",
 };
 
 const EXTRACT_DRAFT_MESSAGES: Record<string, string> = {
@@ -361,6 +363,8 @@ function validateItemsOkResponse(
         throw bad();
       }
       break;
+    case "videoUploadReceipt":
+      break;
     case "videoEvidenceAttach":
       if (validVideoEvidenceRow(r.evidence) === false || typeof r.duplicated !== "boolean") throw bad();
       break;
@@ -410,6 +414,7 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "photoCommit",
   "photoEvidenceRetry",
   "videoUploadBegin",
+  "videoUploadReceipt",
   "videoUploadCancel",
   "videoEvidenceAttach",
   "videoEvidenceDelete",
@@ -457,6 +462,9 @@ export function callItemsApi(
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoUploadBegin" }>,
 ): Promise<VideoUploadBeginResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoUploadReceipt" }>,
+): Promise<VideoUploadReceiptResponse>;
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoUploadCancel" }>,
 ): Promise<VideoUploadCancelResponse>;

@@ -67,11 +67,14 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 ### 单件视频留证(itemsApi.videoUploadBegin / videoEvidenceAttach / videoEvidenceGet / videoEvidenceDelete)
 
 - **集合**:`video_upload_tickets`(服务端签发的上传票据)、`video_evidence`(绑定证据);权限均「所有用户不可读不可写」。`video_evidence` 唯一索引 `(household_id, item_id, file_id)`。
-- **videoUploadBegin**(写类,走 F2 双 marker):`{ action, item_id, ext?("mp4"|"mov"|"m4v") }`。物品必须属当前家庭且未删。返回 `{ ok, upload_ticket, upload_path, expires_at }`;路径固定为 `video-evidence/<household_id>/<ticket>.<ext>`,票据 15 分钟过期。票据存在 `video_upload_tickets`,`_id` 即随机 ticket,服务端据此证明上传路径由本家庭申请。
-- **videoEvidenceAttach**(写类):`{ action, upload_ticket, file_id, duration_ms(1-600000), video_w, video_h, consent_version:"v1" }`。服务端校验票据存在且属当前家庭、状态 pending/bound、未过期、`file_id` 实际路径与票据 `upload_path` 完全一致、物品仍存活、文件可通过 `getTempFileURL` 取得临时链接;任一不通过失败关闭。成功后落 `video_evidence` 并把票据置 bound;同票据同 file_id 重放返回 duplicated=true。
+- **videoUploadBegin**(写类,走 F2 双 marker):`{ action, item_id, ext?("mp4"|"mov"|"m4v") }`。物品必须属当前家庭且未删。**每次调用签发新票据,绝不复用同物品旧 pending 票据**。返回 `{ ok, upload_ticket, upload_path, expires_at }`;路径固定为 `video-evidence/<household_id>/<ticket>.<ext>`,票据 15 分钟过期。票据存在 `video_upload_tickets`,`_id` 即随机 ticket,服务端据此证明上传路径由本家庭申请。
+- **videoUploadReceipt**(写类):`{ action, upload_ticket, file_id }`。客户端 uploadFile 成功后立即调用,服务端校验票据/家庭/路径后把 `file_id` 落到票据(幂等);用于即使本地 pending 丢失或换设备,服务端仍可识别并清理未绑定的私有视频。
+- **票据过期**:attach/receipt 返回 `VIDEO_TICKET_EXPIRED`。客户端展示「删除待关联视频后重新拍摄」并隐藏重试入口,不无限重试。
+- **videoEvidenceAttach**(写类):`{ action, upload_ticket, file_id, duration_ms(1-600000), video_w, video_h, consent_version:"v1" }`。服务端校验票据存在且属当前家庭、状态 pending/bound、未过期、票据已回执且 `ticket.file_id` 与本次一致、`file_id` 实际路径与票据 `upload_path` 完全一致、物品仍存活、文件可通过 `getTempFileURL` 取得临时链接;任一不通过失败关闭。成功后落 `video_evidence` 并把票据置 bound;同票据同 file_id 重放返回 duplicated=true。
 - **videoEvidenceGet**(只读):`{ action, item_ids(1-10) }`;每件取最新 3 条,只返回未删物品的证据;云存储 fileID 批量换临时播放链接,单链接失败 `video_url:""` 不废整次查询。响应带 `household_id`/共享家庭 `scope_revision`。
-- **videoEvidenceDelete**(写类):`{ action, item_id, evidence_id? }`。先调 `cloud.deleteFile` 删除原视频,成功后才删证据行;云删除失败返回 `VIDEO_DELETE_FAILED` 且证据保留可重试。删除物品时在软删前走同一清理;云删除失败则物品不删、返回可重试错误。
+- **videoEvidenceDelete**(写类):`{ action, item_id, evidence_id? }`。逐文件解析 `cloud.deleteFile` 返回的 `fileList[].status`:仅 `status===0` 或文件已不存在(`-503003`)的对应证据行才删除;任一文件失败返回 `VIDEO_DELETE_FAILED`(附 `deleted` 与 `failed_file_ids`),失败行保留可重试。删除物品时在软删前清理 bound 证据与已回执 file_id 的 pending 票据;任一云删除失败则物品不删、返回可重试错误。
 - **videoUploadCancel**(写类):`{ action, upload_ticket }`;作废尚未绑定的票据。客户端在删除待关联视频时先删云文件再作废票据。
+- **孤儿回收**:`videoCleanup` 云函数每日定时扫描超过 24h 仍为 pending 且已回执 `file_id` 的票据,只删这些票据对应的云文件并置 cancelled;bound 证据永不在此删除。没有 `file_id` 的票据仅标记 cancelled,因为无法从路径反查云对象。客户端上传成功后应立即回执,以把未知窗口压到最小。
 - **边界**:首版一个视频只绑定用户明确选择的一件物品;服务端不接收物品名称/识别结果/自动高亮;客户端不自动播放;上传成功但绑定失败时客户端本地保留 pending,可重试或删除。
 
 ## extractDraft 协议

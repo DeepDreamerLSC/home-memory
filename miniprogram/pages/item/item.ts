@@ -238,6 +238,7 @@ Page<
     videoBusy: boolean;
     /** 上传成功但绑定失败的待关联视频(本地恢复凭据) */
     videoPending: PendingVideoUpload | null;
+    videoPendingExpired: boolean;
     videoPendingText: string;
   },
   {
@@ -409,6 +410,7 @@ Page<
     videoEvidence: null as VideoEvidenceCollectionView | null,
     videoBusy: false,
     videoPending: null as PendingVideoUpload | null,
+    videoPendingExpired: false,
     videoPendingText: "",
   },
 
@@ -2134,13 +2136,17 @@ Page<
   refreshVideoPending(): void {
     const pending = loadPendingVideo(householdScopeId(), this.data.itemId);
     if (pending !== null && pending.itemId === this.data.itemId) {
+      const expired = Date.parse(pending.expiresAt) <= Date.now();
       this.setData({
         videoPending: pending,
-        videoPendingText: "视频已上传,但还没有确认关联到这件物品。可重试关联;不再需要时请删除待关联视频。",
+        videoPendingExpired: expired,
+        videoPendingText: expired
+          ? "视频上传凭据已过期,不能再关联。请删除待关联视频后重新拍摄。"
+          : "视频已上传,但还没有确认关联到这件物品。可重试关联;不再需要时请删除待关联视频。",
       });
       return;
     }
-    this.setData({ videoPending: null, videoPendingText: "" });
+    this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
   },
 
   onVideoToggle() {
@@ -2166,6 +2172,14 @@ Page<
 
   async onAddVideoTap() {
     if (this.data.videoBusy) return;
+    if (this.data.videoPending !== null) {
+      wx.showModal({
+        title: "先处理待关联视频",
+        content: "这件物品已有一段上传后还没关联成功的视频。请先重试关联或删除待关联视频,再拍摄新视频。",
+        showCancel: false,
+      });
+      return;
+    }
     const itemId = this.data.itemId;
     if (itemId === "") return;
     try {
@@ -2200,10 +2214,10 @@ Page<
       wx.showToast({ title: "视频已留证", icon: "success" });
       return;
     }
-    this.setData({ videoBusy: false });
+    this.setData({ videoBusy: false, videoPendingExpired: outcome.expired === true });
     this.refreshVideoPending();
     wx.showModal({
-      title: "视频还没关联成功",
+      title: outcome.expired === true ? "上传凭据已过期" : "视频还没关联成功",
       content: outcome.message,
       showCancel: false,
     });
@@ -2242,6 +2256,14 @@ Page<
 
   async onVideoPendingRetryTap() {
     if (this.data.videoPending === null || this.data.videoBusy) return;
+    if (this.data.videoPendingExpired) {
+      wx.showModal({
+        title: "上传凭据已过期",
+        content: "请删除待关联视频后重新拍摄。继续重试不会成功。",
+        showCancel: false,
+      });
+      return;
+    }
     try {
       await ensureScopeVerified();
     } catch (e) {
@@ -2252,12 +2274,14 @@ Page<
     const outcome = await retryPendingVideo(this.data.videoPending);
     this.setData({ videoBusy: false });
     if (outcome.ok) {
-      this.setData({ videoPending: null, videoPendingText: "" });
+      this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
       await this.refreshVideoEvidence();
       wx.showToast({ title: "视频已关联", icon: "success" });
       return;
     }
-    wx.showModal({ title: "还没关联成功", content: outcome.message, showCancel: false });
+    this.setData({ videoPendingExpired: outcome.expired === true });
+    this.refreshVideoPending();
+    wx.showModal({ title: outcome.expired === true ? "上传凭据已过期" : "还没关联成功", content: outcome.message, showCancel: false });
   },
 
   async onVideoPendingDiscardTap() {
@@ -2281,7 +2305,7 @@ Page<
       wx.showModal({ title: "删除失败", content: outcome.message, showCancel: false });
       return;
     }
-    this.setData({ videoPending: null, videoPendingText: "" });
+    this.setData({ videoPending: null, videoPendingExpired: false, videoPendingText: "" });
     wx.showToast({ title: "已删除待关联视频", icon: "success" });
   },
 
