@@ -8,7 +8,7 @@ import type {
 import { getUnfinishedDraftSession } from "../../utils/draft-session";
 import { getUnfinishedPhotoSession } from "../../utils/photo-session";
 import { pickEvidenceUrls } from "../../utils/evidence-view";
-import { pickVideoEvidence } from "../../utils/video-evidence";
+import { pickVideoPlaybackHints, type VideoPlaybackBadge } from "../../utils/video-evidence";
 import {
   countDue,
   dueBannerText,
@@ -70,7 +70,8 @@ function toUnmountedRows(
 type DisplayItem = ItemSummary & {
   updated_at_short: string;
   evidenceUrl?: string;
-  hasVideo?: boolean;
+  /** 有视频才携带；只来自 user_confirmed 行，不含临时 URL/box/confidence */
+  videoHint?: VideoPlaybackBadge;
 };
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
@@ -199,6 +200,8 @@ Page<
     attachQueryEvidence(ids: string[], scopeGen: number): Promise<void>;
     attachQueryVideo(ids: string[], scopeGen: number): Promise<void>;
     onResultTap(e: WechatMiniprogram.CustomEvent): void;
+    /** 搜索结果视频角标：带只读定位 hint 进详情，不直接播放 */
+    onResultVideoTap(e: WechatMiniprogram.CustomEvent): void;
     /** 收起搜索结果,回家里地图 */
     onCollapseResultsTap(): void;
     onResumeTap(): void;
@@ -233,7 +236,7 @@ Page<
     onUnmountedRowTap(e: WechatMiniprogram.CustomEvent): void;
     onBackTap(): void;
     onDirectItemTap(e: WechatMiniprogram.CustomEvent): void;
-    openItem(item: DisplayItem, spacePath?: string[]): void;
+    openItem(item: DisplayItem, spacePath?: string[], videoHint?: VideoPlaybackBadge | null): void;
     /** 容器抬头「⋯」整理位置:改名/移动/合并(复用 locations 页动作与确认交互) */
     onContainerMore(): void;
     currentContainer(): { location_id: string; name: string; path: string[] } | null;
@@ -548,9 +551,9 @@ Page<
     try {
       const res = await callItemsApi({ action: "videoEvidenceGet", item_ids: top });
       if (isScopeGenerationCurrent(scopeGen) === false || this.queriedScopeGen !== scopeGen) return;
-      const videos = pickVideoEvidence(res.evidence, top);
+      const hints = pickVideoPlaybackHints(res.evidence, top);
       const rows = this.data.queryResults.map((r) =>
-        videos[r.item_id] !== undefined ? { ...r, hasVideo: true } : r,
+        hints[r.item_id] !== undefined ? { ...r, videoHint: hints[r.item_id] } : r,
       );
       this.setData({ queryResults: rows });
     } catch (e) {
@@ -564,6 +567,13 @@ Page<
     if (item) {
       this.openItem(item);
     }
+  },
+
+  onResultVideoTap(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const item = this.data.queryResults[index];
+    if (item == null || item.videoHint == null) return;
+    this.openItem(item, [], item.videoHint);
   },
 
   onCollapseResultsTap() {
@@ -958,7 +968,7 @@ Page<
     }
   },
 
-  openItem(item: DisplayItem, spacePath: string[] = []) {
+  openItem(item: DisplayItem, spacePath: string[] = [], videoHint?: VideoPlaybackBadge | null) {
     const summary: ItemSummary = {
       item_id: item.item_id,
       name: item.name,
@@ -970,6 +980,14 @@ Page<
     const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
     if (spacePath.length > 0) {
       params.push("path=" + encodeURIComponent(JSON.stringify(spacePath)));
+    }
+    if (videoHint) {
+      params.push("video_entry=search_badge");
+      params.push("video_evidence_id=" + encodeURIComponent(videoHint.evidenceId));
+      if (videoHint.startMs !== null && videoHint.endMs !== null) {
+        params.push("video_hint_start_ms=" + encodeURIComponent(String(videoHint.startMs)));
+        params.push("video_hint_end_ms=" + encodeURIComponent(String(videoHint.endMs)));
+      }
     }
     wx.navigateTo({
       url: "/pages/item/item?" + params.join("&"),

@@ -309,8 +309,8 @@ Page({
             const res = await (0, api_1.callItemsApi)({ action: "videoEvidenceGet", item_ids: top });
             if ((0, household_scope_1.isScopeGenerationCurrent)(scopeGen) === false || this.queriedScopeGen !== scopeGen)
                 return;
-            const videos = (0, video_evidence_1.pickVideoEvidence)(res.evidence, top);
-            const rows = this.data.queryResults.map((r) => videos[r.item_id] !== undefined ? { ...r, hasVideo: true } : r);
+            const hints = (0, video_evidence_1.pickVideoPlaybackHints)(res.evidence, top);
+            const rows = this.data.queryResults.map((r) => hints[r.item_id] !== undefined ? { ...r, videoHint: hints[r.item_id] } : r);
             this.setData({ queryResults: rows });
         }
         catch (e) {
@@ -323,6 +323,13 @@ Page({
         if (item) {
             this.openItem(item);
         }
+    },
+    onResultVideoTap(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const item = this.data.queryResults[index];
+        if (item == null || item.videoHint == null)
+            return;
+        this.openItem(item, [], item.videoHint);
     },
     onCollapseResultsTap() {
         this.queriedScopeGen = null;
@@ -696,7 +703,7 @@ Page({
             this.openItem(item, !this.data.isRootView ? this.currentNodePath : []);
         }
     },
-    openItem(item, spacePath = []) {
+    openItem(item, spacePath = [], videoHint) {
         const summary = {
             item_id: item.item_id,
             name: item.name,
@@ -708,6 +715,14 @@ Page({
         const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
         if (spacePath.length > 0) {
             params.push("path=" + encodeURIComponent(JSON.stringify(spacePath)));
+        }
+        if (videoHint) {
+            params.push("video_entry=search_badge");
+            params.push("video_evidence_id=" + encodeURIComponent(videoHint.evidenceId));
+            if (videoHint.startMs !== null && videoHint.endMs !== null) {
+                params.push("video_hint_start_ms=" + encodeURIComponent(String(videoHint.startMs)));
+                params.push("video_hint_end_ms=" + encodeURIComponent(String(videoHint.endMs)));
+            }
         }
         wx.navigateTo({
             url: "/pages/item/item?" + params.join("&"),
