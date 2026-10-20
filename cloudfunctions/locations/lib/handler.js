@@ -1235,6 +1235,247 @@ async function ensureAndLinkAction(event, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// action:deletePreview / deleteLocation(#94 D1 删除位置三按钮)
+// ---------------------------------------------------------------------------
+
+var SCANS_COLLECTION = "location_scans";
+var VIDEO_EVIDENCE_COLLECTION = "video_evidence";
+
+/** 子树 id → true 布尔表(含自身) */
+function subtreeIdSet(ids) {
+  var set = Object.create(null);
+  for (var i = 0; i < ids.length; i++) set[ids[i]] = true;
+  return set;
+}
+
+/** 物品是否挂载在子树内(未挂载/悬挂不算) */
+function itemMountedInSubtree(item, subtreeIds) {
+  var at = item.location_node_id;
+  return at !== undefined && at !== null && at !== "" && subtreeIds[at] === true;
+}
+
+/**
+ * 子树内 scan 行状态迁移(条件 update,幂等重试安全):fromStatus → toStatus +
+ * 时间戳字段;只动本家庭、只动 fromStatus 行,已迁移/已删的原样不动。
+ * scan 行随位置走生命周期(active → location_deleted / deleted),绝不删任何
+ * 证据行/云文件/物品(§5.2)。
+ */
+async function markSubtreeScans(deps, subtreeIds, fromStatus, toStatus, atField) {
+  var scans = await fetchAllPages(deps, SCANS_COLLECTION, {
+    household_id: deps.householdId,
+    status: fromStatus
+  });
+  var marked = 0;
+  var now = deps.now();
+  for (var i = 0; i < scans.length; i++) {
+    if (subtreeIds[scans[i].location_id] !== true) continue;
+    var patch = { status: toStatus, updated_at: now };
+    patch[atField] = now;
+    await deps.db.collection(SCANS_COLLECTION)
+      .where({ _id: scans[i]._id, household_id: deps.householdId, status: fromStatus })
+      .update({ data: patch });
+    marked += 1;
+  }
+  return marked;
+}
+
+/**
+ * deletePreview(只读,#94 影响面计数):子树节点数(含自身)、挂载物品数、这些
+ * 物品的 video_evidence 行数(逐 item 查询,分页护栏)、子树内 active scan 数、
+ * migrate_available(node.path.length ≥ 2,父不是 home 根)。根节点 INVALID_INPUT
+ * (根不在 children 列表、无「⋯」入口,服务端再拦一层,双重防删)。
+ */
+async function deletePreviewAction(event, deps) {
+  if (!validItemId(event.node_id)) {
+    return fail("INVALID_INPUT");
+  }
+  var node = await findNodeById(deps, event.node_id);
+  if (!node) {
+    return fail("NOT_FOUND");
+  }
+  if (isHomeRoot(node)) {
+    return fail("INVALID_INPUT");
+  }
+  var nodes = await fetchHouseholdNodes(deps);
+  var sub = tree.collectSubtree(nodes, node._id);
+  var subtreeIds = subtreeIdSet(sub.ids);
+  var items = await fetchActiveItems(deps);
+  var mounted = [];
+  for (var i = 0; i < items.length; i++) {
+    if (itemMountedInSubtree(items[i], subtreeIds)) mounted.push(items[i]);
+  }
+  var videoCount = 0;
+  for (var v = 0; v < mounted.length; v++) {
+    var rows = await fetchAllPages(deps, VIDEO_EVIDENCE_COLLECTION, {
+      household_id: deps.householdId,
+      item_id: mounted[v]._id
+    });
+    videoCount += rows.length;
+  }
+  var activeScans = await fetchAllPages(deps, SCANS_COLLECTION, {
+    household_id: deps.householdId,
+    status: "active"
+  });
+  var scanCount = 0;
+  for (var s = 0; s < activeScans.length; s++) {
+    if (subtreeIds[activeScans[s].location_id] === true) scanCount += 1;
+  }
+  return {
+    ok: true,
+    node_count: sub.ids.length,
+    item_count: mounted.length,
+    video_count: videoCount,
+    scan_count: scanCount,
+    migrate_available: node.path.length >= 2
+  };
+}
+
+/**
+ * migrate 重挂阶段(mergeRemountPhase 同款循环 + guard):把挂载在子树内的物品
+ * 逐件条件重挂到被删节点的上一级;确定性 update_id = "locmigrate:"+digest(node_id
+ * +":"+item_id)。0 命中回查:已删/已重挂/派生标识重放 → continue(幂等);
+ * 真冲突 → abort 清单,调用方整体 VERSION_CONFLICT、零删除、可重试。
+ * 迁移只改挂载,不改 location_text(§1 定案:结构性操作永不改写用户话语)。
+ */
+async function migrateRemountPhase(deps, node, subtreeIds) {
+  var remounted = 0;
+  var guard = 0;
+  while (true) {
+    var items = await fetchActiveItems(deps);
+    var mounted = [];
+    for (var i = 0; i < items.length; i++) {
+      if (itemMountedInSubtree(items[i], subtreeIds)) mounted.push(items[i]);
+    }
+    if (mounted.length === 0) {
+      return { remounted: remounted };
+    }
+    guard += 1;
+    if (guard > 5) {
+      throw new Error("migrate remount exceeded retry guard");
+    }
+    for (var m = 0; m < mounted.length; m++) {
+      var item = mounted[m];
+      var updateId = "locmigrate:" + deps.digest(node._id + ":" + item._id);
+      var res = await conditionalMountUpdate(deps, item, node.parent_id, updateId, "migrate");
+      if (res.updated >= 1) {
+        remounted += 1;
+        continue;
+      }
+      var cur = await itemsCol(deps)
+        .where({ _id: item._id, household_id: deps.householdId, deleted: false })
+        .get();
+      if (!cur.data || cur.data.length === 0) {
+        continue; // 已被删除:无需重挂,继续下一件
+      }
+      var doc = cur.data[0];
+      if (doc.location_node_id === node.parent_id) {
+        continue; // 上次或本次已完成
+      }
+      if (isReplay(doc, item.version, res.updateId, res.fingerprint)) {
+        continue; // 派生标识重放识别:已完成
+      }
+      return { abort: [{ item_id: item._id, current_version: doc.version }] };
+    }
+  }
+}
+
+/**
+ * deleteLocation(写类,#94 三按钮服务端动作):{ action:"deleteLocation", node_id,
+ * mode:"migrate"|"purge" }。根位置两模式一律 INVALID_INPUT(删除入口在客户端
+ * 已不存在,服务端硬门兜底)。
+ * - migrate:物品条件重挂到上一级(冲突即中止零删除)→ 硬删子树全部节点 →
+ *   补偿扫描摘除悬挂挂载 → 子树内 active scan 标 location_deleted。
+ *   顶层房间(父为 home 根,物品不能直接挂根)拒绝 migrate。
+ * - purge:客户端已逐件 itemsApi.delete;若仍有未删物品挂载在子树 → NODE_NOT_EMPTY
+ *   + 当前清单(补删后重试,收敛式);否则硬删子树、补偿悬挂挂载、子树内 scan
+ *   (含已 location_deleted)升级为 deleted。绝不在此级联证据/云文件/物品——
+ *   物品软删的级联全部硬化在 itemsApi(锁序与末引用复核是 B 已验收资产)。
+ */
+async function deleteLocationAction(event, deps) {
+  if (!validItemId(event.node_id)) {
+    return fail("INVALID_INPUT");
+  }
+  if (event.mode !== "migrate" && event.mode !== "purge") {
+    return fail("INVALID_INPUT");
+  }
+  var node = await findNodeById(deps, event.node_id);
+  if (!node) {
+    return fail("NOT_FOUND");
+  }
+  if (isHomeRoot(node)) {
+    return fail("INVALID_INPUT");
+  }
+  var nodes = await fetchHouseholdNodes(deps);
+  var sub = tree.collectSubtree(nodes, node._id);
+  var subtreeIds = subtreeIdSet(sub.ids);
+  var remounted = 0;
+
+  if (event.mode === "migrate") {
+    if (node.path.length < 2) {
+      return fail("INVALID_INPUT", "物品不能直接挂「我的家」,请先移动物品或改用全部删除");
+    }
+    var phase = await migrateRemountPhase(deps, node, subtreeIds);
+    if (phase.abort) {
+      return {
+        ok: false,
+        error: "VERSION_CONFLICT",
+        message: "部分物品刚被修改,请重试",
+        detail: { conflicted: phase.abort }
+      };
+    }
+    remounted = phase.remounted;
+  } else {
+    var items = await fetchActiveItems(deps);
+    var remaining = [];
+    for (var r = 0; r < items.length; r++) {
+      if (itemMountedInSubtree(items[r], subtreeIds)) {
+        remaining.push({ item_id: items[r]._id, current_version: items[r].version });
+      }
+    }
+    if (remaining.length > 0) {
+      return {
+        ok: false,
+        error: "NODE_NOT_EMPTY",
+        message: ERROR_MESSAGES.NODE_NOT_EMPTY,
+        detail: { remaining_items: remaining }
+      };
+    }
+  }
+
+  // 硬删子树全部节点(与现 delete 相同的逐节点 remove),随即补偿扫描摘除
+  // 「计数时为 0 → 并发 linkItem 写入 → 硬删」交错出的悬挂挂载。
+  for (var d = 0; d < sub.ids.length; d++) {
+    await locCol(deps).doc(sub.ids[d]).remove();
+  }
+  var after = await fetchActiveItems(deps);
+  var victims = [];
+  for (var c = 0; c < after.length; c++) {
+    if (itemMountedInSubtree(after[c], subtreeIds)) victims.push(after[c]);
+  }
+  var comp = await compensateUnmount(deps, victims, function (item) {
+    return "compensate:" + deps.digest(node._id + ":" + item._id);
+  });
+
+  // scan 状态迁移(条件 update,幂等重试安全;不删任何证据行/云文件/物品)
+  var scansMarked;
+  if (event.mode === "migrate") {
+    scansMarked = await markSubtreeScans(deps, subtreeIds, "active", "location_deleted", "location_deleted_at");
+  } else {
+    scansMarked =
+      (await markSubtreeScans(deps, subtreeIds, "active", "deleted", "deleted_at")) +
+      (await markSubtreeScans(deps, subtreeIds, "location_deleted", "deleted", "deleted_at"));
+  }
+  return {
+    ok: true,
+    deleted_nodes: sub.ids.length,
+    remounted: remounted,
+    compensated: comp.compensated,
+    compensated_skipped: comp.skipped,
+    scans_marked: scansMarked
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 路由与日志(§2/§3)
 // ---------------------------------------------------------------------------
 
@@ -1248,7 +1489,9 @@ var DB_ACTIONS = {
   linkItem: linkItemAction,
   unlinkItem: unlinkItemAction,
   applyScan: applyScanAction,
-  ensureAndLink: ensureAndLinkAction
+  ensureAndLink: ensureAndLinkAction,
+  deletePreview: deletePreviewAction,
+  deleteLocation: deleteLocationAction
 };
 
 /**
@@ -1273,7 +1516,8 @@ var WRITE_DB_ACTIONS = {
   linkItem: true,
   unlinkItem: true,
   applyScan: true,
-  ensureAndLink: true
+  ensureAndLink: true,
+  deleteLocation: true
 };
 
 var LLM_ACTIONS = { parseLocation: true, scanHousehold: true };

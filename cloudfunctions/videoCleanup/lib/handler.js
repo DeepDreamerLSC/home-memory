@@ -5,6 +5,9 @@
 // 任何删除前都必须抢 ticket CAS 并二次核对视频证据引用。
 var TK = "video_upload_tickets";
 var EV = "video_evidence";
+// D1(issue #94):location_scans 引用复核——commit 已落 scan 但 0 件证据成功的
+// 会话,其视频是该 scan 的回看内容,24h 孤儿回收不得删它。
+var LS = "location_scans";
 var PAGE_SIZE = 100;
 var MAX_PAGES = 100;
 var GRACE_MS = 24 * 60 * 60 * 1000;
@@ -55,6 +58,29 @@ async function evidenceRefsTicket(deps, ticket) {
   return rows.length > 0 ? rows[0] : null;
 }
 
+/**
+ * D1(§2.4):location_scans 按 asset/file 的引用复核——任一 scan 行存在即视为
+ * 有引用,不删云文件。scan 只能由 itemsApi.videoSceneCommit 写出;无 scan 的
+ * 会话(全部 B 场景)查不到行,回收行为与 B 完全一致。
+ * 查询异常向上抛(调用方既有 try/catch 会把票据退回 pending 并计 failed,
+ * fail-closed:绝不因查询失败而误删仍被 scan 引用的视频)。
+ */
+async function scanRefsTicket(deps, ticket) {
+  if (typeof ticket.asset_id === "string" && ticket.asset_id !== "") {
+    var byAsset = await deps.db.collection(LS)
+      .where({ household_id: ticket.household_id, asset_id: ticket.asset_id })
+      .get();
+    if (byAsset && byAsset.data && byAsset.data.length > 0) return true;
+  }
+  if (typeof ticket.file_id === "string" && ticket.file_id !== "") {
+    var byFile = await deps.db.collection(LS)
+      .where({ household_id: ticket.household_id, file_id: ticket.file_id })
+      .get();
+    if (byFile && byFile.data && byFile.data.length > 0) return true;
+  }
+  return false;
+}
+
 async function collectByStatus(deps, status) {
   var out = [];
   var offset = 0;
@@ -98,15 +124,22 @@ async function recoverIntermediate(deps, now, cutoffMs) {
     for (var i = 0; i < rows.length; i++) {
       var t = rows[i];
       var evidence = null;
+      var scanRef = false;
       try {
         evidence = await evidenceRefsTicket(deps, t);
+        if (evidence === null) scanRef = await scanRefsTicket(deps, t);
       } catch (e) {
         stats.failed += 1;
         continue;
       }
-      if (evidence !== null) {
+      if (evidence !== null || scanRef) {
         await deps.db.collection(TK).where({ _id: t._id, status: spec.status }).update({
-          data: { status: "bound", bound_at: t.bound_at || now, evidence_id: evidence._id, recovered_at: now }
+          data: {
+            status: "bound",
+            bound_at: t.bound_at || now,
+            evidence_id: evidence !== null ? evidence._id : "",
+            recovered_at: now
+          }
         });
         stats.to_bound += 1;
         continue;
@@ -157,16 +190,23 @@ async function cleanupExpiredPending(deps, now, cutoffMs) {
       continue;
     }
     var evidence = null;
+    var scanRef = false;
     try {
       evidence = await evidenceRefsTicket(deps, t);
+      if (evidence === null) scanRef = await scanRefsTicket(deps, t);
     } catch (e) {
       await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({ data: { status: "pending", cleanup_failed_at: now } });
       stats.failed += 1;
       continue;
     }
-    if (evidence !== null) {
+    if (evidence !== null || scanRef) {
       await deps.db.collection(TK).where({ _id: t._id, status: "cleaning" }).update({
-        data: { status: "bound", bound_at: t.bound_at || now, evidence_id: evidence._id, cleanup_reason: "evidence_ref_found" }
+        data: {
+          status: "bound",
+          bound_at: t.bound_at || now,
+          evidence_id: evidence !== null ? evidence._id : "",
+          cleanup_reason: evidence !== null ? "evidence_ref_found" : "scan_ref_found"
+        }
       });
       stats.repaired_bound += 1;
       continue;

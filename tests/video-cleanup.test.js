@@ -222,3 +222,101 @@ test("CLEANUP-B12:超时 cancelling 删除成功收敛 cancelled,失败恢复 pe
   assert.equal(byId.vt_cancel_ok.status, "cancelled");
   assert.equal(byId.vt_cancel_fail.status, "pending");
 });
+
+// ---------- D1(issue #94):location_scans 引用复核 ----------
+
+/** 直接注入 location_scans 行(按 asset/file 引用视频) */
+async function seedScan(db, scanId, extra) {
+  await db.collection("location_scans").add({
+    data: Object.assign({
+      _id: "ls_" + scanId,
+      household_id: "hh_a",
+      scan_id: scanId,
+      location_id: "lc_shelf",
+      location_path_snapshot: ["书房", "书柜"],
+      location_text_snapshot: "书房 / 书柜",
+      file_id: "cloud://bucket/video-evidence/hh_a/scan.mp4",
+      asset_id: "va_scan_asset",
+      upload_ticket: "vt_scan_zero",
+      duration_ms: 12000,
+      video_w: 1280,
+      video_h: 720,
+      candidate_count: 2,
+      confirmed_count: 0,
+      confirmed_item_ids: [],
+      created_at: "2026-10-19T00:00:00.000Z",
+      updated_at: "2026-10-19T00:00:00.000Z",
+      status: "active"
+    }, extra || {})
+  });
+}
+
+test("CLEANUP-D1-SCAN:过期 pending 票据有 location_scans 引用 → 不删文件,修复 bound", async () => {
+  const db = await seeded([
+    ticket("vt_scan_zero", {
+      purpose: "scene",
+      scene_id: "scan-zero-01",
+      asset_id: "va_scan_asset",
+      file_id: "cloud://bucket/video-evidence/hh_a/scan.mp4",
+    }),
+  ]);
+  await seedScan(db, "scan-zero-01");
+  const deleted = [];
+  const res = await handler({
+    db,
+    now: () => NOW,
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID, status: 0 })) };
+    },
+  });
+  assert.equal(res.scanned, 1);
+  assert.equal(res.repaired_bound, 1, "scan 存在 → 视为有引用,修复 bound");
+  assert.equal(res.cleaned, 0);
+  assert.deepEqual(deleted, [], "commit 已落 scan 但 0 件证据成功:视频是 scan 的回看内容,绝不回收");
+  const after = (await db.collection("video_upload_tickets").doc("vt_scan_zero").get()).data;
+  assert.equal(after.status, "bound");
+  const scans = (await db.collection("location_scans").where({}).get()).data;
+  assert.equal(scans.length, 1, "scan 行原样保留");
+});
+
+test("CLEANUP-D1-SCAN-FILE-ONLY:旧行无 asset_id 时按 file_id 命中 scan 引用", async () => {
+  const db = await seeded([
+    ticket("vt_scan_file_only", {
+      file_id: "cloud://bucket/video-evidence/hh_a/scan.mp4",
+    }),
+  ]);
+  await seedScan(db, "scan-file-only-01", { asset_id: "" });
+  const deleted = [];
+  const res = await handler({
+    db,
+    now: () => NOW,
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID, status: 0 })) };
+    },
+  });
+  assert.equal(res.repaired_bound, 1);
+  assert.deepEqual(deleted, []);
+  const after = (await db.collection("video_upload_tickets").doc("vt_scan_file_only").get()).data;
+  assert.equal(after.status, "bound");
+});
+
+test("CLEANUP-D1-NO-SCAN:无 scan 引用的过期票据照旧回收(B 行为零回归)", async () => {
+  const db = await seeded([
+    ticket("vt_no_scan", {
+      file_id: "cloud://bucket/video-evidence/hh_a/no-scan.mp4",
+    }),
+  ]);
+  const deleted = [];
+  const res = await handler({
+    db,
+    now: () => NOW,
+    deleteCloudFiles: async (ids) => {
+      deleted.push.apply(deleted, ids);
+      return { fileList: ids.map((fileID) => ({ fileID, status: 0 })) };
+    },
+  });
+  assert.equal(res.cleaned, 1);
+  assert.deepEqual(deleted, ["cloud://bucket/video-evidence/hh_a/no-scan.mp4"]);
+});
