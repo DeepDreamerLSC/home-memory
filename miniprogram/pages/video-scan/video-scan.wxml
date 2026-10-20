@@ -46,7 +46,7 @@
           bindtap="onObservationToggle"
         >
           <view class="check {{obs.checked ? 'on' : ''}}">{{obs.checked ? '✓' : ''}}</view>
-          <view class="obs-img-wrap">
+          <view class="obs-img-wrap" data-obs-id="{{obs.obsId}}" catchtap="onObsImageTap">
             <image class="obs-img" src="{{obs.framePath}}" mode="aspectFit" />
             <view wx:if="{{obs.boxStyle !== 'display:none'}}" class="obs-box" style="{{obs.boxStyle}}"></view>
           </view>

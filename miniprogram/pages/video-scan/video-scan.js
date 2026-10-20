@@ -385,6 +385,18 @@ Page({
         this.setData({ phase: "idle", busy: false, observations: [], drafts: [], progressText: "", errorText: "" });
         this.clearSession();
     },
+    /** 点缩略图放大预览(真机反馈 2026-10-20:横图看不清、无法展开)——catchtap 不触发勾选 */
+    onObsImageTap(e) {
+        const obsId = String(e.currentTarget.dataset.obsId || "");
+        const group = this.data.observationGroups.find((g) => g.observations.some((o) => o.obsId === obsId));
+        const urls = (group ? group.observations : this.data.observations)
+            .map((o) => o.framePath)
+            .filter((p) => typeof p === "string" && p !== "");
+        const current = this.data.observations.find((o) => o.obsId === obsId);
+        if (current && current.framePath) {
+            wx.previewImage({ current: current.framePath, urls: urls.length > 0 ? urls : [current.framePath] });
+        }
+    },
     onObservationToggle(e) {
         const obsId = String(e.currentTarget.dataset.obsId || "");
         if (obsId === "")
@@ -580,6 +592,11 @@ Page({
         if (choice === null)
             return;
         if (choice === 0) {
+            const d = this.data.drafts[index];
+            if (d.target === "new") {
+                wx.showToast({ title: "这件已是「新建物品」", icon: "none" });
+                return;
+            }
             const drafts = this.data.drafts.slice();
             drafts[index] = { ...drafts[index], target: "new", itemId: "" };
             this.setData({ drafts }, () => this.renderDrafts());

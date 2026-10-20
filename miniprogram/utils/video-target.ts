@@ -216,6 +216,7 @@ export interface VideoFileSystemManagerLike {
 export interface VideoTargetWxLike {
   createVideoDecoder?(): VideoDecoderLike;
   createOffscreenCanvas?(options: { type: "2d"; width: number; height: number }): unknown;
+  getVideoInfo?(options: { src: string; success: (r: { width?: number; height?: number }) => void; fail: () => void }): void;
   canvasToTempFilePath?(options: Record<string, unknown>): unknown;
   getFileSystemManager?(): VideoFileSystemManagerLike;
 }
@@ -247,6 +248,8 @@ export interface VideoFrameSessionOptions {
   createDecoder?: () => VideoDecoderLike;
   decoderFactory?: () => VideoDecoderLike;
   createCanvas?: (width: number, height: number) => VideoFrameCanvasLike;
+  /** 视频展示方向为竖屏时置 true:解码帧为横置原始帧,导出前旋转 90°(真机竖拍实测 2026-10-20) */
+  displayPortrait?: boolean;
   canvasToTempFilePath?: (options: CanvasToTempFilePathOptions) => string | Promise<string>;
   readFileBase64?: (path: string) => string | { data?: string } | Promise<string | { data?: string }>;
   cleanupFile?: (path: string) => unknown;
@@ -328,6 +331,9 @@ export interface VideoCanvasContextLike {
   createImageData?(width: number, height: number): VideoCanvasImageDataLike;
   putImageData?(image: VideoCanvasImageDataLike, dx: number, dy: number): void;
   drawImage?(image: unknown, dx: number, dy: number, dw: number, dh: number): void;
+  rotate?(angle: number): void;
+  save?(): void;
+  restore?(): void;
 }
 export interface VideoFrameSessionOptionsExtra {
   startTimeoutMs?: number;
@@ -350,6 +356,15 @@ function sourceDuration(source: VideoFrameSource): number | undefined {
     return source.durationMs;
   }
   return undefined;
+}
+
+function probeDisplayPortrait(wxLike: VideoTargetWxLike, src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof wxLike.getVideoInfo !== "function") { resolve(false); return; }
+    try {
+      wxLike.getVideoInfo({ src, success: (r: { width?: number; height?: number }) => resolve((r.height || 0) > (r.width || 0)), fail: () => resolve(false) });
+    } catch (e) { resolve(false); }
+  });
 }
 
 function toClampedBytes(value: ArrayBuffer | ArrayBufferView): Uint8ClampedArray | null {
@@ -498,6 +513,21 @@ export function createVideoFrameSession(
   const jpegQuality = typeof opts.jpegQuality === "number" ? opts.jpegQuality : VIDEO_TARGET_JPEG_QUALITY;
   const maxBase64Chars = Math.max(1, Math.floor(opts.maxBase64Chars || VIDEO_TARGET_BASE64_MAX_CHARS));
   const startTimeoutMs = typeof opts.startTimeoutMs === "number" ? opts.startTimeoutMs : 10000;
+  // 竖拍自动探测(惰性,首帧时一次):调用方未显式给 displayPortrait 时,
+  // 用 wx.getVideoInfo 的展示宽高判定;探测失败按横拍(false)兜底,行为同旧版。
+  const displayPortraitOverride = opts.displayPortrait;
+  let displayPortraitResolved: boolean | null = displayPortraitOverride === undefined ? null : displayPortraitOverride;
+  let displayPortraitPromise: Promise<boolean> | null = null;
+  async function resolveDisplayPortrait(): Promise<boolean> {
+    if (displayPortraitResolved !== null) return displayPortraitResolved;
+    if (displayPortraitPromise === null) {
+      displayPortraitPromise = (typeof path === "string" && path !== ""
+        ? probeDisplayPortrait(wxLike, path)
+        : Promise.resolve(false)
+      ).then((v) => { displayPortraitResolved = v; return v; });
+    }
+    return displayPortraitPromise;
+  }
   const seekTimeoutMs = typeof opts.seekTimeoutMs === "number" ? opts.seekTimeoutMs : 5000;
   const framePollCount = typeof opts.framePollCount === "number" ? opts.framePollCount : 40;
   const framePollIntervalMs = typeof opts.framePollIntervalMs === "number" ? opts.framePollIntervalMs : 25;
@@ -596,14 +626,37 @@ export function createVideoFrameSession(
     else if (typeof ctx.drawImage === "function") ctx.drawImage(imageData, 0, 0, sourceW, sourceH);
     else throw new VideoTargetError("unsupported", "当前基础库不支持视频帧绘制");
 
+    // 竖拍旋转(真机 2026-10-20:B 验收发现竖拍视频抽帧全部横置):解码器给的是
+    // 未旋转的原始帧(横),竖拍=横帧+90° 元数据;displayPortrait 时经第二画布
+    // 顺时针转 90° 再导出——旋转发生在识别与框坐标之前,全链(缩略图/识别/框)一致竖立。
+    let outCanvas: unknown = canvas;
+    let outW = sourceW, outH = sourceH, outDW = destW, outDH = destH;
+    if (await resolveDisplayPortrait() === true && sourceW > sourceH) {
+      const rotated = canvasFactory(sourceH, sourceW);
+      const rctx = typeof rotated.getContext === "function" ? rotated.getContext("2d") as VideoCanvasContextLike : null;
+      if (rctx === null) throw new VideoTargetError("unsupported", "当前基础库不支持 2D Canvas");
+      if (typeof rctx.rotate !== "function" || typeof rctx.drawImage !== "function") {
+        throw new VideoTargetError("unsupported", "当前基础库不支持视频帧旋转");
+      }
+      if (typeof rctx.save === "function") rctx.save();
+      rctx.rotate(Math.PI / 2);
+      rctx.drawImage(canvas as unknown, 0, -sourceW, sourceW, sourceH);
+      if (typeof rctx.restore === "function") rctx.restore();
+      outCanvas = rotated;
+      outW = sourceH; outH = sourceW;
+      const rScale = Math.min(1, maxLongEdge / Math.max(outW, outH));
+      outDW = Math.max(1, Math.round(outW * rScale));
+      outDH = Math.max(1, Math.round(outH * rScale));
+    }
+
     const tempResult = await canvasToTemp({
-      canvas: canvas as unknown,
+      canvas: outCanvas,
       x: 0,
       y: 0,
-      width: sourceW,
-      height: sourceH,
-      destWidth: destW,
-      destHeight: destH,
+      width: outW,
+      height: outH,
+      destWidth: outDW,
+      destHeight: outDH,
       fileType: "jpg",
       quality: jpegQuality,
     });
@@ -625,8 +678,8 @@ export function createVideoFrameSession(
     }
     return {
       path: tempPath,
-      width: destW,
-      height: destH,
+      width: outDW,
+      height: outDH,
       timeMs: Math.round(timeMs),
       frameIndex: Number.isInteger(frameIndex) ? (frameIndex as number) : 0,
       base64: base64,
