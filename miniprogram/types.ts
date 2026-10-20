@@ -310,7 +310,11 @@ export type ItemsApiEvent =
         expected_generation?: number;
       } & ScopeWriteBinding
     )
-  | { action: "remindList" };
+  | { action: "remindList" }
+  /** D1(#94):位置页「上次清点」摘要与回看共用(只读) */
+  | { action: "locationScanLatest"; location_id: string }
+  /** D1(#94):确认页固定位置头卡/逐件子位置选择器/五级匹配池(只读) */
+  | { action: "locationScanContext"; location_id: string };
 
 /* ---------------- itemsApi 响应 ---------------- */
 
@@ -431,7 +435,9 @@ export type ItemsApiOkResponse =
   | VideoEvidenceGetResponse
   | VideoEvidenceHighlightSaveResponse
   | VideoSceneCommitResponse
-  | VideoEvidenceDeleteResponse;
+  | VideoEvidenceDeleteResponse
+  | LocationScanLatestResponse
+  | LocationScanContextResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -711,6 +717,18 @@ export type LocationsApiEvent =
       update_id: string;
       /** 缺省 manual;确认卡路径来自原话拆层时用 parse */
       created_from?: "scan" | "parse" | "manual";
+    } & ScopeWriteBinding)
+  /** D1(#94):删除位置影响面计数(只读;根位置服务端 INVALID_INPUT 双重防删) */
+  | { action: "deletePreview"; node_id: string }
+  | ({
+      /**
+       * D1(#94)删除位置三按钮的服务端动作:migrate=物品条件重挂上一级后删子树,
+       * scan 标 location_deleted;purge=客户端已逐件 itemsApi.delete,仍有活物品
+       * 挂载则 NODE_NOT_EMPTY 附清单(补删后重试,收敛式)。根位置两模式硬拒。
+       */
+      action: "deleteLocation";
+      node_id: string;
+      mode: "migrate" | "purge";
     } & ScopeWriteBinding);
 
 /* ---------------- locations 响应 ---------------- */
@@ -818,7 +836,9 @@ export type LocationsApiOkResponse =
   | ParseLocationResponse
   | ScanHouseholdResponse
   | ApplyScanResponse
-  | EnsureAndLinkResponse;
+  | EnsureAndLinkResponse
+  | LocationsDeletePreviewResponse
+  | LocationsDeleteLocationResponse;
 
 export type LocationsApiResponse = LocationsApiOkResponse | LocationsApiErrorResponse;
 
@@ -1200,6 +1220,12 @@ export interface VideoSceneCommitNewItem {
   location_text: string;
   note?: string;
   highlights: VideoEvidenceHighlightInput[];
+  /**
+   * D1 位置清点可选(#94):新物品目标节点(须在 location 子树内);
+   * 缺省 = location.location_id。携带时 location_text 必须逐字等于目标节点
+   * 路径文本(服务端权威,消除双份真相)。不带 location 的 B 提交绝不携带。
+   */
+  node_id?: string;
 }
 
 export interface VideoSceneCommitExistingItem {
@@ -1207,9 +1233,28 @@ export interface VideoSceneCommitExistingItem {
   target: "existing";
   item_id: string;
   highlights: VideoEvidenceHighlightInput[];
+  /**
+   * D1 显式移动(#94):用户在三选弹窗点了「移动到当前位置并关联」才携带;
+   * 缺省 = 只关联不改位置。expected_version 必填当且仅当 move_to_node_id 出现
+   * (来自匹配池读到的物品版本;冲突时该件不写证据,绝不静默降级为只关联)。
+   */
+  move_to_node_id?: string;
+  expected_version?: number;
 }
 
 export type VideoSceneCommitItem = VideoSceneCommitNewItem | VideoSceneCommitExistingItem;
+
+/**
+ * D1 位置上下文(#94):位置级清点提交的可选参数。缺省 = B 现行为零感知;
+ * 携带时 scan_id 必须同时 === scene_id 与票据 scene_id(三方一致),
+ * path_snapshot/text_snapshot 是进入位置时读到的节点路径快照。
+ */
+export interface LocationScanCommitLocation {
+  location_id: string;
+  scan_id: string;
+  path_snapshot: string[];
+  text_snapshot: string;
+}
 
 export interface VideoSceneCommitEvent {
   action: "videoSceneCommit";
@@ -1223,6 +1268,10 @@ export interface VideoSceneCommitEvent {
   video_h: number;
   consent_version: "v1";
   items: VideoSceneCommitItem[];
+  /** D1:位置上下文;缺省 = B 场景扫描提交 */
+  location?: LocationScanCommitLocation;
+  /** D1:客户端观察线索数(0-500),落 location_scans.candidate_count;仅 location 存在时可携带 */
+  candidate_count?: number;
 }
 
 export interface VideoSceneCommitResultRow {
@@ -1235,6 +1284,13 @@ export interface VideoSceneCommitResultRow {
   evidence_duplicated?: boolean;
   error?: string;
   message?: string;
+  /** D1:新物品实际挂载的目标节点(响应增量,仅 location 存在时) */
+  node_id?: string;
+  /** D1:新物品是否挂载成功;false 时物品与证据已在,仅挂载待用户后续手动处理 */
+  mounted?: boolean;
+  mount_error?: string;
+  /** D1:显式移动结果 moved=本次写入 / already=已在目标节点 / replayed=重放收敛 */
+  move?: "moved" | "already" | "replayed";
 }
 
 export interface VideoSceneCommitResponse {
@@ -1245,11 +1301,100 @@ export interface VideoSceneCommitResponse {
   results: VideoSceneCommitResultRow[];
   /** 未完成/证据写入失败的 draft_key；客户端用同一冻结载荷重试 */
   evidence_failed?: string[];
+  /** D1:位置清点 scan 行摘要;仅 location 存在时携带(B 提交零感知) */
+  scan?: {
+    scan_id: string;
+    location_id: string;
+    status: "active";
+    confirmed_count: number;
+    evidence_failed: string[];
+  };
 }
 
 export interface VideoEvidenceDeleteResponse {
   ok: true;
   deleted: number;
+}
+
+/* ---------------- D1 位置级视频清点(issue #94):读侧与删除三按钮 ---------------- */
+
+/** locationScanLatest 的 scan 行摘要(位置页「上次清点」) */
+export interface LocationScanLatestScan {
+  scan_id: string;
+  location_id: string;
+  created_at: string;
+  candidate_count: number;
+  /** 原始确认数(含此后被删除的物品);仍存活清单在 items 字段 */
+  confirmed_count: number;
+  confirmed_item_ids: string[];
+  duration_ms: number;
+}
+
+export interface LocationScanLatestResponse {
+  ok: true;
+  /** 该位置无 active scan 时为 null(静默隐藏「上次清点」行) */
+  scan: LocationScanLatestScan | null;
+  /** 回看临时链接;换链失败为 ""(视频已随物品证据删除等),不废查询 */
+  video_url: string;
+  /** 仍存活的确认物品(只列三字段;scan.confirmed_count 仍是原始数) */
+  items: Array<{ item_id: string; name: string; location_text: string }>;
+}
+
+/** locationScanContext 的子树节点投影(含自身;选择器只渲染这份列表,禁出子树) */
+export interface LocationScanContextNode {
+  location_id: string;
+  name: string;
+  path: string[];
+  parent_id: string;
+}
+
+/** 匹配池物品投影(五级匹配的输入;version 供移动三选的 expected_version) */
+export interface LocationScanPoolItem {
+  item_id: string;
+  name: string;
+  /** "" = 未挂载/悬挂(显示时回退 location_text 并标「未归位」) */
+  location_node_id: string;
+  location_text: string;
+  version: number;
+}
+
+export interface LocationScanContextResponse {
+  ok: true;
+  /** collectSubtree 投影(含自身),路径深度升序、同深名称字典序 */
+  subtree: LocationScanContextNode[];
+  /** 挂载在子树内的未删物品 */
+  subtree_items: LocationScanPoolItem[];
+  /** 全家庭未删物品(updated_at 倒序截断 200) */
+  household_items: LocationScanPoolItem[];
+  /** true 时建议列表顶部如实标注「物品较多,建议只参考同名精确匹配」 */
+  household_truncated: boolean;
+}
+
+/** locations.deletePreview(只读):删除位置影响面计数(#94 三按钮弹窗文案来源) */
+export interface LocationsDeletePreviewResponse {
+  ok: true;
+  /** 子树节点数(含自身) */
+  node_count: number;
+  /** 挂载在子树内的未删物品数 */
+  item_count: number;
+  /** 这些物品的 video_evidence 行数 */
+  video_count: number;
+  /** 子树内 active location_scans 数 */
+  scan_count: number;
+  /** node.path.length ≥ 2(父不是 home 根)时才允许「删位置并迁移物品」 */
+  migrate_available: boolean;
+}
+
+/** locations.deleteLocation(写类):migrate=物品重挂上一级;purge=客户端已逐件删物品 */
+export interface LocationsDeleteLocationResponse {
+  ok: true;
+  deleted_nodes: number;
+  /** 仅 migrate:重挂到上一级的物品数 */
+  remounted: number;
+  compensated: number;
+  compensated_skipped: number;
+  /** 子树内被标记状态迁移的 scan 行数(migrate→location_deleted;purge→deleted) */
+  scans_marked: number;
 }
 
 /* ---------------- 拍照识物:draftEditParse(§1.2,语音受限编辑) ---------------- */

@@ -32,6 +32,9 @@ var LOCATION_ID_MAX = 128;
 var SCAN_CANDIDATE_MAX = 500;
 var LOCATION_PATH_SEPARATOR = " / ";
 var LOCATION_SNAPSHOT_SEGMENTS_MAX = 6;
+// D1 §3:locationScanContext 的全家庭匹配池上限(超过置 truncated,建议列表
+// 由客户端如实标注「物品较多,建议只参考同名精确匹配」)
+var SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX = 200;
 
 function stableTextHash(text) {
   var h1 = 0x811c9dc5;
@@ -1497,6 +1500,145 @@ function createVideoActions(h) {
     return { ok: true, state: "bound", scan_retained: true };
   }
 
+  // ---------------------------------------------------------------------------
+  // D1 只读 action(§2.3 locationScanLatest / §3 locationScanContext):
+  // 位置页「上次清点」与确认页匹配池的唯一读侧入口;纯读零写,不进 WRITE_ACTIONS。
+  // 集合权限「所有用户不可读不可写」,一切读走本云函数;日志只记计数/错误码。
+  // ---------------------------------------------------------------------------
+
+  function projectPoolItem(doc) {
+    return {
+      item_id: doc._id,
+      name: doc.name,
+      location_node_id: isString(doc.location_node_id) ? doc.location_node_id : "",
+      location_text: isString(doc.location_text) ? doc.location_text : "",
+      version: Number.isInteger(doc.version) ? doc.version : 1
+    };
+  }
+
+  /**
+   * locationScanLatest:位置页「上次清点」摘要与回看共用这一次调用(§2.3)。
+   * 拉该位置全部 active scan 行后在函数内按 created_at 倒序取最新一条(排序收口
+   * 在函数内,与 evidenceRowsForFile 同款纪律,不依赖端上 orderBy 行为)。
+   * items 只列仍存活的确认物品;scan.confirmed_count 保持原始数,已删差额由
+   * 客户端对照显示。换链失败 video_url:"" 不废查询(B 同款)。
+   */
+  async function locationScanLatest(event, deps) {
+    if (isString(event.location_id) === false || event.location_id.length < 1 || event.location_id.length > LOCATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await scanCol(deps).where({
+      household_id: deps.householdId,
+      location_id: event.location_id,
+      status: "active"
+    }).get();
+    var rows = (got && got.data) || [];
+    if (rows.length === 0) return { ok: true, scan: null, video_url: "", items: [] };
+    rows.sort(h.byCreatedDesc);
+    var scan = rows[0];
+    var confirmed = Array.isArray(scan.confirmed_item_ids) ? scan.confirmed_item_ids : [];
+    var alive = [];
+    var seenAlive = Object.create(null);
+    for (var i = 0; i < confirmed.length; i++) {
+      if (seenAlive[confirmed[i]] === true) continue; // 防御:清单重复 id 不产生重复行
+      var gotItem = await h.collection(deps)
+        .where({ _id: confirmed[i], household_id: deps.householdId, deleted: false })
+        .get();
+      var doc = gotItem && gotItem.data && gotItem.data.length > 0 ? gotItem.data[0] : null;
+      if (doc === null) continue;
+      seenAlive[doc._id] = true;
+      alive.push({ item_id: doc._id, name: doc.name, location_text: doc.location_text });
+    }
+    var videoUrl = "";
+    if (isString(scan.file_id) && scan.file_id !== "" && typeof deps.getTempFileUrls === "function") {
+      try {
+        var urlMap = h.mapTempUrls(await deps.getTempFileUrls([scan.file_id]));
+        if (Object.prototype.hasOwnProperty.call(urlMap, scan.file_id)) videoUrl = urlMap[scan.file_id];
+      } catch (e) {}
+    }
+    return {
+      ok: true,
+      scan: {
+        scan_id: isString(scan.scan_id) ? scan.scan_id : "",
+        location_id: scan.location_id,
+        created_at: scan.created_at,
+        candidate_count: Number.isInteger(scan.candidate_count) ? scan.candidate_count : 0,
+        confirmed_count: Array.isArray(scan.confirmed_item_ids) ? scan.confirmed_item_ids.length : 0,
+        confirmed_item_ids: confirmed,
+        duration_ms: Number.isInteger(scan.duration_ms) ? scan.duration_ms : 0
+      },
+      video_url: videoUrl,
+      items: alive
+    };
+  }
+
+  /**
+   * locationScanContext(§3):确认页固定位置头卡、逐件子位置选择器与五级匹配
+   * 建议的匹配池来源。subtree 为 collectSubtree 投影(含自身;客户端选择器只
+   * 渲染这份列表,数据面天然不允许出子树);subtree_items 只含挂载在子树内的
+   * 未删物品;household_items 全家庭未删物品按 updated_at 倒序截断 200 并附
+   * truncated 标志。纯服务端读取,无写门;跨家庭 location_id → NOT_FOUND,
+   * home 根 → INVALID_INPUT(清点入口只在非根层,与 resolveLocationContext 同款)。
+   */
+  async function locationScanContext(event, deps) {
+    if (isString(event.location_id) === false || event.location_id.length < 1 || event.location_id.length > LOCATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await deps.db.collection(LOCATIONS_COLLECTION)
+      .where({ _id: event.location_id, household_id: deps.householdId })
+      .get();
+    var node = got && got.data && got.data.length > 0 ? got.data[0] : null;
+    if (node === null) return fail("NOT_FOUND");
+    if (node.parent_id === "") return fail("INVALID_INPUT");
+    var nodes = await fetchHouseholdLocationNodes(deps);
+    var subtree = subtreeNodesById(nodes, event.location_id);
+    if (subtree === null) return fail("NOT_FOUND");
+    var subtreeIds = Object.create(null);
+    var subtreeList = [];
+    var keys = Object.keys(subtree);
+    for (var k = 0; k < keys.length; k++) {
+      var n = subtree[keys[k]];
+      subtreeIds[n._id] = true;
+      subtreeList.push({ location_id: n._id, name: n.name, path: n.path, parent_id: n.parent_id });
+    }
+    // 渲染顺序:路径深度升序、同深名称字典序——客户端缩进列表直接可用,稳定不抖
+    subtreeList.sort(function (a, b) {
+      if (a.path.length !== b.path.length) return a.path.length - b.path.length;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+
+    // 全家庭未删物品分页拉全(与 handler.js fetchActiveItems 同款护栏),再在
+    // 函数内分流:子树内 → subtree_items;全量按 updated_at 倒序截断 200。
+    var items = [];
+    for (var page = 0; page < 100; page++) {
+      var res = await h.collection(deps)
+        .where({ household_id: deps.householdId, deleted: false })
+        .skip(items.length)
+        .limit(100)
+        .get();
+      var batch = (res && res.data) || [];
+      for (var b = 0; b < batch.length; b++) items.push(batch[b]);
+      if (batch.length < 100) break;
+    }
+    var subtreeItems = [];
+    for (var si = 0; si < items.length; si++) {
+      if (subtreeIds[items[si].location_node_id] === true) subtreeItems.push(projectPoolItem(items[si]));
+    }
+    var sorted = items.slice().sort(function (a, b) {
+      if (a.updated_at === b.updated_at) return 0;
+      return a.updated_at < b.updated_at ? 1 : -1;
+    });
+    var truncated = sorted.length > SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX;
+    var householdItems = sorted.slice(0, SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX).map(projectPoolItem);
+    return {
+      ok: true,
+      subtree: subtreeList,
+      subtree_items: subtreeItems,
+      household_items: householdItems,
+      household_truncated: truncated
+    };
+  }
+
   function parseSceneCommitItems(raw) {
     if (Array.isArray(raw) === false || raw.length < 1 || raw.length > SCENE_ITEMS_MAX) return "INVALID";
     var out = [];
@@ -2031,6 +2173,8 @@ function createVideoActions(h) {
     videoEvidenceHighlightSave: videoEvidenceHighlightSave,
     videoEvidenceDelete: videoEvidenceDelete,
     videoSceneCommit: videoSceneCommit,
+    locationScanLatest: locationScanLatest,
+    locationScanContext: locationScanContext,
     cleanupForItem: cleanupForItem,
     acquireItemLock: acquireItemLock,
     acquireAssetLock: acquireAssetLock,

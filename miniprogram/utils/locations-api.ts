@@ -33,6 +33,8 @@ import type {
   ListLocationsResponse,
   LocationsApiEvent,
   LocationsApiOkResponse,
+  LocationsDeleteLocationResponse,
+  LocationsDeletePreviewResponse,
   MergeLocationResponse,
   MoveLocationResponse,
   ParseLocationResponse,
@@ -198,6 +200,28 @@ function validateLocationsOkResponse(
         throw bad();
       }
       break;
+    case "deletePreview":
+      // D1(#94)影响面计数:三按钮弹窗文案的数据源,残缺不上屏
+      if (
+        typeof r.node_count !== "number" ||
+        typeof r.item_count !== "number" ||
+        typeof r.video_count !== "number" ||
+        typeof r.scan_count !== "number" ||
+        typeof r.migrate_available !== "boolean"
+      ) {
+        throw bad();
+      }
+      break;
+    case "deleteLocation":
+      if (
+        typeof r.deleted_nodes !== "number" ||
+        typeof r.remounted !== "number" ||
+        typeof r.compensated !== "number" ||
+        typeof r.scans_marked !== "number"
+      ) {
+        throw bad();
+      }
+      break;
     case "linkItem":
     case "unlinkItem":
       if (!isRecord(r.item) || typeof r.item.version !== "number") {
@@ -276,6 +300,8 @@ const LOCATIONS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "unlinkItem",
   "applyScan",
   "ensureAndLink",
+  // D1(#94)删除位置三按钮的写动作:改树 + 标记 location_scans,成功后整树失效
+  "deleteLocation",
 ]);
 
 export function callLocationsApi(
@@ -314,6 +340,12 @@ export function callLocationsApi(
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "applyScan" }>,
 ): Promise<ApplyScanResponse>;
+export function callLocationsApi(
+  event: Extract<LocationsApiEvent, { action: "deletePreview" }>,
+): Promise<LocationsDeletePreviewResponse>;
+export function callLocationsApi(
+  event: Extract<LocationsApiEvent, { action: "deleteLocation" }>,
+): Promise<LocationsDeleteLocationResponse>;
 export async function callLocationsApi(
   event: LocationsApiEvent,
 ): Promise<LocationsApiOkResponse> {

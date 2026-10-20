@@ -6,6 +6,7 @@
     "pages/item/item",
     "pages/video-scan/video-scan",
     "pages/locations/locations",
+    "pages/location-video-scan/location-video-scan",
     "pages/locationScan/locationScan",
     "pages/family/family",
     "pages/join-family/join-family",

@@ -179,3 +179,45 @@
   font-size: 22rpx;
   flex-shrink: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* D1(#94)位置级视频清点:底部入口卡 + 删除位置三按钮弹层              */
+
+/* 底部入口卡(仅 browse 且非根层):点整卡拍摄,点「回看」进回放 */
+.scan-entry-card .scan-entry {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.scan-entry-card .pick-check {
+  flex-shrink: 0;
+}
+
+/* 三按钮弹层:遮罩 + 底部面板 */
+.layer-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+}
+
+.delete-layer {
+  width: 100%;
+  background: var(--card);
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 28rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.delete-layer .hint {
+  text-align: left;
+}
