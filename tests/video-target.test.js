@@ -80,7 +80,7 @@ test("抽帧会话:一次 start、逐次 seek、导出 base64、cancel 清理临
   const made = makeSession();
   const frame = await made.session.captureAt(1200, 3);
   assert.equal(made.decoder.started, 1);
-  assert.deepEqual(made.decoder.seeks, [1.2]);
+  assert.deepEqual(made.decoder.seeks, [1200]);
   assert.equal(frame.path, "/tmp/frame.jpg");
   assert.equal(frame.timeMs, 1200);
   assert.equal(frame.frameIndex, 3);
@@ -230,4 +230,26 @@ test("候选展示:时间文案与 0-1 框转百分比样式", () => {
     "left:10%;top:20%;width:50%;height:60%"
   );
   assert.equal(target.boxPercentStyle(null), "display:none");
+});
+
+test("抽帧:start Promise reject 时如实报错,不能误报事件超时", async () => {
+  const decoder = {
+    on() {},
+    off() {},
+    start() { return Promise.reject(new Error("开发者工具暂时不支持此 API 调试")); },
+    seek() { return Promise.resolve(); },
+    getFrameData() { return { data: new Uint8ClampedArray(16), width: 2, height: 2 }; },
+    stop() {},
+    remove() {},
+  };
+  const session = target.createVideoFrameSession("http://tmp/video.mp4", {
+    decoder,
+    durationMs: 1000,
+    startTimeoutMs: 200,
+  });
+  await assert.rejects(
+    () => session.captureAt(100, 0),
+    (error) => error && error.code === "extract_failed" && /不支持/.test(error.message)
+  );
+  await session.cancel();
 });

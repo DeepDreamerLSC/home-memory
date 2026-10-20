@@ -393,7 +393,23 @@ function decoderEventWait(
     }, Math.max(50, timeoutMs));
     try {
       decoder.on(eventName, handler);
-      action();
+      const returned = action();
+      // 真机 VideoDecoder.start/seek 返回 Promise;模拟器还会直接 reject
+      // "不支持此 API 调试"。事件和 Promise 任一成功都算完成,错误不能被
+      // 静默吞掉,否则会被误报成事件超时。
+      if (returned && typeof (returned as PromiseLike<unknown>).then === "function") {
+        Promise.resolve(returned).then(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        }).catch((error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(asVideoTargetError(error, "extract_failed", "视频解码器启动/定位失败: " + errorMessage(error)));
+        });
+      }
     } catch (e) {
       if (settled) return;
       settled = true;
@@ -515,7 +531,7 @@ export function createVideoFrameSession(
     const start = dec.start;
     if (startedPromise) return startedPromise;
     startedPromise = decoderEventWait(dec, "start", startTimeoutMs, () => {
-      start.call(dec, { source: path });
+      return start.call(dec, { source: path });
     }).catch((error: unknown) => {
       startedPromise = null;
       throw asVideoTargetError(error, "extract_failed", "视频解码器启动失败: " + errorMessage(error));
@@ -535,7 +551,8 @@ export function createVideoFrameSession(
     }
     const seek = dec.seek;
     await decoderEventWait(dec, "seek", seekTimeoutMs, () => {
-      seek.call(dec, Math.round(timeMs) / 1000);
+      // 官方 VideoDecoder.seek 参数单位是毫秒,不是秒。
+      return seek.call(dec, Math.round(timeMs));
     });
     ensureNotCancelled();
 
