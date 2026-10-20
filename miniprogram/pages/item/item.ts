@@ -51,8 +51,14 @@ import type { Box } from "../../utils/photo-box";
 import { mapEvidenceView } from "../../utils/evidence-view";
 import type { EvidenceView } from "../../utils/evidence-view";
 import {
+  defaultVideoHighlightView,
   mapVideoEvidenceView,
+  selectVideoPlaybackTarget,
   type VideoEvidenceCollectionView,
+  type VideoEvidenceView,
+  type VideoHighlightBoxView,
+  type VideoPlaybackHint,
+  type VideoPlaybackTarget,
 } from "../../utils/video-evidence";
 import {
   boxPercentStyle,
@@ -175,6 +181,60 @@ function parseSpacePath(raw: string | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+/** 搜索 badge 的只读定位 hint；非法时降级为无 hint，不阻断详情主体。 */
+function parseVideoPlaybackHint(options: Record<string, string | undefined>): VideoPlaybackHint | null {
+  if (options == null || safeDecode(options.video_entry || "") !== "search_badge") return null;
+  const evidenceId = safeDecode(options.video_evidence_id || "").trim();
+  if (evidenceId === "" || evidenceId.length > 160) return null;
+  const hasStart = typeof options.video_hint_start_ms === "string" && options.video_hint_start_ms.trim() !== "";
+  const hasEnd = typeof options.video_hint_end_ms === "string" && options.video_hint_end_ms.trim() !== "";
+  if (hasStart === false || hasEnd === false) return { evidenceId, startMs: null, endMs: null };
+  const start = Number(options.video_hint_start_ms);
+  const end = Number(options.video_hint_end_ms);
+  if (Number.isSafeInteger(start) === false || Number.isSafeInteger(end) === false || start < 0 || end <= start) {
+    return { evidenceId, startMs: null, endMs: null };
+  }
+  return { evidenceId, startMs: start, endMs: end };
+}
+
+/** 折叠条目标文案：只描述用户确认过的片段，不把 AI 候选写成事实。 */
+function videoFoldTextFor(selected: VideoEvidenceView, highlightKey: string): string {
+  if (selected.playable === false) return "🎬 视频暂时无法加载 · 点按重试";
+  const highlight =
+    selected.highlights.find((h) => h.key === highlightKey) ||
+    defaultVideoHighlightView(selected.highlights);
+  if (highlight !== null) {
+    return "🎬 你确认过的片段 " + highlight.rangeText + " · 点开回看";
+  }
+  return "🎬 点开当时视频 · " + selected.badge;
+}
+
+/** 回退/换链说明：失败不伪装成“无视频”，也不静默换行。 */
+function videoFallbackNotice(
+  target: VideoPlaybackTarget,
+  view: VideoEvidenceCollectionView,
+  selected: VideoEvidenceView,
+): string {
+  if (target.fallbackReason === "explicit_url_failed") {
+    return target.mode === "unavailable"
+      ? "原目标视频暂时无法加载,点按重试。"
+      : "原目标视频暂时无法加载,已回退到更早的一条留证。";
+  }
+  if (
+    target.fallbackReason === "explicit_not_found" ||
+    target.fallbackReason === "explicit_highlight_missing"
+  ) {
+    return "原来的视频片段不可用了,已回到这段视频的普通回放。";
+  }
+  if (target.fallbackReason === "all_urls_failed") {
+    return "视频暂时无法加载,点按重试。";
+  }
+  if (view.latest.urlFail && selected.evidenceId !== view.latest.evidenceId) {
+    return "最新一条视频暂时无法加载,当前查看更早的一条留证。";
+  }
+  return "";
 }
 
 /** 刷新最新数据的结果 */
@@ -304,6 +364,16 @@ Page<
     videoReady: boolean;
     videoOpen: boolean;
     videoEvidence: VideoEvidenceCollectionView | null;
+    videoSelected: VideoEvidenceView | null;
+    videoSelectedHighlightKey: string;
+    videoFoldText: string;
+    videoPlaybackNotice: string;
+    videoPlaybackError: string;
+    videoInitialTime: number;
+    videoSeekPending: boolean;
+    videoCurrentMs: number;
+    videoActiveBox: VideoHighlightBoxView | null;
+    videoLookupFailed: boolean;
     videoBusy: boolean;
     /** 上传成功但绑定失败的待关联视频(本地恢复凭据) */
     videoPending: PendingVideoUpload | null;
@@ -317,6 +387,9 @@ Page<
   },
   {
     original: { name: string; location: string; note: string };
+
+    videoEntryHint: VideoPlaybackHint | null;
+    videoEntryFocusConsumed: boolean;
 
     /**
      * 提醒字段与服务器对齐的基准日期(YYYY-MM-DD;""=确认无提醒):
@@ -426,11 +499,19 @@ Page<
     onRetakeTap(): void;
     /* ---------------- 单件视频留证与回放 ---------------- */
     fetchVideoEvidenceRows(): Promise<VideoEvidenceRow[] | undefined>;
-    refreshVideoEvidence(): Promise<void>;
+    refreshVideoEvidence(reopenPaused?: boolean): Promise<void>;
     refreshVideoPending(): void;
     onVideoToggle(): void;
     onVideoRetry(): void;
     onVideoMoreTap(): void;
+    onVideoEvidenceSelect(e: WechatMiniprogram.CustomEvent<Record<string, unknown>>): void;
+    onVideoHighlightTap(e: WechatMiniprogram.CustomEvent<Record<string, unknown>>): void;
+    onVideoLoadedMetadata(): void;
+    onVideoTimeUpdate(e: WechatMiniprogram.CustomEvent<{ currentTime: number; duration: number }>): void;
+    onVideoPlaybackError(): void;
+    scrollVideoCard(): void;
+    seekVideoTo(seconds: number): void;
+    openVideoPaused(selected?: VideoEvidenceView | null, highlightKey?: string): void;
     onAddVideoTap(): Promise<void>;
     onVideoRetakeTap(): Promise<void>;
     onVideoDeleteTap(): Promise<void>;
@@ -486,6 +567,16 @@ Page<
     videoReady: false,
     videoOpen: false,
     videoEvidence: null as VideoEvidenceCollectionView | null,
+    videoSelected: null as VideoEvidenceView | null,
+    videoSelectedHighlightKey: "",
+    videoFoldText: "",
+    videoPlaybackNotice: "",
+    videoPlaybackError: "",
+    videoInitialTime: 0,
+    videoSeekPending: false,
+    videoCurrentMs: 0,
+    videoActiveBox: null as VideoHighlightBoxView | null,
+    videoLookupFailed: false,
     videoBusy: false,
     videoPending: null as PendingVideoUpload | null,
     videoPendingExpired: false,
@@ -506,12 +597,19 @@ Page<
 
   remoteRemindKind: "下次维护" as RemindKind,
 
+  videoEntryHint: null as VideoPlaybackHint | null,
+  videoEntryFocusConsumed: false,
+
   pendingRetry: null as {
     updateId: string;
     changes: { name?: string; location_text?: string; note?: string };
   } | null,
 
   onLoad(options) {
+    // 搜索 badge 的定位 hint 只存在页面实例内存；真正 seek 前还要用
+    // videoEvidenceGet 的新鲜行和当前 item/household 重新校验。
+    this.videoEntryHint = parseVideoPlaybackHint(options);
+    this.videoEntryFocusConsumed = false;
     // 空间路径来自进入时的容器层(首页地图 / 空间页点开的条目);
     // 搜索等入口没有路径就不显示,只用原话,不自造
     this.setData({
@@ -2205,8 +2303,6 @@ Page<
     });
   },
 
-  /* ---------------- 单件视频留证与回放 ---------------- */
-
   async fetchVideoEvidenceRows(): Promise<VideoEvidenceRow[] | undefined> {
     if (this.data.itemId === "") return undefined;
     try {
@@ -2224,13 +2320,144 @@ Page<
     }
   },
 
-  async refreshVideoEvidence(): Promise<void> {
-    this.setData({ videoReady: false, videoEvidence: null, videoOpen: false });
+  async refreshVideoEvidence(reopenPaused = false): Promise<void> {
+    const badgeEntry = this.videoEntryHint !== null && this.videoEntryFocusConsumed === false;
+    const itemId = this.data.itemId;
+    this.setData({
+      videoReady: false,
+      videoEvidence: null,
+      videoSelected: null,
+      videoOpen: false,
+      videoSelectedHighlightKey: "",
+      videoFoldText: "",
+      videoPlaybackNotice: "",
+      videoPlaybackError: "",
+      videoInitialTime: 0,
+      videoSeekPending: false,
+      videoCurrentMs: 0,
+      videoActiveBox: null,
+      videoLookupFailed: false,
+    });
     const rows = await this.fetchVideoEvidenceRows();
-    if (rows === undefined || rows.length === 0) return;
-    const view = mapVideoEvidenceView(rows, this.data.locationText);
-    if (view === null) return;
-    this.setData({ videoReady: true, videoEvidence: view, videoOpen: false });
+    const scopedRows = rows === undefined ? [] : rows.filter((r) => r.item_id === itemId);
+    if (scopedRows.length === 0) {
+      if (this.videoEntryHint !== null) {
+        this.videoEntryFocusConsumed = true;
+        this.setData({ videoLookupFailed: true });
+      }
+      return;
+    }
+    const view = mapVideoEvidenceView(scopedRows, this.data.locationText);
+    if (view === null) {
+      if (this.videoEntryHint !== null) {
+        this.videoEntryFocusConsumed = true;
+        this.setData({ videoLookupFailed: true });
+      }
+      return;
+    }
+    const target = selectVideoPlaybackTarget(view.all, itemId, this.videoEntryHint);
+    const selected = target.evidenceId === null
+      ? null
+      : view.all.find((v) => v.evidenceId === target.evidenceId) || null;
+    if (selected === null) {
+      if (this.videoEntryHint !== null) {
+        this.videoEntryFocusConsumed = true;
+        this.setData({ videoLookupFailed: true });
+      }
+      return;
+    }
+    const highlightKey = target.highlightKey || (selected.primaryHighlight === null ? "" : selected.primaryHighlight.key);
+    this.setData({
+      videoReady: true,
+      videoEvidence: view,
+      videoSelected: selected,
+      videoSelectedHighlightKey: highlightKey,
+      videoFoldText: videoFoldTextFor(selected, highlightKey),
+      videoPlaybackNotice: videoFallbackNotice(target, view, selected),
+      videoPlaybackError: "",
+      videoOpen: false,
+      videoSeekPending: false,
+      videoInitialTime: 0,
+      videoCurrentMs: 0,
+      videoActiveBox: null,
+      videoLookupFailed: false,
+    });
+    if (badgeEntry) this.videoEntryFocusConsumed = true;
+    if (badgeEntry || reopenPaused) this.scrollVideoCard();
+    if ((badgeEntry || reopenPaused) && target.mode !== "unavailable" && selected.playable) {
+      setTimeout(() => {
+        if (this.data.itemId === itemId) this.openVideoPaused(selected, highlightKey);
+      }, 0);
+    }
+  },
+
+  scrollVideoCard(): void {
+    setTimeout(() => {
+      if (typeof wx === "undefined" || typeof wx.pageScrollTo !== "function") return;
+      try {
+        wx.pageScrollTo({ selector: "#video-evidence-card", duration: 250 });
+      } catch (e) {}
+    }, 0);
+  },
+
+  seekVideoTo(seconds: number): void {
+    if (typeof wx === "undefined" || typeof wx.createVideoContext !== "function") return;
+    try {
+      wx.createVideoContext("videoEvidencePlayer").seek(Math.max(0, seconds));
+    } catch (e) {}
+  },
+
+  openVideoPaused(selectedOverride?: VideoEvidenceView | null, highlightKey?: string): void {
+    const selected = selectedOverride === undefined ? this.data.videoSelected : selectedOverride;
+    if (selected === null || selected.playable === false) return;
+    const preferredKey = highlightKey === undefined ? this.data.videoSelectedHighlightKey : highlightKey;
+    const highlight =
+      selected.highlights.find((h) => h.key === preferredKey) ||
+      defaultVideoHighlightView(selected.highlights);
+    const startMs = highlight === null ? 0 : highlight.startMs;
+    const initialTime = Math.max(0, (startMs - 300) / 1000);
+    const key = highlight === null ? "" : highlight.key;
+    this.setData({
+      videoOpen: true,
+      videoSelected: selected,
+      videoSelectedHighlightKey: key,
+      videoFoldText: videoFoldTextFor(selected, key),
+      videoInitialTime: initialTime,
+      videoSeekPending: true,
+      videoCurrentMs: Math.round(initialTime * 1000),
+      videoActiveBox: null,
+      videoPlaybackError: "",
+    });
+  },
+
+  onVideoLoadedMetadata(): void {
+    if (this.data.videoSeekPending === false) return;
+    const initial = this.data.videoInitialTime;
+    this.setData({ videoSeekPending: false });
+    this.seekVideoTo(initial);
+  },
+
+  onVideoTimeUpdate(e: WechatMiniprogram.CustomEvent<{ currentTime: number; duration: number }>): void {
+    const selected = this.data.videoSelected;
+    if (selected === null) return;
+    const currentTime = e && e.detail && typeof e.detail.currentTime === "number" ? e.detail.currentTime : 0;
+    const ms = Math.max(0, Math.round(currentTime * 1000));
+    let activeBox: VideoHighlightBoxView | null = null;
+    for (const highlight of selected.highlights) {
+      if (ms >= highlight.startMs && ms < highlight.endMs) {
+        activeBox = highlight.box;
+        break;
+      }
+    }
+    this.setData({ videoCurrentMs: ms, videoActiveBox: activeBox });
+  },
+
+  onVideoPlaybackError(): void {
+    this.setData({
+      videoPlaybackError: "视频加载失败,点按重试",
+      videoActiveBox: null,
+      videoSeekPending: false,
+    });
   },
 
   refreshVideoPending(): void {
@@ -2250,42 +2477,97 @@ Page<
   },
 
   onVideoToggle() {
-    if (this.data.videoEvidence !== null && this.data.videoEvidence.latest.urlFail) {
-      void this.refreshVideoEvidence();
+    const selected = this.data.videoSelected;
+    if (selected === null) return;
+    if (selected.playable === false) {
+      void this.refreshVideoEvidence(true);
       return;
     }
     if (this.data.videoOpen) {
       void cancelActiveVideoAi(this.data.itemId);
       this.setData({
+        videoOpen: false,
         videoAiBusy: false,
         videoAiProgress: "",
         videoAiCandidates: [],
         videoAiError: "",
         videoAiNoHit: false,
+        videoSeekPending: false,
+        videoActiveBox: null,
+        videoPlaybackError: "",
       });
+      return;
     }
-    this.setData({ videoOpen: this.data.videoOpen === false });
+    this.openVideoPaused(selected, this.data.videoSelectedHighlightKey);
   },
 
   onVideoRetry() {
-    void this.refreshVideoEvidence();
+    this.setData({ videoPlaybackError: "", videoLookupFailed: false });
+    void this.refreshVideoEvidence(true);
+  },
+
+  onVideoEvidenceSelect(e: WechatMiniprogram.CustomEvent<Record<string, unknown>>): void {
+    if (this.data.videoAiBusy) {
+      wx.showToast({ title: "请先结束 AI 识别", icon: "none" });
+      return;
+    }
+    const collection = this.data.videoEvidence;
+    if (collection === null) return;
+    const evidenceId = e && e.currentTarget && e.currentTarget.dataset
+      ? String(e.currentTarget.dataset.evidenceId || "")
+      : "";
+    const selected = collection.all.find((v) => v.evidenceId === evidenceId);
+    if (selected === undefined) return;
+    const highlight = defaultVideoHighlightView(selected.highlights);
+    const key = highlight === null ? "" : highlight.key;
+    const initialTime = highlight === null || selected.playable === false ? 0 : Math.max(0, (highlight.startMs - 300) / 1000);
+    this.setData({
+      videoSelected: selected,
+      videoSelectedHighlightKey: key,
+      videoFoldText: videoFoldTextFor(selected, key),
+      videoPlaybackNotice: selected.playable ? "" : "这段视频暂时无法加载,点按重试。",
+      videoPlaybackError: "",
+      videoInitialTime: initialTime,
+      videoSeekPending: selected.playable && this.data.videoOpen,
+      videoCurrentMs: Math.round(initialTime * 1000),
+      videoActiveBox: null,
+    });
+  },
+
+  onVideoHighlightTap(e: WechatMiniprogram.CustomEvent<Record<string, unknown>>): void {
+    const selected = this.data.videoSelected;
+    if (selected === null) return;
+    const key = e && e.currentTarget && e.currentTarget.dataset
+      ? String(e.currentTarget.dataset.highlightKey || "")
+      : "";
+    const highlight = selected.highlights.find((h) => h.key === key);
+    if (highlight === undefined) return;
+    const initialTime = Math.max(0, (highlight.startMs - 300) / 1000);
+    this.setData({
+      videoSelectedHighlightKey: highlight.key,
+      videoFoldText: videoFoldTextFor(selected, highlight.key),
+      videoInitialTime: initialTime,
+      videoSeekPending: false,
+      videoCurrentMs: Math.round(initialTime * 1000),
+      videoActiveBox: null,
+    });
+    this.seekVideoTo(initialTime);
   },
 
   onVideoMoreTap() {
     wx.showModal({
       title: "视频留证说明",
       content:
-        "视频只作为这件物品的历史证据,说明拍摄当时东西在哪,不冒充当前位置。视频默认折叠,你点击后才播放;删除这件物品或手动删除视频时,原视频会一起删除。",
+        "视频只作为这件物品的历史证据,说明拍摄当时东西在哪,不冒充当前位置。普通入口默认折叠;搜索角标进入会展开到暂停画面,但不会自动播放,你点播放器按钮后才开始。你确认过的片段也可能有偏差。",
       showCancel: false,
     });
   },
 
   async onVideoAiTap(): Promise<void> {
     if (this.data.videoAiBusy || this.data.videoBusy) return;
-    const collection = this.data.videoEvidence;
-    if (collection === null) return;
-    const latest = collection.latest;
-    if (latest.urlFail || latest.videoUrl === "") {
+    const selected = this.data.videoSelected;
+    if (selected === null) return;
+    if (selected.urlFail || selected.videoUrl === "") {
       wx.showToast({ title: "视频暂时无法加载,请先重试", icon: "none" });
       return;
     }
@@ -2294,7 +2576,7 @@ Page<
       wx.showModal({ title: "AI 查找暂不可用", content: entry.message, showCancel: false });
       return;
     }
-    if (latest.durationMs <= 0) {
+    if (selected.durationMs <= 0) {
       wx.showToast({ title: "视频时长未知,暂时无法定位", icon: "none" });
       return;
     }
@@ -2324,11 +2606,11 @@ Page<
       videoAiNoHit: false,
     });
     try {
-      session = createVideoFrameSession(latest.videoUrl, { durationMs: latest.durationMs });
+      session = createVideoFrameSession(selected.videoUrl, { durationMs: selected.durationMs });
       activeVideoAiSession = session;
       activeVideoAiItemId = itemId;
       const result = await findVideoTargetCandidates({
-        durationMs: latest.durationMs,
+        durationMs: selected.durationMs,
         targetName: this.data.name,
         session: session,
         callRecognize: (input) => callVideoTargetRecognize({
@@ -2399,14 +2681,14 @@ Page<
 
   async onVideoAiSave(): Promise<void> {
     if (this.data.videoAiBusy) return;
-    const collection = this.data.videoEvidence;
-    if (collection === null) return;
-    const selected = this.data.videoAiCandidates.filter((c) => c.selected === true);
-    if (selected.length === 0) {
+    const selected = this.data.videoSelected;
+    if (selected === null) return;
+    const chosen = this.data.videoAiCandidates.filter((c) => c.selected === true);
+    if (chosen.length === 0) {
       wx.showToast({ title: "请先选择要保存的高亮", icon: "none" });
       return;
     }
-    const highlights: VideoEvidenceHighlightInput[] = selected.map((c) => ({
+    const highlights: VideoEvidenceHighlightInput[] = chosen.map((c) => ({
       start_ms: c.windowStartMs,
       end_ms: c.windowEndMs,
       box: c.box,
@@ -2418,8 +2700,8 @@ Page<
       await callItemsApi({
         action: "videoEvidenceHighlightSave",
         item_id: this.data.itemId,
-        evidence_id: collection.latest.evidenceId,
-        expected_highlight_version: collection.latest.highlightVersion,
+        evidence_id: selected.evidenceId,
+        expected_highlight_version: selected.highlightVersion,
         highlight_update_id: uuid(),
         highlights: highlights,
       });
@@ -2430,8 +2712,7 @@ Page<
         videoAiProgress: "",
         videoAiNoHit: false,
       });
-      await this.refreshVideoEvidence();
-      this.setData({ videoOpen: true });
+      await this.refreshVideoEvidence(true);
       wx.showToast({ title: "已保存高亮", icon: "success" });
     } catch (e) {
       this.setData({ videoAiBusy: false, videoAiError: errorMessage(e) });

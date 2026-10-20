@@ -780,3 +780,16 @@
 .vd-ai-conf { padding: 1px 7px 6px; font-size: 10.5px; color: var(--text-secondary); }
 .vd-ai-actions { margin-top: 8px; display: flex; justify-content: flex-end; gap: 10px; }
 .vd-textbtn.primary { background: #1a73e8; color: #fff; }
+
+/* ===== PR C：已确认片段定位回放 ===== */
+.vd-fail-inline { margin: 0 14px 14px; padding: 12px; border-radius: 10px; background: #fdecea; color: #a1261d; font-size: 12px; text-align: center; }
+.vd-notice { margin: 10px 14px 0; padding: 8px 10px; border-radius: 9px; background: #fff5d6; color: #6b5a1d; font-size: 11.5px; line-height: 1.45; }
+.vd-evidence-scroll { width: 100%; white-space: nowrap; padding: 8px 14px 0; box-sizing: border-box; }
+.vd-evidence-chip { display: inline-block; margin-right: 8px; padding: 6px 9px; border-radius: 9px; border: 1.5px solid transparent; background: var(--input-bg); color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.vd-evidence-chip.selected { border-color: #191919; background: #191919; color: #ffe15a; }
+.vd-evidence-chip.unavailable { color: #a1261d; background: #fdecea; }
+.vd-points { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.vd-points-title { font-size: 11.5px; color: var(--text-secondary); line-height: 1.45; }
+.vd-points-scroll { width: 100%; white-space: nowrap; margin-top: 7px; }
+.vd-point { display: inline-block; min-height: 32px; margin-right: 7px; padding: 6px 9px; border-radius: 9px; background: var(--input-bg); color: var(--text); font-size: 11px; font-weight: 700; line-height: 20px; }
+.vd-point.selected { background: #fff5d6; border: 1.5px solid #ffe15a; color: #6b5a1d; }
