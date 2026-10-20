@@ -485,7 +485,7 @@ function createVideoFrameSession(source, options) {
             if (typeof rctx.save === "function")
                 rctx.save();
             rctx.rotate(Math.PI / 2);
-            rctx.drawImage(canvas, 0, -sourceW, sourceW, sourceH);
+            rctx.drawImage(canvas, 0, -sourceH, sourceW, sourceH);
             if (typeof rctx.restore === "function")
                 rctx.restore();
             outCanvas = rotated;
