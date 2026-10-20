@@ -1,11 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ApiError = exports.CLIENT_BAD_RESPONSE = exports.CLIENT_NETWORK = exports.CLIENT_TIMEOUT = void 0;
+exports.callExtractDraftVideoTarget = exports.ApiError = exports.CLIENT_BAD_RESPONSE = exports.CLIENT_NETWORK = exports.CLIENT_TIMEOUT = void 0;
 exports.isApiError = isApiError;
 exports.callItemsApi = callItemsApi;
 exports.callExtractDraft = callExtractDraft;
 exports.callDraftEditParse = callDraftEditParse;
 exports.callLocationSplit = callLocationSplit;
+exports.callVideoTargetRecognize = callVideoTargetRecognize;
 exports.uuid = uuid;
 exports.formatDateTime = formatDateTime;
 exports.errorMessage = errorMessage;
@@ -19,6 +20,8 @@ const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 const ITEMS_API_TIMEOUT_MS = 15000;
 /** extractDraft 服务端 LLM 超时 20 秒,客户端放宽到 30 秒,优先让服务端错误回来 */
 const EXTRACT_DRAFT_TIMEOUT_MS = 30000;
+/** 单帧 VL 识别:服务端 config 60s,客户端 70s 让服务端超时/错误先回来 */
+const VIDEO_TARGET_RECOGNIZE_TIMEOUT_MS = 70000;
 /** 客户端侧错误码(与服务端契约错误码区分) */
 exports.CLIENT_TIMEOUT = "CLIENT_TIMEOUT";
 exports.CLIENT_NETWORK = "CLIENT_NETWORK";
@@ -61,6 +64,11 @@ const ITEMS_API_MESSAGES = {
 const EXTRACT_DRAFT_MESSAGES = {
     AI_UNAVAILABLE: "AI 暂时不可用,可手动录入",
 };
+const VIDEO_TARGET_MESSAGES = {
+    AI_UNAVAILABLE: "AI 查找暂不可用,可继续回放视频自己确认",
+    INVALID_INPUT: "这一帧图片不符合识别要求,请重试",
+};
+const VIDEO_TARGET_CONFIDENCE_VALUES = ["high", "mid", "low"];
 /** 提醒类别冻结词表(issue #36,与服务端 remind_kind 同源) */
 const REMIND_KIND_VALUES = ["有效期", "开封后", "下次维护"];
 /** 服务端规范化的提醒日期形态(客户端只透传,绝不自行解析/推算日期) */
@@ -145,6 +153,35 @@ function callCloudFunction(name, data, timeoutMs) {
         });
     });
 }
+function validHighlightBox(box) {
+    if (box === null)
+        return true;
+    if (isRecord(box) === false)
+        return false;
+    const values = [box.x1, box.y1, box.x2, box.y2];
+    if (values.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1) === false) {
+        return false;
+    }
+    return box.x2 > box.x1 && box.y2 > box.y1;
+}
+/** 服务端已确认高亮形状门:时间窗整数、box null 或 0-1、frame 可选且在窗内、source 固定。 */
+function validVideoHighlight(v) {
+    if (isRecord(v) === false)
+        return false;
+    if (Number.isInteger(v.start_ms) === false ||
+        Number.isInteger(v.end_ms) === false ||
+        v.start_ms < 0 ||
+        v.end_ms <= v.start_ms ||
+        v.source !== "user_confirmed" ||
+        validHighlightBox(v.box) === false) {
+        return false;
+    }
+    if (v.frame_ms === undefined)
+        return true;
+    return (Number.isInteger(v.frame_ms) &&
+        v.frame_ms >= v.start_ms &&
+        v.frame_ms < v.end_ms);
+}
 /** 对 ok:true 响应做最小结构校验,结构不符按异常响应处理(如实提示) */
 function validVideoEvidenceRow(v) {
     if (isRecord(v) === false)
@@ -158,6 +195,10 @@ function validVideoEvidenceRow(v) {
         typeof v.video_h === "number" &&
         typeof v.captured_location_text === "string" &&
         typeof v.consent_version === "string" &&
+        Array.isArray(v.highlights) &&
+        v.highlights.every(validVideoHighlight) &&
+        Number.isInteger(v.highlight_version) &&
+        v.highlight_version >= 0 &&
         typeof v.created_at === "string");
 }
 function validateItemsOkResponse(action, r) {
@@ -261,6 +302,16 @@ function validateItemsOkResponse(action, r) {
             if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false)
                 throw bad();
             break;
+        case "videoEvidenceHighlightSave":
+            if (typeof r.evidence_id !== "string" ||
+                Array.isArray(r.highlights) === false ||
+                r.highlights.every(validVideoHighlight) === false ||
+                Number.isInteger(r.highlight_version) === false ||
+                r.highlight_version < 0 ||
+                typeof r.duplicated !== "boolean") {
+                throw bad();
+            }
+            break;
         case "remindList":
             // 提醒行形状严格校验(issue #36):残缺行不上屏,绝不静默丢弃后部分展示;
             // generation(PR #52 B1)为可选数值——旧云函数窗口可能缺省,携带时类型必须正确;
@@ -296,6 +347,7 @@ const ITEMS_MUTATING_ACTIONS = new Set([
     "videoUploadReceipt",
     "videoUploadCancel",
     "videoEvidenceAttach",
+    "videoEvidenceHighlightSave",
     "videoEvidenceDelete",
 ]);
 async function callItemsApi(event) {
@@ -586,6 +638,37 @@ async function callLocationSplit(text) {
         fallback: result.fallback === true,
     };
 }
+/**
+ * 单件视频「AI 找这件物品」单帧识别(extractDraft.videoTargetRecognize):
+ * 只走现有 VL,无状态/不落库;客户端只做形状门,服务端已归一 box 到 0..1。
+ * 坏 JSON 的重试与 AI_UNAVAILABLE/INVALID_INPUT 语义由服务端统一裁定。
+ */
+async function callVideoTargetRecognize(event) {
+    const result = await callCloudFunction(EXTRACT_DRAFT_FUNCTION, event, VIDEO_TARGET_RECOGNIZE_TIMEOUT_MS);
+    if (isRecord(result) === false) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    if (result.ok === false) {
+        throw toServerError(result.error, result.message, VIDEO_TARGET_MESSAGES);
+    }
+    if (result.ok !== true) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    if (typeof result.hit !== "boolean" ||
+        typeof result.confidence !== "string" ||
+        VIDEO_TARGET_CONFIDENCE_VALUES.indexOf(result.confidence) === -1 ||
+        validHighlightBox(result.box) === false) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    return {
+        ok: true,
+        hit: result.hit,
+        box: result.box,
+        confidence: result.confidence,
+    };
+}
+/** 兼容按 extractDraft action 命名的调用点。 */
+exports.callExtractDraftVideoTarget = callVideoTargetRecognize;
 /** 生成 operation_id(uuid v4 形态,36 位,满足契约 ≤64) */
 function uuid() {
     const template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx";

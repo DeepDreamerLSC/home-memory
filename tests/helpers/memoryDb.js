@@ -24,7 +24,12 @@
 var GET_DEFAULT_LIMIT = 100;
 
 // 默认唯一索引:items 的 (household_id, operation_id)(与线上索引一致)
-var DEFAULT_UNIQUE_INDEXES = { items: [["household_id", "operation_id"]] };
+var DEFAULT_UNIQUE_INDEXES = {
+  items: [["household_id", "operation_id"]],
+  // 物品锁以 _id 作为锁键,抢锁 add 的并发语义必须与真实库一致;仅对该集合启用,
+  // 不改变其他既有测试对 _id 的宽松假设。
+  video_item_locks: [["_id"]],
+};
 
 function clone(value) {
   if (value === undefined || value === null) {

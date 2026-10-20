@@ -1,0 +1,817 @@
+/**
+ * 通用视频抽帧与「在单条视频里找目标物品」客户端原语。
+ * - createVideoFrameSession 封装 wx.createVideoDecoder，一次 start、逐次 seek、取消即释放；
+ * - 帧计划与时间窗为纯函数；
+ * - 目标识别只通过注入的 callVideoTargetRecognize 发起，逐帧候选独立保留，
+ *   默认不自动勾选任何候选，低置信也不会被推荐。
+ */
+export const VIDEO_TARGET_FRAME_LONG_EDGE_MAX = 1024;
+export const VIDEO_TARGET_JPEG_QUALITY = 0.72;
+export const VIDEO_TARGET_BASE64_MAX_CHARS = 4_000_000;
+export const VIDEO_TARGET_MAX_FRAMES = 8;
+export const VIDEO_TARGET_WINDOW_RADIUS_MS = 750;
+export const VIDEO_TARGET_FEATURE_ENABLED: boolean = true;
+export const VIDEO_TARGET_INITIAL_FRACTIONS: readonly number[] = [0.1, 0.35, 0.65, 0.9];
+export const VIDEO_TARGET_SUPPLEMENTAL_FRACTIONS: readonly number[] = [0.225, 0.5, 0.775, 0.975];
+
+export type VideoTargetFailureKind =
+  | "cancelled"
+  | "unsupported"
+  | "disabled"
+  | "extract_failed"
+  | "recognize_unavailable"
+  | "bad_response"
+  | "too_large";
+
+export class VideoTargetError extends Error {
+  readonly code: VideoTargetFailureKind;
+  readonly cause?: unknown;
+  constructor(code: VideoTargetFailureKind, message: string, cause?: unknown) {
+    super(message);
+    this.name = "VideoTargetError";
+    this.code = code;
+    this.cause = cause;
+    Object.setPrototypeOf(this, VideoTargetError.prototype);
+  }
+}
+export function isVideoTargetError(error: unknown): error is VideoTargetError {
+  return error instanceof VideoTargetError;
+}
+
+/* 纯函数：帧计划与时间窗 */
+
+export interface VideoTargetFrameWindow {
+  timeMs: number;
+  windowStartMs: number;
+  windowEndMs: number;
+}
+
+export interface VideoTargetFramePlan extends VideoTargetFrameWindow {
+  frameIndex: number;
+  phase: "initial" | "supplemental";
+  fraction: number;
+}
+function normalizedDurationMs(durationMs: number): number {
+  if (durationMs > 0 && Number.isFinite(durationMs)) return Math.max(0, Math.floor(durationMs));
+  return 0;
+}
+
+function fractionTime(durationMs: number, fraction: number): number {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return 0;
+  const raw = Math.round(duration * fraction);
+  return Math.max(0, Math.min(duration - 1, raw));
+}
+
+function uniqueNumbers(values: readonly number[]): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const value of values) {
+    if (seen.has(value) === false) {
+      seen.add(value);
+      out.push(value);
+    }
+  }
+  return out;
+}
+
+export function frameWindow(timeMs: number, durationMs: number): VideoTargetFrameWindow {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return { timeMs: 0, windowStartMs: 0, windowEndMs: 0 };
+  const t = Math.max(0, Math.min(duration, Math.round(Number.isFinite(timeMs) ? timeMs : 0)));
+  let start = Math.max(0, t - VIDEO_TARGET_WINDOW_RADIUS_MS);
+  let end = Math.min(duration, t + VIDEO_TARGET_WINDOW_RADIUS_MS);
+  if (start >= end) {
+    if (t === 0) {
+      start = 0;
+      end = duration;
+    } else {
+      start = Math.max(0, duration - 1);
+      end = duration;
+    }
+  }
+  return { timeMs: t, windowStartMs: start, windowEndMs: end };
+}
+export const timeWindowForFrame = frameWindow;
+
+export function initialFrameTimes(durationMs: number): number[] {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return [];
+  return uniqueNumbers(VIDEO_TARGET_INITIAL_FRACTIONS.map((f) => fractionTime(duration, f)));
+}
+
+export function supplementalFrameTimes(durationMs: number): number[] {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return [];
+  return uniqueNumbers(VIDEO_TARGET_SUPPLEMENTAL_FRACTIONS.map((f) => fractionTime(duration, f)));
+}
+
+function plansFromFractions(
+  durationMs: number,
+  fractions: readonly number[],
+  phase: "initial" | "supplemental",
+  frameIndexOffset: number,
+  skipTimes: ReadonlySet<number>,
+): VideoTargetFramePlan[] {
+  const plans: VideoTargetFramePlan[] = [];
+  const seen = new Set<number>(skipTimes);
+  for (const fraction of fractions) {
+    const timeMs = fractionTime(durationMs, fraction);
+    if (seen.has(timeMs)) continue;
+    seen.add(timeMs);
+    plans.push({
+      frameIndex: frameIndexOffset + plans.length,
+      phase,
+      fraction,
+      ...frameWindow(timeMs, durationMs),
+    });
+  }
+  return plans;
+}
+
+export function planInitialFrames(durationMs: number): VideoTargetFramePlan[] {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return [];
+  return plansFromFractions(duration, VIDEO_TARGET_INITIAL_FRACTIONS, "initial", 0, new Set<number>());
+}
+
+export function planSupplementalFrames(
+  durationMs: number,
+  options?: { frameIndexOffset?: number; skipTimes?: readonly number[] },
+): VideoTargetFramePlan[] {
+  const duration = normalizedDurationMs(durationMs);
+  if (duration === 0) return [];
+  const offset = options && Number.isInteger(options.frameIndexOffset)
+    ? Math.max(0, options.frameIndexOffset as number)
+    : VIDEO_TARGET_INITIAL_FRACTIONS.length;
+  return plansFromFractions(
+    duration,
+    VIDEO_TARGET_SUPPLEMENTAL_FRACTIONS,
+    "supplemental",
+    offset,
+    new Set<number>(options && options.skipTimes ? options.skipTimes : []),
+  );
+}
+
+export function buildFramePlan(
+  durationMs: number,
+  options?: { supplemental?: boolean },
+): VideoTargetFramePlan[] {
+  const initial = planInitialFrames(durationMs);
+  if (options && options.supplemental === false) return initial;
+  const initialTimes = initial.map((p) => p.timeMs);
+  const supplemental = planSupplementalFrames(durationMs, {
+    frameIndexOffset: initial.length,
+    skipTimes: initialTimes,
+  });
+  return initial.concat(supplemental);
+}
+
+export function planFrameTimes(
+  durationMs: number,
+  options?: { supplemental?: boolean },
+): number[] {
+  return buildFramePlan(durationMs, options).map((p) => p.timeMs);
+}
+
+/* 依赖注入类型 */
+
+export interface VideoDecoderStartOptions {
+  source: string;
+  mode?: number;
+  abortAudio?: boolean;
+  abortVideo?: boolean;
+}
+
+export interface VideoFrameData {
+  data: ArrayBuffer | ArrayBufferView;
+  width: number;
+  height: number;
+  pkDts?: number;
+  pkPts?: number;
+}
+
+export interface VideoDecoderLike {
+  start?(options: VideoDecoderStartOptions): unknown;
+  seek?(position: number): unknown;
+  getFrameData?(): VideoFrameData;
+  stop?(): unknown;
+  remove?(): unknown;
+  on?(eventName: string, callback: (...args: unknown[]) => void): void;
+  off?(eventName: string, callback: (...args: unknown[]) => void): void;
+}
+
+export interface VideoFrameCanvasLike {
+  width?: number;
+  height?: number;
+  getContext?(contextType: "2d"): unknown;
+  [key: string]: unknown;
+}
+
+export interface VideoFileSystemManagerLike {
+  readFile?(options: Record<string, unknown>): unknown;
+  unlink?(options: Record<string, unknown>): unknown;
+}
+
+export interface VideoTargetWxLike {
+  createVideoDecoder?(): VideoDecoderLike;
+  createOffscreenCanvas?(options: { type: "2d"; width: number; height: number }): unknown;
+  canvasToTempFilePath?(options: Record<string, unknown>): unknown;
+  getFileSystemManager?(): VideoFileSystemManagerLike;
+}
+
+export interface VideoFrameSourceInfo {
+  path: string;
+  durationMs?: number;
+}
+export type VideoFrameSource = string | VideoFrameSourceInfo;
+
+export interface CanvasToTempFilePathOptions {
+  canvas: unknown;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  destWidth: number;
+  destHeight: number;
+  fileType: "jpg";
+  quality: number;
+  success?: (result: { tempFilePath?: string }) => void;
+  fail?: (error: unknown) => void;
+}
+
+export interface VideoFrameSessionOptions {
+  durationMs?: number;
+  wx?: VideoTargetWxLike;
+  decoder?: VideoDecoderLike;
+  createDecoder?: () => VideoDecoderLike;
+  decoderFactory?: () => VideoDecoderLike;
+  createCanvas?: (width: number, height: number) => VideoFrameCanvasLike;
+  canvasToTempFilePath?: (options: CanvasToTempFilePathOptions) => string | Promise<string>;
+  readFileBase64?: (path: string) => string | { data?: string } | Promise<string | { data?: string }>;
+  cleanupFile?: (path: string) => unknown;
+  maxLongEdge?: number;
+  jpegQuality?: number;
+  maxBase64Chars?: number;
+}
+
+export interface VideoTargetFrame {
+  path: string;
+  width: number;
+  height: number;
+  timeMs: number;
+  frameIndex: number;
+  base64: string;
+}
+
+export interface VideoFrameSession {
+  readonly cancelled: boolean;
+  readonly durationMs?: number;
+  captureAt(timeMs: number, frameIndex?: number): Promise<VideoTargetFrame>;
+  cancel(): Promise<void>;
+}
+
+export interface VideoTargetEntryState {
+  enabled: boolean;
+  supported: boolean;
+  available: boolean;
+  reason: "disabled" | "unsupported" | null;
+  message: string;
+}
+
+function getGlobalWx(): VideoTargetWxLike | undefined {
+  if (typeof wx === "undefined") return undefined;
+  return wx as unknown as VideoTargetWxLike;
+}
+
+function resolveWx(options: VideoFrameSessionOptions): VideoTargetWxLike {
+  return options.wx || getGlobalWx() || {};
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    for (const key of ["errMsg", "message", "error"]) {
+      if (typeof record[key] === "string" && (record[key] as string).length > 0) {
+        return record[key] as string;
+      }
+    }
+  }
+  return "未知错误";
+}
+
+function asVideoTargetError(
+  error: unknown,
+  fallback: VideoTargetFailureKind,
+  message: string,
+): VideoTargetError {
+  if (isVideoTargetError(error)) return error;
+  return new VideoTargetError(fallback, message, error);
+}
+
+function cancelledError(message: string): VideoTargetError {
+  return new VideoTargetError("cancelled", message);
+}
+
+
+/* ------------------------------------------------------------------ *
+ * 解码器会话实现
+ * ------------------------------------------------------------------ */
+
+export interface VideoCanvasImageDataLike {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+export interface VideoCanvasContextLike {
+  createImageData?(width: number, height: number): VideoCanvasImageDataLike;
+  putImageData?(image: VideoCanvasImageDataLike, dx: number, dy: number): void;
+  drawImage?(image: unknown, dx: number, dy: number, dw: number, dh: number): void;
+}
+export interface VideoFrameSessionOptionsExtra {
+  startTimeoutMs?: number;
+  seekTimeoutMs?: number;
+  framePollCount?: number;
+  framePollIntervalMs?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function sourcePath(source: VideoFrameSource): string {
+  if (typeof source === "string") return source;
+  return source && typeof source.path === "string" ? source.path : "";
+}
+
+function sourceDuration(source: VideoFrameSource): number | undefined {
+  if (source && typeof source === "object" && typeof source.durationMs === "number") {
+    return source.durationMs;
+  }
+  return undefined;
+}
+
+function toClampedBytes(value: ArrayBuffer | ArrayBufferView): Uint8ClampedArray | null {
+  if (value instanceof ArrayBuffer) return new Uint8ClampedArray(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8ClampedArray(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return null;
+}
+
+function decoderEventWait(
+  decoder: VideoDecoderLike,
+  eventName: "start" | "seek",
+  timeoutMs: number,
+  action: () => unknown,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (typeof decoder.on !== "function") {
+      reject(new VideoTargetError("unsupported", "当前基础库不支持视频解码事件"));
+      return;
+    }
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = (): void => {
+      if (timer !== null) clearTimeout(timer);
+      if (typeof decoder.off === "function") {
+        try { decoder.off(eventName, handler); } catch (e) { /* ignore */ }
+      }
+    };
+    const handler = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new VideoTargetError("extract_failed", "视频解码等待 " + eventName + " 超时"));
+    }, Math.max(50, timeoutMs));
+    try {
+      decoder.on(eventName, handler);
+      const returned = action();
+      // 真机 VideoDecoder.start/seek 返回 Promise;模拟器还会直接 reject
+      // "不支持此 API 调试"。事件和 Promise 任一成功都算完成,错误不能被
+      // 静默吞掉,否则会被误报成事件超时。
+      if (returned && typeof (returned as PromiseLike<unknown>).then === "function") {
+        Promise.resolve(returned).then(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        }).catch((error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(asVideoTargetError(error, "extract_failed", "视频解码器启动/定位失败: " + errorMessage(error)));
+        });
+      }
+    } catch (e) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(asVideoTargetError(e, "extract_failed", "视频解码器启动/定位失败: " + errorMessage(e)));
+    }
+  });
+}
+
+function defaultCanvasFactory(wxLike: VideoTargetWxLike, width: number, height: number): VideoFrameCanvasLike {
+  if (typeof wxLike.createOffscreenCanvas !== "function") {
+    throw new VideoTargetError("unsupported", "当前基础库不支持 OffscreenCanvas");
+  }
+  return wxLike.createOffscreenCanvas({ type: "2d", width, height }) as VideoFrameCanvasLike;
+}
+
+function defaultCanvasToTempFilePath(
+  wxLike: VideoTargetWxLike,
+  options: CanvasToTempFilePathOptions,
+): Promise<string> {
+  const canvasToTempFilePath = wxLike.canvasToTempFilePath;
+  if (typeof canvasToTempFilePath !== "function") {
+    return Promise.reject(new VideoTargetError("unsupported", "当前基础库不支持 canvasToTempFilePath"));
+  }
+  return new Promise<string>((resolve, reject) => {
+    canvasToTempFilePath.call(wxLike, {
+      ...options,
+      success: (result: { tempFilePath?: string }) => {
+        if (result && typeof result.tempFilePath === "string" && result.tempFilePath.length > 0) {
+          resolve(result.tempFilePath);
+        } else {
+          reject(new VideoTargetError("extract_failed", "canvasToTempFilePath 未返回临时文件"));
+        }
+      },
+      fail: (error: unknown) => reject(asVideoTargetError(error, "extract_failed", "视频帧导出失败: " + errorMessage(error))),
+    });
+  });
+}
+
+
+function defaultReadFileBase64(wxLike: VideoTargetWxLike, path: string): Promise<string> {
+  const fs = typeof wxLike.getFileSystemManager === "function" ? wxLike.getFileSystemManager() : null;
+  if (fs === null || typeof fs.readFile !== "function") {
+    return Promise.reject(new VideoTargetError("unsupported", "当前基础库不支持读取临时文件"));
+  }
+  const readFile = fs.readFile;
+  return new Promise<string>((resolve, reject) => {
+    try {
+      readFile.call(fs, {
+        filePath: path,
+        encoding: "base64",
+        success: (result: unknown) => {
+          if (typeof result === "string") return resolve(result);
+          if (result && typeof (result as { data?: unknown }).data === "string") {
+            return resolve((result as { data: string }).data);
+          }
+          reject(new VideoTargetError("extract_failed", "读取视频帧临时文件失败"));
+        },
+        fail: (error: unknown) => reject(asVideoTargetError(error, "extract_failed", "读取视频帧失败: " + errorMessage(error))),
+      });
+    } catch (e) {
+      reject(asVideoTargetError(e, "extract_failed", "读取视频帧失败: " + errorMessage(e)));
+    }
+  });
+}
+
+function defaultCleanupFile(wxLike: VideoTargetWxLike, path: string): void {
+  const fs = typeof wxLike.getFileSystemManager === "function" ? wxLike.getFileSystemManager() : null;
+  if (fs === null || typeof fs.unlink === "function" === false) return;
+  try {
+    fs.unlink({ filePath: path, success: () => undefined, fail: () => undefined });
+  } catch (e) { /* 临时文件清理失败不影响业务 */ }
+}
+
+
+export function createVideoFrameSession(
+  source: VideoFrameSource,
+  options?: VideoFrameSessionOptions & VideoFrameSessionOptionsExtra,
+): VideoFrameSession {
+  const opts = options || {};
+  const wxLike = resolveWx(opts);
+  const path = sourcePath(source);
+  if (path === "") throw new VideoTargetError("extract_failed", "视频源为空");
+  const durationMs = typeof opts.durationMs === "number" ? normalizedDurationMs(opts.durationMs) : sourceDuration(source);
+  const maxLongEdge = Math.max(1, Math.floor(opts.maxLongEdge || VIDEO_TARGET_FRAME_LONG_EDGE_MAX));
+  const jpegQuality = typeof opts.jpegQuality === "number" ? opts.jpegQuality : VIDEO_TARGET_JPEG_QUALITY;
+  const maxBase64Chars = Math.max(1, Math.floor(opts.maxBase64Chars || VIDEO_TARGET_BASE64_MAX_CHARS));
+  const startTimeoutMs = typeof opts.startTimeoutMs === "number" ? opts.startTimeoutMs : 10000;
+  const seekTimeoutMs = typeof opts.seekTimeoutMs === "number" ? opts.seekTimeoutMs : 5000;
+  const framePollCount = typeof opts.framePollCount === "number" ? opts.framePollCount : 40;
+  const framePollIntervalMs = typeof opts.framePollIntervalMs === "number" ? opts.framePollIntervalMs : 25;
+
+  let decoder: VideoDecoderLike | null = opts.decoder || null;
+  if (decoder === null) {
+    if (typeof opts.createDecoder === "function") decoder = opts.createDecoder();
+    else if (typeof opts.decoderFactory === "function") decoder = opts.decoderFactory();
+    else if (typeof wxLike.createVideoDecoder === "function") decoder = wxLike.createVideoDecoder();
+  }
+  if (decoder === null) throw new VideoTargetError("unsupported", "当前基础库不支持视频解码");
+  const dec: VideoDecoderLike = decoder;
+
+  let startedPromise: Promise<void> | null = null;
+  let cancelled = false;
+  const tempFiles = new Set<string>();
+  const canvasFactory = opts.createCanvas || ((w: number, h: number) => defaultCanvasFactory(wxLike, w, h));
+  const canvasToTemp = opts.canvasToTempFilePath || ((o: CanvasToTempFilePathOptions) => defaultCanvasToTempFilePath(wxLike, o));
+  const readBase64 = opts.readFileBase64 || ((p: string) => defaultReadFileBase64(wxLike, p));
+  const cleanupFile = opts.cleanupFile || ((p: string) => defaultCleanupFile(wxLike, p));
+
+  function ensureNotCancelled(): void {
+    if (cancelled) throw cancelledError("视频抽帧已取消");
+  }
+
+  async function ensureStarted(): Promise<void> {
+    ensureNotCancelled();
+    if (typeof dec.start !== "function") {
+      throw new VideoTargetError("unsupported", "视频解码器不支持 start");
+    }
+    const start = dec.start;
+    if (startedPromise) return startedPromise;
+    startedPromise = decoderEventWait(dec, "start", startTimeoutMs, () => {
+      return start.call(dec, { source: path });
+    }).catch((error: unknown) => {
+      startedPromise = null;
+      throw asVideoTargetError(error, "extract_failed", "视频解码器启动失败: " + errorMessage(error));
+    });
+    return startedPromise;
+  }
+
+  async function captureAt(timeMs: number, frameIndex?: number): Promise<VideoTargetFrame> {
+    ensureNotCancelled();
+    if (Number.isFinite(timeMs) === false || timeMs < 0) {
+      throw new VideoTargetError("extract_failed", "抽帧时间无效");
+    }
+    await ensureStarted();
+    ensureNotCancelled();
+    if (typeof dec.seek !== "function") {
+      throw new VideoTargetError("unsupported", "视频解码器不支持 seek");
+    }
+    const seek = dec.seek;
+    await decoderEventWait(dec, "seek", seekTimeoutMs, () => {
+      // 官方 VideoDecoder.seek 参数单位是毫秒,不是秒。
+      return seek.call(dec, Math.round(timeMs));
+    });
+    ensureNotCancelled();
+
+    let frameData: VideoFrameData | null = null;
+    for (let i = 0; i < Math.max(1, framePollCount); i++) {
+      ensureNotCancelled();
+      let candidate: VideoFrameData | null | undefined = null;
+      try { candidate = typeof dec.getFrameData === "function" ? dec.getFrameData() : null; } catch (e) { candidate = null; }
+      if (candidate && candidate.data && candidate.width > 0 && candidate.height > 0) {
+        frameData = candidate;
+        break;
+      }
+      await sleep(framePollIntervalMs);
+    }
+    ensureNotCancelled();
+    if (frameData === null) throw new VideoTargetError("extract_failed", "视频帧尚未解码完成");
+
+    const sourceW = Math.max(1, Math.floor(frameData.width));
+    const sourceH = Math.max(1, Math.floor(frameData.height));
+    const scale = Math.min(1, maxLongEdge / Math.max(sourceW, sourceH));
+    const destW = Math.max(1, Math.round(sourceW * scale));
+    const destH = Math.max(1, Math.round(sourceH * scale));
+    const bytes = toClampedBytes(frameData.data as ArrayBuffer | ArrayBufferView);
+    if (bytes === null) throw new VideoTargetError("extract_failed", "视频帧数据格式不支持");
+
+    const canvas = canvasFactory(sourceW, sourceH);
+    const ctx = typeof canvas.getContext === "function" ? canvas.getContext("2d") as VideoCanvasContextLike : null;
+    if (ctx === null) throw new VideoTargetError("unsupported", "当前基础库不支持 2D Canvas");
+    let imageData: VideoCanvasImageDataLike | null = null;
+    if (typeof ctx.createImageData === "function") {
+      imageData = ctx.createImageData(sourceW, sourceH);
+      if ((imageData.data.length === bytes.length) === false) imageData = null;
+    }
+    if (imageData === null) {
+      const ctor = (globalThis as unknown as { ImageData?: new (data: Uint8ClampedArray, w: number, h: number) => VideoCanvasImageDataLike }).ImageData;
+      if (typeof ctor === "function") imageData = new ctor(bytes, sourceW, sourceH);
+    }
+    if (imageData === null) throw new VideoTargetError("unsupported", "当前基础库不支持 ImageData");
+    imageData.data.set(bytes);
+    if (typeof ctx.putImageData === "function") ctx.putImageData(imageData, 0, 0);
+    else if (typeof ctx.drawImage === "function") ctx.drawImage(imageData, 0, 0, sourceW, sourceH);
+    else throw new VideoTargetError("unsupported", "当前基础库不支持视频帧绘制");
+
+    const tempResult = await canvasToTemp({
+      canvas: canvas as unknown,
+      x: 0,
+      y: 0,
+      width: sourceW,
+      height: sourceH,
+      destWidth: destW,
+      destHeight: destH,
+      fileType: "jpg",
+      quality: jpegQuality,
+    });
+    const tempPath = typeof tempResult === "string" ? tempResult : "";
+    if (tempPath === "") throw new VideoTargetError("extract_failed", "视频帧导出未返回临时文件");
+    ensureNotCancelled();
+    tempFiles.add(tempPath);
+    let base64 = "";
+    try {
+      const raw = await readBase64(tempPath);
+      if (typeof raw === "string") base64 = raw;
+      else if (raw && typeof raw.data === "string") base64 = raw.data;
+    } catch (e) {
+      throw asVideoTargetError(e, "extract_failed", "读取视频帧 base64 失败: " + errorMessage(e));
+    }
+    ensureNotCancelled();
+    if (base64.length < 1 || base64.length > maxBase64Chars) {
+      throw new VideoTargetError("too_large", "视频帧图片超过大小上限");
+    }
+    return {
+      path: tempPath,
+      width: destW,
+      height: destH,
+      timeMs: Math.round(timeMs),
+      frameIndex: Number.isInteger(frameIndex) ? (frameIndex as number) : 0,
+      base64: base64,
+    };
+  }
+
+  async function cancel(): Promise<void> {
+    if (cancelled) return;
+    cancelled = true;
+    if (typeof dec.stop === "function") {
+      try { dec.stop(); } catch (e) { /* ignore */ }
+    }
+    if (typeof dec.remove === "function") {
+      try { dec.remove(); } catch (e) { /* ignore */ }
+    }
+    const paths = Array.from(tempFiles);
+    tempFiles.clear();
+    for (const p of paths) {
+      try { await cleanupFile(p); } catch (e) { /* ignore */ }
+    }
+  }
+
+  return { get cancelled() { return cancelled; }, durationMs, captureAt, cancel };
+}
+
+
+export interface VideoTargetBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface VideoTargetRecognitionInput {
+  target_name: string;
+  image_base64: string;
+  img_w: number;
+  img_h: number;
+}
+
+export interface VideoTargetRecognitionResponse {
+  ok: boolean;
+  hit?: boolean;
+  box?: VideoTargetBox | null;
+  confidence?: "high" | "mid" | "low";
+  error?: string;
+}
+
+export interface VideoTargetCandidate {
+  frameIndex: number;
+  timeMs: number;
+  windowStartMs: number;
+  windowEndMs: number;
+  box: VideoTargetBox | null;
+  confidence: "high" | "mid" | "low";
+  framePath: string;
+  frameWidth: number;
+  frameHeight: number;
+}
+
+export interface FindVideoTargetResult {
+  candidates: VideoTargetCandidate[];
+  framesProcessed: number;
+  stoppedEarly: boolean;
+  session: VideoFrameSession;
+}
+
+function confidenceRank(value: string | undefined): number {
+  if (value === "high") return 3;
+  if (value === "mid") return 2;
+  if (value === "low") return 1;
+  return 0;
+}
+
+function normalizeBox(box: VideoTargetBox | null | undefined): VideoTargetBox | null {
+  if (box === null || box === undefined) return null;
+  const values = [box.x1, box.y1, box.x2, box.y2];
+  if (values.every((v) => Number.isFinite(v)) === false) return null;
+  if (box.x1 < 0 || box.y1 < 0 || box.x2 > 1 || box.y2 > 1 || box.x1 >= box.x2 || box.y1 >= box.y2) return null;
+  return { x1: box.x1, y1: box.y1, x2: box.x2, y2: box.y2 };
+}
+
+export interface FindVideoTargetOptions {
+  durationMs: number;
+  targetName: string;
+  callRecognize: (input: VideoTargetRecognitionInput) => Promise<VideoTargetRecognitionResponse>;
+  onProgress?: (done: number, total: number) => void;
+  source?: VideoFrameSource;
+  session?: VideoFrameSession;
+  sessionOptions?: VideoFrameSessionOptions;
+}
+
+export async function findVideoTargetCandidates(
+  options: FindVideoTargetOptions,
+): Promise<FindVideoTargetResult> {
+  const duration = normalizedDurationMs(options.durationMs);
+  if (duration <= 0) throw new VideoTargetError("extract_failed", "视频时长无效");
+  const targetName = String(options.targetName || "").trim();
+  if (targetName.length < 1) throw new VideoTargetError("extract_failed", "目标物品为空");
+  const session = options.session || createVideoFrameSession(options.source || "", options.sessionOptions);
+  const initial = planInitialFrames(duration);
+  const supplemental = planSupplementalFrames(duration, {
+    frameIndexOffset: initial.length,
+    skipTimes: initial.map((p) => p.timeMs),
+  });
+  const plans = initial.concat(supplemental).slice(0, VIDEO_TARGET_MAX_FRAMES);
+  const candidates: VideoTargetCandidate[] = [];
+  let processed = 0;
+  let foundStrongHit = false;
+  for (let i = 0; i < plans.length; i++) {
+    if (session.cancelled) throw cancelledError("视频目标识别已取消");
+    if (i >= initial.length && foundStrongHit) break;
+    const plan = plans[i];
+    const frame = await session.captureAt(plan.timeMs, plan.frameIndex);
+    if (session.cancelled) throw cancelledError("视频目标识别已取消");
+    const result = await options.callRecognize({
+      target_name: targetName,
+      image_base64: frame.base64,
+      img_w: frame.width,
+      img_h: frame.height,
+    });
+    processed += 1;
+    if (options.onProgress) options.onProgress(processed, plans.length);
+    if (result && result.ok === true && result.hit === true) {
+      const box = normalizeBox(result.box);
+      if (box !== null) {
+        const confidence: "high" | "mid" | "low" = result.confidence === "high" || result.confidence === "mid" || result.confidence === "low"
+          ? result.confidence
+          : "low";
+        candidates.push({
+          frameIndex: frame.frameIndex,
+          timeMs: frame.timeMs,
+          windowStartMs: plan.windowStartMs,
+          windowEndMs: plan.windowEndMs,
+          box: box,
+          confidence: confidence,
+          framePath: frame.path,
+          frameWidth: frame.width,
+          frameHeight: frame.height,
+        });
+        if (confidenceRank(confidence) >= 2) foundStrongHit = true;
+      }
+    } else if (result && result.ok === false) {
+      throw new VideoTargetError("recognize_unavailable", result.error || "AI 识别暂不可用");
+    }
+  }
+  return {
+    candidates: candidates,
+    framesProcessed: processed,
+    stoppedEarly: foundStrongHit && processed < plans.length,
+    session: session,
+  };
+}
+
+export function videoTimeText(ms: number): string {
+  const total = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m + ":" + (sec < 10 ? "0" + sec : String(sec));
+}
+
+export function highlightWindowText(startMs: number, endMs: number): string {
+  return videoTimeText(startMs) + " - " + videoTimeText(endMs);
+}
+
+export function boxPercentStyle(box: VideoTargetBox | null): string {
+  if (box === null) return "display:none";
+  const pct = (value: number): number => Math.round(value * 100) / 100;
+  const left = pct(Math.max(0, Math.min(100, box.x1 * 100)));
+  const top = pct(Math.max(0, Math.min(100, box.y1 * 100)));
+  const width = pct(Math.max(0, Math.min(100 - left, (box.x2 - box.x1) * 100)));
+  const height = pct(Math.max(0, Math.min(100 - top, (box.y2 - box.y1) * 100)));
+  return "left:" + left + "%;top:" + top + "%;width:" + width + "%;height:" + height + "%";
+}
+
+export function videoTargetEntryState(wxLike?: VideoTargetWxLike): VideoTargetEntryState {
+  if (VIDEO_TARGET_FEATURE_ENABLED === false) {
+    return { enabled: false, supported: true, available: false, reason: "disabled", message: "AI 查物品已关闭，可正常回放" };
+  }
+  const w = wxLike || getGlobalWx() || {};
+  const supported = typeof w.createVideoDecoder === "function"
+    && typeof w.createOffscreenCanvas === "function"
+    && typeof w.canvasToTempFilePath === "function"
+    && typeof w.getFileSystemManager === "function";
+  return supported
+    ? { enabled: true, supported: true, available: true, reason: null, message: "" }
+    : { enabled: true, supported: false, available: false, reason: "unsupported", message: "当前基础库暂不支持视频抽帧，可正常回放" };
+}

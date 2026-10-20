@@ -3,7 +3,7 @@
  * 视频只作为「当时记录在哪」的历史证据,不冒充当前位置;客户端不根据视频
  * 自动推断物品身份或高亮归属。默认折叠,只有用户明确点击才播放。
  */
-import type { VideoEvidenceRow } from "../types";
+import type { VideoEvidenceHighlight, VideoEvidenceRow } from "../types";
 
 export interface VideoEvidenceView {
   evidenceId: string;
@@ -16,6 +16,18 @@ export interface VideoEvidenceView {
   changed: boolean;
   subText: string;
   createdAt: string;
+  durationMs: number;
+  highlightVersion: number;
+  highlightCount: number;
+  highlights: VideoEvidenceHighlightView[];
+}
+
+export interface VideoEvidenceHighlightView {
+  key: string;
+  startMs: number;
+  endMs: number;
+  timeText: string;
+  hasBox: boolean;
 }
 
 export interface VideoEvidenceCollectionView {
@@ -24,6 +36,23 @@ export interface VideoEvidenceCollectionView {
   olderCount: number;
 }
 
+function secondsText(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m + ":" + (sec < 10 ? "0" + sec : String(sec));
+}
+
+function mapHighlightViews(row: VideoEvidenceRow): VideoEvidenceHighlightView[] {
+  const list = Array.isArray(row.highlights) ? row.highlights : [];
+  return list.map((h, index) => ({
+    key: h.start_ms + "-" + h.end_ms + "-" + index,
+    startMs: h.start_ms,
+    endMs: h.end_ms,
+    timeText: secondsText(h.start_ms) + " - " + secondsText(h.end_ms),
+    hasBox: h.box !== null && h.box !== undefined,
+  }));
+}
 function monthDay(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "";
@@ -58,6 +87,10 @@ export function toVideoEvidenceView(
       ? "现在:" + currentLocationText.trim() + "(以文字为准);旧视频仅作证据"
       : "视频与当前记录一致",
     createdAt: row.created_at,
+    durationMs: typeof row.duration_ms === "number" && Number.isFinite(row.duration_ms) ? row.duration_ms : 0,
+    highlightVersion: Number.isInteger(row.highlight_version) && row.highlight_version >= 0 ? row.highlight_version : 0,
+    highlightCount: Array.isArray(row.highlights) ? row.highlights.length : 0,
+    highlights: mapHighlightViews(row),
   };
 }
 

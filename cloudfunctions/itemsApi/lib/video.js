@@ -14,6 +14,10 @@ var TICKET_TTL_MS = 15 * 60 * 1000;
 var PATH_PREFIX = "video-evidence/";
 var CONSENT_VERSION = "v1";
 var EXTS = ["mp4", "mov", "m4v"];
+var HIGHLIGHT_MAX = 8;
+var HIGHLIGHT_UPDATE_ID_MIN = 8;
+var HIGHLIGHT_UPDATE_ID_MAX = 64;
+var HIGHLIGHT_SOURCE = "user_confirmed";
 
 function createVideoActions(h) {
   var isString = h.isString;
@@ -89,7 +93,104 @@ function createVideoActions(h) {
     } catch (e) {}
   }
 
+  function hasOwn(obj, key) {
+    return obj !== null && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key);
+  }
+
+  function sortHighlights(list) {
+    list.sort(function (a, b) {
+      if (a.start_ms !== b.start_ms) return a.start_ms - b.start_ms;
+      return a.end_ms - b.end_ms;
+    });
+    return list;
+  }
+
+  /**
+   * 严格解析客户端确认高亮(输入形状门,不依赖 duration_ms):
+   * - 1..8 条;start/end 整数、start>=0、end>start;box 必填且 null 或 0-1 有效框;
+   * - frame_ms 可选,必须是 [start_ms,end_ms) 内整数;
+   * - 客户端携带的 source/confidence/候选 id 等一律无视,source 由服务端固定。
+   */
+  function parseHighlightInput(raw) {
+    if (Array.isArray(raw) === false || raw.length < 1 || raw.length > HIGHLIGHT_MAX) return "INVALID";
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var item = raw[i];
+      if (item === null || typeof item !== "object" || Array.isArray(item)) return "INVALID";
+      var start = item.start_ms;
+      var end = item.end_ms;
+      if (Number.isInteger(start) === false || start < 0) return "INVALID";
+      if (Number.isInteger(end) === false || end <= start) return "INVALID";
+      if (hasOwn(item, "box") === false || item.box === undefined) return "INVALID";
+      var box = h.parseBoxInput(item.box);
+      if (box === "INVALID") return "INVALID";
+      var clean = { start_ms: start, end_ms: end, box: box };
+      if (item.frame_ms !== undefined) {
+        if (
+          Number.isInteger(item.frame_ms) === false ||
+          item.frame_ms < start ||
+          item.frame_ms >= end
+        ) {
+          return "INVALID";
+        }
+        clean.frame_ms = item.frame_ms;
+      }
+      clean.source = HIGHLIGHT_SOURCE;
+      out.push(clean);
+    }
+    return sortHighlights(out);
+  }
+
+  function highlightsWithinDuration(list, durationMs) {
+    if (Number.isInteger(durationMs) === false || durationMs < 1) return false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].end_ms > durationMs) return false;
+    }
+    return true;
+  }
+
+  /**
+   * 读侧只投影服务端认可的用户确认高亮。旧行/非法行返回 [] + 0;
+   * 不把任何 AI candidate/目标名/置信度字段透出。
+   */
+  function sanitizeStoredHighlights(raw, durationMs) {
+    var parsed = parseHighlightInput(raw);
+    if (parsed === "INVALID") return null;
+    for (var i = 0; i < raw.length; i++) {
+      if (raw[i].source !== HIGHLIGHT_SOURCE) return null;
+    }
+    if (highlightsWithinDuration(parsed, durationMs) === false) return null;
+    return parsed;
+  }
+
+  function projectHighlightFields(row) {
+    var highlights = [];
+    var version = 0;
+    if (Array.isArray(row.highlights) && row.highlights.length > 0) {
+      var sanitized = sanitizeStoredHighlights(row.highlights, row.duration_ms);
+      if (sanitized !== null && Number.isInteger(row.highlight_version) && row.highlight_version >= 0) {
+        highlights = sanitized;
+        version = row.highlight_version;
+      }
+    }
+    return { highlights: highlights, highlight_version: version };
+  }
+
+  /** 幂等内容指纹:以服务端规范化后的字段比较,输入顺序不影响重放识别。 */
+  function highlightsContentKey(list) {
+    var canonical = [];
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i];
+      var one = { start_ms: item.start_ms, end_ms: item.end_ms, box: item.box };
+      if (item.frame_ms !== undefined) one.frame_ms = item.frame_ms;
+      one.source = HIGHLIGHT_SOURCE;
+      canonical.push(one);
+    }
+    return JSON.stringify(canonical);
+  }
+
   function projectEvidence(row, videoUrl) {
+    var highlightFields = projectHighlightFields(row);
     return {
       evidence_id: row._id,
       item_id: row.item_id,
@@ -100,6 +201,8 @@ function createVideoActions(h) {
       video_h: row.video_h,
       captured_location_text: isString(row.captured_location_text) ? row.captured_location_text : "",
       consent_version: row.consent_version === CONSENT_VERSION ? CONSENT_VERSION : "",
+      highlights: highlightFields.highlights,
+      highlight_version: highlightFields.highlight_version,
       created_at: row.created_at
     };
   }
@@ -410,6 +513,8 @@ function createVideoActions(h) {
       consent_version: CONSENT_VERSION,
       upload_ticket: ticket._id,
       source: "manual",
+      highlights: [],
+      highlight_version: 0,
       created_at: now
     };
     try {
@@ -536,17 +641,146 @@ function createVideoActions(h) {
     return res;
   }
 
+  /**
+   * 用户确认高亮保存:
+   * - 输入门先于任何写入;item 必须在当前家庭且未删除,evidence 必须同归属;
+   * - 与 attach/删除物品/删除证据共用 item 锁;锁内重读 item+evidence 并做版本 CAS;
+   * - 同 highlight_update_id 且规范化内容一致 → 幂等返回当前值(不递增版本),
+   *   同 update_id 异内容 → OPERATION_CONFLICT;版本不符 → VERSION_CONFLICT;
+   * - source 固定 user_confirmed;只写用户确认的时间窗/框/观察帧,不落 AI 原文。
+   */
+  async function videoEvidenceHighlightSave(event, deps) {
+    if (h.validItemId(event.item_id) === false) return fail("INVALID_INPUT");
+    if (
+      isString(event.evidence_id) === false ||
+      event.evidence_id.length < 1 ||
+      event.evidence_id.length > 128
+    ) {
+      return fail("INVALID_INPUT");
+    }
+    if (
+      Number.isInteger(event.expected_highlight_version) === false ||
+      event.expected_highlight_version < 0
+    ) {
+      return fail("INVALID_INPUT");
+    }
+    if (
+      isString(event.highlight_update_id) === false ||
+      event.highlight_update_id.length < HIGHLIGHT_UPDATE_ID_MIN ||
+      event.highlight_update_id.length > HIGHLIGHT_UPDATE_ID_MAX
+    ) {
+      return fail("INVALID_INPUT");
+    }
+    var parsedHighlights = parseHighlightInput(event.highlights);
+    if (parsedHighlights === "INVALID") return fail("INVALID_INPUT");
+
+    // 先做轻量归属/存活检查,避免为不存在/他家的 item 创建锁文档。
+    var item = await itemAlive(deps, event.item_id);
+    if (item === null) return fail("NOT_FOUND");
+
+    var itemLock = await acquireItemLock(deps, event.item_id, "highlight_save");
+    if (itemLock.ok !== true) return fail(itemLock.error || "VIDEO_ITEM_BUSY");
+    try {
+      // 锁内重查 item+evidence:删除/attach 都持同一把锁,领取锁期间的变更必须重判。
+      item = await itemAlive(deps, event.item_id);
+      if (item === null) return fail("NOT_FOUND");
+
+      var got = await evidenceCol(deps).where({
+        _id: event.evidence_id,
+        household_id: deps.householdId,
+        item_id: event.item_id
+      }).get();
+      var row = got && got.data && got.data.length > 0 ? got.data[0] : null;
+      if (row === null) return fail("NOT_FOUND");
+      if (highlightsWithinDuration(parsedHighlights, row.duration_ms) === false) {
+        return fail("INVALID_INPUT");
+      }
+
+      var currentVersion = Number.isInteger(row.highlight_version) && row.highlight_version >= 0
+        ? row.highlight_version
+        : 0;
+
+      // 幂等重放先于版本 CAS:响应丢失后的同 update_id 重试仍应成功。
+      if (row.highlight_update_id === event.highlight_update_id) {
+        var stored = sanitizeStoredHighlights(row.highlights, row.duration_ms);
+        if (stored !== null &&
+            highlightsContentKey(stored) === highlightsContentKey(parsedHighlights)) {
+          return {
+            ok: true,
+            evidence_id: row._id,
+            highlights: stored,
+            highlight_version: currentVersion,
+            duplicated: true
+          };
+        }
+        return fail("OPERATION_CONFLICT");
+      }
+
+      if (event.expected_highlight_version !== currentVersion) return fail("VERSION_CONFLICT");
+
+      // 版本 CAS:新行带 highlight_version 条件;旧行没有该字段时由 item 锁 +
+      // _id/household/item 条件更新保证线性化,_id 不存在则 stats.updated=0,
+      // 绝不把已删除证据行“复活”。
+      var casCond = {
+        _id: row._id,
+        household_id: deps.householdId,
+        item_id: event.item_id
+      };
+      if (row.highlight_version !== undefined) {
+        casCond.highlight_version = currentVersion;
+      }
+      var now = deps.now();
+      var updated = await evidenceCol(deps).where(casCond).update({
+        data: {
+          highlights: parsedHighlights,
+          highlight_version: currentVersion + 1,
+          highlight_updated_at: now,
+          highlight_update_id: event.highlight_update_id
+        }
+      });
+      if (((updated && updated.stats && updated.stats.updated) || 0) !== 1) {
+        var latestGot = await evidenceCol(deps).where({
+          _id: event.evidence_id,
+          household_id: deps.householdId,
+          item_id: event.item_id
+        }).get();
+        if (latestGot && latestGot.data && latestGot.data.length > 0) return fail("VERSION_CONFLICT");
+        return fail("NOT_FOUND");
+      }
+      return {
+        ok: true,
+        evidence_id: row._id,
+        highlights: parsedHighlights,
+        highlight_version: currentVersion + 1,
+        duplicated: false
+      };
+    } finally {
+      await releaseItemLock(deps, event.item_id, itemLock.token);
+    }
+  }
+
+  /**
+   * 删除证据同样持 item 锁:删除读文件列表、逐文件删云文件、删行期间,
+   * highlight save 无法插队;失败也 finally 释放,行不会被交错“复活”。
+   * cleanupForItem 只由 deleteItem 在已持锁时调用,此处不重复抢锁。
+   */
   async function videoEvidenceDelete(event, deps) {
     if (h.validItemId(event.item_id) === false) return fail("INVALID_INPUT");
     if (event.evidence_id !== undefined && event.evidence_id !== null && isString(event.evidence_id) === false) return fail("INVALID_INPUT");
-    var res = await removeEvidenceRows(deps, event.item_id, event.evidence_id || "");
-    if (res.ok === false) {
-      var failed = fail("VIDEO_DELETE_FAILED");
-      failed.deleted = res.deleted;
-      failed.failed_file_ids = res.failed_file_ids;
-      return failed;
+    var itemLock = await acquireItemLock(deps, event.item_id, "evidence_delete");
+    if (itemLock.ok !== true) return fail(itemLock.error || "VIDEO_ITEM_BUSY");
+    try {
+      var res = await removeEvidenceRows(deps, event.item_id, event.evidence_id || "");
+      if (res.ok === false) {
+        var failed = fail("VIDEO_DELETE_FAILED");
+        failed.deleted = res.deleted;
+        failed.failed_file_ids = res.failed_file_ids;
+        return failed;
+      }
+      return { ok: true, deleted: res.deleted };
+    } finally {
+      await releaseItemLock(deps, event.item_id, itemLock.token);
     }
-    return { ok: true, deleted: res.deleted };
   }
 
   return {
@@ -555,6 +789,7 @@ function createVideoActions(h) {
     videoEvidenceAttach: videoEvidenceAttach,
     videoUploadCancel: videoUploadCancel,
     videoEvidenceGet: videoEvidenceGet,
+    videoEvidenceHighlightSave: videoEvidenceHighlightSave,
     videoEvidenceDelete: videoEvidenceDelete,
     cleanupForItem: cleanupForItem,
     acquireItemLock: acquireItemLock,

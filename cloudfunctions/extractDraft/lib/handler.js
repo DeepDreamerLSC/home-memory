@@ -1105,6 +1105,166 @@ async function locationSplit(event, deps) {
   return aiUnavailableResult(engine);
 }
 
+// ---------- videoTargetRecognize(单帧“AI 找这件物品”,无状态只走 VL) ----------
+
+const VIDEO_TARGET_NAME_MAX = 40;
+const VIDEO_TARGET_CONFIDENCES = ["high", "mid", "low"];
+
+const VIDEO_TARGET_SYSTEM_PROMPT = [
+  "你是家庭视频单帧目标物品定位器。用户会给出一个目标物品名称与一帧视频画面,请判断目标是否出现在这一帧。",
+  "规则:",
+  "1. found 为布尔值:画面里能明确看到目标就为 true,看不到或无法确认就为 false。",
+  "2. confidence 只能是 high、mid、low 之一。",
+  "3. box 为 [x1,y1,x2,y2] 四个 0-1000 的整数,归一化到图片宽高,(0,0) 在左上角,x1<x2、y1<y2。found 为 false 时 box 为 null;看不清时 confidence 给 low。",
+  "4. 只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:",
+  '{ "found": true, "confidence": "high", "box": [x1,y1,x2,y2] }',
+].join("\n");
+
+function buildVideoTargetPrompt(targetName, retryInfo) {
+  let prompt = VIDEO_TARGET_SYSTEM_PROMPT + "\n\n【目标物品】\n" + targetName;
+  if (retryInfo) {
+    prompt +=
+      "\n\n" +
+      RETRY_OUTPUT_MARKER +
+      "\n" +
+      retryInfo.previousOutput +
+      "\n" +
+      RETRY_ERROR_MARKER +
+      "\n" +
+      retryInfo.reason +
+      "\n请重新输出,只输出一个符合上述字段要求的 JSON 对象,不要包含任何其他文字或代码块围栏。";
+  }
+  return prompt;
+}
+
+/*
+ * 严格校验模型形状:
+ * - 顶层不是 JSON 对象/found 非布尔/confidence 词表外 → retryable(带错误重试一次);
+ * - found=false → hit:false,box:null;
+ * - found=true 但 box 不是合法 0-1000 整数框 → hit:false,box:null
+ *   (不产生可确认候选,绝不按值域猜量纲/钳制);
+ * - 仅合法框经 normalizeVlBox 归一为 0-1。
+ */
+function validateVideoTargetOutput(rawText) {
+  const parsed = extractJsonObject(rawText);
+  if (parsed === undefined || parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, retryable: true, reason: "输出不是合法的 JSON 对象" };
+  }
+  if (typeof parsed.found !== "boolean") {
+    return { ok: false, retryable: true, reason: "found 字段缺失或不是布尔值" };
+  }
+  if (VIDEO_TARGET_CONFIDENCES.indexOf(parsed.confidence) === -1) {
+    return { ok: false, retryable: true, reason: "confidence 字段不在词表内" };
+  }
+  if (parsed.found === false) {
+    return { ok: true, hit: false, box: null, confidence: parsed.confidence };
+  }
+  const box = normalizeVlBox(parsed.box);
+  if (box === null) {
+    return { ok: true, hit: false, box: null, confidence: parsed.confidence };
+  }
+  return { ok: true, hit: true, box: box, confidence: parsed.confidence };
+}
+
+function videoTargetInvalidInputResult() {
+  return {
+    ok: false,
+    error: "INVALID_INPUT",
+    message: "这一帧图片或目标参数不符合识别要求,请重试",
+  };
+}
+
+function videoTargetUnavailableResult() {
+  return {
+    ok: false,
+    error: "AI_UNAVAILABLE",
+    message: "AI 查找暂不可用,可继续回放视频自己确认",
+    manual_fallback: true,
+  };
+}
+
+/*
+ * videoTargetRecognize:
+ * - 输入门:target_name trim 后 1..40 码点;裸 base64 1..4,000,000 字符且可解码;
+ *   img_w/img_h 整数 1..10000;任一不过 → INVALID_INPUT,零调用、零落库;
+ * - 只走现有 VL 三件套;未注入 callVL(未配置)→ AI_UNAVAILABLE + manual_fallback;
+ * - 模型输出坏 JSON/形状失败 → 带错误重试一次,仍败或引擎抛错 → AI_UNAVAILABLE;
+ * - 日志白名单:action/elapsedMs/engine/hit/targetLen/error/reason,绝不记
+ *   target_name、base64、prompt 或模型原文。
+ */
+async function videoTargetRecognize(event, deps) {
+  const startedAt = Date.now();
+  const logger = deps && typeof deps.logger === "function" ? deps.logger : function () {};
+  const elapsedMs = () => Date.now() - startedAt;
+  const rawTarget = event && typeof event.target_name === "string" ? event.target_name : null;
+  const targetName = rawTarget === null ? "" : rawTarget.trim();
+  const targetLen = codePointLength(targetName);
+
+  const invalid = () => {
+    logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, error: "INVALID_INPUT" });
+    return videoTargetInvalidInputResult();
+  };
+
+  if (targetLen < 1 || targetLen > VIDEO_TARGET_NAME_MAX) {
+    return invalid();
+  }
+  const imageBase64 = event && typeof event.image_base64 === "string" ? event.image_base64 : null;
+  if (
+    imageBase64 === null ||
+    imageBase64.length < 1 ||
+    imageBase64.length > VL_MAX_IMAGE_BASE64_CHARS ||
+    VL_BASE64_RE.test(imageBase64) === false
+  ) {
+    return invalid();
+  }
+  const imgW = event ? event.img_w : undefined;
+  if (Number.isInteger(imgW) === false || imgW < 1 || imgW > VL_IMG_DIM_MAX) {
+    return invalid();
+  }
+  const imgH = event ? event.img_h : undefined;
+  if (Number.isInteger(imgH) === false || imgH < 1 || imgH > VL_IMG_DIM_MAX) {
+    return invalid();
+  }
+  if (Buffer.byteLength(imageBase64, "base64") < 1) {
+    return invalid();
+  }
+
+  const callVL = deps && typeof deps.callVL === "function" ? deps.callVL : null;
+  if (callVL === null) {
+    logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, error: "AI_UNAVAILABLE", reason: "vl_not_configured" });
+    return videoTargetUnavailableResult();
+  }
+
+  let output;
+  try {
+    output = await callVL(buildVideoTargetPrompt(targetName, null), imageBase64);
+  } catch (e) {
+    logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, error: "AI_UNAVAILABLE", reason: "vl_call_failed" });
+    return videoTargetUnavailableResult();
+  }
+  let result = validateVideoTargetOutput(output);
+  if (result.ok === false && result.retryable === true) {
+    let retryOutput;
+    try {
+      retryOutput = await callVL(
+        buildVideoTargetPrompt(targetName, { previousOutput: output, reason: result.reason }),
+        imageBase64
+      );
+    } catch (e) {
+      logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, error: "AI_UNAVAILABLE", reason: "vl_call_failed" });
+      return videoTargetUnavailableResult();
+    }
+    result = validateVideoTargetOutput(retryOutput);
+    if (result.ok === false) {
+      logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, error: "AI_UNAVAILABLE", reason: "vl_bad_output" });
+      return videoTargetUnavailableResult();
+    }
+  }
+
+  logger({ action: "videoTargetRecognize", elapsedMs: elapsedMs(), engine: "vl-local", targetLen: targetLen, hit: result.hit });
+  return { ok: true, hit: result.hit, box: result.box, confidence: result.confidence };
+}
+
 module.exports = {
   handler,
   buildPrompt,
@@ -1116,6 +1276,9 @@ module.exports = {
   validateVlOutput,
   validateDraftEditOutput,
   locationSplit,
+  videoTargetRecognize,
+  buildVideoTargetPrompt,
+  validateVideoTargetOutput,
   LOCATION_SPLIT_SYSTEM_PROMPT,
   buildLocationSplitPrompt,
   validateLocationSplitOutput,

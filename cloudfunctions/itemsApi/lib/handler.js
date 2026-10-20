@@ -2622,6 +2622,7 @@ var ACTIONS = {
   videoUploadCancel: videoActions.videoUploadCancel,
   videoEvidenceAttach: videoActions.videoEvidenceAttach,
   videoEvidenceGet: videoActions.videoEvidenceGet,
+  videoEvidenceHighlightSave: videoActions.videoEvidenceHighlightSave,
   videoEvidenceDelete: videoActions.videoEvidenceDelete
 };
 
@@ -2655,6 +2656,7 @@ var WRITE_ACTIONS = {
   videoUploadReceipt: true,
   videoUploadCancel: true,
   videoEvidenceAttach: true,
+  videoEvidenceHighlightSave: true,
   videoEvidenceDelete: true
 };
 

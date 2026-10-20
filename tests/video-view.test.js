@@ -24,9 +24,27 @@ test("VIEW:视频默认视图、比例、位置变更与授权版本门", () => 
   assert.equal(mapped.latest.aspect, "1280 / 720");
   assert.equal(mapped.latest.changed, false);
   assert.equal(mapped.latest.urlFail, false);
+  assert.equal(mapped.latest.durationMs, 12000);
+  assert.equal(mapped.latest.highlightVersion, 0);
+  assert.deepEqual(mapped.latest.highlights, []);
   assert.equal(view.mapVideoEvidenceView([row({ consent_version: "" })], "书房 · 抽屉"), null);
   const changed = view.mapVideoEvidenceView([row()], "客厅");
   assert.equal(changed.latest.changed, true);
+});
+
+test("VIEW:用户确认高亮映射为时间文案,旧行安全降级", () => {
+  const mapped = view.mapVideoEvidenceView([row({
+    highlight_version: 2,
+    highlights: [
+      { start_ms: 1000, end_ms: 3250, box: { x1: 0.1, y1: 0.2, x2: 0.6, y2: 0.8 }, source: "user_confirmed" },
+      { start_ms: 9000, end_ms: 10000, box: null, source: "user_confirmed" },
+    ],
+  })], "书房 · 抽屉");
+  assert.ok(mapped);
+  assert.equal(mapped.latest.highlightVersion, 2);
+  assert.equal(mapped.latest.highlightCount, 2);
+  assert.deepEqual(mapped.latest.highlights.map((h) => h.timeText), ["0:01 - 0:03", "0:09 - 0:10"]);
+  assert.deepEqual(mapped.latest.highlights.map((h) => h.hasBox), [true, false]);
 });
 
 test("VIEW:搜索角标只取授权有效且换链成功的最新视频", () => {
