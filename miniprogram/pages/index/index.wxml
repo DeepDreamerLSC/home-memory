@@ -296,7 +296,12 @@
 
 <!-- 常驻语音条(issue #45 全局可达:首页全部状态) -->
 <voice-bar>
-  <view slot="actions" class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
-    <view class="vb-photo-face">📷 拍照</view>
+  <view slot="actions" class="vb-add-actions">
+    <view class="vb-video-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onVideoScanTap">
+      <view class="vb-video-face">🎬 多件</view>
+    </view>
+    <view class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
+      <view class="vb-photo-face">📷 拍照</view>
+    </view>
   </view>
 </voice-bar>

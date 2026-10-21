@@ -209,6 +209,8 @@ Page<
     /** 拍照批恢复横幅(#3):读当前家庭作用域的未完成拍照会话 */
     currentPhotoResume(): { count: number; mode: "review" | "evidence" } | null;
     onPhotoResumeTap(): void;
+    /** PR B 场景扫描入口:用户主动进入,不替换拍照识物 */
+    onVideoScanTap(): void;
     /** 拍照识物入口(#3):进 photo 页新批拍照 */
     onPhotoRecordTap(): void;
     /** 地图当前层加载(X1/X2 与分层缓存、防旧覆盖守卫全在这里) */
@@ -629,6 +631,16 @@ Page<
     this.setData({ photoResume: null });
     wx.navigateTo({
       url: "/pages/photo/photo?resume=1",
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** PR B 场景扫描入口:只由用户主动进入,不替换拍照识物,不自动巡检。 */
+  onVideoScanTap() {
+    wx.navigateTo({
+      url: "/pages/video-scan/video-scan",
       fail: () => {
         wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
       },

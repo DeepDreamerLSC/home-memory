@@ -64,7 +64,7 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 - **级联**:itemsApi delete 软删物品时同步硬删其全部 active 提醒(done 历史保留)并消费 slot 上未消费的欠账声明(物品已删,任何未落地的再生/补录认领不再有意义),remindList 不再出现该物品。
 - **作用域绑定(#34 全沿用,不另起炉灶)**:remindComplete/remindClear/remindSet 为写类 action,与 create/update/delete 同走 checkWriteScopeBinding——共享家庭必须携带一致 expected_household_id + expected_scope_revision(缺失/不一致 → FAMILY_SWITCHED / FAMILY_STALE_SCOPE,零写入);个人家庭维持宽松口径零回归。提醒读写全部以服务端解析的 household_id 为 where 条件,家庭解析失败关闭(HOUSEHOLD_UNAVAILABLE)同样先于一切提醒读写(宁拒一次操作,不错写一个家庭)。
 
-### 单件视频留证(itemsApi.videoUploadBegin / videoEvidenceAttach / videoEvidenceGet / videoEvidenceDelete)
+### 视频证据(itemsApi.videoUploadBegin / videoEvidenceAttach / videoEvidenceGet / videoEvidenceDelete / videoSceneCommit)
 
 - **集合**:`video_upload_tickets`(服务端签发的上传票据)、`video_evidence`(绑定证据)、`video_item_locks`(物品级 attach/delete 互斥锁,`_id=vil_<item_id>`,60s 过期可接管);权限均「所有用户不可读不可写」。`video_evidence` 唯一索引 `(household_id, item_id, file_id)`。
 - **videoUploadBegin**(写类,走 F2 双 marker):`{ action, item_id, ext?("mp4"|"mov"|"m4v") }`。物品必须属当前家庭且未删。**begin 与 attach/删除物品共用 `video_item_locks` 物品锁**,持锁期间完成 item 存活复核与票据插入,防止删除完成后又新建 pending 票据。**每次调用签发新票据,绝不复用同物品旧 pending 票据**。返回 `{ ok, upload_ticket, upload_path, expires_at }`;路径固定为 `video-evidence/<household_id>/<ticket>.<ext>`,票据 15 分钟过期。
@@ -72,10 +72,18 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 - **票据过期**:attach/receipt 返回 `VIDEO_TICKET_EXPIRED`。客户端展示「删除待关联视频后重新拍摄」并隐藏重试入口,不无限重试。
 - **videoEvidenceAttach**(写类):`{ action, upload_ticket, file_id, duration_ms(1-600000), video_w, video_h, consent_version:"v1" }`。服务端校验票据存在且属当前家庭、状态 pending/bound/binding、未过期、票据已回执且 `ticket.file_id` 与本次一致、`file_id` 实际路径与票据 `upload_path` 完全一致、物品仍存活、文件可通过 `getTempFileURL` 取得临时链接。随后抢物品级锁 `video_item_locks`(与删除物品互斥)并重查物品;绑定前以 CAS 把票据 `pending → binding`(与清理/取消互斥),再查已有证据;命中已有证据则修复票据 bound 并返回 duplicated=true。证据插入成功后即使票据状态更新失败,清理任务也会先核对证据引用,不会删除正式视频。物品锁与票据锁均在 finally 释放,中断后由 60s TTL 接管。
 - **videoEvidenceGet**(只读):`{ action, item_ids(1-10) }`;每件取最新 3 条,只返回未删物品的证据;云存储 fileID 批量换临时播放链接,单链接失败 `video_url:""` 不废整次查询。响应带 `household_id`/共享家庭 `scope_revision`。
-- **videoEvidenceDelete**(写类):`{ action, item_id, evidence_id? }`。逐文件解析 `cloud.deleteFile` 返回的 `fileList[].status`:仅 `status===0` 或文件已不存在(`-503003`)的对应证据行才删除;任一文件失败返回 `VIDEO_DELETE_FAILED`(附 `deleted` 与 `failed_file_ids`),失败行保留可重试。删除物品时先抢 `video_item_locks` 物品锁,覆盖视频清理、软删与提醒级联;清理范围包括 bound 证据以及 pending/binding/cleaning/cancelling 全部非终态票据,按票据最新 file_id 逐文件删除后才置 deleted;任一云删除失败则物品不删、票据保留、释放锁、返回可重试错误。
+- **videoEvidenceDelete**(写类):`{ action, item_id, evidence_id? }`。逐文件解析 `cloud.deleteFile` 返回的 `fileList[].status`:仅 `status===0` 或文件已不存在(`-503003`)的对应证据行才删除;任一文件失败返回 `VIDEO_DELETE_FAILED`(附 `deleted` 与 `failed_file_ids`),失败行保留可重试。**PR B 引用门槛**:同一 `file_id` 可被多 item evidence 引用;删除必须先取 item 锁(多件按 item_id 升序),再取 `video_item_locks` 的 `_id=val_<asset_id>` asset/file 锁,锁内重新查询同 household 下全部引用。仍有其他 item 引用时只删当前行、绝不删云文件;只有最后一条引用才删云文件。删除物品级联同样遵守该锁序与锁内复核。清理范围包括本物品 bound 证据以及 pending/binding/cleaning/cancelling 全部非终态票据;任一云删除失败则物品不删、票据/证据保留、释放锁、返回可重试错误。
 - **videoUploadCancel**(写类):`{ action, upload_ticket }`。客户端不再直接删云文件,统一由服务端判断:若证据已存在/票据 bound,只修复票据并返回 `{ state:"bound", evidence }`,绝不删文件;若仍 pending,先 CAS `pending → cancelling`,**CAS 成功后必须重读票据最新快照**,再核对证据,确认未绑定后按最新 `file_id` 逐文件删除云对象,成功才置 cancelled;云删除失败则恢复 pending 并返回 `VIDEO_DELETE_FAILED`,保留后续回收责任。重读用于封住 receipt 在 cancel 初次读取后写入 file_id 的反向交错。
-- **孤儿回收与中间态恢复**:`videoCleanup` 云函数每日先恢复超时(>10min)卡在 binding/cleaning/cancelling 的票据:有证据引用→修复 bound;binding/cleaning 无证据→恢复 pending;cancelling 无证据→逐文件删除成功则 cancelled、失败则 pending。随后扫描超过 24h 仍为 pending 且已回执 `file_id` 的票据。每条先 CAS `pending → cleaning`,再二次查询 `video_evidence` 引用:若证据已存在,只修复票据 bound,不删文件;无引用才逐文件删除并置 cancelled;删除失败恢复 pending。bound 证据永不进入清理集。没有 `file_id` 的票据仅标记 cancelled。客户端上传成功后应立即回执,以把未知窗口压到最小。
-- **边界**:首版一个视频只绑定用户明确选择的一件物品;服务端不接收物品名称/识别结果/自动高亮;客户端不自动播放;上传成功但绑定失败时客户端本地保留 pending,可重试或删除。
+- **孤儿回收与中间态恢复**:`videoCleanup` 云函数每日先恢复超时(>10min)卡在 binding/cleaning/cancelling 的票据:有证据引用→修复 bound;binding/cleaning 无证据→恢复 pending;cancelling 无证据→逐文件删除成功则 cancelled、失败则 pending。随后扫描超过 24h 仍为 pending 且已回执 `file_id` 的票据。每条先 CAS `pending → cleaning`,再二次查询 `video_evidence` 引用:有任一行(按 `asset_id`,旧行回退 `file_id`,不能只看 ticket.item_id)只修复票据 bound,不删文件;无引用才逐文件删除并置 cancelled;删除失败恢复 pending。bound 证据永不进入清理集。没有 `file_id` 的票据仅标记 cancelled。客户端上传成功后应立即回执,以把未知窗口压到最小。
+- **边界**:单件入口仍是一个视频绑定用户明确选择的一件物品;PR B 场景确认允许同一原视频为多件物品**各建一行** evidence,每行独立 highlights、同一 `asset_id`。服务端不接收物品名称/识别结果作为事实,不自动生成高亮;客户端不自动播放;上传成功但绑定失败时客户端本地保留 pending,可重试或删除。
+
+### 场景扫描与多物品确认(PR B,itemsApi.videoSceneCommit)
+
+- **videoUploadBegin scene 分支**(写类):`{ action:"videoUploadBegin", purpose:"scene", scene_id(8-64), ext?, duration_ms(1-600000), video_w, video_h }`。无具体 item_id,签发 `vt_` 票据和 `va_` asset_id,路径仍为 `video-evidence/<household_id>/<ticket>.<ext>`,15 分钟过期。缺省 `purpose:"item"` 保持 #89 行为。
+- **videoUploadReceipt / videoUploadCancel**:入参不变。scene ticket 无 item 锁,仅票据 CAS;取消时有任一 evidence(按 asset_id/file_id 全量查询)返回 `{ state:"bound", evidence, linked_item_ids, evidence_count }`,不删文件;无 evidence 才按最新 `file_id` 严格删除并置 cancelled。
+- **videoSceneCommit**(写类):`{ action, scene_id, upload_ticket, asset_id, file_id, duration_ms, video_w, video_h, consent_version:"v1", items:[1..12] }`。每件 `target:"new"` 需 `draft_key/operation_id/name/location_text/highlights`,或 `target:"existing"` 需 `draft_key/item_id/highlights`。服务端校验 ticket purpose/scene_id/asset_id/path/家庭/尺寸,commit 阶段禁 AI/VL,只做 DB 与文件可用性检查。逐件复用 createItem 幂等建档并写 per-item `video_evidence`;同名不同 operation_id 绝不合并。highlights 1..8 条,沿用 PR A schema(时间窗、0-1 box 或 null、`source:"user_confirmed"`、可选 frame_ms),初始 `highlight_version:1`。
+- **幂等/部分成功**:票据保存 canonical `scene_payload_sig`(sha256,只存哈希);同载荷重试收敛,不同载荷 `OPERATION_CONFLICT`。逐件返回 results;至少一条 evidence 成功即把票据修 bound 并保护文件,未完成件进 `evidence_failed`,客户端用完全相同的冻结载荷重试。纯参数错误整批零写。
+- **索引/锁**:`video_evidence` 保持唯一索引 `(household_id,item_id,file_id)`,建议加 `(household_id,asset_id)` 非唯一索引;锁继续用 `video_item_locks`,asset 锁 `_id=val_<asset_id>`,TTL 60s。统一锁序 item(item_id 升序)→asset(asset_id 升序)。
 
 ## extractDraft 协议
 ### v2 多件拆分协议(Issue #14,2026-10-10)

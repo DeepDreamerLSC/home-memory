@@ -1,0 +1,124 @@
+<view class="page">
+  <view class="hero">
+    <view class="hero-title">🎬 拍视频找多件</view>
+    <view class="hero-sub">抽屉/柜子录一段视频，AI 给线索；你逐件勾选、改名、拆分或补件后才保存。同名不代表同一件，原视频确认前不上传。</view>
+  </view>
+
+  <view wx:if="{{phase === 'idle'}}" class="card center-card">
+    <view class="empty-face">📦</view>
+    <view class="empty-title">录一段抽屉或柜子</view>
+    <view class="empty-sub">建议 5–30 秒，慢慢扫过要记录的区域。AI 只给候选，不会自动入库。</view>
+    <view class="primary-btn" bindtap="onChooseVideoTap">开始录/选视频</view>
+  </view>
+
+  <view wx:if="{{phase === 'scanning'}}" class="card">
+    <view class="section-title">正在找物品线索…</view>
+    <view class="progress-line">{{progressText}}</view>
+    <view class="hint">只把单帧临时发到云端 AI；base64 用完即弃，原视频不会在确认前上传。</view>
+    <view class="secondary-btn" bindtap="onCancelScanTap">取消识别</view>
+  </view>
+
+  <block wx:if="{{phase === 'review' || phase === 'uploading' || phase === 'committing'}}">
+    <view wx:if="{{failureText}}" class="notice warn">{{failureText}}</view>
+    <view wx:if="{{errorText}}" class="notice danger">{{errorText}}</view>
+    <view wx:if="{{resultText}}" class="notice">{{resultText}}</view>
+
+    <view class="card">
+      <view class="section-title">这次视频的位置</view>
+      <input class="text-input" value="{{batchLocation}}" placeholder="例如：书房 · 右侧抽屉" bindinput="onBatchLocationInput" />
+      <view class="hint">新物品默认继承这个位置；可在每件草稿里单独改。已有物品不会改位置。</view>
+    </view>
+
+    <view class="card">
+      <view class="section-head">
+        <view class="section-title">AI 线索</view>
+        <view class="text-action" bindtap="onRestartTap">重拍</view>
+      </view>
+      <view wx:if="{{observationGroups.length === 0}}" class="empty-small">没有 AI 线索。可直接补一件，或重拍。</view>
+      <view wx:for="{{observationGroups}}" wx:for-item="group" wx:key="nameKey" class="obs-group">
+        <view class="obs-group-title">{{group.label}} · {{group.countText}}</view>
+        <view
+          wx:for="{{group.observations}}"
+          wx:for-item="obs"
+          wx:key="obsId"
+          class="obs-row {{obs.checked ? 'selected' : ''}}"
+          data-obs-id="{{obs.obsId}}"
+          bindtap="onObservationToggle"
+        >
+          <view class="check {{obs.checked ? 'on' : ''}}">{{obs.checked ? '✓' : ''}}</view>
+          <view class="obs-img-wrap" data-obs-id="{{obs.obsId}}" catchtap="onObsImageTap">
+            <image class="obs-img" src="{{obs.framePath}}" mode="aspectFit" />
+            <view wx:if="{{obs.boxStyle !== 'display:none'}}" class="obs-box" style="{{obs.boxStyle}}"></view>
+          </view>
+          <view class="obs-info">
+            <view class="obs-name">{{obs.name}}</view>
+            <view class="obs-meta">{{obs.timeText}} · {{obs.confidenceText}}</view>
+          </view>
+        </view>
+      </view>
+      <view class="toggle-row">
+        <switch checked="{{mergeSameName}}" bindchange="onMergeSameNameChange" color="#e6b31e" />
+        <view class="toggle-copy">生成草稿时，把选中的同名线索视为一件（默认关闭；同名也默认分开）</view>
+      </view>
+      <view class="primary-btn" bindtap="onGenerateDraftsTap">把勾选线索生成待确认物品</view>
+    </view>
+
+    <view class="card">
+      <view class="section-head">
+        <view class="section-title">待确认物品（{{draftViews.length}}）</view>
+        <view class="text-action" bindtap="onAddManualDraftTap">＋ 补一件</view>
+      </view>
+      <view wx:if="{{draftViews.length === 0}}" class="empty-small">先勾选线索生成草稿，或点「补一件」。</view>
+      <view wx:for="{{draftViews}}" wx:for-item="d" wx:for-index="idx" wx:key="draftKey" class="draft-card">
+        <view class="draft-head">
+          <view class="check {{d.checked ? 'on' : ''}}" data-index="{{idx}}" bindtap="onDraftCheckedTap">{{d.checked ? '✓' : ''}}</view>
+          <input class="name-input" value="{{d.name}}" placeholder="物品名称" data-index="{{idx}}" bindinput="onDraftNameInput" />
+          <view class="tiny-danger" data-index="{{idx}}" bindtap="onDraftRemoveTap">移除</view>
+        </view>
+        <view class="target-row" data-index="{{idx}}" bindtap="onDraftTargetTap">{{d.targetText}} ›</view>
+        <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.locationText}}" placeholder="这件放在哪里" data-index="{{idx}}" bindinput="onDraftLocationInput" />
+        <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.note}}" placeholder="备注（可选）" data-index="{{idx}}" bindinput="onDraftNoteInput" />
+        <view class="draft-meta">{{d.observationCount}} 条线索 · {{d.highlightCount}} 条用户确认高亮{{d.isManual ? ' · 手动补件' : ''}}</view>
+        <view wx:if="{{d.isManual}}" class="manual-times">
+          <view>仅时间窗可无框：</view>
+          <input class="time-input" type="digit" value="{{d.startSecText}}" data-index="{{idx}}" data-field="start" bindinput="onDraftManualTimeInput" /> 秒 —
+          <input class="time-input" type="digit" value="{{d.endSecText}}" data-index="{{idx}}" data-field="end" bindinput="onDraftManualTimeInput" /> 秒
+        </view>
+        <view class="draft-actions">
+          <view class="mini-btn" data-key="{{d.draftKey}}" bindtap="onDraftMergeSelectTap">{{d.mergeSelected ? '取消合并选择' : '选择合并'}}</view>
+          <view wx:if="{{d.highlightCount > 1}}" class="mini-btn" data-index="{{idx}}" bindtap="onDraftSplitTap">拆成多件</view>
+        </view>
+      </view>
+      <view wx:if="{{mergeSelectedKeys.length > 0}}" class="primary-btn" bindtap="onMergeDraftsTap">合并选中的新建物品草稿</view>
+    </view>
+
+    <view class="privacy-note">确认保存后才会上传原视频。每件物品各存一行证据和各自的高亮；同一视频可被多件物品引用。删除某件物品时，只有最后一条引用消失才删原视频。</view>
+    <view wx:if="{{busy}}" class="primary-btn disabled">处理中…</view>
+    <view wx:else class="primary-btn" bindtap="onSaveTap">确认并保存 {{draftViews.length}} 件</view>
+  </block>
+
+  <view wx:if="{{phase === 'partial'}}" class="card">
+    <view class="section-title">视频已上传，关联尚未全部完成</view>
+    <view wx:if="{{errorText}}" class="notice danger">{{errorText}}</view>
+    <view wx:if="{{resultText}}" class="notice">{{resultText}}</view>
+    <view class="hint">重试会使用同一份确认内容（同 scene_id / operation_id / highlights），已成功项不会重复创建；不会按名称自动合并。</view>
+    <view wx:if="{{busy}}" class="primary-btn disabled">处理中…</view>
+    <view wx:else class="primary-btn" bindtap="onRetryCommitTap">重试剩余关联</view>
+    <view class="secondary-btn" bindtap="onDiscardPendingTap">放弃待关联视频</view>
+  </view>
+
+  <view wx:if="{{phase === 'done'}}" class="card center-card">
+    <view class="empty-face">✓</view>
+    <view class="empty-title">已保存</view>
+    <view class="empty-sub">{{resultText}}</view>
+    <view class="privacy-note">视频默认不在详情页自动播放；需要你点开才播放。</view>
+    <view class="primary-btn" bindtap="onDoneBackTap">返回</view>
+  </view>
+
+  <view wx:if="{{phase === 'failed'}}" class="card center-card">
+    <view class="empty-face">⚠</view>
+    <view class="empty-title">这次没有完成</view>
+    <view class="empty-sub">{{errorText}}</view>
+    <view class="primary-btn" bindtap="onRestartTap">重新选择视频</view>
+  </view>
+</view>

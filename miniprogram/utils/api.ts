@@ -45,6 +45,8 @@ import type {
   VideoEvidenceDeleteResponse,
   VideoEvidenceGetResponse,
   VideoEvidenceHighlightSaveResponse,
+  VideoSceneCommitEvent,
+  VideoSceneCommitResponse,
   VideoUploadBeginResponse,
   VideoUploadCancelResponse,
   VideoUploadReceiptResponse,
@@ -62,6 +64,8 @@ const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 
 /** itemsApi 为薄适配层,正常应在数秒内返回 */
 const ITEMS_API_TIMEOUT_MS = 15000;
+/** PR B 场景 commit：12 件批量写，客户端与服务端同为 20s 目标预算 */
+const VIDEO_SCENE_COMMIT_TIMEOUT_MS = 20000;
 /** extractDraft 服务端 LLM 超时 20 秒,客户端放宽到 30 秒,优先让服务端错误回来 */
 const EXTRACT_DRAFT_TIMEOUT_MS = 30000;
 /** 单帧 VL 识别:服务端 config 60s,客户端 70s 让服务端超时/错误先回来 */
@@ -425,6 +429,33 @@ function validateItemsOkResponse(
       if (r.state !== "cancelled" && r.state !== "bound") throw bad();
       if (r.state === "bound" && validVideoEvidenceRow(r.evidence) === false) throw bad();
       break;
+    case "videoSceneCommit": {
+      const resultsOk =
+        Array.isArray(r.results) &&
+        r.results.every(
+          (row) =>
+            isRecord(row) &&
+            typeof row.draft_key === "string" &&
+            typeof row.ok === "boolean" &&
+            (row.item_id === undefined || typeof row.item_id === "string") &&
+            (row.error === undefined || typeof row.error === "string") &&
+            (row.message === undefined || typeof row.message === "string"),
+        );
+      const evidenceFailedOk =
+        r.evidence_failed === undefined ||
+        (Array.isArray(r.evidence_failed) &&
+          r.evidence_failed.every((id) => typeof id === "string"));
+      if (
+        typeof r.scene_id !== "string" ||
+        typeof r.asset_id !== "string" ||
+        (r.ticket_state !== "bound" && r.ticket_state !== "partial") ||
+        resultsOk === false ||
+        evidenceFailedOk === false
+      ) {
+        throw bad();
+      }
+      break;
+    }
     case "videoEvidenceDelete":
       if (typeof r.deleted !== "number") throw bad();
       break;
@@ -485,6 +516,7 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "videoUploadCancel",
   "videoEvidenceAttach",
   "videoEvidenceHighlightSave",
+  "videoSceneCommit",
   "videoEvidenceDelete",
 ]);
 
@@ -531,6 +563,9 @@ export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoUploadBegin" }>,
 ): Promise<VideoUploadBeginResponse>;
 export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "videoSceneCommit" }>,
+): Promise<VideoSceneCommitResponse>;
+export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoUploadReceipt" }>,
 ): Promise<VideoUploadReceiptResponse>;
 export function callItemsApi(
@@ -562,7 +597,11 @@ export async function callItemsApi(
     : event;
   let result: unknown;
   try {
-    result = await callCloudFunction(ITEMS_API_FUNCTION, payload, ITEMS_API_TIMEOUT_MS);
+    result = await callCloudFunction(
+      ITEMS_API_FUNCTION,
+      payload,
+      event.action === "videoSceneCommit" ? VIDEO_SCENE_COMMIT_TIMEOUT_MS : ITEMS_API_TIMEOUT_MS,
+    );
   } catch (e) {
     // FAMILY_SWITCHED / FAMILY_STALE_SCOPE:家庭状态刚变化——触发 status 刷新
     // 作用域(捕获新 id/修订号),绝不静默重试,由用户按服务端文案重试

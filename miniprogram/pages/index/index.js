@@ -385,6 +385,15 @@ Page({
             },
         });
     },
+    /** PR B 场景扫描入口:只由用户主动进入,不替换拍照识物,不自动巡检。 */
+    onVideoScanTap() {
+        wx.navigateTo({
+            url: "/pages/video-scan/video-scan",
+            fail: () => {
+                wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+            },
+        });
+    },
     /** 拍照识物入口(#3):新批拍照(确认前照片不持久化、不写云存储;识别临时传输需首次授权) */
     onPhotoRecordTap() {
         wx.navigateTo({
