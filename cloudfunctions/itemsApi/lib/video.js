@@ -24,6 +24,17 @@ var SCENE_ITEMS_MAX = 12;
 var SCENE_ID_MIN = 8;
 var SCENE_ID_MAX = 64;
 var SCENE_DRAFT_KEY_MAX = 64;
+// D1 位置级视频清点(issue #94):location_scans 独立集合 + commit 可选位置上下文。
+// 全部新逻辑只在 event.location 存在的分支内生效;缺省时本文件行为与 PR B 逐字节一致。
+var LS = "location_scans";
+var LOCATIONS_COLLECTION = "locations";
+var LOCATION_ID_MAX = 128;
+var SCAN_CANDIDATE_MAX = 500;
+var LOCATION_PATH_SEPARATOR = " / ";
+var LOCATION_SNAPSHOT_SEGMENTS_MAX = 6;
+// D1 §3:locationScanContext 的全家庭匹配池上限(超过置 truncated,建议列表
+// 由客户端如实标注「物品较多,建议只参考同名精确匹配」)
+var SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX = 200;
 
 function stableTextHash(text) {
   var h1 = 0x811c9dc5;
@@ -253,6 +264,8 @@ function createVideoActions(h) {
       item_id: row.item_id,
       file_id: row.file_id,
       asset_id: isString(row.asset_id) ? row.asset_id : "",
+      // D1:scan_id 关联字段(旧行/B 行无此字段时投影为 "",读侧零破坏)
+      scan_id: isString(row.scan_id) ? row.scan_id : "",
       source: row.source === "scene" ? "scene" : "manual",
       video_url: videoUrl || "",
       duration_ms: row.duration_ms,
@@ -906,6 +919,13 @@ function createVideoActions(h) {
       await repairTicketBound(deps, ticket, preRows[0]._id, preRows.length);
       return boundStateFromRows(ticket, preRows, await tempUrlMap(deps, preRows));
     }
+    // D1(§2.4):commit 已落 scan 但 0 件证据成功的会话,其视频是该 scan 的回看
+    // 内容,取消不得删云文件——按 asset/file 复核 location_scans,任一 scan 行存在
+    // 即视为有引用,bound 态保留。scan 只能由 commit 写出,cancel-before-commit
+    // 场景查不到,行为与 B 完全一致。
+    if (await locationScanRefExists(deps, ticket)) {
+      return retainTicketForScan(deps, ticket);
+    }
     if (ticket.status === "bound") return fail("VIDEO_TICKET_BUSY");
     if (ticket.status === "cancelled" || ticket.status === "deleted") return { ok: true, state: "cancelled" };
     if (ticket.status !== "pending") return fail("VIDEO_TICKET_BUSY");
@@ -941,6 +961,18 @@ function createVideoActions(h) {
       await repairTicketBound(deps, fresh, afterClaimRows[0]._id, afterClaimRows.length);
       return boundStateFromRows(fresh, afterClaimRows, await tempUrlMap(deps, afterClaimRows));
     }
+    // D1(§2.4):抢到 cancelling 之后同样先复核 scan 引用再谈删文件。
+    if (await locationScanRefExists(deps, fresh)) {
+      await ticketCol(deps).where({ _id: ticket._id, household_id: deps.householdId, status: "cancelling" }).update({
+        data: {
+          status: "bound",
+          bound_at: fresh.bound_at || deps.now(),
+          scan_retained_at: deps.now(),
+          cleanup_reason: "scan_ref_found"
+        }
+      });
+      return { ok: true, state: "bound", scan_retained: true };
+    }
 
     if (isString(fresh.file_id) && fresh.file_id !== "") {
       var del = await deleteFilesStrict(deps, [fresh.file_id]);
@@ -962,7 +994,14 @@ function createVideoActions(h) {
     return crypto.createHash("sha256").update(String(text)).digest("hex");
   }
 
-  function canonicalSceneItems(items) {
+  /**
+   * canonical 输入(D1 增量):location 存在时逐件追加 node_id[]/move_to_node_id[],
+   * 并把位置上下文 { location_id, scan_id, path_snapshot } 并入签名输入——同一票据
+   * 先无位置后有位置(或反之)→ 签名失配 → OPERATION_CONFLICT,杜绝混合模式重试。
+   * location 缺省时输出与 B 逐字节相同(零感知硬保证,由回归测试锁定)。
+   * expected_version 不进签名:客户端刷新物品版本后同载荷重试必须过签名门。
+   */
+  function canonicalSceneItems(items, locationCtx) {
     var out = [];
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
@@ -976,8 +1015,10 @@ function createVideoActions(h) {
         one.name = it.name;
         one.location_text = it.location_text;
         one.note = it.note;
+        if (locationCtx && it.node_id !== undefined) one.node_id = it.node_id;
       } else {
         one.item_id = it.item_id;
+        if (locationCtx && it.move_to_node_id !== undefined) one.move_to_node_id = it.move_to_node_id;
       }
       out.push(one);
     }
@@ -985,11 +1026,22 @@ function createVideoActions(h) {
     return out;
   }
 
-  function scenePayloadSignature(deps, items) {
-    return sha256Hex(deps, JSON.stringify(canonicalSceneItems(items)));
+  function scenePayloadSignature(deps, items, locationCtx) {
+    var canonical = canonicalSceneItems(items, locationCtx || null);
+    if (locationCtx == null) {
+      return sha256Hex(deps, JSON.stringify(canonical));
+    }
+    return sha256Hex(deps, JSON.stringify({
+      location: {
+        location_id: locationCtx.location_id,
+        scan_id: locationCtx.scan_id,
+        path_snapshot: locationCtx.path_snapshot
+      },
+      items: canonical
+    }));
   }
 
-  async function saveSceneEvidence(deps, ticket, item, highlights, now) {
+  async function saveSceneEvidence(deps, ticket, item, highlights, now, scanId) {
     var existingGot = await evidenceCol(deps).where({
       household_id: deps.householdId,
       item_id: item._id,
@@ -1004,6 +1056,7 @@ function createVideoActions(h) {
         existing.duration_ms === ticket.duration_ms &&
         existing.video_w === ticket.video_w &&
         existing.video_h === ticket.video_h &&
+        (isString(existing.scan_id) ? existing.scan_id : "") === (scanId || "") &&
         stored !== null &&
         highlightsContentKey(stored) === highlightsContentKey(highlights);
       if (same) return { ok: true, duplicated: true, evidence: existing };
@@ -1027,6 +1080,7 @@ function createVideoActions(h) {
       highlight_updated_at: now,
       created_at: now
     };
+    if (scanId) doc.scan_id = scanId;
     try {
       await evidenceCol(deps).add({ data: doc });
       return { ok: true, duplicated: false, evidence: doc };
@@ -1040,7 +1094,12 @@ function createVideoActions(h) {
       var twin = twinGot && twinGot.data && twinGot.data.length > 0 ? twinGot.data[0] : null;
       if (twin === null) return { ok: false, error: "EVIDENCE_WRITE_FAILED", message: "视频证据写入失败,请重试" };
       var twinStored = sanitizeStoredHighlights(twin.highlights, twin.duration_ms);
-      if (twin.asset_id === ticket.asset_id && twinStored !== null && highlightsContentKey(twinStored) === highlightsContentKey(highlights)) {
+      if (
+        twin.asset_id === ticket.asset_id &&
+        (isString(twin.scan_id) ? twin.scan_id : "") === (scanId || "") &&
+        twinStored !== null &&
+        highlightsContentKey(twinStored) === highlightsContentKey(highlights)
+      ) {
         return { ok: true, duplicated: true, evidence: twin };
       }
       return { ok: false, error: "OPERATION_CONFLICT", message: h.ERROR_MESSAGES.OPERATION_CONFLICT };
@@ -1098,6 +1157,488 @@ function createVideoActions(h) {
     return { ok: false, error: "VIDEO_TICKET_BUSY" };
   }
 
+  // ---------------------------------------------------------------------------
+  // D1 位置清点(issue #94,docs/design/video-ai/D1-IMPLEMENTATION.md §2):
+  // location 上下文解析、itemsApi 内的子树等价实现、显式移动/挂载、location_scans 落库。
+  // 所有入口只在 event.location 存在时被调用;集合权限「所有用户不可读不可写」,
+  // 一切读写走本云函数,日志只记计数/错误码。
+  // ---------------------------------------------------------------------------
+
+  function scanCol(deps) { return deps.db.collection(LS); }
+
+  function codePointLength(s) { return Array.from(s).length; }
+
+  /** path_snapshot 段形状门:去首尾空白 1-30 码点(与 locations 的节点名同款门槛) */
+  function cleanSnapshotSegment(v) {
+    if (isString(v) === false) return null;
+    var trimmed = v.trim();
+    var len = codePointLength(trimmed);
+    if (len < 1 || len > 30) return null;
+    return trimmed;
+  }
+
+  /**
+   * 解析 event.location(D1 可选参数)。缺省/未携带返回 null(= B 现行为,零感知);
+   * 形状非法返回 "INVALID"(调用方整批零写)。scene_id 三方一致的第一方在这里:
+   * location.scan_id 必须 === event.scene_id(第二方在 ticket 校验,既有逻辑)。
+   */
+  function parseLocationContext(event) {
+    if (event.location === undefined || event.location === null) return null;
+    var loc = event.location;
+    if (loc === null || typeof loc !== "object" || Array.isArray(loc)) return "INVALID";
+    if (
+      isString(loc.location_id) === false ||
+      loc.location_id.length < 1 ||
+      loc.location_id.length > LOCATION_ID_MAX
+    ) return "INVALID";
+    if (
+      isString(loc.scan_id) === false ||
+      loc.scan_id.length < SCENE_ID_MIN ||
+      loc.scan_id.length > SCENE_ID_MAX ||
+      loc.scan_id !== event.scene_id
+    ) return "INVALID";
+    if (
+      Array.isArray(loc.path_snapshot) === false ||
+      loc.path_snapshot.length < 1 ||
+      loc.path_snapshot.length > LOCATION_SNAPSHOT_SEGMENTS_MAX
+    ) return "INVALID";
+    var segments = [];
+    for (var i = 0; i < loc.path_snapshot.length; i++) {
+      var seg = cleanSnapshotSegment(loc.path_snapshot[i]);
+      if (seg === null) return "INVALID";
+      segments.push(seg);
+    }
+    if (isString(loc.text_snapshot) === false) return "INVALID";
+    if (loc.text_snapshot !== segments.join(LOCATION_PATH_SEPARATOR)) return "INVALID";
+    return { location_id: loc.location_id, scan_id: loc.scan_id, path_snapshot: segments };
+  }
+
+  /**
+   * 拉本家庭全部位置节点(分页拉全量 + 护栏,locations/lib/handler.js fetchAllPages 同款)。
+   * itemsApi 与 locations 是两个独立部署包,不能 require locations/lib/tree.js
+   * (locations 读 items 集合的先例已存在,此处反向对称);子树算法等价性由
+   * tests/location-scan-commit.test.js 的行为级用例保证,两处需同步演进。
+   */
+  async function fetchHouseholdLocationNodes(deps) {
+    var out = [];
+    for (var page = 0; page < 100; page++) {
+      var res = await deps.db.collection(LOCATIONS_COLLECTION)
+        .where({ household_id: deps.householdId })
+        .skip(out.length)
+        .limit(100)
+        .get();
+      var batch = (res && res.data) || [];
+      for (var i = 0; i < batch.length; i++) out.push(batch[i]);
+      if (batch.length < 100) return out;
+    }
+    throw new Error("locations query exceeded 10000 documents");
+  }
+
+  /**
+   * collectSubtree 等价实现(locations/lib/tree.js:39 同款 BFS):返回 rootId 子树的
+   * id→node 映射(含自身);rootId 不在节点集内返回 null。
+   */
+  function subtreeNodesById(nodes, rootId) {
+    var byParent = Object.create(null);
+    var root = null;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n._id === rootId) root = n;
+      if (Object.prototype.hasOwnProperty.call(byParent, n.parent_id) === false) {
+        byParent[n.parent_id] = [];
+      }
+      byParent[n.parent_id].push(n);
+    }
+    if (root === null) return null;
+    var subtree = Object.create(null);
+    subtree[root._id] = root;
+    var queue = [root];
+    while (queue.length > 0) {
+      var cur = queue.shift();
+      var children = byParent[cur._id] || [];
+      for (var c = 0; c < children.length; c++) {
+        subtree[children[c]._id] = children[c];
+        queue.push(children[c]);
+      }
+    }
+    return subtree;
+  }
+
+  /**
+   * location_id 归属与子树校验(读 DB,仍在票据 CAS 之前,非法输入零写):
+   * - 按 { _id, household_id } 查 locations:跨家庭/不存在 → NOT_FOUND(findNodeById 同语义);
+   * - home 根拒绝(清点入口只在非根层,物品不允许挂根);
+   * - 逐件校验 node_id/move_to_node_id ∈ subtree(location_id)(含自身),越界 →
+   *   INVALID_INPUT + detail.out_of_subtree,整批零写;
+   * - target:"new" 的 location_text 必须逐字 === 目标节点 path.join(" / ")
+   *   (服务端权威,消除双份真相);不一致 → INVALID_INPUT 零写。
+   */
+  async function resolveLocationContext(deps, prepared, locationCtx) {
+    var got = await deps.db.collection(LOCATIONS_COLLECTION)
+      .where({ _id: locationCtx.location_id, household_id: deps.householdId })
+      .get();
+    var node = got && got.data && got.data.length > 0 ? got.data[0] : null;
+    if (node === null) return { ok: false, error: "NOT_FOUND" };
+    if (node.parent_id === "") return { ok: false, error: "INVALID_INPUT" };
+    var nodes = await fetchHouseholdLocationNodes(deps);
+    var subtree = subtreeNodesById(nodes, locationCtx.location_id);
+    if (subtree === null) return { ok: false, error: "NOT_FOUND" };
+    var outOfSubtree = [];
+    var targets = Object.create(null);
+    for (var i = 0; i < prepared.length; i++) {
+      var p = prepared[i];
+      if (p.target === "new") {
+        var targetId = p.node_id !== undefined ? p.node_id : locationCtx.location_id;
+        var targetNode = subtree[targetId];
+        if (targetNode === undefined) {
+          outOfSubtree.push(p.draft_key);
+          continue;
+        }
+        if (p.location_text !== targetNode.path.join(LOCATION_PATH_SEPARATOR)) {
+          return { ok: false, error: "INVALID_INPUT", detail: { location_text_mismatch: [p.draft_key] } };
+        }
+        targets[p.draft_key] = { node_id: targetId, path_text: targetNode.path.join(LOCATION_PATH_SEPARATOR) };
+      } else if (p.move_to_node_id !== undefined && subtree[p.move_to_node_id] === undefined) {
+        outOfSubtree.push(p.draft_key);
+      }
+    }
+    if (outOfSubtree.length > 0) {
+      return { ok: false, error: "INVALID_INPUT", detail: { out_of_subtree: outOfSubtree } };
+    }
+    return { ok: true, node: node, subtree: subtree, targets: targets };
+  }
+
+  /** 修改内容指纹(键排序 JSON,itemsApi changesFingerprint 同款算法) */
+  function scanChangesFingerprint(changes) {
+    var keys = Object.keys(changes).sort();
+    var parts = [];
+    for (var i = 0; i < keys.length; i++) {
+      parts.push(JSON.stringify(keys[i]) + ":" + JSON.stringify(changes[keys[i]]));
+    }
+    return "{" + parts.join(",") + "}";
+  }
+
+  /**
+   * D1 显式移动(target:"existing" + move_to_node_id):itemsApi.update 同构的
+   * 版本条件更新,一次写 location_text(目标节点路径文本)+ location_node_id;
+   * update_id = "d1move:"+sha256Hex(scan_id+":"+item_id),确定性,响应丢失重试
+   * 可被三重重放识别。0 命中回查三态:已在目标节点(already)/三重条件命中
+   * (replayed)/否则 VERSION_CONFLICT(该件不写 evidence,由调用方标记,绝不
+   * 静默降级为「只关联」)。expected_version 不进载荷签名:客户端刷新版本后
+   * 同载荷重试必须能过签名门(D1-IMPLEMENTATION §2.1 第 4 条)。
+   */
+  async function applyScanMove(deps, itemId, expectedVersion, targetNodeId, targetPathText, scanId) {
+    var updateId = "d1move:" + sha256Hex(deps, scanId + ":" + itemId);
+    var fingerprint = scanChangesFingerprint({ location_text: targetPathText, location_node_id: targetNodeId });
+    var res = await h.collection(deps).where({
+      _id: itemId,
+      household_id: deps.householdId,
+      deleted: false,
+      version: expectedVersion
+    }).update({
+      data: {
+        location_text: targetPathText,
+        location_node_id: targetNodeId,
+        version: expectedVersion + 1,
+        updated_at: deps.now(),
+        last_update_id: updateId,
+        last_update_fingerprint: fingerprint
+      }
+    });
+    if (((res && res.stats && res.stats.updated) || 0) >= 1) return { ok: true, move: "moved" };
+    var curGot = await h.collection(deps)
+      .where({ _id: itemId, household_id: deps.householdId, deleted: false })
+      .get();
+    var cur = curGot && curGot.data && curGot.data.length > 0 ? curGot.data[0] : null;
+    if (cur === null) return { ok: false, error: "NOT_FOUND" };
+    // 三重重放识别先于 already:同一 d1move 派生标识 + 版本恰为 expected+1 + 内容指纹
+    // 一致 = 本请求自己的上次写入,报 replayed;否则已在目标节点才归 already。
+    if (
+      cur.version === expectedVersion + 1 &&
+      cur.last_update_id === updateId &&
+      cur.last_update_fingerprint === fingerprint
+    ) {
+      return { ok: true, move: "replayed", item: cur };
+    }
+    if (cur.location_node_id === targetNodeId) return { ok: true, move: "already", item: cur };
+    return { ok: false, error: "VERSION_CONFLICT" };
+  }
+
+  /**
+   * D1 新物品挂载(target:"new" 建档后):同款条件更新挂 location_node_id
+   * (expected_version=1;update_id = "d1mount:"+sha256Hex(scan_id+":"+item_id))。
+   * 挂载失败(并发编辑的理论窗口)不推翻「物品已按正确 location_text 建档 +
+   * 证据已存」的事实:返回 mounted:false + mount_error,绝不删物品。
+   */
+  async function applyScanMount(deps, itemId, targetNodeId, scanId) {
+    var updateId = "d1mount:" + sha256Hex(deps, scanId + ":" + itemId);
+    var fingerprint = scanChangesFingerprint({ location_node_id: targetNodeId });
+    var res = await h.collection(deps).where({
+      _id: itemId,
+      household_id: deps.householdId,
+      deleted: false,
+      version: 1
+    }).update({
+      data: {
+        location_node_id: targetNodeId,
+        version: 2,
+        updated_at: deps.now(),
+        last_update_id: updateId,
+        last_update_fingerprint: fingerprint
+      }
+    });
+    if (((res && res.stats && res.stats.updated) || 0) >= 1) return { mounted: true, replayed: false };
+    var curGot = await h.collection(deps)
+      .where({ _id: itemId, household_id: deps.householdId, deleted: false })
+      .get();
+    var cur = curGot && curGot.data && curGot.data.length > 0 ? curGot.data[0] : null;
+    if (cur === null) return { mounted: false, mount_error: "NOT_FOUND" };
+    if (cur.location_node_id === targetNodeId) return { mounted: true, replayed: false };
+    if (
+      cur.version === 2 &&
+      cur.last_update_id === updateId &&
+      cur.last_update_fingerprint === fingerprint
+    ) {
+      return { mounted: true, replayed: true };
+    }
+    return { mounted: false, mount_error: "VERSION_CONFLICT" };
+  }
+
+  /**
+   * location_scans 落库(锁内、逐件循环之后,§2.2 第 4 条):(household_id, scan_id)
+   * 为幂等键。无 → add(_id="ls_"+genId(),E11000 并发 → 回查走下一分支);已有且
+   * file_id/asset_id/location_id 一致 → 以活证据自愈式更新:confirmed_item_ids 由
+   * 调用方从 evidenceRowsForFile 的活行重新算出(部分失败重试后第二次 commit 会把
+   * 补齐的证据计入),candidate_count 取 max(旧, 新),返回 duplicated:true;已有但
+   * file_id/asset_id/location_id 不一致 → OPERATION_CONFLICT(scan_id 被复用到另一段
+   * 视频的客户端 bug 硬门)。零确认件也落 scan(confirmed_count:0)。
+   */
+  async function upsertLocationScan(deps, ticket, locationCtx, node, candidateCount, confirmedItemIds) {
+    var col = scanCol(deps);
+    var existingGot = await col.where({ household_id: deps.householdId, scan_id: locationCtx.scan_id }).get();
+    var existing = existingGot && existingGot.data && existingGot.data.length > 0 ? existingGot.data[0] : null;
+    var now = deps.now();
+    if (existing === null) {
+      var doc = {
+        _id: "ls_" + deps.genId(),
+        household_id: deps.householdId,
+        scan_id: locationCtx.scan_id,
+        location_id: locationCtx.location_id,
+        location_path_snapshot: node.path,
+        location_text_snapshot: node.path.join(LOCATION_PATH_SEPARATOR),
+        file_id: ticket.file_id,
+        asset_id: ticket.asset_id,
+        upload_ticket: ticket._id,
+        duration_ms: ticket.duration_ms,
+        video_w: ticket.video_w,
+        video_h: ticket.video_h,
+        candidate_count: candidateCount,
+        confirmed_count: confirmedItemIds.length,
+        confirmed_item_ids: confirmedItemIds,
+        created_at: now,
+        updated_at: now,
+        status: "active"
+      };
+      try {
+        await col.add({ data: doc });
+        return { ok: true, duplicated: false, scan: doc };
+      } catch (e) {
+        if (h.isDuplicateKeyError(e) === false) throw e;
+        existingGot = await col.where({ household_id: deps.householdId, scan_id: locationCtx.scan_id }).get();
+        existing = existingGot && existingGot.data && existingGot.data.length > 0 ? existingGot.data[0] : null;
+        if (existing === null) throw e;
+      }
+    }
+    if (
+      existing.file_id !== ticket.file_id ||
+      existing.asset_id !== ticket.asset_id ||
+      existing.location_id !== locationCtx.location_id
+    ) {
+      return { ok: false, error: "OPERATION_CONFLICT" };
+    }
+    var patch = {
+      confirmed_item_ids: confirmedItemIds,
+      confirmed_count: confirmedItemIds.length,
+      updated_at: now
+    };
+    patch.candidate_count = Math.max(
+      Number.isInteger(existing.candidate_count) ? existing.candidate_count : 0,
+      candidateCount
+    );
+    await col.where({ _id: existing._id, household_id: deps.householdId }).update({ data: patch });
+    return { ok: true, duplicated: true, scan: Object.assign({}, existing, patch) };
+  }
+
+  /**
+   * location_scans 按 asset/file 的引用复核(§2.4):任一 scan 行存在即视为有引用。
+   * 用于取消与孤儿回收——commit 已落 scan 但 0 件证据成功的会话,其视频是该 scan
+   * 的回看内容,不得删云文件;cancel-before-commit(scan 尚不存在)行为与 B 一致。
+   */
+  async function locationScanRefExists(deps, ticket) {
+    if (isString(ticket.asset_id) && ticket.asset_id !== "") {
+      var byAsset = await scanCol(deps).where({ household_id: deps.householdId, asset_id: ticket.asset_id }).get();
+      if (byAsset && byAsset.data && byAsset.data.length > 0) return true;
+    }
+    if (isString(ticket.file_id) && ticket.file_id !== "") {
+      var byFile = await scanCol(deps).where({ household_id: deps.householdId, file_id: ticket.file_id }).get();
+      if (byFile && byFile.data && byFile.data.length > 0) return true;
+    }
+    return false;
+  }
+
+  /** D1:scan 引用保留的取消收敛——票据修复为 bound(零证据场景),文件绝不删 */
+  async function retainTicketForScan(deps, ticket) {
+    if (ticket.status === "pending" || ticket.status === "binding") {
+      try {
+        await ticketCol(deps).where({ _id: ticket._id, household_id: deps.householdId }).update({
+          data: { status: "bound", bound_at: ticket.bound_at || deps.now(), scan_retained_at: deps.now() }
+        });
+      } catch (e) {
+        // 状态修复失败不改变「不删文件」的事实;清理任务会再次按 scan 引用复核
+      }
+    }
+    return { ok: true, state: "bound", scan_retained: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // D1 只读 action(§2.3 locationScanLatest / §3 locationScanContext):
+  // 位置页「上次清点」与确认页匹配池的唯一读侧入口;纯读零写,不进 WRITE_ACTIONS。
+  // 集合权限「所有用户不可读不可写」,一切读走本云函数;日志只记计数/错误码。
+  // ---------------------------------------------------------------------------
+
+  function projectPoolItem(doc) {
+    return {
+      item_id: doc._id,
+      name: doc.name,
+      location_node_id: isString(doc.location_node_id) ? doc.location_node_id : "",
+      location_text: isString(doc.location_text) ? doc.location_text : "",
+      version: Number.isInteger(doc.version) ? doc.version : 1
+    };
+  }
+
+  /**
+   * locationScanLatest:位置页「上次清点」摘要与回看共用这一次调用(§2.3)。
+   * 拉该位置全部 active scan 行后在函数内按 created_at 倒序取最新一条(排序收口
+   * 在函数内,与 evidenceRowsForFile 同款纪律,不依赖端上 orderBy 行为)。
+   * items 只列仍存活的确认物品;scan.confirmed_count 保持原始数,已删差额由
+   * 客户端对照显示。换链失败 video_url:"" 不废查询(B 同款)。
+   */
+  async function locationScanLatest(event, deps) {
+    if (isString(event.location_id) === false || event.location_id.length < 1 || event.location_id.length > LOCATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await scanCol(deps).where({
+      household_id: deps.householdId,
+      location_id: event.location_id,
+      status: "active"
+    }).get();
+    var rows = (got && got.data) || [];
+    if (rows.length === 0) return { ok: true, scan: null, video_url: "", items: [] };
+    rows.sort(h.byCreatedDesc);
+    var scan = rows[0];
+    var confirmed = Array.isArray(scan.confirmed_item_ids) ? scan.confirmed_item_ids : [];
+    var alive = [];
+    var seenAlive = Object.create(null);
+    for (var i = 0; i < confirmed.length; i++) {
+      if (seenAlive[confirmed[i]] === true) continue; // 防御:清单重复 id 不产生重复行
+      var gotItem = await h.collection(deps)
+        .where({ _id: confirmed[i], household_id: deps.householdId, deleted: false })
+        .get();
+      var doc = gotItem && gotItem.data && gotItem.data.length > 0 ? gotItem.data[0] : null;
+      if (doc === null) continue;
+      seenAlive[doc._id] = true;
+      alive.push({ item_id: doc._id, name: doc.name, location_text: doc.location_text });
+    }
+    var videoUrl = "";
+    if (isString(scan.file_id) && scan.file_id !== "" && typeof deps.getTempFileUrls === "function") {
+      try {
+        var urlMap = h.mapTempUrls(await deps.getTempFileUrls([scan.file_id]));
+        if (Object.prototype.hasOwnProperty.call(urlMap, scan.file_id)) videoUrl = urlMap[scan.file_id];
+      } catch (e) {}
+    }
+    return {
+      ok: true,
+      scan: {
+        scan_id: isString(scan.scan_id) ? scan.scan_id : "",
+        location_id: scan.location_id,
+        created_at: scan.created_at,
+        candidate_count: Number.isInteger(scan.candidate_count) ? scan.candidate_count : 0,
+        confirmed_count: Array.isArray(scan.confirmed_item_ids) ? scan.confirmed_item_ids.length : 0,
+        confirmed_item_ids: confirmed,
+        duration_ms: Number.isInteger(scan.duration_ms) ? scan.duration_ms : 0
+      },
+      video_url: videoUrl,
+      items: alive
+    };
+  }
+
+  /**
+   * locationScanContext(§3):确认页固定位置头卡、逐件子位置选择器与五级匹配
+   * 建议的匹配池来源。subtree 为 collectSubtree 投影(含自身;客户端选择器只
+   * 渲染这份列表,数据面天然不允许出子树);subtree_items 只含挂载在子树内的
+   * 未删物品;household_items 全家庭未删物品按 updated_at 倒序截断 200 并附
+   * truncated 标志。纯服务端读取,无写门;跨家庭 location_id → NOT_FOUND,
+   * home 根 → INVALID_INPUT(清点入口只在非根层,与 resolveLocationContext 同款)。
+   */
+  async function locationScanContext(event, deps) {
+    if (isString(event.location_id) === false || event.location_id.length < 1 || event.location_id.length > LOCATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await deps.db.collection(LOCATIONS_COLLECTION)
+      .where({ _id: event.location_id, household_id: deps.householdId })
+      .get();
+    var node = got && got.data && got.data.length > 0 ? got.data[0] : null;
+    if (node === null) return fail("NOT_FOUND");
+    if (node.parent_id === "") return fail("INVALID_INPUT");
+    var nodes = await fetchHouseholdLocationNodes(deps);
+    var subtree = subtreeNodesById(nodes, event.location_id);
+    if (subtree === null) return fail("NOT_FOUND");
+    var subtreeIds = Object.create(null);
+    var subtreeList = [];
+    var keys = Object.keys(subtree);
+    for (var k = 0; k < keys.length; k++) {
+      var n = subtree[keys[k]];
+      subtreeIds[n._id] = true;
+      subtreeList.push({ location_id: n._id, name: n.name, path: n.path, parent_id: n.parent_id });
+    }
+    // 渲染顺序:路径深度升序、同深名称字典序——客户端缩进列表直接可用,稳定不抖
+    subtreeList.sort(function (a, b) {
+      if (a.path.length !== b.path.length) return a.path.length - b.path.length;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+
+    // 全家庭未删物品分页拉全(与 handler.js fetchActiveItems 同款护栏),再在
+    // 函数内分流:子树内 → subtree_items;全量按 updated_at 倒序截断 200。
+    var items = [];
+    for (var page = 0; page < 100; page++) {
+      var res = await h.collection(deps)
+        .where({ household_id: deps.householdId, deleted: false })
+        .skip(items.length)
+        .limit(100)
+        .get();
+      var batch = (res && res.data) || [];
+      for (var b = 0; b < batch.length; b++) items.push(batch[b]);
+      if (batch.length < 100) break;
+    }
+    var subtreeItems = [];
+    for (var si = 0; si < items.length; si++) {
+      if (subtreeIds[items[si].location_node_id] === true) subtreeItems.push(projectPoolItem(items[si]));
+    }
+    var sorted = items.slice().sort(function (a, b) {
+      if (a.updated_at === b.updated_at) return 0;
+      return a.updated_at < b.updated_at ? 1 : -1;
+    });
+    var truncated = sorted.length > SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX;
+    var householdItems = sorted.slice(0, SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX).map(projectPoolItem);
+    return {
+      ok: true,
+      subtree: subtreeList,
+      subtree_items: subtreeItems,
+      household_items: householdItems,
+      household_truncated: truncated
+    };
+  }
+
   function parseSceneCommitItems(raw) {
     if (Array.isArray(raw) === false || raw.length < 1 || raw.length > SCENE_ITEMS_MAX) return "INVALID";
     var out = [];
@@ -1112,7 +1653,16 @@ function createVideoActions(h) {
       seenDraft[it.draft_key] = true;
       var highlights = parseHighlightInput(it.highlights);
       if (highlights === "INVALID") return "INVALID";
+      // D1 可选字段(缺省 = B 现行为):node_id 仅 target:"new";move_to_node_id 仅
+      // target:"existing" 且 expected_version 必填当且仅当 move_to_node_id 出现。
+      var hasNodeId = it.node_id !== undefined && it.node_id !== null;
+      var hasMoveTo = it.move_to_node_id !== undefined && it.move_to_node_id !== null;
+      var hasExpectedVersion = it.expected_version !== undefined && it.expected_version !== null;
+      if (hasNodeId && (isString(it.node_id) === false || it.node_id.length < 1 || it.node_id.length > LOCATION_ID_MAX)) return "INVALID";
+      if (hasMoveTo && (isString(it.move_to_node_id) === false || it.move_to_node_id.length < 1 || it.move_to_node_id.length > LOCATION_ID_MAX)) return "INVALID";
+      if (hasExpectedVersion && (Number.isInteger(it.expected_version) === false || it.expected_version < 1)) return "INVALID";
       if (it.target === "new") {
+        if (hasMoveTo || hasExpectedVersion) return "INVALID";
         if (isString(it.operation_id) === false || it.operation_id.length < 1 || it.operation_id.length > h.OPERATION_ID_MAX) return "INVALID";
         if (seenOperation[it.operation_id] === true) return "INVALID";
         seenOperation[it.operation_id] = true;
@@ -1122,12 +1672,21 @@ function createVideoActions(h) {
         if (location === null) return "INVALID";
         var note = h.cleanOptional(it.note, h.NOTE_MAX);
         if (note === null) return "INVALID";
-        out.push({ draft_key: it.draft_key, target: "new", operation_id: it.operation_id, name: name, location_text: location, note: note, highlights: highlights });
+        var newItemOut = { draft_key: it.draft_key, target: "new", operation_id: it.operation_id, name: name, location_text: location, note: note, highlights: highlights };
+        if (hasNodeId) newItemOut.node_id = it.node_id;
+        out.push(newItemOut);
       } else if (it.target === "existing") {
+        if (hasNodeId) return "INVALID";
+        if (hasMoveTo !== hasExpectedVersion) return "INVALID";
         if (h.validItemId(it.item_id) === false) return "INVALID";
         if (seenExisting[it.item_id] === true) return "INVALID";
         seenExisting[it.item_id] = true;
-        out.push({ draft_key: it.draft_key, target: "existing", item_id: it.item_id, highlights: highlights });
+        var existingItemOut = { draft_key: it.draft_key, target: "existing", item_id: it.item_id, highlights: highlights };
+        if (hasMoveTo) {
+          existingItemOut.move_to_node_id = it.move_to_node_id;
+          existingItemOut.expected_version = it.expected_version;
+        }
+        out.push(existingItemOut);
       } else {
         return "INVALID";
       }
@@ -1152,6 +1711,42 @@ function createVideoActions(h) {
       if (highlightsWithinDuration(prepared[hp].highlights, event.duration_ms) === false) return fail("INVALID_INPUT");
     }
 
+    // D1 位置上下文(可选;缺省 = B 现行为零感知):形状门先于一切读写,
+    // 非法参数整批零写(与 B 的「纯参数错误零写」同款纪律)。
+    var locationCtx = parseLocationContext(event);
+    if (locationCtx === "INVALID") return fail("INVALID_INPUT");
+    var hasCandidateCount = event.candidate_count !== undefined && event.candidate_count !== null;
+    if (hasCandidateCount && locationCtx === null) return fail("INVALID_INPUT");
+    var candidateCount = 0;
+    if (hasCandidateCount) {
+      if (
+        Number.isInteger(event.candidate_count) === false ||
+        event.candidate_count < 0 ||
+        event.candidate_count > SCAN_CANDIDATE_MAX
+      ) return fail("INVALID_INPUT");
+      candidateCount = event.candidate_count;
+    }
+
+    // D1 归属与子树校验(读 DB,仍在票据 CAS 之前,非法输入零写):
+    // 跨家庭 location_id → NOT_FOUND;件选子树外节点 → INVALID_INPUT + out_of_subtree;
+    // target:"new" 的 location_text 必须 === 目标节点路径文本(服务端权威)。
+    var locationInfo = null;
+    if (locationCtx !== null) {
+      var resolvedLocation = await resolveLocationContext(deps, prepared, locationCtx);
+      if (resolvedLocation.ok !== true) {
+        if (resolvedLocation.detail) {
+          return {
+            ok: false,
+            error: resolvedLocation.error,
+            message: h.ERROR_MESSAGES.INVALID_INPUT,
+            detail: resolvedLocation.detail
+          };
+        }
+        return fail(resolvedLocation.error);
+      }
+      locationInfo = resolvedLocation;
+    }
+
     var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
     var ticket = gotTicket && gotTicket.data;
     if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
@@ -1172,7 +1767,7 @@ function createVideoActions(h) {
     var url = await verifyFile(deps, event.file_id);
     if (url === "") return fail("VIDEO_NOT_AVAILABLE");
 
-    var signature = scenePayloadSignature(deps, prepared);
+    var signature = scenePayloadSignature(deps, prepared, locationCtx);
     if (isString(ticket.scene_payload_sig) && ticket.scene_payload_sig !== "" && ticket.scene_payload_sig !== signature) {
       return fail("OPERATION_CONFLICT");
     }
@@ -1245,13 +1840,54 @@ function createVideoActions(h) {
           if (failedKeys.indexOf(rr.p.draft_key) === -1) failedKeys.push(rr.p.draft_key);
           continue;
         }
-        var saveRes = await saveSceneEvidence(deps, ticket, alive, rr.p.highlights, deps.now());
+        // D1 显式移动(target:"existing" + move_to_node_id):移动先于证据——若先存
+        // 证据再移动失败,结果是用户未同意的「只关联」,违背显式确认原则;冲突时
+        // 该件不写 evidence(绝不静默降级为「只关联」),其余件照常。
+        var pendingMove = null;
+        if (locationCtx !== null && rr.p.target === "existing" && rr.p.move_to_node_id !== undefined) {
+          var moveRes = await applyScanMove(
+            deps,
+            itemId,
+            rr.p.expected_version,
+            rr.p.move_to_node_id,
+            locationInfo.subtree[rr.p.move_to_node_id].path.join(LOCATION_PATH_SEPARATOR),
+            locationCtx.scan_id
+          );
+          if (moveRes.ok !== true) {
+            results.push({
+              draft_key: rr.p.draft_key,
+              ok: false,
+              item_id: itemId,
+              error: moveRes.error === "NOT_FOUND" ? "NOT_FOUND" : "VERSION_CONFLICT",
+              message: moveRes.error === "NOT_FOUND" ? h.ERROR_MESSAGES.NOT_FOUND : h.ERROR_MESSAGES.VERSION_CONFLICT,
+              moved: false
+            });
+            if (failedKeys.indexOf(rr.p.draft_key) === -1) failedKeys.push(rr.p.draft_key);
+            continue;
+          }
+          pendingMove = moveRes.move;
+          // 新证据行的 captured_location_text 取移动后物品的 location_text(新位置);
+          // 旧证据行的 captured_location_text 创建时已冻结,天然不动。
+          if (moveRes.item !== undefined && moveRes.item !== null) {
+            alive = moveRes.item;
+          } else {
+            alive = await itemAlive(deps, itemId);
+          }
+        }
+        var saveRes = await saveSceneEvidence(
+          deps,
+          ticket,
+          alive,
+          rr.p.highlights,
+          deps.now(),
+          locationCtx !== null ? locationCtx.scan_id : ""
+        );
         if (saveRes.ok !== true) {
           results.push({ draft_key: rr.p.draft_key, ok: false, item_id: itemId, error: saveRes.error, message: saveRes.message || "视频证据写入失败" });
           if (failedKeys.indexOf(rr.p.draft_key) === -1) failedKeys.push(rr.p.draft_key);
           continue;
         }
-        results.push({
+        var resultRow = {
           draft_key: rr.p.draft_key,
           ok: true,
           item_id: itemId,
@@ -1259,10 +1895,56 @@ function createVideoActions(h) {
           duplicated: rr.duplicated,
           evidence_saved: true,
           evidence_duplicated: saveRes.duplicated === true
-        });
+        };
+        // D1 响应增量:existing 显式移动 → move:moved|already|replayed;new → node_id +
+        // mounted(挂载失败不推翻建档与证据,mount_error 如实上报,绝不删物品)。
+        if (pendingMove !== null) resultRow.move = pendingMove;
+        if (locationCtx !== null && rr.p.target === "new") {
+          var mountTarget = locationInfo.targets[rr.p.draft_key];
+          resultRow.node_id = mountTarget.node_id;
+          var mountRes = await applyScanMount(deps, itemId, mountTarget.node_id, locationCtx.scan_id);
+          resultRow.mounted = mountRes.mounted === true;
+          if (mountRes.mounted !== true) {
+            resultRow.mount_error = mountRes.mount_error || "VERSION_CONFLICT";
+          }
+        }
+        results.push(resultRow);
       }
 
       var refs = await evidenceRowsForFile(deps, ticket.file_id, ticket.asset_id);
+      // D1 location_scans 落库(锁内、逐件循环之后):confirmed_item_ids 不取自载荷,
+      // 而是重新查询活证据行中 scan_id 相等、且 item_id ∈ 本次提交 item 集合的行——
+      // 部分失败重试后第二次 commit 会把补齐的证据计入,confirmed_count 自然收敛。
+      var scanInfo = null;
+      if (locationCtx !== null) {
+        var commitItemIds = Object.create(null);
+        for (var ci = 0; ci < resolved.length; ci++) {
+          if (resolved[ci].item) commitItemIds[resolved[ci].item._id] = true;
+        }
+        var confirmedIds = [];
+        var seenConfirmed = Object.create(null);
+        for (var sr = 0; sr < refs.length; sr++) {
+          if (
+            refs[sr].scan_id === locationCtx.scan_id &&
+            commitItemIds[refs[sr].item_id] === true &&
+            seenConfirmed[refs[sr].item_id] !== true
+          ) {
+            seenConfirmed[refs[sr].item_id] = true;
+            confirmedIds.push(refs[sr].item_id);
+          }
+        }
+        confirmedIds.sort();
+        var scanRes = await upsertLocationScan(
+          deps,
+          ticket,
+          locationCtx,
+          locationInfo.node,
+          candidateCount,
+          confirmedIds
+        );
+        if (scanRes.ok !== true) return fail(scanRes.error || "OPERATION_CONFLICT");
+        scanInfo = scanRes;
+      }
       if (refs.length > 0) {
         await ticketCol(deps).where({ _id: ticket._id, household_id: deps.householdId }).update({ data: {
           status: "bound",
@@ -1275,7 +1957,7 @@ function createVideoActions(h) {
           scene_partial_at: deps.now()
         } });
       }
-      return {
+      var commitResponse = {
         ok: true,
         scene_id: event.scene_id,
         asset_id: ticket.asset_id,
@@ -1283,6 +1965,16 @@ function createVideoActions(h) {
         results: results,
         evidence_failed: failedKeys
       };
+      if (locationCtx !== null) {
+        commitResponse.scan = {
+          scan_id: locationCtx.scan_id,
+          location_id: locationCtx.location_id,
+          status: "active",
+          confirmed_count: scanInfo.scan.confirmed_count,
+          evidence_failed: failedKeys
+        };
+      }
+      return commitResponse;
     } finally {
       if (assetLock !== null && assetLock.ok === true) {
         await releaseAssetLock(deps, ticket.asset_id, assetLock.token);
@@ -1481,6 +2173,8 @@ function createVideoActions(h) {
     videoEvidenceHighlightSave: videoEvidenceHighlightSave,
     videoEvidenceDelete: videoEvidenceDelete,
     videoSceneCommit: videoSceneCommit,
+    locationScanLatest: locationScanLatest,
+    locationScanContext: locationScanContext,
     cleanupForItem: cleanupForItem,
     acquireItemLock: acquireItemLock,
     acquireAssetLock: acquireAssetLock,

@@ -116,7 +116,46 @@
         <view class="row-more" catchtap="onItemMore" data-index="{{ index }}">⋯</view>
       </view>
     </view>
+
+    <!-- D1(#94)底部入口卡:仅 browse 且非根层;点整卡拍摄,点「回看」进回放 -->
+    <view wx:if="{{ mode === 'browse' && hasScanEntry }}" class="card scan-entry-card">
+      <view class="scan-entry" bindtap="onScanEntryTap">
+        <view class="item-main">
+          <view class="item-name">📹 拍视频清点这里</view>
+          <view wx:if="{{ scanSummaryText }}" class="item-location">{{ scanSummaryText }}</view>
+        </view>
+        <view wx:if="{{ scanSummaryText }}" class="pick-check" catchtap="onScanReviewTap">回看</view>
+        <view wx:else class="chevron">›</view>
+      </view>
+    </view>
   </block>
+</view>
+
+<!-- D1(#94)删除位置三按钮弹层:影响面文案 + 取消/迁移/全部删除 -->
+<view wx:if="{{ deleteLayer.visible }}" class="layer-mask" bindtap="onDeleteLayerCancel">
+  <view class="delete-layer" catchtap="noop">
+    <view class="card-title">删除「{{ deleteLayer.name }}」</view>
+    <view class="hint">{{ deleteLayer.countsText }}</view>
+    <view wx:if="{{ deleteLayer.scanCount > 0 }}" class="hint">
+      含 {{ deleteLayer.scanCount }} 次视频清点记录
+    </view>
+    <button class="btn block" disabled="{{ deleteLayer.busy }}" bindtap="onDeleteLayerCancel">
+      <view class="btn-face">取消</view>
+    </button>
+    <button
+      class="btn block"
+      disabled="{{ deleteLayer.busy || !deleteLayer.migrateAvailable }}"
+      bindtap="onMigrateTap"
+    >
+      <view class="btn-face">删位置并迁移物品</view>
+    </button>
+    <view wx:if="{{ !deleteLayer.migrateAvailable }}" class="hint">
+      顶层房间不能迁移(物品不能直接挂「我的家」),可移动物品后重试或改用全部删除
+    </view>
+    <button class="btn block danger" disabled="{{ deleteLayer.busy }}" bindtap="onPurgeTap">
+      <view class="btn-face">全部删除</view>
+    </button>
+  </view>
 </view>
 
 <!-- 常驻语音条:按住说话记一件(issue #45 全局可达);选择位置(picker)是过渡任务流,不挂语音入口 -->

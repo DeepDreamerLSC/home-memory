@@ -13,6 +13,8 @@ import {
 } from "../../utils/locations-cache";
 import type { LocationsRequestSeq } from "../../utils/locations-cache";
 import { errorMessage, formatDateTime, uuid } from "../../utils/api";
+import { callItemsApi } from "../../utils/api";
+import { lastScanSummaryText } from "../../utils/location-scan";
 import { householdScopeName, isHouseholdScopeShared, isScopeVerified } from "../../utils/household-scope";
 import type {
   ItemSummary,
@@ -36,6 +38,17 @@ type DisplayNode = LocationNodeSummary & {
 
 /** 用于渲染的物品条目(附格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
+
+/** D1(#94)删除位置三按钮弹层:影响面文案来自 deletePreview(只读计数) */
+interface DeleteLayerState {
+  visible: boolean;
+  nodeId: string;
+  name: string;
+  countsText: string;
+  scanCount: number;
+  migrateAvailable: boolean;
+  busy: boolean;
+}
 
 /** 页面 query 参数不会自动解码;容错解码(已解码或含非法 % 时原样返回) */
 function safeDecode(s: string | undefined): string {
@@ -91,6 +104,12 @@ Page<
     canScan: boolean;
     /** 结构操作进行中(rename/move/merge/delete/add),防止并发重复提交 */
     acting: boolean;
+    /** D1(#94):browse 且非根层显示「拍视频清点这里」入口卡(根层不显示) */
+    hasScanEntry: boolean;
+    /** D1(#94):「上次清点」摘要行;空串 = 无记录或读取失败(静默隐藏) */
+    scanSummaryText: string;
+    /** D1(#94)删除位置三按钮弹层(影响面文案 + migrate 可用性) */
+    deleteLayer: DeleteLayerState;
   },
   {
     nodeId: string;
@@ -128,6 +147,21 @@ Page<
     onAddTap(): void;
     doAdd(name: string): Promise<void>;
     onScanTap(): void;
+    /** 弹层防冒泡占位 */
+    noop(): void;
+    /** D1(#94)位置级视频清点:底部入口卡 / 上次清点摘要 / 回看 */
+    loadScanSummary(nodeId: string): Promise<void>;
+    scanLoadSeq: number;
+    onScanEntryTap(): void;
+    onScanReviewTap(): void;
+    /** D1(#94)删除位置三按钮:preview 影响面 → 弹层三选(取消/迁移/全部删除) */
+    deleteNodeWithPreview(node: DisplayNode): Promise<void>;
+    onDeleteLayerCancel(): void;
+    onMigrateTap(): void;
+    onPurgeTap(): void;
+    doMigrateDelete(): Promise<void>;
+    doPurgeDelete(): Promise<void>;
+    deleteLayerBusy(busy: boolean): void;
     onItemTap(e: WechatMiniprogram.CustomEvent): void;
     onItemMore(e: WechatMiniprogram.CustomEvent): void;
     moveItem(item: DisplayItem): void;
@@ -167,6 +201,17 @@ Page<
     hasRooms: false,
     canScan: false,
     acting: false,
+    hasScanEntry: false,
+    scanSummaryText: "",
+    deleteLayer: {
+      visible: false,
+      nodeId: "",
+      name: "",
+      countsText: "",
+      scanCount: 0,
+      migrateAvailable: false,
+      busy: false,
+    },
   },
 
   nodeId: "",
@@ -175,11 +220,13 @@ Page<
   pendingPick: null as ((picked: PickedLocation) => void) | null,
   requestSeq: createRequestSeq(),
   renderedOnce: false,
+  scanLoadSeq: 0,
 
   onLoad(options) {
     // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
     this.requestSeq = createRequestSeq();
     this.renderedOnce = false;
+    this.scanLoadSeq = 0;
     const isPicker = options.picker === "1";
     this.nodeId = safeDecode(options.node_id);
     this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
@@ -293,6 +340,10 @@ Page<
       updated_at_text: formatDateTime(it.updated_at),
     }));
     this.renderedOnce = true;
+    // D1(#94):browse 且非根层显示底部「拍视频清点这里」入口卡;根层不显示
+    // (物品不允许挂 home 根,「清点我的家整体」没有可归档目标)。fire-and-forget
+    // 拉「上次清点」摘要,失败静默隐藏第二行(不影响主列表)。
+    const scanEntry = this.data.mode === "browse" && !isRoot && res.node.location_id !== "";
     this.setData({
       breadcrumbText: isRoot
         ? "我的家"
@@ -308,6 +359,71 @@ Page<
       familyName: householdScopeName() || "",
       hasRooms: res.children.length > 0,
       canScan: res.unmounted_count > 0,
+      hasScanEntry: scanEntry,
+    });
+    if (scanEntry) {
+      void this.loadScanSummary(res.node.location_id);
+    } else if (this.data.scanSummaryText !== "") {
+      this.setData({ scanSummaryText: "" });
+    }
+  },
+
+  /**
+   * D1(#94)「上次清点」:读最新 active location_scan 的摘要行(§2.3 一次调用)。
+   * 迟到守卫:序号 + nodeId 双重校验(下钻后旧层响应不上屏);失败静默——
+   * 摘要是增强信息,绝不打断空间浏览主流程。首页不做任何改动(#94「首页不展示」)。
+   */
+  async loadScanSummary(nodeId: string): Promise<void> {
+    const seq = this.scanLoadSeq + 1;
+    this.scanLoadSeq = seq;
+    try {
+      const res = await callItemsApi({ action: "locationScanLatest", location_id: nodeId });
+      if (this.scanLoadSeq !== seq || this.data.currentNodeId !== nodeId) {
+        return; // 迟到响应:用户已进入其他层
+      }
+      if (res.scan === null) {
+        this.setData({ scanSummaryText: "" });
+        return;
+      }
+      this.setData({
+        scanSummaryText: lastScanSummaryText(
+          res.scan.created_at,
+          res.scan.confirmed_count,
+          res.items.length,
+        ),
+      });
+    } catch (e) {
+      if (this.scanLoadSeq === seq && this.data.currentNodeId === nodeId) {
+        this.setData({ scanSummaryText: "" });
+      }
+    }
+  },
+
+  /** 点整卡进入拍摄清点(把当前层 node_id 带给清点页固定位置上下文) */
+  onScanEntryTap() {
+    if (this.data.mode !== "browse" || !this.data.hasScanEntry || this.data.acting) {
+      return;
+    }
+    wx.navigateTo({
+      url: "/pages/location-video-scan/location-video-scan?node_id=" +
+        encodeURIComponent(this.data.currentNodeId),
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
+    });
+  },
+
+  /** 点「回看」进上次清点的回放(不自动播放)+ 确认物品清单 */
+  onScanReviewTap() {
+    if (this.data.mode !== "browse" || !this.data.hasScanEntry) {
+      return;
+    }
+    wx.navigateTo({
+      url: "/pages/location-video-scan/location-video-scan?mode=last&node_id=" +
+        encodeURIComponent(this.data.currentNodeId),
+      fail: () => {
+        wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
+      },
     });
   },
 
@@ -477,7 +593,9 @@ Page<
         } else if (r.tapIndex === 2) {
           this.mergeNode(node);
         } else if (r.tapIndex === 3) {
-          this.deleteNode(node);
+          // D1(#94):「删除」改走 preview + 三按钮弹层;旧 delete/force 交互保留
+          // 为服务端兜底(其他调用方零回归),页面不再触达
+          void this.deleteNodeWithPreview(node);
         }
       },
       fail: () => {},
@@ -698,6 +816,200 @@ Page<
       },
     });
   },
+
+  /* ------------------------------------------------------------------
+   * D1(#94)删除位置三按钮:preview 影响面 → 自定义半屏弹层三选
+   * (取消 / 删位置并迁移物品 / 全部删除)。取消不调任何接口;
+   * 迁移物品条件重挂上一级(冲突中止零删除,可重试);全部删除先逐件
+   * itemsApi.delete(B 已验收级联)再 deleteLocation(purge),二次确认,
+   * NODE_NOT_EMPTY 收敛清单兜住删除期间的并发挂载。根位置无「⋯」入口,
+   * 服务端 deletePreview/deleteLocation 再拦一层(双重防删)。
+   * ------------------------------------------------------------------ */
+
+  /** 「⋯ → 删除」新流程:先拉影响面计数,再开三按钮弹层(纯读) */
+  async deleteNodeWithPreview(node) {
+    if (this.data.acting) {
+      return;
+    }
+    this.setData({ acting: true });
+    try {
+      const preview = await callLocationsApi({
+        action: "deletePreview",
+        node_id: node.location_id,
+      });
+      this.setData({
+        deleteLayer: {
+          visible: true,
+          nodeId: node.location_id,
+          name: node.name,
+          countsText:
+            "当前及子位置共 " + preview.node_count + " 个,物品 " +
+            preview.item_count + " 件,关联视频 " + preview.video_count + " 条",
+          scanCount: preview.scan_count,
+          migrateAvailable: preview.migrate_available,
+          busy: false,
+        },
+      });
+    } catch (e) {
+      wx.showModal({ title: "读取影响面失败", content: errorMessage(e), showCancel: false });
+    } finally {
+      this.setData({ acting: false });
+    }
+  },
+
+  /** 取消:关弹层,不调任何接口(#94 三按钮语义) */
+  onDeleteLayerCancel() {
+    this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
+  },
+
+  deleteLayerBusy(busy) {
+    this.setData({ deleteLayer: { ...this.data.deleteLayer, busy } });
+  },
+
+  onMigrateTap() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy || this.data.acting) {
+      return;
+    }
+    if (!layer.migrateAvailable) {
+      wx.showToast({ title: "物品不能直接挂「我的家」,请改用全部删除", icon: "none" });
+      return;
+    }
+    void this.doMigrateDelete();
+  },
+
+  /** 删位置并迁移物品:物品条件重挂上一级 → 删子树;scan 标 location_deleted */
+  async doMigrateDelete() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy) {
+      return;
+    }
+    this.deleteLayerBusy(true);
+    try {
+      const res = await callLocationsApi({
+        action: "deleteLocation",
+        node_id: layer.nodeId,
+        mode: "migrate",
+      });
+      this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
+      wx.showToast({
+        title: res.remounted > 0
+          ? "已删除;" + res.remounted + " 件物品已挂到上一级"
+          : "已删除",
+        icon: res.remounted > 0 ? "none" : "success",
+        duration: res.remounted > 0 ? 3000 : 1500,
+      });
+      await this.loadNode();
+    } catch (e) {
+      // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试
+      this.deleteLayerBusy(false);
+      wx.showModal({ title: "删除失败", content: errorMessage(e), showCancel: false });
+    }
+  },
+
+  onPurgeTap() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy || this.data.acting) {
+      return;
+    }
+    void this.doPurgeDelete();
+  },
+
+  /**
+   * 全部删除(#94 必须二次确认):先逐件 itemsApi.delete(软删级联——证据行、
+   * 末引用才删云文件、提醒清理全部是 B 已验收资产,顺序执行),再
+   * deleteLocation(purge);期间有并发挂载 → NODE_NOT_EMPTY 附 remaining_items
+   * 清单,补删后重试(收敛循环,上限 3 轮)。每步幂等:软删后重删返回
+   * NOT_FOUND 视为完成。
+   */
+  async doPurgeDelete() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy) {
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      wx.showModal({
+        title: "全部删除(不可恢复)",
+        content:
+          "「" + layer.name + "」" + layer.countsText + "。将删除这些物品及其全部视频/照片证据,连带子位置与清点记录一起删除。确定?",
+        confirmText: "全部删除",
+        confirmColor: "#d93025",
+        cancelText: "取消",
+        success: (r) => resolve(r.confirm === true),
+        fail: () => resolve(false),
+      });
+    });
+    if (confirmed === false) {
+      return;
+    }
+    this.deleteLayerBusy(true);
+    try {
+      let remaining: Array<{ item_id: string }> = [];
+      for (let round = 0; round < 3; round++) {
+        if (remaining.length > 0) {
+          wx.showLoading({ title: "正在删除物品…", mask: true });
+          const failedNames: string[] = [];
+          for (const row of remaining) {
+            try {
+              await callItemsApi({ action: "delete", item_id: row.item_id });
+            } catch (e) {
+              // NOT_FOUND = 已被别处删除,视为完成;其余如实收集后中止
+              const msg = errorMessage(e);
+              if (msg.indexOf("没有找到") === -1 && msg.indexOf("NOT_FOUND") === -1) {
+                failedNames.push(msg);
+                break;
+              }
+            }
+          }
+          wx.hideLoading();
+          if (failedNames.length > 0) {
+            wx.showModal({
+              title: "部分物品删除失败",
+              content: failedNames[0] + " 已删的物品不会恢复,可重试继续删除剩余部分。",
+              showCancel: false,
+            });
+            return;
+          }
+        }
+        try {
+          const res = await callLocationsApi({
+            action: "deleteLocation",
+            node_id: layer.nodeId,
+            mode: "purge",
+          });
+          this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
+          wx.showToast({ title: "已全部删除", icon: "success" });
+          await this.loadNode();
+          return;
+        } catch (e) {
+          if (isLocationsApiErrorWithCode(e, "NODE_NOT_EMPTY")) {
+            const detail = e.detail as { remaining_items?: unknown } | undefined;
+            const rows = detail && Array.isArray(detail.remaining_items)
+              ? detail.remaining_items as Array<{ item_id: string }>
+              : [];
+            if (rows.length > 0) {
+              remaining = rows; // 删除期间有并发挂载:补删后重试(收敛)
+              continue;
+            }
+          }
+          throw e;
+        }
+      }
+      // 3 轮仍有物品持续被挂进来:如实报告,用户可重试
+      this.deleteLayerBusy(false);
+      wx.showModal({
+        title: "暂未能全部删除",
+        content: "有物品刚被移入这个范围,列表已更新;请再试一次完成删除。",
+        showCancel: false,
+      });
+    } catch (e) {
+      this.deleteLayerBusy(false);
+      wx.showModal({ title: "删除失败", content: errorMessage(e), showCancel: false });
+    }
+  },
+
+  /** 弹层防冒泡占位(点面板不吃掉遮罩关闭) */
+  noop() {},
 
   /** 手动添加子位置(根层=添加房间):ensurePath created_from:"manual" */
   onAddTap() {

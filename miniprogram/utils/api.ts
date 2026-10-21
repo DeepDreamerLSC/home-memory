@@ -31,6 +31,8 @@ import type {
   ItemsApiOkResponse,
   ItemSummary,
   ListItemsResponse,
+  LocationScanContextResponse,
+  LocationScanLatestResponse,
   PhotoCommitResponse,
   PhotoEvidenceGetResponse,
   PhotoEvidenceRetryResponse,
@@ -459,6 +461,62 @@ function validateItemsOkResponse(
     case "videoEvidenceDelete":
       if (typeof r.deleted !== "number") throw bad();
       break;
+    case "locationScanLatest": {
+      // D1(#94):scan:null 合法(无清点记录);有 scan 时字段齐整才上屏,
+      // 残缺响应按异常处理——「上次清点」摘要绝不拿半份数据拼文案
+      if (r.scan === null) {
+        if (typeof r.video_url !== "string" || Array.isArray(r.items) === false) throw bad();
+        break;
+      }
+      const scan = r.scan as unknown;
+      if (
+        isRecord(scan) === false ||
+        typeof (scan as { scan_id?: unknown }).scan_id !== "string" ||
+        typeof (scan as { location_id?: unknown }).location_id !== "string" ||
+        typeof (scan as { created_at?: unknown }).created_at !== "string" ||
+        Array.isArray((scan as { confirmed_item_ids?: unknown }).confirmed_item_ids) === false ||
+        typeof r.video_url !== "string" ||
+        Array.isArray(r.items) === false ||
+        r.items.every(
+          (row) =>
+            isRecord(row) &&
+            typeof row.item_id === "string" &&
+            typeof row.name === "string" &&
+            typeof row.location_text === "string",
+        ) === false
+      ) {
+        throw bad();
+      }
+      break;
+    }
+    case "locationScanContext": {
+      // D1(#94):匹配池与子树选择器是确认页的结构事实源,形状不符按异常处理
+      const validNode = (v: unknown): boolean =>
+        isRecord(v) &&
+        typeof v.location_id === "string" &&
+        typeof v.name === "string" &&
+        Array.isArray(v.path) &&
+        typeof v.parent_id === "string";
+      const validPoolItem = (v: unknown): boolean =>
+        isRecord(v) &&
+        typeof v.item_id === "string" &&
+        typeof v.name === "string" &&
+        typeof v.location_node_id === "string" &&
+        typeof v.location_text === "string" &&
+        Number.isInteger(v.version);
+      if (
+        Array.isArray(r.subtree) === false ||
+        r.subtree.every(validNode) === false ||
+        Array.isArray(r.subtree_items) === false ||
+        r.subtree_items.every(validPoolItem) === false ||
+        Array.isArray(r.household_items) === false ||
+        r.household_items.every(validPoolItem) === false ||
+        typeof r.household_truncated !== "boolean"
+      ) {
+        throw bad();
+      }
+      break;
+    }
     case "videoEvidenceGet":
       if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false) throw bad();
       break;
@@ -583,6 +641,12 @@ export function callItemsApi(
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "videoEvidenceDelete" }>,
 ): Promise<VideoEvidenceDeleteResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "locationScanLatest" }>,
+): Promise<LocationScanLatestResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "locationScanContext" }>,
+): Promise<LocationScanContextResponse>;
 export async function callItemsApi(
   event: ItemsApiEvent,
 ): Promise<ItemsApiOkResponse> {

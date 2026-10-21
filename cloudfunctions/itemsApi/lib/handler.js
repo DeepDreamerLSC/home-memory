@@ -2624,7 +2624,10 @@ var ACTIONS = {
   videoEvidenceGet: videoActions.videoEvidenceGet,
   videoEvidenceHighlightSave: videoActions.videoEvidenceHighlightSave,
   videoEvidenceDelete: videoActions.videoEvidenceDelete,
-  videoSceneCommit: videoActions.videoSceneCommit
+  videoSceneCommit: videoActions.videoSceneCommit,
+  // D1 位置级清点只读 action(#94):不进 WRITE_ACTIONS,零写入门
+  locationScanLatest: videoActions.locationScanLatest,
+  locationScanContext: videoActions.locationScanContext
 };
 
 /**

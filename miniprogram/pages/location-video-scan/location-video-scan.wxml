@@ -1,0 +1,229 @@
+<!-- D1 位置级视频清点(#94):scan=拍摄确认流;last=回看(不自动播放) -->
+<view class="page page-with-voice-bar">
+
+  <!-- 回看模式:上次清点摘要 + 视频播放器(不自动播放,用户点播放才播) + 确认物品清单 -->
+  <block wx:if="{{ mode === 'last' }}">
+    <view class="card">
+      <view class="card-title">上次清点</view>
+      <view wx:if="{{ lastSummaryText }}" class="hint">{{ lastSummaryText }}</view>
+      <video
+        wx:if="{{ lastVideoUrl }}"
+        class="scan-video"
+        src="{{ lastVideoUrl }}"
+        controls
+      ></video>
+      <view wx:else class="empty-text">{{ lastLoaded ? '视频无法回看(可能已随物品证据删除)' : '加载中…' }}</view>
+    </view>
+    <view class="card">
+      <view class="card-title">确认过的物品</view>
+      <view wx:if="{{ lastItems.length === 0 }}" class="empty-text">上次清点没有确认物品。</view>
+      <view
+        wx:for="{{ lastItems }}"
+        wx:key="item_id"
+        class="item-row"
+        data-index="{{ index }}"
+        bindtap="onLastItemTap"
+      >
+        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-main">
+          <view class="item-name">{{ item.name }}</view>
+          <view class="item-location">原始记录:{{ item.location_text }}</view>
+        </view>
+        <view class="chevron">›</view>
+      </view>
+    </view>
+  </block>
+
+  <!-- 拍摄确认流 -->
+  <block wx:else>
+    <!-- 位置上下文头卡:固定,不可全局改(§6.3) -->
+    <view class="card">
+      <view class="card-title">位置:{{ locationPathText || '读取中…' }}(固定)</view>
+      <view wx:if="{{ contextErrorText }}" class="error-text">{{ contextErrorText }}</view>
+      <view wx:elif="{{ contextReady }}" class="hint">
+        新物品默认归这里,可逐件改到范围内更细的位置;绝不会自动创建新位置。
+      </view>
+      <button wx:if="{{ contextErrorText }}" class="btn block" bindtap="onContextRetryTap"><view class="btn-face">重试</view></button>
+    </view>
+
+    <!-- idle/review:入口与扫描进度 -->
+    <view wx:if="{{ phase === 'idle' || phase === 'review' || phase === 'scanning' }}" class="card">
+      <button
+        wx:if="{{ phase === 'idle' && contextReady }}"
+        class="btn block primary"
+        disabled="{{ busy }}"
+        bindtap="onChooseVideoTap"
+      ><view class="btn-face">📹 拍视频清点这里</view></button>
+      <view wx:if="{{ phase === 'scanning' }}" class="hint">{{ progressText }}</view>
+      <view wx:if="{{ phase === 'scanning' }}" class="btn block" bindtap="onCancelScanTap"><view class="btn-face">取消识别</view></view>
+      <view wx:if="{{ failureText }}" class="warn-line">{{ failureText }}</view>
+      <view wx:if="{{ resultText }}" class="hint">{{ resultText }}</view>
+      <view wx:if="{{ errorText }}" class="error-text">{{ errorText }}</view>
+    </view>
+
+    <!-- 线索与草稿(review) -->
+    <block wx:if="{{ phase === 'review' || phase === 'uploading' || phase === 'committing' || phase === 'partial' }}">
+      <view wx:if="{{ observationGroups.length > 0 }}" class="card">
+        <view class="card-head">
+          <view class="card-title">线索({{ observations.length }})</view>
+          <view class="hint">同名线索不会被自动合并</view>
+        </view>
+        <view wx:for="{{ observationGroups }}" wx:key="nameKey" wx:for-item="group" class="obs-group">
+          <view class="group-label">{{ group.label }} · {{ group.countText }}</view>
+          <view
+            wx:for="{{ group.observations }}"
+            wx:key="obsId"
+            class="obs-row {{ item.checked ? 'obs-checked' : '' }}"
+            data-obs-id="{{ item.obsId }}"
+            bindtap="onObservationToggle"
+          >
+            <view class="frame-box">
+              <image class="frame-img" src="{{ item.framePath }}" mode="aspectFill" />
+              <view wx:if="{{ item.boxStyle !== 'display:none' }}" class="frame-box-outline" style="{{ item.boxStyle }}"></view>
+            </view>
+            <view class="item-main">
+              <view class="item-name">{{ item.name }}</view>
+              <view class="item-location">{{ item.timeText }} · {{ item.confidenceText }}</view>
+            </view>
+            <view class="pick-check">{{ item.checked ? '✓' : '' }}</view>
+          </view>
+        </view>
+        <view class="row-actions">
+          <label class="check-label">
+            <switch checked="{{ mergeSameName }}" bindchange="onMergeSameNameChange" />同名线索生成一件
+          </label>
+          <button class="btn" size="mini" bindtap="onGenerateDraftsTap"><view class="btn-face">生成草稿</view></button>
+          <button class="btn" size="mini" bindtap="onAddManualDraftTap"><view class="btn-face">手动补一件</view></button>
+        </view>
+      </view>
+
+      <!-- 草稿清单:逐件子位置选择 + 匹配建议入口 -->
+      <view wx:if="{{ draftViews.length > 0 }}" class="card">
+        <view class="card-head">
+          <view class="card-title">待确认物品({{ draftViews.length }})</view>
+          <button
+            wx:if="{{ phase === 'review' }}"
+            class="btn danger"
+            size="mini"
+            bindtap="onRestartTap"
+          ><view class="btn-face">重新拍摄</view></button>
+        </view>
+        <view wx:if="{{ householdTruncated }}" class="warn-line">
+          物品较多,建议只参考同名精确匹配
+        </view>
+        <view wx:for="{{ draftViews }}" wx:key="draftKey" class="draft-card">
+          <view class="row-actions">
+            <view class="pick-check" data-index="{{ index }}" bindtap="onDraftCheckedTap">{{ item.checked ? '✓' : '' }}</view>
+            <input class="draft-name" value="{{ item.name }}" data-index="{{ index }}" bindinput="onDraftNameInput" placeholder="物品名称" />
+          </view>
+          <view wx:if="{{ item.target === 'new' }}" class="draft-meta">
+            <view class="item-location">归到:{{ item.nodeText }}</view>
+            <view
+              wx:if="{{ subtreeHasChildren }}"
+              class="link-text"
+              data-index="{{ index }}"
+              bindtap="onDraftNodeTap"
+            >改子位置(仅当前范围内)</view>
+          </view>
+          <view wx:else class="draft-meta">
+            <view class="item-location">{{ item.targetText }}</view>
+            <view wx:if="{{ item.moveText }}" class="warn-line">{{ item.moveText }}</view>
+          </view>
+          <view class="row-actions">
+            <view class="link-text" data-index="{{ index }}" bindtap="onDraftMatchTap">找已有物品</view>
+            <view class="link-text" data-index="{{ index }}" bindtap="onDraftSplitTap">拆分</view>
+            <view class="link-text" data-index="{{ index }}" bindtap="onDraftMergeSelectTap">{{ item.mergeSelected ? '取消合并' : '选去合并' }}</view>
+            <view wx:if="{{ item.target === 'existing' }}" class="link-text" data-index="{{ index }}" bindtap="onDraftTargetResetTap">改回新建</view>
+            <view class="link-text danger-text" data-index="{{ index }}" bindtap="onDraftRemoveTap">删除</view>
+          </view>
+          <view wx:if="{{ item.isManual }}" class="row-actions">
+            <input class="time-input" type="digit" value="{{ item.startSecText }}" data-index="{{ index }}" data-field="start" bindinput="onDraftManualTimeInput" placeholder="开始秒" />
+            <input class="time-input" type="digit" value="{{ item.endSecText }}" data-index="{{ index }}" data-field="end" bindinput="onDraftManualTimeInput" placeholder="结束秒" />
+            <view class="item-location">高亮 {{ item.highlightCount }} 条</view>
+          </view>
+        </view>
+        <view wx:if="{{ mergeSelectedKeys.length >= 2 }}" class="row-actions">
+          <button class="btn" size="mini" bindtap="onMergeDraftsTap"><view class="btn-face">合并所选({{ mergeSelectedKeys.length }})</view></button>
+        </view>
+      </view>
+
+      <!-- 提交/重试入口 -->
+      <view class="card">
+        <button
+          wx:if="{{ phase === 'review' }}"
+          class="btn block primary"
+          disabled="{{ busy }}"
+          bindtap="onSaveTap"
+        ><view class="btn-face">保存本次清点</view></button>
+        <block wx:if="{{ phase === 'uploading' || phase === 'committing' }}">
+          <view class="hint">{{ phase === 'uploading' ? '正在上传视频…' : '正在保存确认结果…' }}</view>
+        </block>
+        <block wx:if="{{ phase === 'partial' }}">
+          <view class="warn-line">{{ errorText }}</view>
+          <view class="hint">{{ resultText }}</view>
+          <button class="btn block" disabled="{{ busy }}" bindtap="onRetryCommitTap"><view class="btn-face">重试剩余件</view></button>
+          <button class="btn block" disabled="{{ busy }}" bindtap="onDiscardPendingTap"><view class="btn-face">放弃待关联视频</view></button>
+        </block>
+      </view>
+    </block>
+
+    <!-- done -->
+    <view wx:if="{{ phase === 'done' }}" class="card">
+      <view class="card-title">清点已保存</view>
+      <view class="hint">{{ resultText }}</view>
+      <button class="btn block" bindtap="onDoneBackTap"><view class="btn-face">回到位置页</view></button>
+    </view>
+
+    <!-- failed -->
+    <view wx:if="{{ phase === 'failed' }}" class="card">
+      <view class="error-text">{{ errorText }}</view>
+      <button class="btn block" bindtap="onCancelScanTap"><view class="btn-face">知道了</view></button>
+    </view>
+
+    <!-- 逐件子位置选择弹层:只渲染子树节点(数据面禁出子树) -->
+    <view wx:if="{{ selectorVisible }}" class="layer-mask" bindtap="onSelectorCloseTap">
+      <view class="layer" catchtap="noop">
+        <view class="card-title">改到哪个子位置</view>
+        <view class="hint">只能选「{{ locationPathText }}」范围内的既有位置。</view>
+        <scroll-view scroll-y class="layer-scroll">
+          <view
+            wx:for="{{ subtreeOptions }}"
+            wx:key="location_id"
+            class="option-row {{ item.location_id === nodeId ? 'option-current' : '' }}"
+            style="padding-left: {{ 24 + item.depth * 24 }}rpx"
+            data-node-id="{{ item.location_id }}"
+            bindtap="onNodeOptionTap"
+          >
+            <view class="item-name">{{ item.name }}</view>
+            <view class="item-location">{{ item.pathText }}</view>
+          </view>
+        </scroll-view>
+        <button class="btn block" bindtap="onSelectorCloseTap"><view class="btn-face">取消</view></button>
+      </view>
+    </view>
+
+    <!-- 五级匹配建议面板:只提示,点选才切「关联已有物品」 -->
+    <view wx:if="{{ matchPanelVisible }}" class="layer-mask" bindtap="onMatchPanelCloseTap">
+      <view class="layer" catchtap="noop">
+        <view class="card-title">是不是已有这件?</view>
+        <view class="hint">只是建议,绝不自动合并、绝不自动移动;点选才关联。</view>
+        <scroll-view scroll-y class="layer-scroll">
+          <view
+            wx:for="{{ matchViews }}"
+            wx:key="item_id"
+            class="option-row"
+            data-index="{{ index }}"
+            bindtap="onSuggestionTap"
+          >
+            <view class="item-main">
+              <view class="item-name">{{ item.name }} · {{ item.levelText }}</view>
+              <view class="item-location">{{ item.whereText }}</view>
+            </view>
+            <view class="pick-check">选</view>
+          </view>
+        </scroll-view>
+        <button class="btn block" bindtap="onMatchPanelCloseTap"><view class="btn-face">都不是,保持新建</view></button>
+      </view>
+    </view>
+  </block>
+</view>
