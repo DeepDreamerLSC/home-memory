@@ -55,7 +55,7 @@
         bindtap="onChooseVideoTap"
       ><view class="btn-face">📹 拍视频清点这里</view></button>
       <view wx:if="{{ phase === 'scanning' }}" class="hint">{{ progressText }}</view>
-      <view wx:if="{{ phase === 'scanning' }}" class="btn block" bindtap="onCancelScanTap"><view class="btn-face">取消识别</view></button>
+      <view wx:if="{{ phase === 'scanning' }}" class="btn block" bindtap="onCancelScanTap"><view class="btn-face">取消识别</view></view>
       <view wx:if="{{ failureText }}" class="warn-line">{{ failureText }}</view>
       <view wx:if="{{ resultText }}" class="hint">{{ resultText }}</view>
       <view wx:if="{{ errorText }}" class="error-text">{{ errorText }}</view>
