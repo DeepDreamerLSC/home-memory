@@ -314,7 +314,11 @@ export type ItemsApiEvent =
   /** D1(#94):位置页「上次清点」摘要与回看共用(只读) */
   | { action: "locationScanLatest"; location_id: string }
   /** D1(#94):确认页固定位置头卡/逐件子位置选择器/五级匹配池(只读) */
-  | { action: "locationScanContext"; location_id: string };
+  | { action: "locationScanContext"; location_id: string }
+  /** D2(#96):本位置清点历史列表(只读;仅 active 行、精确 location_id,≤20 行+has_more) */
+  | { action: "locationScanHistory"; location_id: string }
+  /** D2(#96):用户删除单次清点记录(写;服务端状态门+末引用复核,云删失败可重试) */
+  | ({ action: "scanDelete"; scan_id: string } & ScopeWriteBinding);
 
 /* ---------------- itemsApi 响应 ---------------- */
 
@@ -437,7 +441,9 @@ export type ItemsApiOkResponse =
   | VideoSceneCommitResponse
   | VideoEvidenceDeleteResponse
   | LocationScanLatestResponse
-  | LocationScanContextResponse;
+  | LocationScanContextResponse
+  | LocationScanHistoryResponse
+  | ScanDeleteResponse;
 
 export type ItemsApiResponse = ItemsApiOkResponse | ItemsApiErrorResponse;
 
@@ -1328,6 +1334,8 @@ export interface LocationScanLatestScan {
   confirmed_count: number;
   confirmed_item_ids: string[];
   duration_ms: number;
+  /** D2(#96):true = 0 确认到期已回收(video_url 恒为 "",无回看入口) */
+  video_reclaimed: boolean;
 }
 
 export interface LocationScanLatestResponse {
@@ -1338,6 +1346,36 @@ export interface LocationScanLatestResponse {
   video_url: string;
   /** 仍存活的确认物品(只列三字段;scan.confirmed_count 仍是原始数) */
   items: Array<{ item_id: string; name: string; location_text: string }>;
+}
+
+/** D2(#96)locationScanHistory 的行投影(不含 file_id/asset_id 等内部字段,回看只用 video_url) */
+export interface LocationScanHistoryRow {
+  scan_id: string;
+  created_at: string;
+  candidate_count: number;
+  confirmed_count: number;
+  duration_ms: number;
+  /** true = 0 确认到期已回收(0 确认视频 30 天后由 videoCleanup 回收,行保留) */
+  video_reclaimed: boolean;
+  /** 回看临时链接;"" = 无回看入口(已回收 / 换链失败同款降级),不废列表 */
+  video_url: string;
+}
+
+export interface LocationScanHistoryResponse {
+  ok: true;
+  /** created_at 倒序,至多 20 行(仅本位置 active 行) */
+  scans: LocationScanHistoryRow[];
+  /** 本位置 active 行数 > 20 时 true(一期单页,页面标「仅显示最近 20 次」) */
+  has_more: boolean;
+}
+
+/** D2(#96)scanDelete 的成功响应 */
+export interface ScanDeleteResponse {
+  ok: true;
+  /** true = 首删已完成的幂等重放(video_deleted 固定 false,不重演文件判定) */
+  replayed?: boolean;
+  /** true = 本次实际删除了云视频文件(这段视频无其他引用时) */
+  video_deleted: boolean;
 }
 
 /** locationScanContext 的子树节点投影(含自身;选择器只渲染这份列表,禁出子树) */

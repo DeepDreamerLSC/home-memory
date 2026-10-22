@@ -54,6 +54,23 @@ Page({
         acting: false,
         hasScanEntry: false,
         scanSummaryText: "",
+        scanHistory: {
+            visible: false,
+            loading: false,
+            errorText: "",
+            rows: [],
+            hasMore: false,
+            replayUrl: "",
+            replayTitle: "",
+            replayHeight: 0,
+            scrollHeight: 0,
+        },
+        scanDeleteLayer: {
+            visible: false,
+            scanId: "",
+            timeText: "",
+            busy: false,
+        },
         deleteLayer: {
             visible: false,
             nodeId: "",
@@ -71,11 +88,13 @@ Page({
     requestSeq: (0, locations_cache_1.createRequestSeq)(),
     renderedOnce: false,
     scanLoadSeq: 0,
+    scanHistorySeq: 0,
     onLoad(options) {
         // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
         this.requestSeq = (0, locations_cache_1.createRequestSeq)();
         this.renderedOnce = false;
         this.scanLoadSeq = 0;
+        this.scanHistorySeq = 0;
         const isPicker = options.picker === "1";
         this.nodeId = safeDecode(options.node_id);
         this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
@@ -265,6 +284,207 @@ Page({
                 wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
             },
         });
+    },
+    /* ------------------------------------------------------------------
+     * D2(#96)清点历史:入口卡摘要行的「历史」→ 半屏弹层列本位置 active
+     * 清点(时间/候选/确认/回看/删);行内回看直接播行内 video_url(不自动
+     * 播放);删除走确认弹层(影响面预告文案冻结自契约 §4)。迟到守卫复用
+     * loadScanSummary 同款(序号 + currentNodeId 双重校验)。
+     * ------------------------------------------------------------------ */
+    /** 点「历史」开弹层并加载(browse 且非根层、有 scan 摘要时入口才可见) */
+    onScanHistoryTap() {
+        if (this.data.mode !== "browse" || !this.data.hasScanEntry || this.data.scanSummaryText === "") {
+            return;
+        }
+        const geo = this.scanHistoryGeometry();
+        this.setData({
+            scanHistory: {
+                visible: true,
+                loading: true,
+                errorText: "",
+                rows: [],
+                hasMore: false,
+                replayUrl: "",
+                replayTitle: "",
+                replayHeight: geo.replayHeight,
+                scrollHeight: geo.scrollHeight,
+            },
+            scanDeleteLayer: { visible: false, scanId: "", timeText: "", busy: false },
+        });
+        void this.loadScanHistory();
+    },
+    /** 弹层几何(回看播放器高 / 列表滚动高):JS 算 px 喂 inline,不用 rpx/vh/calc */
+    scanHistoryGeometry() {
+        try {
+            const si = wx.getSystemInfoSync();
+            const winW = (si && si.windowWidth) || 375;
+            const winH = (si && si.windowHeight) || 667;
+            return {
+                // 与清点页回看播放器同款高(380rpx 折 px:winW × 380/750),下限保护
+                replayHeight: Math.max(160, Math.round((winW * 380) / 750)),
+                scrollHeight: Math.max(200, Math.round(winH * 0.45)),
+            };
+        }
+        catch (e) {
+            return { replayHeight: 190, scrollHeight: 300 };
+        }
+    },
+    /** 拉本位置清点历史;逐行视频降级(已回收/换链失败)不废列表 */
+    async loadScanHistory() {
+        const nodeId = this.data.currentNodeId;
+        const seq = this.scanHistorySeq + 1;
+        this.scanHistorySeq = seq;
+        try {
+            const res = await (0, api_2.callItemsApi)({ action: "locationScanHistory", location_id: nodeId });
+            if (this.scanHistorySeq !== seq || this.data.currentNodeId !== nodeId || !this.data.scanHistory.visible) {
+                return; // 迟到响应:用户已进其他层/已关弹层
+            }
+            this.setData({
+                scanHistory: {
+                    ...this.data.scanHistory,
+                    loading: false,
+                    errorText: "",
+                    rows: res.scans.map((row) => ({
+                        scanId: row.scan_id,
+                        timeText: (0, api_1.formatDateTime)(row.created_at),
+                        countsText: "候选 " + row.candidate_count + " · 确认 " + row.confirmed_count,
+                        stateText: row.video_reclaimed
+                            ? "视频已过期回收"
+                            : row.video_url === ""
+                                ? "视频已随物品证据删除"
+                                : "",
+                        canReview: row.video_url !== "",
+                        videoUrl: row.video_url,
+                    })),
+                    hasMore: res.has_more === true,
+                },
+            });
+        }
+        catch (e) {
+            if (this.scanHistorySeq === seq && this.data.scanHistory.visible) {
+                this.setData({
+                    scanHistory: { ...this.data.scanHistory, loading: false, errorText: (0, api_1.errorMessage)(e) },
+                });
+            }
+        }
+    },
+    /** 读取失败重试(弹层保留,原位重拉) */
+    onScanHistoryRetryTap() {
+        if (!this.data.scanHistory.visible) {
+            return;
+        }
+        this.setData({ scanHistory: { ...this.data.scanHistory, loading: true, errorText: "" } });
+        void this.loadScanHistory();
+    },
+    /** 关弹层(连带回看态与删除确认弹层一并收起;作废在途响应) */
+    onScanHistoryClose() {
+        this.scanHistorySeq = this.scanHistorySeq + 1;
+        this.setData({
+            scanHistory: {
+                ...this.data.scanHistory,
+                visible: false,
+                loading: false,
+                errorText: "",
+                rows: [],
+                replayUrl: "",
+                replayTitle: "",
+            },
+            scanDeleteLayer: { visible: false, scanId: "", timeText: "", busy: false },
+        });
+    },
+    scanHistoryRowAt(index) {
+        const row = this.data.scanHistory.rows[index];
+        return row ? row : undefined;
+    },
+    /** 行内「回看」:弹层内播该行 video_url(不自动播放,复用回看交互) */
+    onScanHistoryReviewTap(e) {
+        if (!this.data.scanHistory.visible) {
+            return;
+        }
+        const row = this.scanHistoryRowAt(Number(e.currentTarget.dataset.index));
+        if (!row || !row.canReview) {
+            return; // 降级行无回看入口(按钮本就不渲染,防御位)
+        }
+        this.setData({
+            scanHistory: { ...this.data.scanHistory, replayUrl: row.videoUrl, replayTitle: "回看:" + row.timeText },
+        });
+    },
+    /** 回看态返回列表 */
+    onScanHistoryBackTap() {
+        this.setData({ scanHistory: { ...this.data.scanHistory, replayUrl: "", replayTitle: "" } });
+    },
+    /** 行内「删」:开确认弹层(文案冻结自契约 §4 影响面预告) */
+    onScanHistoryDeleteTap(e) {
+        if (!this.data.scanHistory.visible || this.data.scanDeleteLayer.busy) {
+            return;
+        }
+        const row = this.scanHistoryRowAt(Number(e.currentTarget.dataset.index));
+        if (!row) {
+            return;
+        }
+        this.setData({
+            scanDeleteLayer: { visible: true, scanId: row.scanId, timeText: row.timeText, busy: false },
+        });
+    },
+    /** 取消删除确认(不调任何接口) */
+    onScanDeleteLayerCancel() {
+        this.setData({ scanDeleteLayer: { visible: false, scanId: "", timeText: "", busy: false } });
+    },
+    /**
+     * 确认删除:scanDelete(服务端状态门+末引用复核,绝不动物品/evidence)。
+     * 失败分型:VIDEO_DELETE_FAILED 云删失败可重试(行保留);VIDEO_ITEM_BUSY
+     * 操作冲突稍后再试;NOT_FOUND 他端已删/位置流程已终结 → 刷新列表收敛不报错。
+     */
+    async onScanDeleteConfirmTap() {
+        const layer = this.data.scanDeleteLayer;
+        if (!layer.visible || layer.busy || layer.scanId === "") {
+            return;
+        }
+        this.setData({ scanDeleteLayer: { ...layer, busy: true } });
+        const scanId = layer.scanId;
+        try {
+            await (0, api_2.callItemsApi)({ action: "scanDelete", scan_id: scanId });
+            if (this.data.scanDeleteLayer.scanId === scanId) {
+                this.setData({ scanDeleteLayer: { visible: false, scanId: "", timeText: "", busy: false } });
+            }
+            wx.showToast({ title: "已删除", icon: "success" });
+            this.refreshAfterScanDelete();
+        }
+        catch (e) {
+            if ((0, api_2.isApiError)(e)) {
+                if (e.code === "NOT_FOUND") {
+                    // 他端已删/位置流程已终结:静默收敛(关确认层 + 刷新列表与摘要)
+                    if (this.data.scanDeleteLayer.scanId === scanId) {
+                        this.setData({ scanDeleteLayer: { visible: false, scanId: "", timeText: "", busy: false } });
+                    }
+                    this.refreshAfterScanDelete();
+                    return;
+                }
+                if (e.code === "VIDEO_DELETE_FAILED") {
+                    if (this.data.scanDeleteLayer.scanId === scanId) {
+                        this.setData({ scanDeleteLayer: { ...this.data.scanDeleteLayer, busy: false } });
+                    }
+                    wx.showToast({ title: "删除失败,请重试", icon: "none" });
+                    return; // 行保留,可再删(确认层留着直接重试)
+                }
+                if (e.code === "VIDEO_ITEM_BUSY") {
+                    if (this.data.scanDeleteLayer.scanId === scanId) {
+                        this.setData({ scanDeleteLayer: { ...this.data.scanDeleteLayer, busy: false } });
+                    }
+                    wx.showToast({ title: "操作冲突,请稍后再试", icon: "none" });
+                    return;
+                }
+            }
+            if (this.data.scanDeleteLayer.scanId === scanId) {
+                this.setData({ scanDeleteLayer: { ...this.data.scanDeleteLayer, busy: false } });
+            }
+            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+        }
+    },
+    /** 删除收敛后:刷新历史列表(可能剩空态)与「上次清点」摘要(可能隐藏入口) */
+    refreshAfterScanDelete() {
+        void this.loadScanHistory();
+        void this.loadScanSummary(this.data.currentNodeId);
     },
     /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因 */
     decorate(children) {

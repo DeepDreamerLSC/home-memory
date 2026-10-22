@@ -2627,7 +2627,11 @@ var ACTIONS = {
   videoSceneCommit: videoActions.videoSceneCommit,
   // D1 位置级清点只读 action(#94):不进 WRITE_ACTIONS,零写入门
   locationScanLatest: videoActions.locationScanLatest,
-  locationScanContext: videoActions.locationScanContext
+  locationScanContext: videoActions.locationScanContext,
+  // D2 清点记录管理(#96):历史列表纯读不进 WRITE_ACTIONS;
+  // scanDelete 是写 action(进 WRITE_ACTIONS,共享家庭双 marker 硬门同族)。
+  locationScanHistory: videoActions.locationScanHistory,
+  scanDelete: videoActions.scanDelete
 };
 
 /**
@@ -2662,7 +2666,9 @@ var WRITE_ACTIONS = {
   videoEvidenceAttach: true,
   videoEvidenceHighlightSave: true,
   videoEvidenceDelete: true,
-  videoSceneCommit: true
+  videoSceneCommit: true,
+  // D2(#96):用户删除单次清点(scan 审计行 + 无引用时云文件)
+  scanDelete: true
 };
 
 /**

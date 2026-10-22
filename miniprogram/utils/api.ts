@@ -32,6 +32,7 @@ import type {
   ItemSummary,
   ListItemsResponse,
   LocationScanContextResponse,
+  LocationScanHistoryResponse,
   LocationScanLatestResponse,
   PhotoCommitResponse,
   PhotoEvidenceGetResponse,
@@ -42,6 +43,7 @@ import type {
   RemindListResponse,
   RemindKind,
   RemindSetResponse,
+  ScanDeleteResponse,
   UpdateItemResponse,
   VideoEvidenceAttachResponse,
   VideoEvidenceDeleteResponse,
@@ -517,6 +519,37 @@ function validateItemsOkResponse(
       }
       break;
     }
+    case "locationScanHistory": {
+      // D2(#96):行投影形状门——残缺行/缺 has_more 整次抛错,历史列表绝不半带;
+      // 已回收与换链失败行的 video_url 为空串是合法降级,不算坏响应
+      if (
+        Array.isArray(r.scans) === false ||
+        r.scans.every(
+          (row) =>
+            isRecord(row) &&
+            typeof row.scan_id === "string" &&
+            typeof row.created_at === "string" &&
+            typeof row.candidate_count === "number" &&
+            typeof row.confirmed_count === "number" &&
+            typeof row.duration_ms === "number" &&
+            typeof row.video_reclaimed === "boolean" &&
+            typeof row.video_url === "string",
+        ) === false ||
+        typeof r.has_more !== "boolean"
+      ) {
+        throw bad();
+      }
+      break;
+    }
+    case "scanDelete":
+      // D2(#96):replayed 可缺省(首删响应),video_deleted 必带
+      if (
+        typeof r.video_deleted !== "boolean" ||
+        (r.replayed !== undefined && typeof r.replayed !== "boolean")
+      ) {
+        throw bad();
+      }
+      break;
     case "videoEvidenceGet":
       if (Array.isArray(r.evidence) === false || r.evidence.every(validVideoEvidenceRow) === false) throw bad();
       break;
@@ -576,6 +609,8 @@ const ITEMS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "videoEvidenceHighlightSave",
   "videoSceneCommit",
   "videoEvidenceDelete",
+  // D2(#96):服务端 WRITE_ACTIONS 同族(共享家庭双 marker 硬门),自动拼装作用域绑定
+  "scanDelete",
 ]);
 
 export function callItemsApi(
@@ -647,6 +682,12 @@ export function callItemsApi(
 export function callItemsApi(
   event: Extract<ItemsApiEvent, { action: "locationScanContext" }>,
 ): Promise<LocationScanContextResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "locationScanHistory" }>,
+): Promise<LocationScanHistoryResponse>;
+export function callItemsApi(
+  event: Extract<ItemsApiEvent, { action: "scanDelete" }>,
+): Promise<ScanDeleteResponse>;
 export async function callItemsApi(
   event: ItemsApiEvent,
 ): Promise<ItemsApiOkResponse> {
