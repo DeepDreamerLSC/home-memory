@@ -1,40 +1,32 @@
-<view class="page page-with-voice-bar">
-  <!-- 先答案:物品名 + 记录更新时间;操作全收进「⋯」 -->
+<view class="page page-with-detail-dock">
   <view class="detail-head">
-    <view class="detail-title">
-      <view class="pagetitle">{{ name }}</view>
-      <view wx:if="{{ lastConfirmedText }}" class="detail-meta">{{ lastConfirmedText }}</view>
-    </view>
+    <view class="detail-title"><view class="pagetitle">{{ name }}</view></view>
     <view class="more-inline" bindtap="onMoreTap"><view class="more-inline-face">⋯</view></view>
   </view>
-
-  <!-- 只读大卡:空间路径(知道时)+ 原话常显 +「可能已移动」提示(D1 P0 三组成) -->
-  <view class="bigcard">
-    <view class="bigcard-lbl">上次记在</view>
-    <view class="bigcard-loc">
-      <view class="bigcard-pin">📍</view>
-      <view class="bigcard-main">
-        <view wx:if="{{ spacePath.length > 0 }}" class="bigcard-path">
-          <block wx:for="{{ spacePath }}" wx:key="*this">
-            <text>{{ item }}</text>
-            <text wx:if="{{ index < spacePath.length - 1 }}" class="bigcard-sep"> › </text>
-          </block>
-        </view>
-        <view class="bigcard-quote">
-          你当时说的是:「{{ locationText }}」
-        </view>
-        <!-- 时间没换算留痕(0.6.0 真机反馈 Fix 4):录入时说了时间但没换成日期;
-             纯展示不产生提醒,有到期行在屏时不重复提示 -->
-        <view wx:if="{{ vagueQuote && !expire }}" class="bigcard-quote vague-quote">
-          当时提到时间:『{{ vagueQuote }}』(没换算成日期)
-        </view>
-      </view>
-    </view>
-    <view class="bigcard-tiny">这是上次记录的位置,东西可能已经移动。</view>
+  <view class="detail-visual">
+    <image wx:if="{{ evidenceReady && evidence && !evidence.latest.urlFail }}" class="detail-photo" src="{{ evidence.latest.photoUrl }}" mode="aspectFill" bindtap="onEvidenceTap" />
+    <block wx:else>
+      <image class="detail-art theme-light" src="{{ artworkLight }}" mode="aspectFit" />
+      <image class="detail-art theme-dark" src="{{ artworkDark }}" mode="aspectFit" />
+    </block>
   </view>
+  <view class="bigcard-lbl">上次记录位置</view>
+  <view class="bigcard">
+    <view wx:if="{{ spacePath.length > 0 }}" class="bigcard-path">
+      <block wx:for="{{ spacePath }}" wx:key="*this">
+        <text>{{ item }}</text><text wx:if="{{ index < spacePath.length - 1 }}" class="bigcard-sep">›</text>
+      </block>
+    </view>
+    <view class="bigcard-location">{{ recordedLocationText || locationText }}</view>
+    <view wx:if="{{ lastConfirmedText }}" class="detail-meta">{{ lastConfirmedText }}</view>
+    <view wx:if="{{ vagueQuote && !expire }}" class="bigcard-quote vague-quote">当时提到时间:『{{ vagueQuote }}』(没换算成日期)</view>
+  </view>
+  <view class="bigcard-tiny">物品可能已移动。</view>
+  <view class="detail-quote-row" bindtap="onQuoteToggle"><text>原话</text><text>{{ detailQuoteOpen ? '收起' : '查看' }}</text></view>
+  <view wx:if="{{ detailQuoteOpen }}" class="detail-quote">{{ recordedLocationText || locationText }}</view>
 
   <view wx:if="{{ videoPending }}" class="vd-pending">
-    <view class="vd-pending-title">🎬 视频待关联</view>
+    <view class="vd-pending-title">视频待关联</view>
     <view class="vd-pending-sub">{{ videoPendingText }}</view>
     <view class="vd-pending-actions">
       <view wx:if="{{ videoPendingExpired === false }}" class="vd-textbtn" bindtap="onVideoPendingRetryTap">重试关联</view>
@@ -44,7 +36,7 @@
 
   <view wx:if="{{ videoLookupFailed }}" id="video-evidence-card" class="vd-card">
     <view class="vd-head">
-      <view class="vd-title">🎬 当时的视频</view>
+      <view class="vd-title">当时的视频</view>
       <view class="vd-more" bindtap="onVideoMoreTap">说明</view>
     </view>
     <view class="vd-fail-inline" bindtap="onVideoRetry">视频留证暂时无法加载,点按重试</view>
@@ -52,7 +44,7 @@
 
   <view wx:if="{{ videoReady && videoEvidence && videoSelected }}" id="video-evidence-card" class="vd-card">
     <view class="vd-head">
-      <view class="vd-title">🎬 当时的视频</view>
+      <view class="vd-title">当时的视频</view>
       <view class="vd-more" bindtap="onVideoMoreTap">说明</view>
     </view>
     <block wx:if="{{ videoOpen }}">
@@ -158,7 +150,7 @@
     </view>
   </view>
   <view wx:elif="{{ videoBusy }}" class="vd-empty">视频处理中…</view>
-  <view wx:elif="{{ videoPending === null && videoLookupFailed === false }}" class="vd-empty" bindtap="onAddVideoTap">🎬 给这件物品拍一段视频留证</view>
+  <view wx:elif="{{ videoPending === null && videoLookupFailed === false }}" class="vd-empty" bindtap="onAddVideoTap">添加视频留证</view>
 
   <!-- 照片证据回放(#3):照片是历史证据——只说明拍摄当日记录在哪,不冒充当前位置;
        位置已变更时以文字位置为准、旧照片作证据。拉取失败整卡不渲染(增强露出,静默) -->
@@ -167,7 +159,7 @@
     <view wx:if="{{ !evidenceOpen }}" class="ev-fold" bindtap="onEvidenceTap">
       <image wx:if="{{ !evidence.latest.urlFail }}" class="ev-fold-img" src="{{ evidence.latest.photoUrl }}" mode="aspectFill" />
       <view wx:else class="ev-fold-fail">照片加载失败,点按重试</view>
-      <view class="ev-chip">📍 点开看拍照留证</view>
+      <view class="ev-chip">查看照片</view>
     </view>
     <!-- 展开态:等比 contain 全幅(aspect-ratio 跟随原图,零裁切)+ 黄环脉冲框 + 当时记录角标 -->
     <block wx:else>
@@ -200,10 +192,10 @@
   </view>
   <!-- 拉取成功但没证据行:如实说明只有文字位置,给补拍入口(原型屏⑥ nocard) -->
   <view wx:elif="{{ evidenceNoPhoto }}" class="ev-none">
-    <view class="ev-none-ico">📷</view>
+
     <view class="ev-none-main">
-      <view class="ev-none-t">这件还没拍过照片</view>
-      <view class="ev-none-s">只有文字位置,没有照片留证</view>
+      <view class="ev-none-t">照片留证</view>
+
     </view>
     <view class="ev-none-go" hover-class="ev-none-go-hover" hover-stay-time="80" bindtap="onRetakeTap">去补拍</view>
   </view>
@@ -248,7 +240,7 @@
     <text>编辑物品信息</text>
     <text class="fold-chev {{ editPanelOpen ? 'up' : '' }}">›</text>
   </view>
-  <view class="fold-body {{ editPanelOpen ? 'open' : '' }}">
+  <view id="item-edit-panel" class="fold-body {{ editPanelOpen ? 'open' : '' }}">
     <!-- 冲突面板(issue #6):保存或改提醒命中版本冲突后出现,逐字段并排
          「你的修改 / 最新记录」;未选完前下方保存按钮禁用,直接在表单里改不算选择 -->
     <view wx:if="{{ conflicts.length > 0 }}" class="card conflict-card">
@@ -415,5 +407,7 @@
   </view>
 </view>
 
-<!-- 常驻语音条:按住说话记一件(issue #45 全局可达) -->
-<voice-bar />
+<view wx:if="{{ !editPanelOpen }}" class="detail-dock">
+  <button class="detail-found" hover-class="btn-press" bindtap="onFoundTap" disabled="{{ saving || deleting || mountSaving }}"><text class="found-check">✓</text>找到了</button>
+  <button class="detail-update" hover-class="btn-press" bindtap="onUpdateLocationTap" disabled="{{ saving || deleting || mountSaving }}">更新位置</button>
+</view>

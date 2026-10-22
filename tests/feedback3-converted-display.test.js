@@ -318,7 +318,7 @@ test("CVT-WXML-1:C1 换算标注(日期旁 sum-meta 灰小字)+ C2 行内标注 
     confirmWxml.indexOf("rows[0].remindAt === rows[0].remindOrigin") !== -1,
     "C1 标注只在日期仍是换算候选时显示(用户改过即收起)",
   );
-  assert.ok(confirmWxml.indexOf("按『{{ rows[0].remindQuote }}』换算") !== -1, "C1 换算源文案取行内 remindQuote");
+  assert.ok(confirmWxml.indexOf("由「{{ rows[0].remindQuote }}」换算") !== -1, "C1 换算源文案取行内 remindQuote");
   assert.ok(/sum-meta[^"]*converted-note/.test(confirmWxml), "C1 复用 sum-meta 灰小字样式");
   // C2:多件行内标注
   assert.ok(confirmWxml.indexOf("按『{{ item.remindQuote }}』换算") !== -1, "C2 换算源文案取行内 remindQuote");

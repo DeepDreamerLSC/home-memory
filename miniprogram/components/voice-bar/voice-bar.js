@@ -12,6 +12,16 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 const voice_entry_1 = require("../../utils/voice-entry");
+function openEntryPage(state, entry, url) {
+    if (state.voiceState !== "idle" || state.transcribing || state.extracting || (entry !== null && entry.isBusy())) {
+        return false;
+    }
+    wx.navigateTo({
+        url,
+        fail: () => wx.showToast({ title: "页面打开失败,请重试", icon: "none" }),
+    });
+    return true;
+}
 Component({
     options: { multipleSlots: true },
     data: {
@@ -22,6 +32,7 @@ Component({
         partialText: "",
         pressed: false,
         kbOpen: false,
+        showActions: false,
     },
     lifetimes: {
         created() {
@@ -38,6 +49,7 @@ Component({
                         extracting: s.extracting,
                         recordSeconds: s.recordSeconds,
                         partialText: s.partialText,
+                        showActions: false,
                     });
                 },
                 fallbackToText: (e) => {
@@ -55,7 +67,7 @@ Component({
             this.kbListener = (res) => {
                 const open = typeof res.height === "number" && res.height > 0;
                 if (open !== this.data.kbOpen) {
-                    this.setData({ kbOpen: open });
+                    this.setData({ kbOpen: open, showActions: false });
                 }
             };
             wx.onKeyboardHeightChange(this.kbListener);
@@ -78,6 +90,7 @@ Component({
             if (this.entry !== null) {
                 this.entry.invalidate();
             }
+            this.setData({ showActions: false, pressed: false });
         },
     },
     methods: {
@@ -113,15 +126,24 @@ Component({
         },
         /** 文字确认入口:在途(录音/识别/提取)置灰防打断,空闲才可进 */
         onTextTap() {
-            if (this.entry !== null && this.entry.isBusy()) {
-                return;
+            if (openEntryPage(this.data, this.entry, "/pages/confirm/confirm?manual=true")) {
+                this.setData({ showActions: false });
             }
-            wx.navigateTo({
-                url: "/pages/confirm/confirm?manual=true",
-                fail: () => {
-                    wx.showToast({ title: "页面打开失败,请重试", icon: "none" });
-                },
-            });
         },
+        onAddTap() {
+            if (this.data.voiceState !== "idle" || this.data.transcribing || this.data.extracting || (this.entry !== null && this.entry.isBusy()))
+                return;
+            this.setData({ showActions: true });
+        },
+        onActionsClose() { this.setData({ showActions: false }); },
+        onPhotoTap() {
+            if (openEntryPage(this.data, this.entry, "/pages/photo/photo"))
+                this.setData({ showActions: false });
+        },
+        onVideoTap() {
+            if (openEntryPage(this.data, this.entry, "/pages/video-scan/video-scan"))
+                this.setData({ showActions: false });
+        },
+        noop() { },
     },
 });

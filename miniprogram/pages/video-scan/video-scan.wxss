@@ -1,29 +1,29 @@
 .page {
   min-height: 100vh;
-  padding: 24rpx 24rpx 64rpx;
+  padding: 40rpx 44rpx 64rpx;
   box-sizing: border-box;
   background: var(--bg, #f4efe3);
-  color: var(--fg, #1d1c18);
+  color: var(--text);
 }
 .hero { padding: 12rpx 8rpx 24rpx; }
-.hero-title { font-size: 40rpx; font-weight: 900; letter-spacing: 1rpx; }
-.hero-sub { margin-top: 12rpx; font-size: 25rpx; line-height: 1.55; color: var(--fg-2, #5f5a50); }
+.hero-title { font-size: 54rpx; font-weight: 600; letter-spacing: -1.6rpx; }
+.hero-sub { margin-top: 12rpx; font-size: 25rpx; line-height: 1.55; color: var(--text-2); }
 .card {
-  margin-bottom: 22rpx;
+  margin: 0 0 22rpx;
   padding: 24rpx;
-  border-radius: 24rpx;
+  border-radius: 34rpx;
   background: var(--card, #fffdf7);
-  border: 2rpx solid rgba(29, 28, 24, 0.12);
-  box-shadow: 0 8rpx 0 rgba(29, 28, 24, 0.06);
+  border: 1rpx solid var(--line);
+  box-shadow: none;
 }
 .center-card { text-align: center; padding: 44rpx 30rpx; }
 .empty-face { font-size: 58rpx; }
 .empty-title { margin-top: 10rpx; font-size: 34rpx; font-weight: 800; }
-.empty-sub { margin-top: 12rpx; font-size: 25rpx; line-height: 1.5; color: var(--fg-2, #5f5a50); }
+.empty-sub { margin-top: 12rpx; font-size: 25rpx; line-height: 1.5; color: var(--text-2); }
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .section-title { font-size: 29rpx; font-weight: 800; }
 .text-action { color: var(--go-bg, #1d1c18); font-size: 24rpx; font-weight: 700; padding: 8rpx 0 8rpx 20rpx; }
-.hint { margin-top: 12rpx; font-size: 22rpx; line-height: 1.5; color: var(--fg-3, #7b7468); }
+.hint { margin-top: 12rpx; font-size: 22rpx; line-height: 1.5; color: var(--text-3); }
 .progress-line { margin-top: 18rpx; font-size: 26rpx; }
 .primary-btn {
   margin-top: 22rpx;
@@ -50,7 +50,7 @@
 .notice { margin-bottom: 18rpx; padding: 18rpx 20rpx; border-radius: 16rpx; font-size: 24rpx; line-height: 1.5; background: #fff3c4; }
 .notice.warn { background: #fff0cf; }
 .notice.danger { background: #ffe1dc; color: #8b2318; }
-.empty-small { padding: 20rpx 0; font-size: 24rpx; color: var(--fg-3, #7b7468); }
+.empty-small { padding: 20rpx 0; font-size: 24rpx; color: var(--text-3); }
 .text-input {
   margin-top: 14rpx;
   min-height: 76rpx;
@@ -91,17 +91,17 @@
 .obs-box { position: absolute; border: 4rpx solid #ffd600; border-radius: 4rpx; box-sizing: border-box; pointer-events: none; }
 .obs-info { min-width: 0; flex: 1; }
 .obs-name { font-size: 27rpx; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.obs-meta { margin-top: 6rpx; font-size: 22rpx; color: var(--fg-3, #7b7468); }
+.obs-meta { margin-top: 6rpx; font-size: 22rpx; color: var(--text-3); }
 .toggle-row { display: flex; align-items: center; gap: 12rpx; margin-top: 20rpx; }
-.toggle-copy { flex: 1; font-size: 22rpx; line-height: 1.45; color: var(--fg-2, #5f5a50); }
+.toggle-copy { flex: 1; font-size: 22rpx; line-height: 1.45; color: var(--text-2); }
 .draft-card { margin-top: 16rpx; padding: 16rpx; border-radius: 18rpx; background: #fbf7ed; border: 2rpx solid rgba(29, 28, 24, 0.1); }
 .draft-head { display: flex; align-items: center; gap: 12rpx; }
 .name-input { flex: 1; min-height: 72rpx; font-size: 28rpx; font-weight: 800; }
 .tiny-danger { flex: 0 0 auto; padding: 10rpx 6rpx; font-size: 22rpx; color: #b02a1b; }
 .target-row { margin-top: 10rpx; padding: 14rpx 12rpx; border-radius: 12rpx; background: #efe8d8; font-size: 23rpx; color: #5f5437; }
-.draft-meta { margin-top: 10rpx; font-size: 22rpx; color: var(--fg-3, #7b7468); }
-.manual-times { margin-top: 10rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 6rpx; font-size: 22rpx; color: var(--fg-2, #5f5a50); }
+.draft-meta { margin-top: 10rpx; font-size: 22rpx; color: var(--text-3); }
+.manual-times { margin-top: 10rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 6rpx; font-size: 22rpx; color: var(--text-2); }
 .time-input { width: 100rpx; min-height: 58rpx; padding: 0 10rpx; border-radius: 10rpx; background: #fff; text-align: center; font-size: 24rpx; }
 .draft-actions { display: flex; gap: 12rpx; margin-top: 12rpx; flex-wrap: wrap; }
 .mini-btn { padding: 10rpx 16rpx; border-radius: 999rpx; border: 2rpx solid rgba(29, 28, 24, 0.18); font-size: 22rpx; font-weight: 700; }
-.privacy-note { margin: 16rpx 4rpx 0; font-size: 21rpx; line-height: 1.55; color: var(--fg-3, #7b7468); }
+.privacy-note { margin: 16rpx 4rpx 0; font-size: 21rpx; line-height: 1.55; color: var(--text-3); }

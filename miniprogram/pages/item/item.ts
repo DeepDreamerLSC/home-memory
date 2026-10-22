@@ -7,6 +7,7 @@ import {
   uuid,
 } from "../../utils/api";
 import { ensureScopeVerified } from "../../utils/households-api";
+import { itemArtwork } from "../../utils/ui";
 import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
@@ -261,6 +262,10 @@ Page<
     itemId: string;
     name: string;
     locationText: string;
+    recordedLocationText: string;
+    artworkLight: string;
+    artworkDark: string;
+    detailQuoteOpen: boolean;
     note: string;
     version: number;
     updatedAtText: string;
@@ -422,6 +427,9 @@ Page<
     onNoteInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     /** 展开 / 收起编辑表单(只读大卡为常态) */
     onEditToggle(): void;
+    onUpdateLocationTap(): void;
+    onFoundTap(): void;
+    onQuoteToggle(): void;
     /* ---------------- 冲突面板(issue #6:同字段多设备双值对比 + 显式选边) ---------------- */
     onChooseLocal(e: WechatMiniprogram.BaseEvent): void;
     onChooseRemote(e: WechatMiniprogram.BaseEvent): void;
@@ -527,6 +535,10 @@ Page<
     itemId: "",
     name: "",
     locationText: "",
+    recordedLocationText: "",
+    artworkLight: itemArtwork(""),
+    artworkDark: itemArtwork("", true),
+    detailQuoteOpen: false,
     note: "",
     version: 0,
     updatedAtText: "",
@@ -871,6 +883,20 @@ Page<
     this.setData({ editPanelOpen: !this.data.editPanelOpen });
   },
 
+  onUpdateLocationTap() {
+    this.setData({ editPanelOpen: true }, () => {
+      wx.pageScrollTo({ selector: "#item-edit-panel", duration: 220 });
+    });
+  },
+
+  onFoundTap() {
+    // Finding an item is feedback, not a new location fact or reminder completion.
+    if (this.data.saving || this.data.deleting || this.data.mountSaving) return;
+    this.goBack();
+  },
+
+  onQuoteToggle() { this.setData({ detailQuoteOpen: !this.data.detailQuoteOpen }); },
+
   applySummary(s: ItemSummary) {
     this.original = {
       name: s.name,
@@ -889,6 +915,9 @@ Page<
       itemId: s.item_id,
       name: s.name,
       locationText: s.location_text,
+      recordedLocationText: s.location_text,
+      artworkLight: itemArtwork(s.name),
+      artworkDark: itemArtwork(s.name, true),
       note: s.note,
       version: s.version,
       updatedAtText: formatDateTime(s.updated_at),
@@ -1234,6 +1263,7 @@ Page<
     this.setData({
       name: outcome.merged.name,
       locationText: outcome.merged.location,
+      recordedLocationText: item.location_text,
       note: outcome.merged.note,
       version: item.version,
       updatedAtText: formatDateTime(item.updated_at),

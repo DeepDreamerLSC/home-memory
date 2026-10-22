@@ -1,3 +1,4 @@
+import { roomArtwork, itemArtwork } from "../../utils/ui";
 import { callItemsApi, errorMessage } from "../../utils/api";
 import { attachVoiceEntry, type VoiceEntryHandle } from "../../utils/voice-entry";
 import type {
@@ -40,6 +41,8 @@ type DisplayRoom = {
   name: string;
   initial: string;
   countText: string;
+  artwork: string;
+  artworkDark: string;
 };
 
 /** 「尚未归类」明细行(#36 真机反馈 Fix 3:首字块 + 名称 + 原话位置 + 灰标) */
@@ -69,6 +72,8 @@ function toUnmountedRows(
     evidenceUrl = 证据缩略临时链接(#3),有证据的照片行才携带) */
 type DisplayItem = ItemSummary & {
   updated_at_short: string;
+  artwork: string;
+  artworkDark: string;
   evidenceUrl?: string;
   /** 有视频才携带；只来自 user_confirmed 行，不含临时 URL/box/confidence */
   videoHint?: VideoPlaybackBadge;
@@ -81,7 +86,7 @@ interface ViewLayer {
 }
 
 function toDisplayItems(items: ItemSummary[]): DisplayItem[] {
-  return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at) }));
+  return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at), artwork: itemArtwork(item.name), artworkDark: itemArtwork(item.name, true) }));
 }
 
 /** 记录更新日期短文案(如 10-08;updated_at 不代表位置确认时间);非法时间如实返回空串 */
@@ -98,12 +103,12 @@ function shortDate(iso: string): string {
 /** 格子计数文案:件数优先;没东西但有子位置时如实说明 */
 function roomCountText(node: LocationNodeSummary): string {
   if (node.item_count > 0) {
-    return node.item_count + " 件东西";
+    return node.item_count + " 件";
   }
   if (node.child_count > 0) {
-    return node.child_count + " 个更细的位置";
+    return node.child_count + " 个位置";
   }
-  return "还没记东西";
+  return "0 件";
 }
 
 Page<
@@ -148,6 +153,10 @@ Page<
     containerName: string;
     rooms: DisplayRoom[];
     directItems: DisplayItem[];
+    rememberedCount: number | null;
+    recentItems: DisplayItem[];
+    recentExpanded: boolean;
+    recentError: boolean;
     /** 未归位物品数(仅根层通栏格;>0 才显示,只显计数) */
     unmountedCount: number;
     /**
@@ -177,6 +186,12 @@ Page<
   {
     onLoad(options: Record<string, string | undefined>): void;
     onShow(): void;
+    loadRecent(): Promise<void>;
+    onRecentTap(e: WechatMiniprogram.CustomEvent): void;
+    onRecentMore(): void;
+    onLocationsTap(): void;
+    recentRequestSeq: number;
+    recentScopeGen: number | null;
     onHide(): void;
     onUnload(): void;
     refreshFamilyChip(): void;
@@ -297,6 +312,10 @@ Page<
     containerName: "",
     rooms: [],
     directItems: [],
+    rememberedCount: null,
+    recentItems: [],
+    recentExpanded: false,
+    recentError: false,
     unmountedCount: 0,
     unmountedView: false,
     unmountedItems: [] as DisplayUnmounted[],
@@ -312,6 +331,8 @@ Page<
     switchingFamily: false,
   },
 
+  recentRequestSeq: 0,
+  recentScopeGen: null,
   voiceEntry: null,
   requestSeq: createRequestSeq(),
   renderedCurrentView: false,
@@ -349,6 +370,7 @@ Page<
   onShow() {
     this.refreshFamilyChip();
     void this.loadMapLayer();
+    void this.loadRecent();
     // 未完成草稿会话恢复入口(中途退出/进程回收;原幂等键续存,不重复建档)。
     // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
     // 旧家庭的未完成批次当作当前可访问内容展示;验证失败时保持无横幅
@@ -363,17 +385,55 @@ Page<
   },
 
   onHide() {
+    this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
       this.voiceEntry.invalidate();
     }
   },
 
   onUnload() {
+    this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
       this.voiceEntry.invalidate();
       this.voiceEntry.detach();
       this.voiceEntry = null;
     }
+  },
+
+  /** Recent records share the same household and write-generation guards as the map. */
+  async loadRecent() {
+    const seq = ++this.recentRequestSeq;
+    let scopeGen = captureScopeGeneration();
+    if (this.recentScopeGen === null || !isScopeGenerationCurrent(this.recentScopeGen)) {
+      this.setData({ recentItems: [], recentExpanded: false, recentError: false });
+    }
+    try {
+      const verified = await ensureScopeVerified();
+      if (!verified || seq !== this.recentRequestSeq) return;
+      scopeGen = captureScopeGeneration();
+      const cacheGen = captureCacheGeneration();
+      const res = await callItemsApi({ action: "list", limit: 20 });
+      if (seq !== this.recentRequestSeq || !isScopeGenerationCurrent(scopeGen) || !isCacheGenerationCurrent(cacheGen)) return;
+      this.recentScopeGen = scopeGen;
+      this.setData({ recentItems: toDisplayItems(res.items), recentError: false });
+    } catch (_) {
+      if (seq !== this.recentRequestSeq || !isScopeGenerationCurrent(scopeGen)) return;
+      this.setData({ recentItems: [], recentError: true });
+    }
+  },
+
+  onRecentTap(e) {
+    if (this.recentScopeGen === null || !isScopeGenerationCurrent(this.recentScopeGen)) return;
+    const item = this.data.recentItems[Number(e.currentTarget.dataset.index)];
+    if (item) this.openItem(item);
+  },
+
+  onRecentMore() {
+    this.setData({ recentExpanded: !this.data.recentExpanded });
+  },
+
+  onLocationsTap() {
+    wx.navigateTo({ url: "/pages/locations/locations" });
   },
 
   /** 家庭上下文头刷新(来自 household-scope 记忆;app 前台复核后已最新) */
@@ -686,6 +746,9 @@ Page<
       this.setData({
         rooms: [],
         directItems: [],
+        rememberedCount: null,
+        recentItems: [],
+        recentExpanded: false,
         unmountedCount: 0,
         unmountedView: false,
         unmountedItems: [],
@@ -762,6 +825,9 @@ Page<
         this.setData({
           rooms: [],
           directItems: [],
+          rememberedCount: null,
+          recentItems: [],
+          recentExpanded: false,
           unmountedCount: 0,
           unmountedView: false,
           unmountedItems: [],
@@ -825,6 +891,8 @@ Page<
       name: c.name,
       initial: c.name.length > 0 ? c.name[0] : "?",
       countText: roomCountText(c),
+      artwork: roomArtwork(c.name),
+      artworkDark: roomArtwork(c.name, true),
     }));
     this.renderedCurrentView = true;
     this.renderedScopeGen = captureScopeGeneration();
@@ -841,6 +909,7 @@ Page<
     const inUnmountedView = this.data.unmountedView;
     this.setData({
       firstUse,
+      rememberedCount: isRoot ? res.node.item_count + res.unmounted_count : res.node.item_count,
       mapTitle: inUnmountedView
         ? "尚未归类 · " + res.unmounted_count + " 件待核实"
         : isRoot
@@ -887,6 +956,7 @@ Page<
       mapTitle: room.name + "里有什么",
       rooms: [],
       directItems: [],
+      rememberedCount: null,
       unmountedCount: 0,
       unmountedView: false,
     });
@@ -947,6 +1017,7 @@ Page<
         backLabel: "",
         rooms: [],
         directItems: [],
+        rememberedCount: null,
       });
       void this.loadMapLayer();
       return;
@@ -1123,6 +1194,7 @@ Page<
         backLabel: "",
         rooms: [],
         directItems: [],
+        rememberedCount: null,
       });
       await this.loadMapLayer(true);
     } catch (e) {
@@ -1193,6 +1265,7 @@ Page<
           : "",
         rooms: [],
         directItems: [],
+        rememberedCount: null,
       });
       await this.loadMapLayer(true);
     } catch (e) {

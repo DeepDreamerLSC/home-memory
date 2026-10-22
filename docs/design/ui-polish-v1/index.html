@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>我靠东西呢 · UI 质感提案</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; color: #292b25; background: #eae9e2; font-synthesis: none; }
+    body { margin: 0; }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #ae8935; outline-offset: 4px; }
+    button { border: 0; background: none; }
+    svg { display: block; }
+    .symbol-library { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .workbench { min-height: 100svh; display: grid; grid-template-columns: 330px 390px; gap: 100px; align-items: center; justify-content: center; padding: 24px 28px; background: radial-gradient(ellipse at 70% 40%, #f7f6f1 0, #eae9e2 64%); }
+    .intro { padding-bottom: 22px; }
+    .edition { display: flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 2px; color: #77796d; }
+    .edition::before { content: ""; width: 22px; height: 1px; background: #898c7d; }
+    .intro h1 { font-size: 43px; line-height: 1.45; font-weight: 500; letter-spacing: -2px; margin: 28px 0 19px; }
+    .intro h1 em { font-style: normal; position: relative; z-index: 0; }
+    .intro h1 em::after { content: ""; position: absolute; left: 0; bottom: 4px; height: 13px; background: #e9cb70; width: 100%; z-index: -1; transform: rotate(-2deg); }
+    .intro-copy { font-size: 14px; line-height: 1.9; color: #75786a; max-width: 280px; }
+    .design-notes { display: grid; gap: 17px; margin: 33px 0; padding: 27px 0; border-block: 1px solid #d4d5ca; }
+    .design-note { display: flex; align-items: baseline; gap: 17px; }
+    .design-note span { font: 11px ui-monospace, monospace; color: #8b8f7e; }
+    .design-note p { margin: 0; font-size: 13px; color: #626657; }
+    .view-picker { display: flex; flex-wrap: wrap; gap: 7px; }
+    .view-picker button { padding: 9px 13px; border: 1px solid #d1d3c7; border-radius: 7px; font-size: 12px; color: #686d5c; transition: background .2s; }
+    .view-picker button[aria-pressed="true"] { background: #30372c; color: #fffdf5; border-color: #30372c; }
+    .preview-note { margin-top: 18px; font-size: 11px; color: #898c7e; line-height: 1.7; }
+    .theme-button { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; padding: 8px 0; font-size: 12px; color: #6d7262; }
+    .theme-button svg { width: 15px; height: 15px; }
+    .phone { --paper: #f8f7f2; --surface: #fffefa; --ink: #292d25; --muted: #666d5e; --faint: #6d7363; --line: #e7e8de; --wash: #eeeee5; --yellow: #efd36e; --action: #30372c; --on-action: #fcfaf1; --room-bg: #efeee4; --room-line: #7b8069; --room-mid: #d3d5bf; --room-light: #f8f6e9; --room-dark: #a9ae91; --room-accent: #ddc486; width: 390px; height: min(844px, calc(100svh - 48px)); min-height: 650px; flex-shrink: 0; background: var(--paper); color: var(--ink); border-radius: 44px; border: 7px solid #f6f5ee; box-shadow: 0 0 0 1px #d1d2c5, 0 34px 75px -25px #4a503744, 0 3px 8px #4a50370b; position: relative; display: flex; flex-direction: column; overflow: hidden; color-scheme: light; }
+    .phone[data-theme="dark"] { --paper: #20241f; --surface: #2b3028; --ink: #efeee4; --muted: #b5baa8; --faint: #929a85; --line: #3d4436; --wash: #32392e; --yellow: #e8ce78; --action: #e8ce78; --on-action: #262c22; --room-bg: #30362d; --room-line: #abb598; --room-mid: #626f52; --room-light: #909a75; --room-dark: #3f4c37; --room-accent: #b29b65; color-scheme: dark; }
+    .phone button { transition: transform .15s ease, background .18s ease, opacity .18s ease; }
+    .phone button:active { transform: scale(.975); }
+    .status-bar { flex: none; height: 34px; padding: 10px 24px 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; }
+    .status-icons { display: flex; align-items: center; gap: 6px; }
+    .status-icons svg { width: 15px; height: 15px; }
+    .battery { width: 22px; height: 11px; border: 1px solid currentColor; border-radius: 3px; padding: 2px; position: relative; }
+    .battery::before { content: ""; display: block; height: 100%; width: 85%; border-radius: 1px; background: currentColor; }
+    .battery::after { content: ""; position: absolute; width: 2px; height: 5px; right: -4px; top: 2px; background: currentColor; border-radius: 0 1px 1px 0; }
+    .mini-nav { flex: none; height: 47px; display: grid; grid-template-columns: 75px 1fr 75px; align-items: center; padding: 0 16px; }
+    .mini-title { text-align: center; font-size: 13px; font-weight: 500; letter-spacing: .2px; }
+    .back { width: 38px; height: 38px; padding: 10px; }
+    .back svg { width: 19px; height: 19px; }
+    .capsule { height: 28px; display: flex; justify-content: space-around; align-items: center; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); padding: 0 8px; }
+    .capsule .dots { letter-spacing: 1px; font-weight: 700; font-size: 14px; line-height: 1; }
+    .capsule .capline { height: 14px; width: 1px; background: var(--line); }
+    .capsule .circle { width: 12px; height: 12px; border: 2px solid var(--ink); border-radius: 50%; position: relative; }
+    .capsule .circle::after { content: ""; position: absolute; inset: 2px; background: var(--ink); border-radius: 50%; }
+    .content { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 22px 22px; scrollbar-width: none; }
+    .content::-webkit-scrollbar { display: none; }
+    .heading-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: .4px; margin: 0 0 6px; }
+    .page-title { font-size: 27px; font-weight: 600; letter-spacing: -.8px; line-height: 1.35; margin: 0; }
+    .home-sub { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+    .family-switch { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 10px 0 10px 8px; color: var(--muted); }
+    .family-switch svg { width: 13px; height: 13px; }
+    .green-dot { width: 5px; height: 5px; border-radius: 50%; background: #899276; margin-right: 2px; }
+    .search { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 5px 5px 5px 14px; margin: 24px 0 22px; }
+    .search > svg { width: 18px; height: 18px; color: var(--muted); flex-shrink: 0; }
+    .search input { background: transparent; color: var(--ink); border: 0; width: 100%; min-width: 0; height: 38px; font-size: 13px; outline-offset: 0; }
+    .search input::placeholder { color: var(--faint); }
+    .search button { width: 37px; height: 37px; display: grid; place-items: center; flex: none; border-radius: 11px; background: var(--action); color: var(--on-action); }
+    .search button svg { width: 17px; height: 17px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 13px; }
+    .section-header h2 { font-size: 14px; font-weight: 600; margin: 0; }
+    .section-header span, .section-header button { font-size: 11px; color: var(--muted); }
+    .section-header button { min-height: 30px; padding: 0; }
+    .rooms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .room { text-align: left; padding: 0; border-radius: 17px; background: var(--surface); overflow: hidden; border: 1px solid var(--line); }
+    .room-art { height: 103px; background: var(--room-bg); display: grid; place-items: center; }
+    .room-art svg { width: 150px; max-width: 100%; height: 103px; }
+    .room-info { padding: 12px 13px; display: flex; align-items: center; justify-content: space-between; }
+    .room-name { font-size: 14px; font-weight: 500; display: block; }
+    .room-count { font-size: 10px; color: var(--muted); display: block; margin-top: 3px; }
+    .room-info > svg { width: 14px; height: 14px; color: var(--faint); }
+    .reminder { display: flex; gap: 9px; align-items: center; width: 100%; text-align: left; padding: 12px 0 11px; margin: 11px 0 17px; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+    .reminder > svg:first-child { color: #9c8a4b; width: 15px; height: 15px; }
+    .reminder > span { flex: 1; }
+    .reminder strong { font-weight: 500; color: var(--ink); }
+    .reminder > svg:last-child { width: 14px; height: 14px; }
+    .item-list { display: grid; }
+    .item { display: flex; gap: 13px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+    .item:last-child { border-bottom: 0; }
+    .item-thumb { width: 45px; height: 45px; flex-shrink: 0; border-radius: 12px; background: var(--wash); display: grid; place-items: center; }
+    .item-thumb svg { width: 35px; height: 35px; }
+    .item-copy { min-width: 0; flex: 1; }
+    .item-copy strong { font-size: 13px; font-weight: 500; display: block; }
+    .item-copy small { color: var(--muted); font-size: 11px; display: block; margin-top: 5px; line-height: 1.5; }
+    .item > svg { width: 14px; height: 14px; color: var(--faint); }
+    .item-date { font-size: 10px; color: var(--faint); align-self: flex-start; padding-top: 3px; }
+    .dock { flex: none; padding: 12px 20px 8px; background: var(--paper); border-top: 1px solid var(--line); }
+    .dock-actions { display: flex; gap: 10px; }
+    .voice { min-height: 51px; flex: 1; border-radius: 16px; background: var(--action); color: var(--on-action); display: flex; align-items: center; justify-content: center; gap: 11px; font-size: 13px; font-weight: 500; }
+    .voice svg { width: 18px; height: 18px; }
+    .mic-disc { width: 29px; height: 29px; border-radius: 50%; background: #efd36e; color: #30372c; display: grid; place-items: center; }
+    .plus { width: 51px; height: 51px; border: 1px solid var(--line); background: var(--surface); border-radius: 16px; display: grid; place-items: center; }
+    .plus svg { width: 22px; height: 22px; }
+    .dock-secondary { min-width: 88px; min-height: 51px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
+    .phone[data-view="empty"] .dock { border-top: 0; }
+    .home-indicator { width: 105px; height: 4px; background: var(--ink); opacity: .85; border-radius: 5px; margin: 15px auto 0; }
+    .breadcrumb { display: flex; align-items: center; gap: 7px; margin-bottom: 17px; color: var(--muted); font-size: 11px; }
+    .breadcrumb button { padding: 6px 0; }
+    .breadcrumb svg { width: 11px; height: 11px; }
+    .room-banner { height: 160px; background: var(--room-bg); border-radius: 20px; display: flex; align-items: center; justify-content: center; margin-top: 20px; }
+    .room-banner svg { width: 230px; height: 160px; }
+    .room-meta { margin: 21px 0 10px; font-size: 12px; color: var(--muted); }
+    .location-label { font-size: 11px; color: var(--muted); margin-top: 28px; }
+    .location-card { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+    .location-card h2 { font-size: 21px; font-weight: 500; margin: 10px 0 8px; line-height: 1.5; letter-spacing: -.5px; }
+    .location-path { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .location-path svg { width: 12px; height: 12px; }
+    .detail-visual { height: 134px; display: grid; place-items: center; background: var(--wash); border-radius: 17px; margin: 18px 0; }
+    .detail-visual svg { width: 120px; height: 100px; }
+    .detail-hint { font-size: 11px; line-height: 1.75; color: var(--muted); margin: 11px 0 22px; }
+    .text-row { padding: 15px 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .text-row > span { color: var(--muted); }
+    .text-row button { font-size: 12px; padding: 5px 0 5px 12px; }
+    .text-row svg { width: 14px; height: 14px; }
+    .primary { width: 100%; min-height: 49px; background: var(--action); color: var(--on-action); border-radius: 14px; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .primary svg { width: 18px; height: 18px; }
+    .secondary { min-height: 44px; width: 100%; font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .bottom-actions { margin-top: 25px; }
+    .trust { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--muted); font-size: 10px; line-height: 1.6; margin: 13px 0; }
+    .trust svg { width: 12px; height: 12px; }
+    .quote { font-size: 13px; line-height: 1.9; margin: 21px 0; padding: 14px 17px; border-left: 2px solid var(--yellow); background: var(--wash); border-radius: 0 12px 12px 0; }
+    .field { display: grid; gap: 7px; font-size: 11px; color: var(--muted); margin-top: 20px; }
+    .field input, .field textarea { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 12px 14px; font-size: 14px; line-height: 1.5; resize: vertical; }
+    .field textarea { min-height: 110px; }
+    .confirm-note { display: flex; gap: 8px; align-items: center; font-size: 11px; line-height: 1.6; color: var(--muted); padding: 12px 14px; background: var(--wash); border-radius: 12px; margin-top: 18px; }
+    .confirm-note svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .empty { text-align: center; padding: 36px 15px; }
+    .empty > svg { width: 210px; max-width: 100%; height: 150px; margin: 0 auto 20px; }
+    .empty h2 { font-size: 22px; font-weight: 500; line-height: 1.5; margin: 0 0 12px; }
+    .empty p { font-size: 12px; color: var(--muted); line-height: 1.9; margin-bottom: 25px; }
+    .empty-compact { padding: 45px 10px; }
+    .empty-compact h2 { font-size: 17px; }
+    .overlay { position: absolute; inset: 0; z-index: 5; background: #171d1866; display: flex; align-items: flex-end; animation: fade-in .2s ease; }
+    .sheet { background: var(--paper); width: 100%; border-radius: 25px 25px 0 0; padding: 10px 22px 24px; max-height: 88%; overflow-y: auto; animation: rise .25s ease; }
+    .grab { width: 32px; height: 4px; border-radius: 4px; background: var(--line); margin: 0 auto 15px; }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+    .sheet-head h2 { font-size: 20px; font-weight: 500; margin: 0; }
+    .close { width: 36px; height: 36px; display: grid; place-items: center; color: var(--muted); }
+    .close svg { width: 18px; height: 18px; }
+    .sheet-sub { font-size: 12px; color: var(--muted); margin: 4px 0 20px; line-height: 1.7; }
+    .method { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; border-bottom: 1px solid var(--line); padding: 16px 0; }
+    .method-icon { width: 43px; height: 43px; border-radius: 13px; background: var(--wash); display: grid; place-items: center; }
+    .method-icon svg { width: 20px; height: 20px; }
+    .method-copy { flex: 1; }
+    .method strong { display: block; font-size: 14px; font-weight: 500; }
+    .method small { display: block; font-size: 11px; color: var(--muted); margin-top: 5px; }
+    .method > svg { width: 15px; height: 15px; color: var(--muted); }
+    .recording { text-align: center; padding-top: 18px; }
+    .recording h3 { font-size: 22px; font-weight: 500; margin: 6px 0 9px; }
+    .recording p { font-size: 12px; color: var(--muted); }
+    .wave { display: flex; justify-content: center; align-items: center; gap: 5px; height: 80px; color: var(--room-line); }
+    .wave i { width: 4px; height: 15px; border-radius: 3px; background: currentColor; animation: wave 1s ease-in-out infinite alternate; }
+    .wave i:nth-child(3n) { height: 39px; animation-delay: -.4s; }
+    .wave i:nth-child(3n + 1) { height: 25px; animation-delay: -.7s; }
+    .sample-transcript { padding: 15px; background: var(--surface); border-radius: 12px; font-size: 15px; line-height: 1.7; margin: 10px 0 22px; }
+    .toast { position: absolute; z-index: 10; bottom: 115px; left: 24px; right: 24px; background: #30372cf2; color: #fffdf5; border-radius: 12px; padding: 14px 15px; text-align: center; font-size: 12px; box-shadow: 0 8px 24px #12180f22; animation: rise .2s ease; }
+    .upload-preview { background: var(--room-bg); border-radius: 17px; padding: 25px; display: grid; place-items: center; margin: 20px 0; }
+    .upload-preview svg { width: 160px; height: 115px; }
+    @keyframes rise { from { transform: translateY(18px); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes wave { to { transform: scaleY(.45); opacity: .6; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+    @media (max-width: 900px) { .workbench { gap: 45px; grid-template-columns: 270px 390px; padding-inline: 20px; } .intro h1 { font-size: 38px; } }
+    @media (max-width: 740px) { .workbench { display: flex; flex-direction: column; padding: 22px 12px; gap: 20px; } .intro { padding: 0; width: min(100%, 390px); } .edition { font-size: 10px; letter-spacing: 1px; } .intro h1, .intro-copy, .design-notes, .preview-note { display: none; } .view-picker { margin-top: 14px; } .view-picker button { flex: 1; padding-inline: 8px; white-space: nowrap; } .theme-button { position: absolute; right: 20px; top: 14px; margin: 0; } }
+    @media (max-width: 420px) { .phone { width: 100%; max-width: 390px; border-radius: 32px; border-width: 4px; height: min(844px, calc(100svh - 110px)); min-height: 620px; } .workbench { padding-inline: 8px; } .content { padding-inline: 19px; } .status-bar { padding-inline: 20px; } .room-art { height: 96px; } .room-art svg { height: 96px; } }
+  </style>
+</head>
+<body>
+  <svg class="symbol-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m16 16 4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="m8 6 1-2h6l1 2h4v14H4V6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+      <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m15 10 6-3v10l-6-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+      <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 6V4h16v2M12 4v16m-3 0h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14a8.5 8.5 0 0 1-10-10 8.5 8.5 0 1 0 10 10Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+      <symbol id="i-signal" viewBox="0 0 20 20"><path d="M3 16v-3m4 3V9m4 7V6m4 10V3" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></symbol>
+      <symbol id="i-wifi" viewBox="0 0 20 20"><path d="M2 7a12 12 0 0 1 16 0M5 10a7.5 7.5 0 0 1 10 0m-7 3a3 3 0 0 1 4 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="16" r="1" fill="currentColor"/></symbol>
+      <symbol id="art-living" viewBox="0 0 180 120">
+        <ellipse cx="92" cy="105" rx="65" ry="5" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M27 95V28h40v67" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M47 29v60M28 54h38" stroke="var(--room-line)" stroke-width=".8" opacity=".6"/>
+        <path d="m57 72 4-17h57l6 17" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="49" y="70" width="82" height="29" rx="6" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="45" y="68" width="13" height="30" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><rect x="122" y="68" width="13" height="30" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M58 82h64m-64 18v5m64-5v5" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="65" y="63" width="20" height="18" rx="4" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width=".8" transform="rotate(-7 75 72)"/>
+        <path d="M151 91V44m-10 0 10-23 10 23Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M142 93h18" stroke="var(--room-line)" stroke-width="1.3" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="art-bedroom" viewBox="0 0 180 120">
+        <ellipse cx="92" cy="105" rx="62" ry="5" fill="var(--room-dark)" opacity=".15"/>
+        <rect x="57" y="21" width="24" height="29" rx="1" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1"/><path d="m62 43 6-10 8 10" fill="var(--room-mid)"/><circle cx="73" cy="29" r="3" fill="var(--room-accent)"/>
+        <path d="M45 80V62q0-9 9-9h68q9 0 9 9v18" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <rect x="51" y="64" width="32" height="19" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width=".9"/><rect x="91" y="64" width="32" height="19" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width=".9"/>
+        <path d="m39 99 8-20h80l11 20Z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M39 99h99v5H39z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="m90 79 7 20h31l-10-20" fill="var(--room-accent)" opacity=".85"/>
+        <path d="M147 73h17v24h-17zm0 9h17" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.1"/><path d="M155 72V57m-8 0h16l-3-12h-10Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.1"/>
+      </symbol>
+      <symbol id="art-study" viewBox="0 0 180 120">
+        <ellipse cx="93" cy="106" rx="65" ry="4" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M124 24h31v77h-31z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M125 48h29m-29 25h29" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M130 45V31h5v14m3 0V29h5v16m3 0V34h4v11" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width=".8"/><rect x="132" y="60" width="15" height="10" rx="2" fill="var(--room-accent)"/>
+        <path d="M30 71h85v6H30zm7 6v27m70-27v27" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <path d="m49 69 4-24h31l4 24Zm-5 2h49" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M65 88v15m-10 2h20" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="52" y="78" width="26" height="16" rx="5" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M102 69V47l-7-8m-6 7 12-10-8-4Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M34 67v-9m-4-2c-5-7 0-12 4-8 3-7 10-4 7 3-1 4-7 6-7 6" fill="var(--room-dark)"/><path d="M29 62h11l-2 9h-7Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width=".8"/>
+      </symbol>
+      <symbol id="art-kitchen" viewBox="0 0 180 120">
+        <ellipse cx="91" cy="106" rx="62" ry="4" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M36 30h49v31H36z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M60 31v29m-6-17v6m12-6v6" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M31 74h108v29H31z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M27 70h117v6H27z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M65 78v24m36-24v24M38 84h20m16 0h19m17 0h21" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M47 70V54q0-8 7-8t7 8" fill="none" stroke="var(--room-line)" stroke-width="1.6"/><path d="M38 70h29" stroke="var(--room-line)" stroke-width="2.5"/>
+        <path d="M99 55h22v14H99zm-3 0h28m-15-4h4" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M96 26h29m-23 0v10m15-10v10" stroke="var(--room-line)" stroke-width="1.2"/><path d="M99 36h6v10h-6zm15 0h6v10h-6z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width=".8"/>
+        <path d="M146 68h10v35h-10zm1-8q-7-12-2-16 9 1 7 12 5-12 11-7-1 10-12 14" fill="var(--room-dark)" stroke="var(--room-line)" stroke-width=".8"/>
+      </symbol>
+      <symbol id="art-key" viewBox="0 0 80 70"><ellipse cx="40" cy="57" rx="24" ry="4" fill="var(--room-dark)" opacity=".18"/><g transform="rotate(-28 40 35)"><path d="M32 30v28h11v-6h-5v-5h6v-6h-6V30" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.5"/><circle cx="35" cy="22" r="13" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.5"/><circle cx="35" cy="20" r="4.5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1"/></g><path d="M43 10q14-3 13 7t-12 6" fill="none" stroke="var(--room-line)" stroke-width="2"/></symbol>
+      <symbol id="art-medicine" viewBox="0 0 80 70"><ellipse cx="40" cy="59" rx="23" ry="4" fill="var(--room-dark)" opacity=".18"/><rect x="24" y="18" width="32" height="40" rx="7" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.4"/><rect x="26" y="11" width="28" height="12" rx="3" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.4"/><path d="M24 32h32v16H24z" fill="var(--room-mid)"/><path d="M40 35v10m-5-5h10" stroke="var(--room-line)" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="art-book" viewBox="0 0 80 70"><ellipse cx="40" cy="58" rx="24" ry="4" fill="var(--room-dark)" opacity=".18"/><path d="m20 17 34-4 6 39-34 6Z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.4"/><path d="m26 16 6 40m-5-2 31-4" stroke="var(--room-line)" stroke-width="1"/><path d="m34 25 13-2m-12 7 12-2" stroke="var(--room-light)" stroke-width="2"/><path d="m46 13 2 13 4-3 3 2-2-13" fill="var(--room-accent)"/></symbol>
+    </defs>
+  </svg>
+  <div class="workbench">
+    <aside class="intro">
+      <div class="edition">我靠东西呢 / 视觉提案</div>
+      <h1>给东西一个<br><em>安稳的位置。</em></h1>
+      <nav class="view-picker" aria-label="预览页面">
+        <button type="button" data-preview="home" aria-pressed="true">日常首页</button>
+        <button type="button" data-preview="empty" aria-pressed="false">首次使用</button>
+        <button type="button" data-preview="confirm" aria-pressed="false">记录核对</button>
+        <button type="button" data-preview="detail" aria-pressed="false">物品详情</button>
+      </nav>
+      <button class="theme-button" id="theme-button" type="button" aria-pressed="false"><svg aria-hidden="true"><use href="#i-moon"/></svg><span>看看深色</span></button>
+      <p class="preview-note">交互原型 · 示例数据</p>
+    </aside>
+    <section class="phone" id="phone" aria-label="小程序交互预览" data-theme="light">
+      <div class="status-bar" aria-hidden="true"><span>9:41</span><div class="status-icons"><svg><use href="#i-signal"/></svg><svg><use href="#i-wifi"/></svg><div class="battery"></div></div></div>
+      <header class="mini-nav"><div id="back-slot"></div><div class="mini-title">我靠东西呢</div><div class="capsule" aria-hidden="true"><span class="dots">•••</span><span class="capline"></span><span class="circle"></span></div></header>
+      <main class="content" id="content"></main>
+      <footer class="dock"><div class="dock-actions"><button class="voice" type="button" data-action="record"><span class="mic-disc"><svg aria-hidden="true"><use href="#i-mic"/></svg></span><span>按住说话</span></button><button class="plus" type="button" data-action="add" aria-label="选择其他录入方式"><svg aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="home-indicator" aria-hidden="true"></div></footer>
+      <div id="overlay-root"></div><div id="toast-root" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const phone = document.getElementById('phone');
+      const content = document.getElementById('content');
+      const overlayRoot = document.getElementById('overlay-root');
+      const backSlot = document.getElementById('back-slot');
+      const rooms = [
+        { id: 'living', name: '客厅', count: 12, art: 'living' },
+        { id: 'bedroom', name: '卧室', count: 16, art: 'bedroom' },
+        { id: 'study', name: '书房', count: 11, art: 'study' },
+        { id: 'kitchen', name: '厨房', count: 9, art: 'kitchen' }
+      ];
+      const items = [
+        { id: 'key', name: '备用钥匙', room: 'living', container: '玄关柜', position: '右侧第二个抽屉', art: 'key', when: '今天', quote: '备用钥匙放在玄关柜右侧第二个抽屉里了。' },
+        { id: 'medicine', name: '维生素', room: 'kitchen', container: '餐边柜', position: '上层收纳盒', art: 'medicine', when: '昨天', quote: '维生素收在厨房餐边柜上层的收纳盒里。' },
+        { id: 'book', name: '相机说明书', room: 'study', container: '书桌', position: '左侧第一个抽屉', art: 'book', when: '昨天', quote: '相机说明书在书房书桌左侧第一个抽屉。' }
+      ];
+      let view = 'home';
+      let history = [];
+      let selectedRoom = 'living';
+      let selectedItem = 'key';
+      let query = '';
+      let draft = { name: '备用钥匙', location: '玄关柜右侧第二个抽屉', room: 'living' };
+      let draftReturn = 'home';
+      let toastTimer;
+      let overlayOpener;
+      const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+      const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
+      const art = name => `<svg aria-hidden="true"><use href="#art-${name}"/></svg>`;
+      const roomFor = item => rooms.find(room => room.id === item.room);
+      const total = () => rooms.reduce((sum, room) => sum + room.count, 0);
+      const currentItem = () => items.find(item => item.id === selectedItem) || items[0];
+      const searchForm = () => `<form class="search" id="search-form">${icon('search')}<input id="search-input" aria-label="搜索物品" placeholder="搜索物品" value="${esc(query)}" autocomplete="off" enterkeyhint="search"><button type="submit" aria-label="搜索">${icon('arrow')}</button></form>`;
+      const itemRow = (item, date = false) => `<button class="item" type="button" data-action="detail" data-id="${esc(item.id)}"><span class="item-thumb">${art(item.art)}</span><span class="item-copy"><strong>${esc(item.name)}</strong><small>${esc(item.container)} · ${esc(item.position)}</small></span>${date ? `<span class="item-date">${esc(item.when)}</span>` : icon('chevron')}</button>`;
+      const heading = (title, sub = '') => `<h1 class="page-title">${title}</h1>${sub ? `<p class="home-sub">${sub}</p>` : ''}`;
+      function render() {
+        phone.dataset.view = view;
+        const dock = phone.querySelector('.dock-actions');
+        if (view === 'detail') dock.innerHTML = `<button class="voice" type="button" data-action="found">${icon('check')}找到了</button><button class="dock-secondary" type="button" data-action="edit">更新位置</button>`;
+        else if (view === 'confirm') dock.innerHTML = `<button class="primary" type="submit" form="confirm-form">确认记住</button>`;
+        else if (view === 'empty') dock.innerHTML = '';
+        else dock.innerHTML = `<button class="voice" type="button" data-action="record"><span class="mic-disc">${icon('mic')}</span><span>按住说话</span></button><button class="plus" type="button" data-action="add" aria-label="选择其他录入方式">${icon('plus')}</button>`;
+        backSlot.innerHTML = view === 'home' || view === 'empty' ? '' : `<button type="button" class="back" data-action="back" aria-label="返回">${icon('back')}</button>`;
+        document.querySelectorAll('[data-preview]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preview === view)));
+        if (view === 'home') {
+          content.innerHTML = `<div class="heading-row"><div>${heading('家里有什么')}</div><button type="button" class="family-switch" data-action="family"><span class="green-dot"></span>我的家${icon('down')}</button></div><p class="home-sub">已记住 ${total()} 件</p>${searchForm()}<div class="section-header"><h2>房间</h2></div><div class="rooms">${rooms.map(room => `<button class="room" type="button" data-action="room" data-id="${room.id}" aria-label="${room.name}，${room.count} 件物品"><div class="room-art">${art(room.art)}</div><div class="room-info"><span><span class="room-name">${room.name}</span><span class="room-count">${room.count} 件</span></span>${icon('chevron')}</div></button>`).join('')}</div><button class="reminder" type="button" data-action="reminders">${icon('clock')}<span><strong>2 件物品</strong>即将到期</span>${icon('chevron')}</button><div class="section-header"><h2>最近记住</h2><button type="button" data-action="all">查看全部</button></div><div class="item-list">${items.slice(0, 2).map(item => itemRow(item, true)).join('')}</div>`;
+        } else if (view === 'room') {
+          const room = rooms.find(room => room.id === selectedRoom);
+          const list = items.filter(item => item.room === room.id);
+          content.innerHTML = `<div class="breadcrumb"><button type="button" data-action="home">我的家</button>${icon('chevron')}<span>${room.name}</span></div>${heading(room.name, `${room.count} 件物品`)}<div class="room-banner">${art(room.art)}</div><div class="room-meta">最近记录</div><div class="item-list">${list.length ? list.map(item => itemRow(item)).join('') : `<div class="empty empty-compact"><h2>还没有记录</h2><button class="primary" type="button" data-action="record">记一件</button></div>`}</div>`;
+        } else if (view === 'results') {
+          const matches = items.filter(item => `${item.name}${item.container}${item.position}${roomFor(item).name}`.includes(query));
+          content.innerHTML = `${heading('找东西')}${searchForm()}${matches.length ? `<div class="section-header"><h2>找到 ${matches.length} 件</h2></div>` : ''}${matches.length ? `<div class="item-list">${matches.map(item => itemRow(item)).join('')}</div>` : `<div class="empty empty-compact">${art('key')}<h2>没有「${esc(query)}」的记录</h2><button class="primary" type="button" data-action="text">记一件</button></div>`}`;
+        } else if (view === 'all') {
+          content.innerHTML = `${heading('最近记住')}<div class="item-list" style="margin-top:24px">${items.map(item => itemRow(item, true)).join('')}</div>`;
+        } else if (view === 'detail') {
+          const item = currentItem();
+          content.innerHTML = `${heading(esc(item.name))}<div class="detail-visual">${art(item.art)}</div><div class="location-label">上次确认放在</div><div class="location-card"><div class="location-path"><span>我的家</span>${icon('chevron')}<span>${esc(roomFor(item).name)}</span>${icon('chevron')}<span>${esc(item.container)}</span></div><h2>${esc(item.position)}</h2><div class="home-sub">${esc(item.when)}确认</div></div><p class="detail-hint">物品可能已移动。</p><div class="text-row"><span>原话</span><button type="button" data-action="quote">查看</button></div>`;
+        } else if (view === 'confirm') {
+          content.innerHTML = `${heading('核对记录')}<form id="confirm-form"><label class="field" for="draft-name">物品<input id="draft-name" value="${esc(draft.name)}" maxlength="40" required></label><label class="field" for="draft-location">位置<input id="draft-location" value="${esc(draft.location)}" maxlength="120" required></label><div class="confirm-note">${icon('check')}归到「${rooms.find(room => room.id === draft.room).name}」</div><div class="bottom-actions"><button class="secondary" type="button" data-action="record">再说一次</button></div><p class="trust">${icon('check')}确认后才保存。</p></form>`;
+        } else if (view === 'empty') {
+          content.innerHTML = `<div class="heading-row"><button class="family-switch" type="button" data-action="family">我的家${icon('down')}</button></div><div class="empty">${art('living')}<h2>先记一件东西</h2><p>告诉我物品和位置，下次帮你找。</p><button class="primary" type="button" data-action="record">${icon('mic')}语音记录</button><button class="secondary" type="button" data-action="text">文字记录</button><p class="trust">${icon('check')}确认后才保存。</p></div>`;
+        }
+        content.scrollTop = 0;
+      }
+      function navigate(next, push = true) { closeSheet(); if (push && view !== next) history.push(view); view = next; render(); }
+      function showSheet(title, body, sub = '') {
+        overlayOpener = document.activeElement;
+        overlayRoot.innerHTML = `<div class="overlay" data-action="dismiss"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><div class="grab"></div><div class="sheet-head"><h2 id="sheet-title">${title}</h2><button class="close" type="button" data-action="close" aria-label="关闭">${icon('close')}</button></div>${sub ? `<p class="sheet-sub">${sub}</p>` : ''}${body}</section></div>`;
+        overlayRoot.querySelector('.close').focus({ preventScroll: true });
+      }
+      function closeSheet() { overlayRoot.innerHTML = ''; if (overlayOpener?.isConnected) overlayOpener.focus({ preventScroll: true }); overlayOpener = null; }
+      function toast(message) { clearTimeout(toastTimer); document.getElementById('toast-root').innerHTML = `<div class="toast">${esc(message)}</div>`; toastTimer = setTimeout(() => { document.getElementById('toast-root').innerHTML = ''; }, 3000); }
+      function startDraft() { draftReturn = view === 'confirm' ? draftReturn : view; draft = { name: '备用钥匙', location: '玄关柜右侧第二个抽屉', room: 'living' }; }
+      function record() {
+        startDraft();
+        showSheet('说吧，我记着呢。', `<div class="recording"><div class="wave" aria-hidden="true">${'<i></i>'.repeat(17)}</div><div class="sample-transcript">备用钥匙放在玄关柜<br>右侧第二个抽屉里了。</div><button class="primary" type="button" data-action="record-done">去核对</button><button class="secondary" type="button" data-action="close">取消</button></div>`);
+      }
+      function method(name, sub, action, symbol) { return `<button class="method" type="button" data-action="${action}"><span class="method-icon">${icon(symbol)}</span><span class="method-copy"><strong>${name}</strong>${sub ? `<small>${sub}</small>` : ''}</span>${icon('chevron')}</button>`; }
+      phone.addEventListener('click', event => {
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+        const action = target.dataset.action;
+        if (action === 'dismiss' && event.target !== target) return;
+        if (action === 'close' || action === 'dismiss') return closeSheet();
+        if (action === 'home') { history = []; return navigate('home', false); }
+        if (action === 'back') return navigate(history.pop() || 'home', false);
+        if (action === 'room') { selectedRoom = target.dataset.id; return navigate('room'); }
+        if (action === 'detail') { selectedItem = target.dataset.id; return navigate('detail'); }
+        if (action === 'all') return navigate('all');
+        if (action === 'record') return record();
+        if (action === 'record-done') return navigate('confirm');
+        if (action === 'add') return showSheet('想怎么记？', `${method('拍照记一件', '', 'photo', 'camera')}${method('视频记多件', '', 'video', 'video')}${method('文字记录', '', 'text', 'text')}`);
+        if (action === 'family') return showSheet('切换家庭', `${method('我的家', '当前使用', 'close', 'check')}${method('我们家', '与家人共享记录', 'family-info', 'plus')}`);
+        if (action === 'family-info') return showSheet('和家人一起记', `<p class="sheet-sub">家人可查看和更新共享记录。个人记录仍留在「我的家」。</p><button class="primary" type="button" data-action="family-demo">邀请家人</button>`);
+        if (action === 'family-demo') { closeSheet(); return toast('这是视觉演示，不会发送真实邀请。'); }
+        if (action === 'text') { startDraft(); return showSheet('文字记录', `<form id="text-form"><label class="field" for="text-record">物品和位置<textarea id="text-record" placeholder="例如：钥匙放在玄关抽屉" required maxlength="200"></textarea></label><div class="bottom-actions"><button class="primary" type="submit">去核对</button></div></form>`); }
+        if (action === 'photo' || action === 'video') { startDraft(); return showSheet(action === 'photo' ? '拍照记一件' : '视频记多件', `<div class="upload-preview">${art('key')}</div><p class="sheet-sub">${action === 'photo' ? '拍清物品，补充位置。' : '拍下多件物品，逐件核对。'}</p><button class="primary" type="button" data-action="sample-capture">体验示例</button><p class="trust">示例素材，不调用摄像头。</p>`); }
+        if (action === 'sample-capture') return navigate('confirm');
+        if (action === 'quote') return showSheet('原话', `<div class="quote">“${esc(currentItem().quote)}”</div><button class="primary" type="button" data-action="close">知道了</button>`);
+        if (action === 'edit') { const item = currentItem(); draftReturn = 'detail'; draft = { name: item.name, location: `${item.container}${item.position}`, room: item.room, editId: item.id }; return navigate('confirm'); }
+        if (action === 'found') { history = []; navigate('home', false); return toast('找到就好。'); }
+        if (action === 'reminders') return showSheet('即将到期', `<div class="item-list">${itemRow(items.find(item => item.id === 'medicine'))}</div><div class="text-row"><span>维生素 · 保质期</span><strong style="font-weight:500">还有 3 天</strong></div><div class="text-row"><span>酸奶 · 冰箱冷藏层</span><strong style="font-weight:500">还有 2 天</strong></div><p class="trust">日期来自已确认的记录。</p>`);
+      });
+      phone.addEventListener('submit', event => {
+        event.preventDefault();
+        if (event.target.id === 'search-form') {
+          query = document.getElementById('search-input').value.trim();
+          if (!query) return toast('请输入物品名称。');
+          return navigate('results');
+        }
+        if (event.target.id === 'text-form') {
+          const text = document.getElementById('text-record').value.trim();
+          const match = text.match(/^(.+?)(?:放在|收在|在)(.+?)[。！!]?$/);
+          if (!match) return toast('再补一句位置，比如「钥匙放在玄关抽屉」。');
+          draft.name = match[1].trim(); draft.location = match[2].trim();
+          draft.room = text.includes('厨房') ? 'kitchen' : text.includes('书房') ? 'study' : text.includes('卧室') ? 'bedroom' : 'living';
+          return navigate('confirm');
+        }
+        if (event.target.id === 'confirm-form') {
+          draft.name = document.getElementById('draft-name').value.trim(); draft.location = document.getElementById('draft-location').value.trim();
+          if (!draft.name || !draft.location) return toast('请补全物品和位置。');
+          if (draft.editId) { const item = items.find(item => item.id === draft.editId); item.name = draft.name; item.container = rooms.find(room => room.id === draft.room).name; item.position = draft.location; item.quote = `${draft.name}放在${draft.location}。`; item.when = '刚刚'; }
+          else { rooms.find(room => room.id === draft.room).count++; items.unshift({ id: `demo-${Date.now()}`, name: draft.name, room: draft.room, container: rooms.find(room => room.id === draft.room).name, position: draft.location, art: 'key', when: '刚刚', quote: `${draft.name}放在${draft.location}。` }); }
+          history = []; query = ''; navigate(draftReturn === 'detail' ? 'detail' : 'home', false); toast('记住了。');
+        }
+      });
+      document.querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => { history = []; query = ''; if (button.dataset.preview === 'confirm') startDraft(); selectedItem = 'key'; navigate(button.dataset.preview, false); }));
+      document.getElementById('theme-button').addEventListener('click', event => { const dark = phone.dataset.theme !== 'dark'; phone.dataset.theme = dark ? 'dark' : 'light'; event.currentTarget.setAttribute('aria-pressed', String(dark)); event.currentTarget.querySelector('span').textContent = dark ? '回到浅色' : '看看深色'; });
+      document.addEventListener('keydown', event => {
+        if (!overlayRoot.firstChild) return;
+        if (event.key === 'Escape') return closeSheet();
+        if (event.key === 'Tab') {
+          const controls = [...overlayRoot.querySelectorAll('button, input, textarea')].filter(node => !node.disabled);
+          const first = controls[0], last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>
