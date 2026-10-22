@@ -396,18 +396,23 @@ test("DEL-IDEMPOTENT-REPLAY:成功后同参重试 replayed:true 行稳定;并发
   assert.equal(replay.video_deleted, false);
   assert.deepEqual(await scanRow(db, "scandel-replay-1"), afterFirst, "重放不二次改写审计行");
 
-  // 双击并发:两个同时进的 scanDelete,败者只可能是 BUSY(锁内)或 replayed(收敛),
-  // 终态唯一为 deleted,云文件只删一次
+  // 双击并发:两个同时进的 scanDelete,胜者按 §4 返回首删响应(ok + video_deleted:true,
+  // 无 replayed——replayed 仅属幂等重放,DEL-NO-REF-FILE-GONE 钉死);败者只可能是
+  // BUSY(锁内)或 replayed(收敛)。终态唯一为 deleted,云文件只删一次。
   const scan2 = await seedScan(db, "scandel-replay-2");
   await seedTicket(db, scan2.upload_ticket, { asset_id: scan2.asset_id, file_id: scan2.file_id });
   const [x1, x2] = await Promise.all([
     itemsHandler({ action: "scanDelete", scan_id: "scandel-replay-2" }, deps),
     itemsHandler({ action: "scanDelete", scan_id: "scandel-replay-2" }, deps),
   ]);
+  let winners = 0;
   for (const r of [x1, x2]) {
     const converged = (r.ok === true && r.replayed === true) || (r.ok === false && r.error === "VIDEO_ITEM_BUSY");
-    assert.equal(converged, true, "并发第二请求必须收敛到 replayed 或 BUSY: " + JSON.stringify(r));
+    const isWinner = r.ok === true && r.video_deleted === true;
+    assert.equal(converged || isWinner, true, "并发响应必须是胜者首删/败者收敛(replayed 或 BUSY): " + JSON.stringify(r));
+    if (isWinner) winners += 1;
   }
+  assert.equal(winners, 1, "恰好一个胜者真正执行删除(终态唯一,云文件只删一次)");
   const row2 = await scanRow(db, "scandel-replay-2");
   assert.equal(row2.status, "deleted");
   assert.equal(row2.deleted_by, "user");

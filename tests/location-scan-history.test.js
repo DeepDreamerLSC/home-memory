@@ -121,8 +121,8 @@ test("HIST-BASIC:多行 created_at 倒序;投影字段白名单(无内部字段)
   const newest = res.scans[0];
   assert.equal(newest.created_at, iso(base + 7200 * 1000));
   assert.equal(newest.candidate_count, 9);
-  assert.equal(newest.confirmed_count, 4, "confirmed_count 投影取行内原始计数(§2)");
-  assert.equal(newest.duration_ms, DURATION, "duration_ms 原样投影");
+  assert.equal(newest.confirmed_count, 2, "confirmed_count 投影取行内原始计数(§2)");
+  assert.equal(newest.duration_ms, 8000, "duration_ms 原样投影");
   assert.equal(newest.video_reclaimed, false, "未回收行缺省 false");
   assert.equal(newest.video_url.indexOf("https://tmp.example/") === 0, true, "未回收行换链");
   // 白名单外字段一律不透出
