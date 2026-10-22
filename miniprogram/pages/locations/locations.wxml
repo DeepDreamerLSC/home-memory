@@ -117,14 +117,17 @@
       </view>
     </view>
 
-    <!-- D1(#94)底部入口卡:仅 browse 且非根层;点整卡拍摄,点「回看」进回放 -->
+    <!-- D1(#94)底部入口卡:仅 browse 且非根层;点整卡拍摄,点「回看」进回放;D2(#96)「历史」开清点历史弹层 -->
     <view wx:if="{{ mode === 'browse' && hasScanEntry }}" class="card scan-entry-card">
       <view class="scan-entry" bindtap="onScanEntryTap">
         <view class="item-main">
           <view class="item-name">📹 拍视频清点这里</view>
           <view wx:if="{{ scanSummaryText }}" class="item-location">{{ scanSummaryText }}</view>
         </view>
-        <view wx:if="{{ scanSummaryText }}" class="pick-check" catchtap="onScanReviewTap">回看</view>
+        <view wx:if="{{ scanSummaryText }}" class="row-actions">
+          <view class="pick-check" catchtap="onScanHistoryTap">历史</view>
+          <view class="pick-check" catchtap="onScanReviewTap">回看</view>
+        </view>
         <view wx:else class="chevron">›</view>
       </view>
     </view>
@@ -154,6 +157,62 @@
     </view>
     <button class="btn block danger" disabled="{{ deleteLayer.busy }}" bindtap="onPurgeTap">
       <view class="btn-face">全部删除</view>
+    </button>
+  </view>
+</view>
+
+<!-- D2(#96)清点历史半屏弹层:本位置清点列表(时间/候选/确认/回看/删)+ 行内回看播放 -->
+<view wx:if="{{ scanHistory.visible }}" class="layer-mask" bindtap="onScanHistoryClose">
+  <view class="scan-history-layer" catchtap="noop">
+    <view class="card-head">
+      <view class="card-title">清点历史</view>
+      <view class="add-link" bindtap="onScanHistoryClose">关闭</view>
+    </view>
+    <block wx:if="{{ scanHistory.replayUrl }}">
+      <view class="hint">{{ scanHistory.replayTitle }}</view>
+      <video
+        class="scan-history-video"
+        style="height: {{ scanHistory.replayHeight }}px"
+        src="{{ scanHistory.replayUrl }}"
+        controls
+      ></video>
+      <button class="btn block" bindtap="onScanHistoryBackTap"><view class="btn-face">返回列表</view></button>
+    </block>
+    <block wx:else>
+      <view wx:if="{{ scanHistory.loading }}" class="empty-text">正在读取清点记录…</view>
+      <block wx:elif="{{ scanHistory.errorText }}">
+        <view class="error-text">{{ scanHistory.errorText }}</view>
+        <button class="btn block" bindtap="onScanHistoryRetryTap"><view class="btn-face">重试</view></button>
+      </block>
+      <block wx:elif="{{ scanHistory.rows.length > 0 }}">
+        <view wx:if="{{ scanHistory.hasMore }}" class="hint">仅显示最近 20 次</view>
+        <scroll-view scroll-y class="scan-history-scroll" style="height: {{ scanHistory.scrollHeight }}px">
+          <view wx:for="{{ scanHistory.rows }}" wx:key="scanId" class="scan-history-row">
+            <view class="item-main">
+              <view class="item-name">{{ item.timeText }}</view>
+              <view class="item-location">{{ item.countsText }}{{ item.stateText ? ' · ' + item.stateText : '' }}</view>
+            </view>
+            <view wx:if="{{ item.canReview }}" class="pick-check" catchtap="onScanHistoryReviewTap" data-index="{{ index }}">回看</view>
+            <view class="scan-history-del" catchtap="onScanHistoryDeleteTap" data-index="{{ index }}">删</view>
+          </view>
+        </scroll-view>
+      </block>
+      <view wx:else class="empty-text">这里还没有清点记录</view>
+    </block>
+  </view>
+</view>
+
+<!-- D2(#96)删除单次清点确认弹层:影响面预告文案冻结自契约 §4 -->
+<view wx:if="{{ scanDeleteLayer.visible }}" class="layer-mask" bindtap="onScanDeleteLayerCancel">
+  <view class="delete-layer" catchtap="noop">
+    <view class="card-title">删除这条清点记录</view>
+    <view class="hint">{{ scanDeleteLayer.timeText }}</view>
+    <view class="hint">只删这条清点记录,不影响已录入的物品和它们的视频证据;若这段视频没有其他引用,将一并删除视频文件。</view>
+    <button class="btn block" disabled="{{ scanDeleteLayer.busy }}" bindtap="onScanDeleteLayerCancel">
+      <view class="btn-face">取消</view>
+    </button>
+    <button class="btn block danger" disabled="{{ scanDeleteLayer.busy }}" bindtap="onScanDeleteConfirmTap">
+      <view class="btn-face">删除</view>
     </button>
   </view>
 </view>

@@ -221,3 +221,46 @@
 .delete-layer .hint {
   text-align: left;
 }
+
+/* ------------------------------------------------------------------ */
+/* D2(#96)清点历史:半屏弹层(列表 / 行内回看 / 删除确认)            */
+
+/* 历史弹层面板:遮罩复用 .layer-mask,面板同 .delete-layer 的底部半屏语言 */
+.scan-history-layer {
+  width: 100%;
+  background: var(--card);
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 28rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+/* 回看播放器:高度 JS 计算 px 喂 inline(契约 §8 实现纪律),这里只管底色圆角 */
+.scan-history-video {
+  width: 100%;
+  border-radius: 12rpx;
+  background: var(--card-inset);
+}
+
+/* 历史行:时间 / 候选·确认 + 回看 / 删(item-row 同款节奏) */
+.scan-history-row {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 0;
+}
+
+.scan-history-row .pick-check {
+  flex-shrink: 0;
+}
+
+/* 行内「删」:危险色次级文字按钮,热区对齐 .row-more 的 ≥88rpx 纪律 */
+.scan-history-del {
+  margin-left: 12rpx;
+  padding: 26rpx 8rpx 26rpx 20rpx;
+  color: var(--danger);
+  font-size: 26rpx;
+  line-height: 1;
+  flex-shrink: 0;
+}
