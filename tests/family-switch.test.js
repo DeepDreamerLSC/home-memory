@@ -549,7 +549,7 @@ test("FS-SWITCH-OK:共享切个人成功——弹层关、toast 明示、上下�
     assert.equal(page.data.mapLoading, false);
     assert.equal(page.data.rooms.length, 1);
     assert.equal(page.data.rooms[0].name, "书房", "地图按新家庭重载");
-    assert.equal(page.data.rooms[0].countText, "2 件东西");
+    assert.equal(page.data.rooms[0].countText, "2 件");
 
     // 新家庭的快到期回来:横幅按新家庭自己的数据重载(不是旧家的数字)
     var yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);

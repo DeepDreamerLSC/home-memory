@@ -1,51 +1,51 @@
-<view class="page">
+<view class="page confirm-page">
   <!-- 手动录入:单表单(旧路径) -->
   <block wx:if="{{ isManual }}">
-    <view class="banner manual">手动录入</view>
+    <view class="c-head"><view class="c-title">核对记录</view></view>
     <view class="card">
       <view class="field">
-        <view class="label">名称</view>
+        <view class="label">物品</view>
         <input
           class="input"
-          placeholder="物品名称(必填)"
+          placeholder="物品名称"
           placeholder-class="placeholder"
           value="{{ name }}"
+          disabled="{{ saving }}"
           maxlength="50"
           bindinput="onNameInput"
         />
       </view>
       <view class="field">
-        <view class="label">位置(必填)</view>
+        <view class="label">位置</view>
         <input
           class="input"
           placeholder="放在哪里"
           placeholder-class="placeholder"
           value="{{ locationText }}"
+          disabled="{{ saving }}"
           maxlength="200"
           bindinput="onLocationInput"
         />
       </view>
-      <view class="field">
+      <view class="manual-note-toggle" bindtap="onToggleManualNote">{{ manualNoteOpen ? '收起备注' : '备注（选填）' }}</view>
+      <view wx:if="{{ manualNoteOpen || note }}" class="field">
         <view class="label">备注</view>
         <textarea
           class="textarea"
           placeholder="选填,最多 200 字"
           placeholder-class="placeholder"
           value="{{ note }}"
+          disabled="{{ saving }}"
           maxlength="200"
           auto-height
           bindinput="onNoteInput"
         />
       </view>
-      <button
-        class="btn primary block"
-        loading="{{ saving }}"
-        bindtap="onSaveTap"
-      >
-        <view class="btn-face">保存</view>
-      </button>
     </view>
-    <view class="trust-line">你确认后,我才会真正记住。</view>
+    <view class="trust-line">确认后才保存。</view>
+    <view class="confirm-dock">
+      <button class="btn primary block" loading="{{ saving }}" disabled="{{ saving || !name || !locationText }}" bindtap="onSaveTap"><view class="btn-face">确认记住</view></button>
+    </view>
   </block>
 
   <!-- 语音/文字记下后核对:单件摘要(C1/C1b)或多件勾选(C2) -->
@@ -55,57 +55,20 @@
       <view class="c-sub">{{ headSub }}</view>
     </view>
 
-    <!-- 单件:摘要卡 + 「改」行内编辑;位置没听清时(C1b)警示框显眼展开、必填才放行 -->
+    <!-- 单件字段直接编辑；位置不确定、原话不足等警示保持可见。 -->
     <block wx:if="{{ rows.length === 1 }}">
       <view class="card sum-card">
-        <view class="sumrow line">
-          <view class="k">物品</view>
-          <view class="v">{{ rows[0].name || '还没写名称' }}</view>
-          <view class="sum-edit" data-field="name" bindtap="onToggleEdit"><view class="sum-edit-face">改</view></view>
+        <view class="field">
+          <view class="label">物品</view>
+          <input class="input" placeholder="物品名称" placeholder-class="placeholder" value="{{ rows[0].name }}" maxlength="50" disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}" data-index="0" bindinput="onRowNameInput" />
         </view>
-        <view wx:if="{{ editingName }}" class="field sum-field">
-          <input
-            class="input"
-            placeholder="物品名称(必填)"
-            placeholder-class="placeholder"
-            value="{{ rows[0].name }}"
-            maxlength="50"
-            disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
-            data-index="0"
-            bindinput="onRowNameInput"
-          />
+        <view wx:if="{{ rows[0].certain }}" class="field">
+          <view class="label">位置</view>
+          <input class="input" placeholder="放在哪里" placeholder-class="placeholder" value="{{ rows[0].locationText }}" maxlength="200" disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}" data-index="0" bindinput="onRowLocationInput" />
         </view>
-        <block wx:if="{{ rows[0].certain }}">
-          <view class="sumrow {{ rows[0].remindAt || rows[0].remindTouched ? 'line' : '' }}">
-            <view class="k">位置</view>
-            <view class="v {{ rows[0].locationText ? '' : 'warn' }}">{{ rows[0].locationText || '还没写位置' }}</view>
-            <view class="sum-edit" data-field="location" bindtap="onToggleEdit"><view class="sum-edit-face">改</view></view>
-          </view>
-          <view wx:if="{{ editingLocation }}" class="field sum-field">
-            <input
-              class="input"
-              placeholder="放在哪里"
-              placeholder-class="placeholder"
-              value="{{ rows[0].locationText }}"
-              maxlength="200"
-              disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
-              data-index="0"
-              bindinput="onRowLocationInput"
-            />
-          </view>
-          <!-- 「放进」行(十七轮,#18 红线语义升级):AI 确定时明示将放入的路径,
-               「换」=从家里已有位置里逐层选;点「确认记住」才建路径并放进去;
-               mount_path 为空不显示该行(certain=false 照旧先进「尚未归类」),绝不静默建路径 -->
-          <view wx:if="{{ rows[0].mountPathText }}" class="sumrow {{ rows[0].remindAt || rows[0].remindTouched ? 'line' : '' }}">
-            <view class="k">放进</view>
-            <view class="v">{{ rows[0].mountPathText }}</view>
-            <view
-              class="sum-edit"
-              data-index="0"
-              bindtap="onMountSwapTap"
-            ><view class="sum-edit-face">换</view></view>
-          </view>
-        </block>
+        <view wx:if="{{ rows[0].mountPathText }}" class="mount-preview">
+          <view class="mount-check">✓</view><view class="mount-text">归到「{{ rows[0].mountPathText }}」</view><view class="mount-swap" data-index="0" bindtap="onMountSwapTap">更换</view>
+        </view>
         <!-- 提醒行(#36):原话里明确说了日期才显示;改=日期选择器弹层,✕=连日期一起清除(灰显「不提醒」);没提取到不催 -->
         <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sumrow">
           <view class="k">提醒</view>
@@ -133,22 +96,22 @@
       </view>
 
       <!-- 纪律句(#36):只在提醒行存在时显示;日期只来自原话或日期选择器 -->
-      <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sum-meta remind-note">时间只来自你说的话;没说清就不带提醒,不猜日期。</view>
+      <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sum-meta remind-note">日期可修改或取消。</view>
 
       <!-- 换算候选标注(#36 真机反馈三件 A):日期来自服务端对『原相对话』的闭集换算,
            是候选不是定论——可改可清;用户改过日期(remindConverted=false)即收起 -->
       <view
         wx:if="{{ rows[0].remindAt && rows[0].remindConverted && rows[0].remindAt === rows[0].remindOrigin }}"
         class="sum-meta converted-note"
-      >(按『{{ rows[0].remindQuote }}』换算,可改可清)</view>
+      >由「{{ rows[0].remindQuote }}」换算，请核对日期。</view>
 
       <!-- 时间没换算(0.6.0 真机反馈 Fix 4):原话有时间表述但没换成日期——纯提示,不是换算 -->
-      <view wx:if="{{ rows[0].remindVagueQuote }}" class="sum-meta vague-note">时间没换算:『{{ rows[0].remindVagueQuote }}』——说具体日期,或以后在详情里选日子</view>
+      <view wx:if="{{ rows[0].remindVagueQuote }}" class="sum-meta vague-note">「{{ rows[0].remindVagueQuote }}」未换算，请补充日期或稍后设置。</view>
 
       <!-- C1b:位置没听清的警示框(常驻展开,不藏进折叠) -->
       <view wx:if="{{ !rows[0].certain }}" class="warnbox">
-        <view class="wtitle">⚠ 位置没听清,放在哪儿?</view>
-        <view class="whint">补上位置才能确认。</view>
+        <view class="wtitle">位置待补充</view>
+        <view class="whint">填好后即可确认。</view>
         <input
           class="winput"
           placeholder="例:客厅电视柜第二格"
@@ -163,8 +126,8 @@
 
       <view wx:if="{{ rows[0].qualifiersText }}" class="sum-meta">限定语:{{ rows[0].qualifiersText }}</view>
       <view wx:if="{{ rows[0].anchorShared }}" class="sum-meta warn">这段原话里有两件东西,位置请核对后再确认</view>
-      <view wx:if="{{ rows[0].sourceQuote }}" class="sum-meta quote">原话:{{ rows[0].sourceQuote }}</view>
-      <view wx:elif="{{ rows[0].status !== 'saved' }}" class="sum-meta warn">AI 没给出这段的原话依据,请自行核对</view>
+      <view wx:if="{{ rows[0].sourceQuote && rows[0].anchorShared }}" class="sum-meta quote">原话:{{ rows[0].sourceQuote }}</view>
+      <view wx:elif="{{ !rows[0].sourceQuote && rows[0].status !== 'saved' }}" class="sum-meta warn">缺少原话依据，请核对后勾选</view>
 
       <view wx:if="{{ rows[0].status === 'failed' }}" class="row-fail sum-fail">
         <text class="fail-msg">{{ rows[0].failMsg }}</text>
@@ -179,13 +142,13 @@
         bindtap="onRowToggle"
       >
         <view class="check {{ rows[0].checked ? 'on' : '' }}"></view>
-        <text class="sum-check-label">核对过这段,记住这件</text>
+        <text class="sum-check-label">已核对，记住这件</text>
       </view>
     </block>
 
     <!-- 原话:默认折叠,点开核对;警示场景初始展开 -->
     <view class="fold" bindtap="onToggleQuote">
-      <text class="fold-label">原话(点开核对)</text>
+      <text class="fold-label">原话</text>
       <text class="chev {{ quoteOpen ? 'open' : '' }}">›</text>
     </view>
     <view wx:if="{{ quoteOpen }}" class="fold-body">
@@ -215,10 +178,10 @@
         </view>
 
         <view class="field">
-          <view class="label">名称</view>
+          <view class="label">物品</view>
           <input
             class="input row-name"
-            placeholder="物品名称(必填)"
+            placeholder="物品名称"
             placeholder-class="placeholder"
             value="{{ item.name }}"
             maxlength="50"
@@ -228,7 +191,7 @@
           />
         </view>
         <view class="field">
-          <view class="label">位置(必填)</view>
+          <view class="label">位置</view>
           <input
             class="input row-location"
             placeholder="{{ item.certain ? '放在哪里' : '放在哪儿?例:书房插座旁' }}"
@@ -243,7 +206,7 @@
         <!-- 「将放入」副文(十七轮):certain 行明示挂靠预览,「换」=同款选位置;
              模糊行无副文(=确认后先进「尚未归类」),绝不静默建路径 -->
         <view wx:if="{{ item.mountPathText }}" class="row-mount">
-          <text class="row-mount-text">将放入:{{ item.mountPathText }}</text>
+          <text class="row-mount-text">归到「{{ item.mountPathText }}」</text>
           <text
             class="row-mount-swap"
             data-index="{{ index }}"
@@ -261,7 +224,7 @@
         <view wx:if="{{ item.qualifiersText }}" class="row-meta">限定语:{{ item.qualifiersText }}</view>
         <view wx:if="{{ item.anchorShared }}" class="row-meta warn">这段原话里有两件东西,位置请核对后再勾选</view>
         <view wx:if="{{ item.sourceQuote }}" class="row-meta quote">原话:{{ item.sourceQuote }}</view>
-        <view wx:elif="{{ item.status !== 'saved' }}" class="row-meta warn">AI 没给出这段的原话依据,请自行核对</view>
+        <view wx:elif="{{ item.status !== 'saved' }}" class="row-meta warn">缺少原话依据，请核对后勾选</view>
 
         <view wx:if="{{ item.status === 'failed' }}" class="row-fail">
           <text class="fail-msg">{{ item.failMsg }}</text>
@@ -270,31 +233,9 @@
       </view>
     </view>
 
-    <!-- C2 主 CTA(0.7.0 真机反馈 Fix 1):移出批次卡、与卡片元素左右对齐同宽
-         (原型 .cta 本就在 .batch 卡外,width 与 .card 同口径) -->
-    <button
-      wx:if="{{ rows.length > 1 }}"
-      class="btn primary block batch-btn"
-      loading="{{ batchSaving }}"
-      disabled="{{ checkedCount === 0 }}"
-      bindtap="onSaveBatchTap"
-    >
-      <view class="btn-face">确认保存 {{ checkedCount }} 件</view>
-    </button>
-
-    <!-- 单件:唯一确认(位置没补上前禁用) -->
-    <block wx:if="{{ rows.length === 1 }}">
-      <button
-        class="btn primary block cta-btn"
-        loading="{{ batchSaving }}"
-        disabled="{{ checkedCount === 0 }}"
-        bindtap="onSaveBatchTap"
-      >
-        <view class="btn-face">{{ !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}</view>
-      </button>
-    </block>
-
-    <!-- 信任句:有「放进」预览时明示路径也还没放(十七轮);其余场景沿用 -->
-    <view class="trust-line">{{ rows.length === 1 && rows[0].mountPathText ? '点「确认记住」之前,什么都不会保存;「放进」的位置也还没放。' : '你确认后,我才会真正记住。' }}</view>
+    <view class="trust-line">确认后才保存。</view>
+    <view class="confirm-dock">
+      <button class="btn primary block" loading="{{ batchSaving }}" disabled="{{ batchSaving || checkedCount === 0 }}" bindtap="onSaveBatchTap"><view class="btn-face">{{ rows.length > 1 ? '确认记住 ' + checkedCount + ' 件' : !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}</view></button>
+    </view>
   </block>
 </view>

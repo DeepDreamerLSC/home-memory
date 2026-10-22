@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
 const households_api_1 = require("../../utils/households-api");
+const ui_1 = require("../../utils/ui");
 const locations_api_1 = require("../../utils/locations-api");
 const household_scope_1 = require("../../utils/household-scope");
 const remind_ui_1 = require("../../utils/remind-ui");
@@ -157,6 +158,10 @@ Page({
         itemId: "",
         name: "",
         locationText: "",
+        recordedLocationText: "",
+        artworkLight: (0, ui_1.itemArtwork)(""),
+        artworkDark: (0, ui_1.itemArtwork)("", true),
+        detailQuoteOpen: false,
         note: "",
         version: 0,
         updatedAtText: "",
@@ -470,6 +475,18 @@ Page({
     onEditToggle() {
         this.setData({ editPanelOpen: !this.data.editPanelOpen });
     },
+    onUpdateLocationTap() {
+        this.setData({ editPanelOpen: true }, () => {
+            wx.pageScrollTo({ selector: "#item-edit-panel", duration: 220 });
+        });
+    },
+    onFoundTap() {
+        // Finding an item is feedback, not a new location fact or reminder completion.
+        if (this.data.saving || this.data.deleting || this.data.mountSaving)
+            return;
+        this.goBack();
+    },
+    onQuoteToggle() { this.setData({ detailQuoteOpen: !this.data.detailQuoteOpen }); },
     applySummary(s) {
         this.original = {
             name: s.name,
@@ -488,6 +505,9 @@ Page({
             itemId: s.item_id,
             name: s.name,
             locationText: s.location_text,
+            recordedLocationText: s.location_text,
+            artworkLight: (0, ui_1.itemArtwork)(s.name),
+            artworkDark: (0, ui_1.itemArtwork)(s.name, true),
             note: s.note,
             version: s.version,
             updatedAtText: (0, api_1.formatDateTime)(s.updated_at),
@@ -824,6 +844,7 @@ Page({
         this.setData({
             name: outcome.merged.name,
             locationText: outcome.merged.location,
+            recordedLocationText: item.location_text,
             note: outcome.merged.note,
             version: item.version,
             updatedAtText: (0, api_1.formatDateTime)(item.updated_at),

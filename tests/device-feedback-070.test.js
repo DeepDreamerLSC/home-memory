@@ -24,40 +24,24 @@ function read(rel) {
 
 /* ---------------- CTA-WIDTH:主 CTA 与卡片元素左右对齐同宽 ---------------- */
 
-test("CTA-WIDTH:主 CTA 左右各让 36rpx,盖掉 .btn.block 的 width:100%", function () {
+test("CTA-WIDTH:确认主操作在固定底栏内留出40rpx边距", function () {
   var css = read("miniprogram/pages/confirm/confirm.wxss");
-  // 与 .card/.fold/.warnbox 同口径的 36rpx 页边距 + width:auto(此前 width:100%
-  // 全宽 0 边距 = 偏宽根因);选择器带 button.btn.block 前缀保证盖过 app.wxss
-  assert.ok(
-    /button\.btn\.block\.cta-btn,\s*\nbutton\.btn\.block\.batch-btn\s*\{[^}]*margin:\s*32rpx 36rpx 0/s.test(css),
-    "主 CTA 左右边距 36rpx(与卡片同口径)",
-  );
-  assert.ok(
-    /button\.btn\.block\.cta-btn,\s*\nbutton\.btn\.block\.batch-btn\s*\{[^}]*width:\s*auto/s.test(css),
-    "盖掉 .btn.block 的 width:100%(不再全宽出血)",
-  );
-  // 卡片元素仍是 36rpx 页边距口径(对齐基准)
-  var appCss = read("miniprogram/app.wxss");
-  assert.ok(/\.card\s*\{[^}]*margin:\s*24rpx 36rpx/s.test(appCss), ".card 仍 36rpx 页边距");
+  assert.match(css, /\.confirm-dock\s*\{[^}]*position:\s*fixed/);
+  assert.match(css, /\.confirm-dock\s*\{[^}]*padding:\s*24rpx 40rpx/);
+  assert.match(css, /\.confirm-dock \.btn\s*\{[^}]*width:\s*100%/);
+  assert.match(css, /\.confirm-page\s*\{[^}]*padding:\s*40rpx 44rpx/);
 });
 
-test("CTA-WIDTH:C2「确认保存 N 件」移出批次卡,与 C1 同层级渲染", function () {
+test("CTA-WIDTH:C1/C2复用底部确认操作,批量仍按勾选数保存", function () {
   var wxml = read("miniprogram/pages/confirm/confirm.wxml");
-  var batchCardIdx = wxml.indexOf('class="card batch-card"');
-  var batchBtnIdx = wxml.indexOf('class="btn primary block batch-btn"');
-  assert.ok(batchCardIdx !== -1 && batchBtnIdx !== -1, "批次卡与主 CTA 都在册");
-  // 移出批次卡:按钮与卡片同级(之间隔着卡片的收尾 </view>),不再嵌在卡内吃 24rpx 内边距
-  var between = wxml.slice(batchCardIdx, batchBtnIdx);
-  assert.ok(between.indexOf("确认保存 {{ checkedCount }} 件") === -1, "按钮文本不在卡片段内");
-  assert.ok(
-    /<button\s*\n?\s*wx:if="\{\{ rows\.length > 1 \}\}"\s*\n?\s*class="btn primary block batch-btn"/s.test(wxml),
-    "C2 主 CTA 由 rows.length > 1 控制渲染(与卡片段解耦)",
-  );
-  // C1/C1b 主 CTA 仍在单件分支
-  assert.ok(wxml.indexOf('class="btn primary block cta-btn"') !== -1, "C1 主 CTA 在册");
+  var card = wxml.indexOf('class="card batch-card"');
+  var dock = wxml.indexOf('class="confirm-dock"', card);
+  assert.ok(card >= 0 && dock > card);
+  assert.ok(wxml.includes('bindtap="onSaveBatchTap"'));
+  assert.ok(wxml.includes("checkedCount === 0"));
+  assert.ok(wxml.includes("'确认记住 ' + checkedCount + ' 件'"));
+  assert.ok(wxml.includes('loading="{{ batchSaving }}"'));
 });
-
-/* ---------------- DONE-WORD:「用完了」统一改「已处理」 ---------------- */
 
 test("DONE-WORD:R1 行钮与 D1 保质期行钮字样「已处理」,页面无「用完了」残留", function () {
   var r1 = read("miniprogram/pages/reminders/reminders.wxml");

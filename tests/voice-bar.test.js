@@ -142,7 +142,7 @@ test("键盘弹起自动避让:attached 注册监听,高度>0 隐藏、归零恢
 
 test("冻结设计基线:wxml 文案与 wxss 取值(--vb-*/安全区/按压反馈/单色麦克风)", function () {
   var wxml = read("voice-bar.wxml");
-  assert.ok(wxml.indexOf("一句话录入物品") !== -1, "胶囊默认文案为一句话录入物品(2026-10-17 用户拍板)");
+  assert.ok(wxml.indexOf("按住说话") !== -1, "胶囊默认文案采用批准稿的按住说话");
   assert.ok(wxml.indexOf("说吧,我记着呢。") !== -1, "录音中文案沿用首页语义");
   assert.ok(wxml.indexOf("好,当我没听见。") !== -1, "上滑取消文案沿用首页语义");
   assert.ok(wxml.indexOf("文字") !== -1, "「文字」按钮存在");
@@ -156,18 +156,18 @@ test("冻结设计基线:wxml 文案与 wxss 取值(--vb-*/安全区/按压反�
     assert.ok(wxss.indexOf(token) !== -1, "wxss 应使用冻结 token:" + token);
   });
   assert.ok(wxss.indexOf("🎙") === -1 && wxml.indexOf("🎙") === -1, "麦克风不用彩色 emoji,单色 CSS 绘制");
-  assert.ok(wxss.indexOf(".mic-cap") !== -1 && wxss.indexOf(".mic-stand") !== -1, "麦克风为 CSS 单色图形");
+  assert.ok(wxml.includes("/assets/icons/mic.png"), "麦克风使用原型的单色图形资产");
 
   var css = fs.readFileSync(path.join(ROOT, "miniprogram", "app.wxss"), "utf8");
   // 九轮浅色冻结值 + 十轮深色黑灰冻结值(handoff 修订记录)
-  ["#fffdf4", "#f3edd9", "#ddd6c2", "#1e1e1e", "#2e2e2e", "#3a3a3a"].forEach(function (hex) {
+  ["#f8f7f2", "#30372c", "#efd36e", "#20241f", "#2b3028", "#e8ce78"].forEach(function (hex) {
     assert.ok(css.indexOf(hex) !== -1, "app.wxss 应含冻结取值 " + hex);
   });
   assert.ok(css.indexOf("--vb-hold-bg") !== -1 && css.indexOf("--vb-btn-line") !== -1, "--vb-* 变量组已入 app.wxss");
 });
 
 test("挂载范围:locations/family/item 三页挂载;confirm/join-family 不挂;locations 选择模式(picker)不挂", function () {
-  ["locations", "family", "item"].forEach(function (p) {
+  ["locations", "family"].forEach(function (p) {
     var cfg = JSON.parse(readPage(p, p + ".json"));
     assert.equal(cfg.usingComponents && cfg.usingComponents["voice-bar"], "/components/voice-bar/voice-bar", p + " 页应挂载语音条");
     assert.ok(readPage(p, p + ".wxml").indexOf("<voice-bar") !== -1, p + " 页 wxml 应包含 voice-bar 标签");
@@ -175,8 +175,45 @@ test("挂载范围:locations/family/item 三页挂载;confirm/join-family 不挂
   });
   var locWxml = readPage("locations", "locations.wxml");
   assert.ok(locWxml.indexOf("mode !== 'pick'") !== -1, "locations 选择位置(picker)为过渡任务流,语音条应排除");
-  ["confirm", "join-family"].forEach(function (p) {
+  ["confirm", "join-family", "item"].forEach(function (p) {
     var cfg = JSON.parse(readPage(p, p + ".json"));
     assert.ok(!cfg.usingComponents || !cfg.usingComponents["voice-bar"], p + " 页不得挂载语音条(确认流程/引导流程)");
+  });
+});
+
+test("添加面板:空闲可展开,录音或提取中不能打开其他录入方式", function () {
+  var self = makeCompThis();
+  self.entry = { isBusy: function () { return false; } };
+  self.data.voiceState = "recording";
+  captured.methods.onAddTap.call(self);
+  assert.ok(!self.data.showActions);
+  self.data.voiceState = "idle";
+  captured.methods.onAddTap.call(self);
+  assert.equal(self.data.showActions, true);
+  captured.methods.onActionsClose.call(self);
+  assert.equal(self.data.showActions, false);
+  self.data.extracting = true;
+  captured.methods.onAddTap.call(self);
+  assert.equal(self.data.showActions, false);
+});
+
+test("面板三种录入方式走真实页面,在途不导航且成功跳转后关闭面板", function () {
+  var targets = [
+    ["onTextTap", "/pages/confirm/confirm?manual=true"],
+    ["onPhotoTap", "/pages/photo/photo"],
+    ["onVideoTap", "/pages/video-scan/video-scan"],
+  ];
+  targets.forEach(function (target) {
+    var self = makeCompThis();
+    self.entry = { isBusy: function () { return false; } };
+    navs.length = 0;
+    self.data.showActions = true;
+    self.data.transcribing = true;
+    captured.methods[target[0]].call(self);
+    assert.equal(navs.length, 0);
+    self.data.transcribing = false;
+    captured.methods[target[0]].call(self);
+    assert.deepEqual(navs, [target[1]]);
+    assert.equal(self.data.showActions, false);
   });
 });

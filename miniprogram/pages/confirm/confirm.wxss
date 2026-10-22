@@ -1,509 +1,69 @@
-/* 确认页补充样式(其余复用 app.wxss) */
-.field:last-of-type {
-  margin-bottom: 0;
-}
-
-/* ---------- 核对呈现(对齐冻结原型 C1/C1b/C2) ---------- */
-
-/* 标题区(替代原「AI 草稿」横幅:用户词汇) */
-.c-head {
-  margin: 24rpx 36rpx;
-}
-
-.c-title {
-  font-size: 52rpx;
-  font-weight: 800;
-  line-height: 1.2;
-  color: var(--text);
-}
-
-.c-sub {
-  margin-top: 8rpx;
-  font-size: 25rpx;
-  color: var(--text-2);
-  line-height: 1.6;
-}
-
-/* 单件摘要卡:字段行 + 「改」(原型 .card 15px 14px + .sumrow 12px 0,直接继承全局卡片内边距) */
-.sum-card {
-  padding: 30rpx 28rpx;
-}
-
-.sumrow {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  padding: 24rpx 0;
-}
-
-.sumrow.line {
-  border-bottom: 1rpx solid var(--line);
-}
-
-.sumrow .k {
-  width: 88rpx;
-  flex: none;
-  font-size: 25rpx;
-  font-weight: 700;
-  color: var(--text-3);
-}
-
-.sumrow .v {
-  flex: 1;
-  min-width: 0;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.sumrow .v.warn {
-  color: var(--danger);
-}
-
-/* ---------- 提醒行(#36 十五轮修订):改=日期选择器弹层,✕=连日期一起清除 ---------- */
-
-/* 清除后的灰显「不提醒」:降级为次要文案,行仍在(可再选日期) */
-.sumrow .v.muted {
-  color: var(--text-3);
-  font-weight: 500;
-}
-
-/* 行右侧「✕」清除:44px 高热区,仅在有日期时渲染(Fix 1:line-height:1 居中) */
-.remind-clear {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72rpx;
-  min-height: 88rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: var(--text-3);
-  line-height: 1;
-}
-
-/* 纪律句(#36):只在提醒行存在时显示,原话折叠区之外常驻 */
-.sum-meta.remind-note {
-  margin-top: 14rpx;
-}
-
-/* C2 行副文下的小角标:有原话日期的行标出(如「11-20 到期」),不参与勾选逻辑 */
-.remind-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 10rpx;
-  font-size: 21rpx;
-  font-weight: 700;
-  color: var(--text-2);
-  background: var(--card-inset);
-  border-radius: 999rpx;
-  padding: 4rpx 16rpx;
-}
-
-/* 时间没换算小灰标(0.6.0 真机反馈 Fix 4):纯提示,不是换算;灰阶弱于提醒角标 */
-.vague-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 10rpx;
-  font-size: 21rpx;
-  font-weight: 700;
-  color: var(--text-3);
-  background: var(--card-inset);
-  border-radius: 999rpx;
-  padding: 4rpx 16rpx;
-}
-
-/* C1 灰行:时间没换算的完整提示(Fix 4;与 sum-meta 同排版,灰阶更弱) */
-.sum-meta.vague-note {
-  color: var(--text-3);
-}
-
-/* 行内「改」小钮(Fix 1:热区 88 = 面 66(原 88 × 0.75)+ 透明上下 11,flex 居中 + line-height:1) */
-.sum-edit {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 88rpx;
-  padding: 11rpx 0;
-  box-sizing: border-box;
-}
-
-.sum-edit-face {
-  min-height: 66rpx;
-  display: flex;
-  align-items: center;
-  border: 1rpx solid var(--line);
-  background: var(--card-inset);
-  color: var(--text-2);
-  font-size: 23rpx;
-  font-weight: 700;
-  border-radius: 18rpx;
-  padding: 0 22rpx;
-  line-height: 1;
-}
-
-.sum-field {
-  margin: 0 0 20rpx;
-}
-
-.sum-status {
-  padding: 6rpx 0 14rpx;
-}
-
-/* 单件行证据/警示(常驻,不随原话折叠) */
-.sum-meta {
-  margin: 10rpx 36rpx 0;
-  font-size: 22rpx;
-  color: var(--text-3);
-}
-
-.sum-meta.quote {
-  color: var(--text-2);
-}
-
-.sum-meta.warn {
-  color: var(--danger);
-}
-
-.sum-fail {
-  margin: 20rpx 36rpx 0;
-}
-
-/* 单件「核对过再勾」行(Fix 1 压扁:96→88,热区=元素 88rpx) */
-.sum-check-row {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  margin: 20rpx 36rpx 0;
-  padding: 14rpx 26rpx;
-  min-height: 88rpx;
-  box-sizing: border-box;
-  background: var(--card);
-  border-radius: 30rpx;
-}
-
-.sum-check-label {
-  flex: 1;
-  font-size: 27rpx;
-  font-weight: 700;
-  color: var(--text);
-}
-
-/* C1b 警示框:位置没听清,显眼展开、必填才放行 */
-.warnbox {
-  margin: 24rpx 36rpx;
-  background: var(--danger-bg);
-  border: 3rpx solid var(--danger-shadow);
-  border-radius: 26rpx;
-  padding: 24rpx 26rpx;
-}
-
-.wtitle {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: var(--danger);
-}
-
-.whint {
-  margin-top: 10rpx;
-  font-size: 23rpx;
-  color: var(--text-2);
-  line-height: 1.6;
-}
-
-.winput {
-  width: 100%;
-  min-height: 88rpx;
-  border: 3rpx solid var(--danger-shadow);
-  border-radius: 22rpx;
-  background: var(--card);
-  color: var(--text);
-  font-size: 27rpx;
-  padding: 20rpx 24rpx;
-  box-sizing: border-box;
-  margin-top: 18rpx;
-}
-
-/* 原话折叠:默认折叠,警示场景初始展开(原型 .fold 14px 13px;展开体=原型 note)
-   (Fix 1 压扁:104→88,flex 居中 + line-height:1) */
-.fold {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  background: var(--card);
-  border-radius: 30rpx;
-  padding: 26rpx 26rpx;
-  margin: 20rpx 36rpx;
-  min-height: 88rpx;
-  box-sizing: border-box;
-  font-size: 28rpx;
-  font-weight: 700;
-  color: var(--text);
-  line-height: 1;
-}
-
-.fold .chev {
-  font-size: 36rpx;
-  color: var(--text-3);
-  transition: transform 0.2s ease;
-}
-
-.fold .chev.open {
-  transform: rotate(90deg);
-}
-
-.fold-body {
-  margin: 0 36rpx;
-  background: var(--card-inset);
-  border-radius: 28rpx;
-  padding: 24rpx 26rpx;
-}
-
-.fold-quote {
-  font-size: 24rpx;
-  color: var(--text-2);
-  line-height: 1.6;
-}
-
-/* ---------- 列表式批量确认(Issue #14,C2 视觉对齐:原型 .batch 17px 圆角描边卡) ---------- */
-
-.batch-card {
-  border: 2rpx solid var(--line);
-  border-radius: 34rpx;
-  padding: 10rpx 24rpx;
-}
-
-.row {
-  padding: 24rpx 0;
-  border-bottom: 1rpx solid var(--line);
-}
-
-.row:last-of-type {
-  border-bottom: none;
-}
-
-.row.saved .input {
-  opacity: 0.65;
-}
-
-.row-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8rpx;
-}
-
-.row-head-left {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-/* 勾选触点:外层补热区(52+2×18=88rpx=44px),色块为原型方形勾选 */
-.check-hit {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18rpx;
-}
-
-.check {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 16rpx;
-  border: 4rpx solid var(--placeholder);
-  background: var(--card);
-  color: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28rpx;
-  font-weight: 800;
-}
-
-.check.on {
-  background: var(--accent);
-  border-color: var(--accent-shadow);
-  color: #191919;
-}
-
-.check.fixed {
-  background: var(--accent);
-  border-color: var(--accent-shadow);
-  color: #191919;
-}
-
-/* 模糊项警示 pill(⚠ 显眼) */
-.flag {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 14rpx;
-  font-size: 21rpx;
-  color: var(--danger);
-  background: var(--danger-bg);
-  border-radius: 999rpx;
-  padding: 4rpx 16rpx;
-  font-weight: 700;
-}
-
-.row-warn-line {
-  margin-top: 10rpx;
-  font-size: 23rpx;
-  color: var(--danger);
-  line-height: 1.5;
-}
-
-/* C2「将放入」副文(十七轮):certain 行的挂靠预览 + 同款「换」入口;
-   模糊行无此行(=确认后先进「尚未归类」)。换=透明热区 ≥88rpx(与 .sum-edit 同口径) */
-.row-mount {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-  margin-top: 6rpx;
-}
-
-.row-mount-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 23rpx;
-  font-weight: 700;
-  color: var(--text-2);
-  line-height: 1.5;
-}
-
-.row-mount-swap {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 88rpx;
-  padding: 0 10rpx;
-  font-size: 23rpx;
-  font-weight: 700;
-  color: var(--text-2);
-  line-height: 1;
-}
-
-.st {
-  font-size: 24rpx;
-}
-
-.st.saved {
-  color: #2e7d32;
-}
-
-.st.saving {
-  color: var(--text-3);
-}
-
-.st.failed {
-  color: var(--danger);
-}
-
-.row-meta {
-  font-size: 22rpx;
-  color: var(--text-3);
-  margin-top: 6rpx;
-}
-
-.row-meta.quote {
-  color: var(--text-2);
-}
-
-.row-meta.warn {
-  color: var(--danger);
-}
-
-.row-fail {
-  margin-top: 10rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-}
-
-.fail-msg {
-  font-size: 24rpx;
-  color: var(--danger);
-  flex: 1;
-}
-
-.fail-link {
-  font-size: 24rpx;
-  color: var(--text-2);
-  text-decoration: underline;
-  flex-shrink: 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .st.saved {
-    color: #7fce84;
-  }
-}
-
-.truncated-banner {
-  margin: 0 36rpx 24rpx;
-  padding: 20rpx 24rpx;
-  background: var(--banner-bg);
-  border: 2rpx solid var(--banner-line);
-  border-radius: 16rpx;
-  font-size: 26rpx;
-  color: var(--text);
-  line-height: 1.5;
-}
-
-/* 确认 CTA:墨底黄字(原型 .cta radius 15px、margin-top 16px)
-   (Fix 1 压扁:去掉 line-height 撑高根因,视觉收进 .btn-face 78(原 108 × 0.75),
-   热区 = 按钮 88(78 + 透明上下 5);flex 居中 + line-height:1)
-   (0.7.0 真机反馈 Fix 1:主 CTA 与摘要卡/批次卡/折叠条左右对齐同宽——
-   左右各让出 36rpx 页边距(.card/.fold/.warnbox 同口径),并盖掉
-   button.btn.block 的 width:100%(全宽 0 边距是此前偏宽的根因;C2 的
-   「确认保存 N 件」原先嵌在批次卡内再吃卡的 24rpx 内边距,已移出卡片),
-   display:flex 块级 + width:auto = 填满父宽减左右 margin,与卡片同宽) */
-button.btn.block.cta-btn,
-button.btn.block.batch-btn {
-  padding: 5rpx 0;
-  margin: 32rpx 36rpx 0;
-  width: auto;
-}
-
-.cta-btn .btn-face,
-.batch-btn .btn-face {
-  min-height: 78rpx;
-  border-radius: 30rpx;
-  font-size: 30rpx;
-  font-weight: 800;
-}
-
-button.btn.primary.cta-btn .btn-face,
-button.btn.primary.batch-btn .btn-face {
-  background: var(--go-bg);
-  color: var(--go-fg);
-}
-
-button.btn.primary.cta-btn[disabled],
-button.btn.primary.batch-btn[disabled] {
-  background: transparent;
-  color: inherit;
-  opacity: 1;
-}
-
-button.btn.primary.cta-btn[disabled] .btn-face,
-button.btn.primary.batch-btn[disabled] .btn-face {
-  background: var(--go-bg);
-  color: var(--go-fg);
-  opacity: 0.38;
-}
-
-/* 信任句:常显 */
-.trust-line {
-  margin: 16rpx 36rpx 0;
-  text-align: center;
-  font-size: 22rpx;
-  color: var(--text-3);
-  line-height: 1.6;
-}
+/* Match the approved prototype while retaining batch and warning states. */
+.confirm-page { padding: 40rpx 44rpx 240rpx; }
+.c-head { margin: 0; }
+.c-title { font-size: 54rpx; font-weight: 600; letter-spacing: -1.6rpx; line-height: 1.35; color: var(--text); }
+.c-sub { font-size: 24rpx; color: var(--text-2); margin-top: 16rpx; line-height: 1.6; }
+.c-sub:empty { display: none; }
+.card { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; border-radius: 0; }
+.field { margin: 40rpx 0 0; }
+.label { margin: 0 0 14rpx; font-size: 22rpx; font-weight: 400; color: var(--text-2); line-height: 1.5; }
+.input, .textarea, .winput { display: block; box-sizing: border-box; width: 100%; min-height: 96rpx; padding: 24rpx 28rpx; border: 1rpx solid var(--line); border-radius: 24rpx; background: var(--card); color: var(--text); font-size: 28rpx; font-weight: 400; line-height: 1.5; }
+.input { height: 96rpx; padding: 0 28rpx; }
+.textarea { min-height: 160rpx; }
+.mount-preview { display: flex; align-items: center; gap: 16rpx; min-height: 88rpx; padding: 0 28rpx; background: var(--card-inset); border-radius: 24rpx; margin-top: 36rpx; font-size: 22rpx; color: var(--text-2); line-height: 1.6; }
+.mount-check { flex-shrink: 0; font-size: 28rpx; }
+.mount-text { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.mount-swap { min-height: 88rpx; display: flex; align-items: center; color: var(--text-2); font-size: 22rpx; flex-shrink: 0; padding-left: 8rpx; }
+.sumrow { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; font-size: 24rpx; }
+.sumrow.line { border-bottom: 1rpx solid var(--line); }
+.k { color: var(--text-2); flex-shrink: 0; }
+.v { flex: 1; min-width: 0; color: var(--text); }
+.sum-edit { min-height: 88rpx; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 22rpx; }
+.sum-edit-face { background: transparent; border: 0; box-shadow: none; font-weight: 400; }
+.remind-clear { width: 64rpx; min-height: 88rpx; display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.sum-meta, .row-meta { margin-top: 20rpx; color: var(--text-2); font-size: 22rpx; line-height: 1.7; overflow-wrap: anywhere; }
+.quote { color: var(--text-2); }
+.warn { color: var(--danger); }
+.warnbox { border: 1rpx solid var(--danger); background: var(--card); padding: 28rpx; border-radius: 24rpx; margin-top: 28rpx; }
+.wtitle { font-size: 28rpx; font-weight: 500; color: var(--danger); }
+.whint { font-size: 22rpx; color: var(--text-2); margin: 8rpx 0 20rpx; }
+.winput { background: var(--bg); }
+.sum-check-row { display: flex; align-items: center; gap: 18rpx; min-height: 88rpx; margin-top: 20rpx; }
+.sum-check-label { font-size: 24rpx; color: var(--text); }
+.fold { display: flex; align-items: center; justify-content: space-between; min-height: 88rpx; margin-top: 34rpx; border-bottom: 1rpx solid var(--line); color: var(--text-2); }
+.fold-label { font-size: 24rpx; }
+.chev { font-size: 34rpx; }
+.chev.open { transform: rotate(90deg); }
+.fold-body { padding: 24rpx 28rpx; background: var(--card-inset); border-radius: 0 0 24rpx 24rpx; }
+.fold-quote { color: var(--text-2); font-size: 24rpx; line-height: 1.8; white-space: pre-wrap; }
+.truncated-banner { margin-top: 24rpx; font-size: 22rpx; line-height: 1.7; color: var(--text-2); }
+.batch-card { margin-top: 24rpx; }
+.row { padding: 28rpx 0 36rpx; border-bottom: 1rpx solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row .field { margin-top: 24rpx; }
+.row-head, .row-head-left { display: flex; align-items: center; gap: 16rpx; }
+.row-head { justify-content: space-between; }
+.check-hit { min-width: 88rpx; min-height: 88rpx; display: flex; align-items: center; }
+.check { width: 38rpx; height: 38rpx; box-sizing: border-box; border: 1rpx solid var(--text-3); border-radius: 12rpx; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 26rpx; }
+.check.on { background: var(--go-bg); border-color: var(--go-bg); color: var(--go-fg); }
+.check.fixed { opacity: .6; }
+.flag { font-size: 22rpx; color: var(--danger); }
+.st { font-size: 22rpx; }
+.st.saved { color: var(--text-2); }
+.st.saving { color: var(--text-2); }
+.st.failed { color: var(--danger); }
+.sum-status { padding-top: 20rpx; }
+.row-mount { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 24rpx; background: var(--card-inset); border-radius: 24rpx; margin-top: 24rpx; font-size: 22rpx; line-height: 1.6; color: var(--text-2); }
+.row-mount-text { flex: 1; min-width: 0; }
+.row-mount-swap { min-height: 88rpx; display: flex; align-items: center; }
+.remind-badge, .vague-badge { display: inline-block; margin-top: 16rpx; padding: 8rpx 16rpx; border-radius: 12rpx; background: var(--card-inset); color: var(--text-2); font-size: 22rpx; }
+.row-warn-line { font-size: 22rpx; color: var(--danger); margin-top: 18rpx; line-height: 1.6; }
+.row-fail { margin-top: 24rpx; padding: 20rpx; border-radius: 20rpx; background: var(--card-inset); font-size: 22rpx; color: var(--danger); line-height: 1.7; }
+.fail-link { display: inline-block; margin-left: 16rpx; text-decoration: underline; }
+.confirm-dock { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; background: var(--bg); padding: 24rpx 40rpx calc(8rpx + env(safe-area-inset-bottom) / 2); border-top: 1rpx solid var(--line); }
+.confirm-dock .btn { border-radius: 28rpx; padding: 0; box-shadow: none; background: var(--go-bg); color: var(--go-fg); border: 0; width: 100%; min-height: 98rpx; margin: 0; }
+.confirm-dock .btn-face { font-size: 28rpx; font-weight: 500; min-height: 98rpx; border: 0; border-radius: 28rpx; box-shadow: none; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center; padding: 0 24rpx; }
+.confirm-dock .btn[disabled] { opacity: .45; }
+.trust-line { text-align: center; color: var(--text-2); font-size: 20rpx; line-height: 1.6; margin: 16rpx 0 0; }
+
+.manual-note-toggle { min-height: 88rpx; display: flex; align-items: center; margin-top: 20rpx; font-size: 24rpx; color: var(--text-2); }
