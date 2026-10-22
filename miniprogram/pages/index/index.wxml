@@ -1,307 +1,89 @@
-<!-- 容器抬头:返回胶囊(逐层退回)+ 抬头(随容器变)+ 「⋯」整理位置 + 刷新指示 -->
-<template name="map-head">
-  <view class="map-head">
-    <view wx:if="{{ backLabel }}" class="backchip" hover-class="backchip-hover" hover-stay-time="80" bindtap="onBackTap"><view class="backchip-face">‹ {{ backLabel }}</view></view>
-    <view class="mtitle">{{ mapTitle }}</view>
-    <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
-    <view wx:if="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore"><view class="more-inline-face">⋯</view></view>
-  </view>
+<template name="icon">
+  <image class="ui-icon theme-light" src="{{ '/assets/icons/' + name + '.png' }}" mode="aspectFit" />
+  <image class="ui-icon theme-dark" src="{{ '/assets/icons/' + name + '-dark.png' }}" mode="aspectFit" />
 </template>
-
-<view class="page page-with-voice-bar">
-  <!-- 品牌头部:右侧家庭上下文入口(共享=我们家·圆点,个人=我的家) -->
-  <view class="brand">
-    <view class="brand-main">
-      <view class="brand-name">我靠东西呢</view>
-      <view class="brand-sub">东西放哪儿了?我记得。</view>
+<view class="page page-with-voice-bar home-page">
+  <view wx:if="{{ firstUse && !queried }}" class="first-use-context"><view class="fam-chip" bindtap="onFamilyTap"><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" /></view></view>
+  <view wx:if="{{ backLabel }}" class="backchip" bindtap="onBackTap">‹ {{ backLabel }}</view>
+  <view wx:if="{{ !firstUse || queried }}" class="heading-row">
+    <view class="mtitle">{{ queried ? '找东西' : mapTitle }}</view>
+    <view wx:if="{{ isRootView && !unmountedView }}" class="fam-chip" bindtap="onFamilyTap">
+      <view class="fam-dot"></view><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" />
     </view>
-    <view class="fam-chip" bindtap="onFamilyTap">
-      <view class="fam-chip-face">
-        <view wx:if="{{ familyShared }}" class="fam-dot"></view>
-        <view class="fam-name">{{ familyShared ? '我们家' : '我的家' }}</view>
-        <view class="fam-caret">▾</view>
+    <view wx:elif="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
+  </view>
+  <view wx:if="{{ !firstUse && !queried && !unmountedView && rememberedCount !== null }}" class="home-sub">{{ isRootView ? '已记住' : '这里有' }} {{ rememberedCount }} 件</view>
+  <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
+  <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">{{ resumeSession.count }} 件待核对 <text>继续 ›</text></view>
+  <view wx:if="{{ photoResume }}" class="resume-banner" bindtap="onPhotoResumeTap">{{ photoResume.count }} 件{{ photoResume.mode === 'evidence' ? '照片待关联' : '拍照待核对' }} <text>继续 ›</text></view>
+  <view wx:if="{{ mapStale }}" class="stale-banner" bindtap="onRetryTap">当前为上次记录 · 点按重试</view>
+  <view wx:if="{{ !firstUse || queried }}" class="searchbar">
+    <template is="icon" data="{{ name: 'search' }}" />
+    <input class="search-input" placeholder="搜索物品" placeholder-class="placeholder" value="{{ queryText }}" confirm-type="search" bindinput="onQueryInput" bindconfirm="onQueryTap" />
+    <view class="search-go-hit" hover-class="btn-press" bindtap="onQueryTap"><view class="search-go">{{ querying ? '…' : '→' }}</view></view>
+  </view>
+
+  <block wx:if="{{ queried }}">
+    <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
+    <block wx:else>
+      <view class="section-label">找到 {{ queryResults.length }} 件</view>
+      <view wx:if="{{ queryResults.length === 0 }}" class="empty-note">
+        <view class="empty-note-main">还没记过「{{ queryKeyword }}」</view>
+        <view class="text-action" bindtap="onTextRecordTap">记一件 ›</view>
       </view>
-    </view>
-  </view>
-
-  <!-- 未完成草稿恢复(中途退出/进程回收;原幂等键续存) -->
-  <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">
-    上次有 {{ resumeSession.count }} 件没记完,继续核对 ›
-  </view>
-
-  <!-- 未完成拍照批恢复(#3):与草稿横幅并存,点进 photo 页带 resume=1 -->
-  <view wx:if="{{ photoResume }}" class="resume-banner photo-resume-banner" bindtap="onPhotoResumeTap">
-    {{ photoResume.mode === 'evidence' ? photoResume.count + ' 件照片待关联,继续处理 ›' : '上次拍照的 ' + photoResume.count + ' 件没记完,继续核对 ›' }}
-  </view>
-
-  <!-- 后台刷新失败:保留旧内容,如实提示(点按强制重试) -->
-  <view wx:if="{{ mapStale }}" class="stale-banner" bindtap="onRetryTap">
-    当前为上次记录(刷新失败),点按重试
-  </view>
-
-  <!-- ================ H0 首用态(无数据分支) ================ -->
-  <block wx:if="{{ firstUse && !queried }}">
-    <view class="map-area">
-      <view class="pagetitle">先让我记住一件东西</view>
-
-      <!-- 页内大语音 CTA(一屏唯一强调面,按住说话;配色随 --vb-* 冻结值) -->
-      <view
-        class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}"
-        catchtouchstart="onTalkTouchStart"
-        catchtouchmove="onTalkTouchMove"
-        catchtouchend="onTalkTouchEnd"
-        catchtouchcancel="onTalkTouchCancel"
-      >
-        <view class="cta-micdot">
-          <block wx:if="{{ voiceState === 'recording' }}">
-            <view class="mic-seconds">{{ recordSeconds }}s</view>
-          </block>
-          <block wx:else>
-            <view class="mic-cap"></view>
-            <view class="mic-stand"></view>
-            <view class="mic-base"></view>
-          </block>
+      <view wx:else class="result-card">
+        <view wx:for="{{ queryResults }}" wx:key="item_id" class="result-row" data-index="{{ index }}" bindtap="onResultTap">
+          <view class="item-icon">
+            <image wx:if="{{ item.evidenceUrl }}" class="item-photo" src="{{ item.evidenceUrl }}" mode="aspectFill" />
+            <block wx:else><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></block>
+          </view>
+          <view class="item-main"><view class="item-name">{{ item.name }}<text wx:if="{{ item.videoHint }}" class="video-badge {{ item.videoHint.playable ? '' : 'unavailable' }}" catchtap="onResultVideoTap" data-index="{{ index }}">{{ item.videoHint.badgeText }}</text></view><view class="item-location">{{ item.location_text }}</view></view>
+          <template is="icon" data="{{ name: 'chevron' }}" />
         </view>
-        <view class="cta-label">
-          {{ voiceState === 'cancelPending' ? '好,当我没听见。' : extracting ? '核对物品和位置…' : transcribing ? '整理你刚说的话…' : voiceState === 'recording' ? '正在听…(松手去核对)' : '按住说话,试试看' }}
-        </view>
+      </view>
+    </block>
+    <view class="collapse-link" bindtap="onCollapseResultsTap">收起搜索</view>
+  </block>
+  <block wx:elif="{{ mapLoading }}"><view class="skel-grid"><view class="skel-tile" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this"><view class="skel-shimmer"></view></view></view></block>
+  <block wx:elif="{{ mapError }}"><view class="fail-view"><view class="fail-title">暂时连不上</view><view class="fail-sub">已保存的记录不受影响</view><view class="text-action" bindtap="onRetryTap">重试 ›</view></view></block>
+  <block wx:elif="{{ unmountedView }}">
+    <view class="result-card"><view wx:for="{{ unmountedItems }}" wx:key="item_id" class="result-row" data-index="{{ index }}" bindtap="onUnmountedRowTap"><view class="item-icon neutral-icon">{{ item.initial }}</view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.locationText || '位置待补充' }}</view></view><view class="unverified-tag">位置待核实</view></view></view>
+    <view wx:if="{{ unmountedCount > unmountedItems.length }}" class="tiny-center">最近 {{ unmountedItems.length }} 件</view>
+  </block>
+  <block wx:elif="{{ firstUse }}">
+    <view class="empty-home">
+      <image class="empty-art theme-light" src="/assets/rooms/living.png" mode="aspectFit" /><image class="empty-art theme-dark" src="/assets/rooms/living-dark.png" mode="aspectFit" />
+      <view class="empty-title">先记一件东西</view>
+      <view class="empty-sub">告诉我物品和位置，下次帮你找。</view>
+      <view class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}" catchtouchstart="onTalkTouchStart" catchtouchmove="onTalkTouchMove" catchtouchend="onTalkTouchEnd" catchtouchcancel="onTalkTouchCancel">
+        <view class="cta-micdot"><view wx:if="{{ voiceState === 'recording' }}" class="mic-seconds">{{ recordSeconds }}s</view><block wx:else><view class="mic-cap"></view><view class="mic-stand"></view></block></view>
+        <view class="cta-label">{{ voiceState === 'cancelPending' ? '松手取消' : extracting ? '整理物品和位置…' : transcribing ? '整理录音…' : voiceState === 'recording' ? '正在听，松手核对' : '语音记录' }}</view>
       </view>
       <view wx:if="{{ partialText }}" class="partial-text">{{ partialText }}</view>
-      <view class="cta-sublnks">
-        <view class="cta-sublnk" bindtap="onTextRecordTap">用文字记</view>
-      </view>
-      <view class="tiny-center">你确认后,我才会真正记住。</view>
-
-      <view class="section-label">找东西</view>
-      <view class="searchbar">
-        <input
-          class="search-input"
-          placeholder="搜东西,如备用钥匙"
-          placeholder-class="placeholder"
-          value="{{ queryText }}"
-          confirm-type="search"
-          bindinput="onQueryInput"
-          bindconfirm="onQueryTap"
-        />
-        <view class="search-go-hit" hover-class="btn-press" hover-stay-time="80" bindtap="onQueryTap">
-          <view class="search-go {{ querying ? 'busy' : '' }}">
-            {{ querying ? '…' : '找' }}
-          </view>
-        </view>
-      </view>
-
-      <!-- 空搜索不造假:结果就地展开(H1b 同款空态,搜完自动切到结果视图) -->
+      <view class="text-action" bindtap="onTextRecordTap">文字记录</view>
+      <view class="empty-trust">确认后才保存。</view>
     </view>
   </block>
-
-  <!-- ================ 有数据态:搜索 + 家庭地图 / 搜索结果 ================ -->
   <block wx:else>
-    <view class="map-area">
-      <!-- 顶部搜索(H1/H1b 共用) -->
-      <view class="searchbar">
-        <input
-          class="search-input"
-          placeholder="搜东西,如备用钥匙"
-          placeholder-class="placeholder"
-          value="{{ queryText }}"
-          confirm-type="search"
-          bindinput="onQueryInput"
-          bindconfirm="onQueryTap"
-        />
-        <view class="search-go-hit" hover-class="btn-press" hover-stay-time="80" bindtap="onQueryTap">
-          <view class="search-go {{ querying ? 'busy' : '' }}">
-            {{ querying ? '…' : '找' }}
-          </view>
-        </view>
+    <view wx:if="{{ rooms.length }}" class="section-label">{{ isRootView ? '房间' : '位置' }}</view>
+    <view class="roomgrid">
+      <view wx:for="{{ rooms }}" wx:key="location_id" class="roomtile" hover-class="roomtile-active" data-index="{{ index }}" bindtap="onRoomTap">
+        <view class="room-art"><image class="room-image theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="room-image theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view>
+        <view class="room-info"><view class="room-copy"><view class="rname">{{ item.name }}</view><view class="rcount">{{ item.countText }}</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view>
       </view>
-
-      <!-- H1b 搜索结果:命中按物品分组,替换中间区域 -->
-      <block wx:if="{{ queried }}">
-        <view wx:if="{{ queryError }}" class="error-text">{{ queryError }}</view>
-        <block wx:else>
-          <view class="section-label">找到 {{ queryResults.length }} 件</view>
-          <view wx:if="{{ queryResults.length === 0 }}" class="empty-note">
-            <view class="empty-note-main">没记住过「{{ queryKeyword }}」。要不要现在记一件?</view>
-            <view class="btn ink block empty-note-btn" bindtap="onTextRecordTap"><view class="btn-face">记一件</view></view>
-          </view>
-          <view wx:else class="result-card">
-            <view
-              wx:for="{{ queryResults }}"
-              wx:key="item_id"
-              class="result-row"
-              data-index="{{ index }}"
-              bindtap="onResultTap"
-            >
-              <view class="item-icon">
-                <!-- 证据缩略(#3):有留证的行以照片替代首字;行内位置仍以文字记录为准 -->
-                <block wx:if="{{ item.evidenceUrl }}">
-                  <image class="item-photo" src="{{ item.evidenceUrl }}" mode="aspectFill" />
-                  <view class="item-photo-badge">留证</view>
-                </block>
-                <block wx:else>{{ item.name[0] }}</block>
-              </view>
-              <view class="item-main">
-                <view class="item-name">{{ item.name }}<text wx:if="{{ item.videoHint }}" class="video-badge {{ item.videoHint.playable ? '' : 'unavailable' }}" catchtap="onResultVideoTap" data-index="{{ index }}">{{ item.videoHint.badgeText }}</text></view>
-                <view class="item-location">{{ item.location_text }} · 记录更新于 {{ item.updated_at_short }}</view>
-              </view>
-              <view class="chevron">›</view>
-            </view>
-          </view>
-        </block>
-        <view class="collapse-link" bindtap="onCollapseResultsTap">收起</view>
-      </block>
-
-      <!-- X1 加载骨架屏:当前层无内容,不拿旧数据冒充 -->
-      <block wx:elif="{{ mapLoading }}">
-        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
-        <view class="skel-grid">
-          <view class="skel-tile {{ index % 2 === 1 ? 'odd' : '' }}" wx:for="{{ [0, 1, 2, 3] }}" wx:key="*this"><view class="skel-shimmer"></view></view>
-          <view class="skel-wide"><view class="skel-shimmer"></view></view>
-        </view>
-      </block>
-
-      <!-- X2 失败态:失败的是这次加载,不是记录没了;可重试 -->
-      <block wx:elif="{{ mapError }}">
-        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
-        <view class="fail-view">
-          <view class="fail-ico">⚠️</view>
-          <view class="fail-title">网络好像断了</view>
-          <view class="fail-sub">已记住的记录不受影响,联网后照常能找</view>
-          <view class="btn ink block fail-btn" bindtap="onRetryTap"><view class="btn-face">再试一次</view></view>
-        </view>
-      </block>
-
-      <!-- H1 家庭地图:根层=房间格子两列;点格子整页切入容器视图 -->
-      <block wx:else>
-        <!-- 尚未归类明细视图(#36 真机反馈 Fix 3):整页切换,行点进物品详情,返回胶囊退家里 -->
-        <block wx:if="{{ unmountedView }}">
-          <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
-          <view class="result-card unmounted-card">
-            <view
-              wx:for="{{ unmountedItems }}"
-              wx:key="item_id"
-              class="result-row"
-              hover-class="roomtile-active"
-              hover-stay-time="80"
-              data-index="{{ index }}"
-              bindtap="onUnmountedRowTap"
-            >
-              <view class="item-icon">{{ item.initial }}</view>
-              <view class="item-main">
-                <view class="item-name">{{ item.name }}</view>
-                <view class="item-location">{{ item.locationText || '没说放在哪儿' }}</view>
-              </view>
-              <view class="unverified-tag">位置待核实</view>
-            </view>
-          </view>
-          <view wx:if="{{ unmountedCount > unmountedItems.length }}" class="tiny-center">先显示最近的 {{ unmountedItems.length }} 件</view>
-        </block>
-
-        <block wx:else>
-        <!-- 到期横幅(#36):仅家里层、有过期/临期才显示;点进「快到期的东西」 -->
-        <view
-          wx:if="{{ isRootView && dueBanner }}"
-          class="due-banner"
-          hover-class="due-banner-hover"
-          hover-stay-time="80"
-          bindtap="onDueBannerTap"
-        >
-          <view class="due-banner-text">⏰ {{ dueBanner.text }}</view>
-          <view class="due-banner-arrow">›</view>
-        </view>
-        <template is="map-head" data="{{ backLabel, mapTitle, isRootView, mapRefreshing }}" />
-
-        <view class="roomgrid">
-          <view
-            wx:for="{{ rooms }}"
-            wx:key="location_id"
-            class="roomtile {{ index % 2 === 1 ? 'odd' : '' }}"
-            hover-class="roomtile-active"
-            hover-stay-time="80"
-            data-index="{{ index }}"
-            bindtap="onRoomTap"
-          >
-            <view class="rico">{{ item.initial }}</view>
-            <view class="rname">{{ item.name }}</view>
-            <view class="rcount">{{ item.countText }}</view>
-            <view class="chev">›</view>
-          </view>
-          <!-- 尚未归类通栏格(#36 真机反馈 Fix 3:可点入未挂物品明细,不再只是计数) -->
-          <view
-            wx:if="{{ isRootView && unmountedCount > 0 }}"
-            class="roomtile wide"
-            hover-class="roomtile-active"
-            hover-stay-time="80"
-            bindtap="onUnmountedTap"
-          >
-            <view class="rico">?</view>
-            <view class="wide-main">
-              <view class="rname">尚未归类</view>
-              <view class="rcount">{{ unmountedCount }} 件待核实</view>
-            </view>
-            <view class="chev">›</view>
-          </view>
-        </view>
-
-        <view wx:if="{{ rooms.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">
-          这里还是空的;点右上「⋯」可整理
-        </view>
-
-        <!-- 容器内:直接记录在这个位置的条目(点开看它上次放在哪儿) -->
-        <block wx:if="{{ !isRootView && directItems.length > 0 }}">
-          <view class="section-label">直接记录在{{ containerName }}</view>
-          <view class="result-card">
-            <view
-              wx:for="{{ directItems }}"
-              wx:key="item_id"
-              class="result-row"
-              data-index="{{ index }}"
-              bindtap="onDirectItemTap"
-            >
-              <view class="item-icon">{{ item.name[0] }}</view>
-              <view class="item-main">
-                <view class="item-name">{{ item.name }}</view>
-                <view class="item-location">上次记在:{{ item.location_text }}</view>
-              </view>
-              <view class="chevron">›</view>
-            </view>
-          </view>
-        </block>
-        </block>
-      </block>
     </view>
+    <view wx:if="{{ isRootView && unmountedCount > 0 }}" class="unmounted-entry" bindtap="onUnmountedTap"><view class="unmounted-symbol">?</view><view class="item-main"><view class="item-name">尚未归类</view><view class="item-location">{{ unmountedCount }} 件待核实</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view>
+    <view wx:if="{{ isRootView && dueBanner }}" class="due-banner" bindtap="onDueBannerTap"><template is="icon" data="{{ name: 'clock' }}" /><view class="due-banner-text">{{ dueBanner.text }}</view><template is="icon" data="{{ name: 'chevron' }}" /></view>
+    <view wx:if="{{ !isRootView && directItems.length }}" class="section-label direct-label">这里的东西</view>
+    <view wx:if="{{ directItems.length }}" class="result-card"><view wx:for="{{ directItems }}" wx:key="item_id" class="result-row" data-index="{{ index }}" bindtap="onDirectItemTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.location_text }}</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view></view>
+    <view wx:if="{{ rooms.length === 0 && directItems.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">这里还没有东西</view>
+    <block wx:if="{{ isRootView && recentItems.length }}">
+      <view class="section-header"><view class="section-label">最近记住</view><view wx:if="{{ recentItems.length > 2 }}" class="recent-more" bindtap="onRecentMore">{{ recentExpanded ? '收起' : '更多' }}</view></view>
+      <view class="result-card"><block wx:for="{{ recentItems }}" wx:key="item_id"><view wx:if="{{ recentExpanded || index < 2 }}" class="result-row" data-index="{{ index }}" bindtap="onRecentTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.location_text }}</view></view><view class="item-date" aria-label="记录更新于 {{ item.updated_at_short }}">{{ item.updated_at_short }}</view></view></block></view>
+    </block>
+    <view wx:if="{{ isRootView && recentError }}" class="recent-retry" bindtap="loadRecent">最近记录加载失败 · 重试</view>
   </block>
+  <view wx:if="{{ isRootView && !firstUse && !unmountedView && !queried }}" class="manage-link" bindtap="onLocationsTap">管理位置 ›</view>
 </view>
-
-<!-- 切换家庭三选弹层(十七轮 B 线):共享态点 fam-chip 打开;
-     我的家 / 我们家·家庭名(✓ 当前)/ 家庭管理页;切换=只改当前看哪个家 -->
-<view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose">
-  <view class="sheet" catchtap="noop">
-    <view class="sheet-title">切换家庭</view>
-    <view
-      wx:for="{{ famSheetOptions }}"
-      wx:key="key"
-      class="sheet-act {{ switchingFamily ? 'disabled' : '' }}"
-      hover-class="{{ switchingFamily ? 'none' : 'sheet-act-hover' }}"
-      hover-stay-time="60"
-      data-key="{{ item.key }}"
-      bindtap="onFamSheetPick"
-    >
-      <view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view>
-      <view class="sheet-act-sub">{{ item.sub }}</view>
-    </view>
-    <view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view>
-  </view>
-</view>
-
-<!-- 常驻语音条(issue #45 全局可达:首页全部状态) -->
-<voice-bar>
-  <view slot="actions" class="vb-add-actions">
-    <view class="vb-video-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onVideoScanTap">
-      <view class="vb-video-face">🎬 多件</view>
-    </view>
-    <view class="vb-photo-btn" hover-class="vb-photo-hover" hover-stay-time="80" bindtap="onPhotoRecordTap">
-      <view class="vb-photo-face">📷 拍照</view>
-    </view>
-  </view>
-</voice-bar>
+<view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose"><view class="sheet" catchtap="noop"><view class="sheet-title">切换家庭</view><view wx:for="{{ famSheetOptions }}" wx:key="key" class="sheet-act {{ switchingFamily ? 'disabled' : '' }}" data-key="{{ item.key }}" bindtap="onFamSheetPick"><view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view><view class="sheet-act-sub">{{ item.sub }}</view></view><view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view></view></view>
+<voice-bar id="global-voice-bar" wx:if="{{ !firstUse || queried }}" />

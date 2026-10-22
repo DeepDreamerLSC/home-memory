@@ -78,11 +78,11 @@ test("B2-item:详情页头部 updated_at 映射为「记录更新于 MM-DD」,�
   assert.equal(self.data.lastConfirmedText.indexOf("上次确认"), -1, "头部不得再出现「上次确认」");
 });
 
-test("B2-index:首页搜索结果行显示「记录更新于 …」,不再出现「上次确认」", function () {
+test("B2-index:首页列表日期保留「记录更新于 …」语义,不再出现「上次确认」", function () {
   var wxml = read("pages/index/index.wxml");
   assert.ok(
     wxml.indexOf("记录更新于 {{ item.updated_at_short }}") !== -1,
-    "搜索结果行应为「记录更新于 {{ item.updated_at_short }}」"
+    "列表日期的辅助标签应为「记录更新于 {{ item.updated_at_short }}」"
   );
   assert.equal(wxml.indexOf("上次确认"), -1, "首页 wxml 不得再出现「上次确认」");
 });
@@ -97,7 +97,7 @@ test("B2-产物与源:源码与编译产物均无「上次确认」;D1「可能�
   // D1 只读大卡静态提示句保留(本批只改「上次确认」文案,不动 D1)
   var wxml = read("pages/item/item.wxml");
   assert.ok(
-    wxml.indexOf("这是上次记录的位置,东西可能已经移动。") !== -1,
-    "D1 大卡提示句应保留不动"
+    wxml.indexOf("物品可能已移动。") !== -1,
+    "D1 仍明确提示位置可能已变化"
   );
 });

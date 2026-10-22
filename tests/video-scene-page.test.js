@@ -11,9 +11,9 @@ const ROOT = path.join(__dirname, "..");
 test("SCENE-PAGE:app.json 注册独立 pages/video-scan；首页保留拍照并新增多件入口", () => {
   const app = JSON.parse(fs.readFileSync(path.join(ROOT, "miniprogram/app.json"), "utf8"));
   assert.ok(app.pages.indexOf("pages/video-scan/video-scan") !== -1);
-  const wxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/index/index.wxml"), "utf8");
-  assert.ok(wxml.indexOf("onPhotoRecordTap") !== -1);
-  assert.ok(wxml.indexOf("onVideoScanTap") !== -1);
+  const wxml = fs.readFileSync(path.join(ROOT, "miniprogram/components/voice-bar/voice-bar.wxml"), "utf8");
+  assert.ok(wxml.indexOf("onPhotoTap") !== -1);
+  assert.ok(wxml.indexOf("onVideoTap") !== -1);
   assert.ok(wxml.indexOf("拍照") !== -1);
   assert.ok(wxml.indexOf("多件") !== -1);
   const ts = fs.readFileSync(path.join(ROOT, "miniprogram/pages/index/index.ts"), "utf8");

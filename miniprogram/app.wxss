@@ -1,85 +1,86 @@
-/* 全局样式:品牌「我靠东西呢」——奶油白/明黄/墨黑,跟随系统深浅色 */
+/* 已确认的 UI 原型: docs/design/ui-polish-v1/index.html。rpx = 375px 画布的 2 倍。 */
 page {
-  /* 浅色(默认):奶油白底 + 白卡 + 墨字 */
-  --bg: #faf8f2;
-  --card: #ffffff;
-  --card-inset: #f1ede0;
-  --text: #191919;
-  --text-2: #4c483e;
-  --text-3: #a39d8d;
-  --line: #e8e3d6;
-  --placeholder: #b8b2a4;
-  --accent: #ffe15a;
-  --accent-shadow: #e5c431;
-  --accent-dim: #f3edd9;
-  --go-bg: #191919;
-  --go-fg: #ffe15a;
-  --danger: #d93025;
-  --danger-bg: #fdecec;
-  --danger-shadow: #ecc2c0;
-  --banner-bg: #fff3bf;
-  --banner-line: #ffe15a;
-  --banner-manual-bg: #f4f1e6;
-  --banner-manual-fg: #4c483e;
-  /* 语音条专属(九轮冻结:奶油条 + 米黄油胶囊 + 圆点挖窗) */
-  --vb-bg: #fffdf4;
-  --vb-fg: #191919;
-  --vb-line: #e8e3d6;
-  --vb-hold-bg: #f3edd9;
-  --vb-hold-fg: #191919;
-  --vb-mic-bg: #fffdf4;
-  --vb-mic-fg: #f3edd9;
-  --vb-btn-bg: transparent;
-  --vb-btn-fg: #4c483e;
-  --vb-btn-line: #ddd6c2;
-  --vb-cta-shadow: #ece6d6;
-
+  --bg: #f8f7f2;
+  --card: #fffefa;
+  --card-inset: #eeeee5;
+  --room-bg: #efeee4;
+  --text: #292d25;
+  --text-2: #666d5e;
+  --text-3: #6d7363;
+  --line: #e7e8de;
+  --placeholder: #6d7363;
+  --accent: #efd36e;
+  --accent-shadow: #d1b95e;
+  --accent-dim: #eeeee5;
+  --go-bg: #30372c;
+  --go-fg: #fcfaf1;
+  --danger: #ad4238;
+  --danger-bg: #faeeea;
+  --danger-shadow: #e8cbc5;
+  --banner-bg: #f4eedb;
+  --banner-line: #e6dbb9;
+  --banner-manual-bg: #eeeee5;
+  --banner-manual-fg: #666d5e;
+  --vb-bg: #f8f7f2;
+  --vb-fg: #292d25;
+  --vb-line: #e7e8de;
+  --vb-hold-bg: #30372c;
+  --vb-hold-fg: #fcfaf1;
+  --vb-mic-bg: #efd36e;
+  --vb-mic-fg: #30372c;
+  --vb-btn-bg: #fffefa;
+  --vb-btn-fg: #292d25;
+  --vb-btn-line: #e7e8de;
+  --vb-cta-shadow: transparent;
+  --radius-card: 34rpx;
+  --radius-input: 24rpx;
+  --radius-button: 28rpx;
+  --page-inset: 44rpx;
   background: var(--bg);
   color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 28rpx;
   line-height: 1.6;
 }
-
+image.theme-dark { display: none; }
 @media (prefers-color-scheme: dark) {
-  .qualifiers.warn {
-    color: #e8a33d;
-  }
-
   page {
-    /* 深色:近黑底 + 深灰卡 + 亮字,明黄仍是唯一强调面 */
-    --bg: #111111;
-    --card: #1e1e1e;
-    --card-inset: #161616;
-    --text: #f5f4f0;
-    --text-2: #a8a69e;
-    --text-3: #8a8880;
-    --line: #2e2e2e;
-    --placeholder: #82807a;
-    --accent: #f7d64b;
-    --accent-shadow: #8f7a1e;
-    --accent-dim: #3a3627;
-    --go-bg: #f5f4f0;
-    --go-fg: #111111;
-    --danger: #ff6b6b;
-    --danger-bg: #3a2222;
-    --danger-shadow: #57302e;
-    --banner-bg: rgba(247, 214, 75, 0.14);
-    --banner-line: #6b5b10;
-    --banner-manual-bg: #262626;
-    --banner-manual-fg: #a8a69e;
-    /* 语音条专属(十轮:深色去黄,黑灰组合,麦克风单色) */
-    --vb-bg: #1e1e1e;
-    --vb-fg: #f5f4f0;
-    --vb-line: #2e2e2e;
-    --vb-hold-bg: #2e2e2e;
-    --vb-hold-fg: #f5f4f0;
-    --vb-mic-bg: #1e1e1e;
-    --vb-mic-fg: #a8a69e;
-    --vb-btn-bg: transparent;
-    --vb-btn-fg: #a8a69e;
-    --vb-btn-line: #3a3a3a;
-    --vb-cta-shadow: rgba(0, 0, 0, 0.45);
+    --bg: #20241f;
+    --card: #2b3028;
+    --card-inset: #32392e;
+    --room-bg: #30362d;
+    --text: #efeee4;
+    --text-2: #b5baa8;
+    --text-3: #929a85;
+    --line: #3d4436;
+    --placeholder: #929a85;
+    --accent: #e8ce78;
+    --accent-shadow: #b29b65;
+    --accent-dim: #32392e;
+    --go-bg: #e8ce78;
+    --go-fg: #262c22;
+    --danger: #f3a89a;
+    --danger-bg: #3b2925;
+    --danger-shadow: #69473e;
+    --banner-bg: #3a392b;
+    --banner-line: #57553b;
+    --banner-manual-bg: #32392e;
+    --banner-manual-fg: #b5baa8;
+    --vb-bg: #20241f;
+    --vb-fg: #efeee4;
+    --vb-line: #3d4436;
+    --vb-hold-bg: #e8ce78;
+    --vb-hold-fg: #262c22;
+    --vb-mic-bg: #e8ce78;
+    --vb-mic-fg: #30372c;
+    --vb-btn-bg: #2b3028;
+    --vb-btn-fg: #efeee4;
+    --vb-btn-line: #3d4436;
+    --vb-cta-shadow: transparent;
   }
+  image.theme-light { display: none; }
+  image.theme-dark { display: block; }
+  .qualifiers.warn { color: #e8ce78; }
 }
 
 .page {
@@ -89,7 +90,7 @@ page {
 /* 挂常驻语音条的页面:内容底部让出固定语音条高度(含底部安全区),不遮最后一条
    (语音条压扁后整条 112rpx + 20rpx 间隙,#36 真机反馈 Fix 1) */
 .page-with-voice-bar {
-  padding-bottom: calc(132rpx + env(safe-area-inset-bottom));
+  padding-bottom: calc(150rpx + env(safe-area-inset-bottom));
 }
 
 /* 卡片:原型 .card(radius 18px、padding 15px 14px、内容边距 18px,无投影) */

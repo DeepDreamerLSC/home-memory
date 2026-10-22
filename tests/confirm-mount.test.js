@@ -724,29 +724,24 @@ function read(rel) {
   return fs.readFileSync(path.join(ROOT, "miniprogram", rel), "utf8");
 }
 
-test("MNT-STATIC-1:confirm.wxml——C1「放进」行/C2「将放入」副文按 mountPathText 渲染,「换」接线", function () {
+test("MNT-STATIC-1:确认前展示归到路径并保留位置更换入口", function () {
   var wxml = read("pages/confirm/confirm.wxml");
-  // C1:「放进」行只在 mountPathText 非空时渲染(mount_path 为空不显示该行)
-  var c1 = wxml.slice(wxml.indexOf('wx:if="{{ rows[0].mountPathText }}"'), wxml.indexOf('wx:if="{{ rows[0].mountPathText }}"') + 700);
-  assert.ok(c1.indexOf(">放进</view>") !== -1, "「放进」行标签在册");
-  assert.ok(c1.indexOf("{{ rows[0].mountPathText }}") !== -1, "路径文本在册");
-  assert.ok(c1.indexOf("onMountSwapTap") !== -1, "「换」接线 onMountSwapTap");
-  assert.ok(c1.indexOf("sum-edit-face\">换</view>") !== -1, "「换」复用行内小钮视觉(热区 88/面 66 先例)");
-  // C2:certain 行副文「将放入:X」
-  assert.ok(wxml.indexOf('wx:if="{{ item.mountPathText }}"') !== -1, "C2 副文按行渲染");
-  assert.ok(wxml.indexOf("将放入:{{ item.mountPathText }}") !== -1, "C2 副文文案「将放入:X」在册");
-  // 屏底信任句:有「放进」预览时明示路径也还没放
-  assert.ok(
-    wxml.indexOf("点「确认记住」之前,什么都不会保存;「放进」的位置也还没放。") !== -1,
-    "信任句同步(确认之前路径也还没放)",
-  );
-  assert.ok(wxml.indexOf("你确认后,我才会真正记住。") !== -1, "既有信任句保留");
+  var start = wxml.indexOf('wx:if="{{ rows[0].mountPathText }}"');
+  var c1 = wxml.slice(start, start + 700);
+  assert.ok(start >= 0);
+  assert.ok(c1.includes("归到「{{ rows[0].mountPathText }}」"));
+  assert.ok(c1.includes('bindtap="onMountSwapTap"'));
+  assert.ok(c1.includes("更换"));
+  assert.ok(wxml.includes('wx:if="{{ item.mountPathText }}"'));
+  assert.ok(wxml.includes("归到「{{ item.mountPathText }}」"));
+  assert.ok(wxml.includes('catchtap="onMountSwapTap"'));
+  assert.ok(wxml.includes("确认后才保存。"));
 });
 
 test("MNT-STATIC-2:confirm.wxss——C2 副文「换」触点 ≥88rpx(热区分层口径)", function () {
   var css = read("pages/confirm/confirm.wxss");
   assert.ok(/\.row-mount-swap\s*\{[^}]*min-height:\s*88rpx/.test(css), "「换」热区 ≥88rpx(44px)");
-  assert.ok(/\.row-mount-text\s*\{[^}]*color:\s*var\(--text-2\)/.test(css), "副文用次级文字色");
+  assert.ok(/\.row-mount\s*\{[^}]*color:\s*var\(--text-2\)/.test(css), "副文用次级文字色");
 });
 
 test("MNT-STATIC-3:confirm.ts——create 请求结构不变(挂靠编排全在客户端);挂靠失败文案在册", function () {

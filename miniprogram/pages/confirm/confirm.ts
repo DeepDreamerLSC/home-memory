@@ -101,6 +101,7 @@ Page<
   {
     /** true 表示手动录入模式(空白单表单,兼容旧入口) */
     isManual: boolean;
+    manualNoteOpen: boolean;
     // ---- 手动单表单(旧) ----
     name: string;
     locationText: string;
@@ -130,6 +131,7 @@ Page<
   {
     onNameInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onLocationInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    onToggleManualNote(): void;
     onNoteInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onSaveTap(): Promise<void>;
     onRowNameInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
@@ -159,6 +161,7 @@ Page<
 >({
   data: {
     isManual: false,
+    manualNoteOpen: false,
     name: "",
     locationText: "",
     note: "",
@@ -271,23 +274,14 @@ Page<
     const quoteOpen = rows.some((r) => r.anchorShared || r.sourceQuote === "");
     // 标题文案(用户词汇):单件核对 / 单件补位置 / 多件清点
     const single = rows.length === 1;
-    const uncertainSingle = single && !rows[0].certain;
     this.setData({
       isManual: false,
       originalText: payload.originalText,
       truncated: payload.truncated,
       rows,
       checkedCount: batchSummary(rows).checked,
-      headTitle: single
-        ? uncertainSingle
-          ? "我听到了,但有件事要补一下"
-          : "我听到了,核对一下"
-        : "识别出 " + rows.length + " 件东西",
-      headSub: single
-        ? uncertainSingle
-          ? "位置没听清,补一句就行。"
-          : "看一眼,没问题就确认。"
-        : "逐件核对,勾选要记住的。",
+      headTitle: "核对记录",
+      headSub: single ? "" : "逐件核对，勾选要记住的。",
       quoteOpen,
     });
   },
@@ -339,6 +333,8 @@ Page<
       locationText: e.detail && e.detail.value ? e.detail.value : "",
     });
   },
+
+  onToggleManualNote() { this.setData({ manualNoteOpen: !this.data.manualNoteOpen }); },
 
   onNoteInput(e) {
     this.setData({ note: e.detail && e.detail.value ? e.detail.value : "" });
