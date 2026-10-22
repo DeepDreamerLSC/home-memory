@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks` 八个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets`、`video_item_locks` 与 `location_scans` 九个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -169,6 +169,17 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 > 用途:用户在物品详情页明确选择**一件**物品后,申请服务端上传票据 -> 客户端按票据路径上传原视频 -> 凭票据绑定证据。服务端校验票据属于当前家庭与该物品、文件路径与票据完全一致、文件可通过云函数换临时链接;读取端只按家庭 + 未删物品返回。一个视频只绑定用户当前确认的一件物品;首版不做批量识物、不自动合并同名实物、不自动生成高亮框。
 >
 > 保留与删除:视频默认折叠,用户点击后才播放;删除视频时逐文件确认云存储删除成功后才删证据行;删除物品与 attach 共用 `video_item_locks` 物品锁,清理 bound 证据与已回执 file_id 的 pending 票据,云删除失败则物品删除失败并保持可重试。上传成功后客户端立即回执 file_id 并保留本地 pending。**禁止对整个 `video-evidence/` 前缀配置统一 24h 生命周期删除**;孤儿回收只由 `videoCleanup` 按数据库票据 file_id 选择性执行,并会恢复超时卡在 binding/cleaning/cancelling 的票据。
+
+**⑨ location_scans(位置级视频清点,issue #94/D1;先建集合与索引,再部署 itemsApi/locations/videoCleanup)**:
+
+> 创建 `location_scans` 集合,权限并入 ③(「所有用户不可读不可写」)。索引两条(索引管理,人工步骤):
+>
+> - 唯一索引:字段一 `household_id`(升序)+ 字段二 `scan_id`(升序),勾选「**唯一**」——`(household_id, scan_id)` 是清点落库的幂等硬门,不建则并发/重试可能双写 scan 行;
+> - 非唯一索引:`household_id`(升序)+ `location_id`(升序)+ `created_at`(升序)——位置页「上次清点」最新一条查询(`locationScanLatest`)。
+>
+> 另:`video_evidence` 建议增补非唯一索引 `household_id` + `scan_id`(D1 只写不查,影响后续 join 效率,缺失不破坏正确性)。
+>
+> 用途:位置页「📹 拍视频清点这里」——对某位置录 5–20 秒视频,本地抽帧 + AI 逐帧识别候选物品,用户逐件确认(可新建/关联已有/移动到当前位置)后批量建物品并共享同一段视频证据;每次拍摄落一条 scan 记录(候选/确认计数、视频回看链接),位置页底部显示「上次清点」,首页不展示清点记录。写侧分工:itemsApi 写创建/lifetime 计数,locations 写删除级联的状态标记(见 `docs/API_CONTRACT.md`)。**0 确认 scan 的视频不会被 videoCleanup 的 24h 孤儿回收**(视频是清点记录的一部分);scan 的用户主动删除与清点历史列表留 D2。
 
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
