@@ -35,6 +35,9 @@ var LOCATION_SNAPSHOT_SEGMENTS_MAX = 6;
 // D1 §3:locationScanContext 的全家庭匹配池上限(超过置 truncated,建议列表
 // 由客户端如实标注「物品较多,建议只参考同名精确匹配」)
 var SCAN_CONTEXT_HOUSEHOLD_ITEMS_MAX = 200;
+// D2 清点记录管理(issue #96,docs/design/video-ai/D2-IMPLEMENTATION.md):
+// 历史列表单页上限(§2 冻结常量,一期单页不做翻页)
+var HISTORY_LIMIT = 20;
 
 function stableTextHash(text) {
   var h1 = 0x811c9dc5;
@@ -1166,6 +1169,89 @@ function createVideoActions(h) {
 
   function scanCol(deps) { return deps.db.collection(LS); }
 
+  // ---------------------------------------------------------------------------
+  // D2 §1 视频引用矩阵(issue #96):「审计行存在」与「云文件仍被引用」分开。
+  // 一个云视频文件仍被引用 = R1 活 evidence 行 / R2 仍保留该视频的 scan /
+  // R3 实际未结算票据(pending/binding/cleaning/cancelling)任一存在。
+  // 终态 deleted 的 scan 行(审计行)、已回收行、bound/cancelled/deleted 票据
+  // 不占引用(bound 票据是同一 scan/asset 的生命周期索引,不是独立引用)。
+  // 此矩阵是 cancel / 孤儿回收 / scanDelete 的单点共享判定。
+  // ---------------------------------------------------------------------------
+
+  /** §3:video_reclaimed_at 置位判定(缺省/空串 = 视频仍在) */
+  function scanRowReclaimed(row) {
+    return isString(row.video_reclaimed_at) === true && row.video_reclaimed_at !== "";
+  }
+
+  /** §1 矩阵 R2:scan 行「仍保留该视频」= status ∈ {active, location_deleted} 且未回收 */
+  function scanRowRetainsVideo(row) {
+    if (row.status !== "active" && row.status !== "location_deleted") return false;
+    return scanRowReclaimed(row) === false;
+  }
+
+  /** §6 防复活门:仅 active 且未回收的 scan 可被旧提交自愈/重试 */
+  function scanRowRevivable(row) {
+    return row.status === "active" && scanRowReclaimed(row) === false;
+  }
+
+  /**
+   * location_scans 按 asset/file 双查去重(evidenceRowsForFile 同款纪律:
+   * 优先 (household_id, asset_id),旧行无 asset_id 时按 file_id 回退)。
+   */
+  async function scanRowsForFile(deps, fileId, assetId) {
+    var rows = [];
+    var seen = Object.create(null);
+    async function append(cond) {
+      var got = await scanCol(deps).where(cond).get();
+      var list = (got && got.data) || [];
+      for (var i = 0; i < list.length; i++) {
+        var row = list[i];
+        if (row && isString(row._id) && seen[row._id] !== true) {
+          seen[row._id] = true;
+          rows.push(row);
+        }
+      }
+    }
+    if (isString(assetId) && assetId !== "") {
+      await append({ household_id: deps.householdId, asset_id: assetId });
+    }
+    if (isString(fileId) && fileId !== "") {
+      await append({ household_id: deps.householdId, file_id: fileId });
+    }
+    return rows;
+  }
+
+  /**
+   * §1 矩阵 R3:实际未结算票据(pending/binding/cleaning/cancelling)按
+   * asset/file 命中;bound/cancelled/deleted 不占引用(矩阵明确排除)。
+   */
+  async function unsettledTicketsForFile(deps, fileId, assetId) {
+    var rows = [];
+    var seen = Object.create(null);
+    async function append(cond) {
+      var got = await ticketCol(deps).where(cond).get();
+      var list = (got && got.data) || [];
+      for (var i = 0; i < list.length; i++) {
+        var t = list[i];
+        if (
+          t &&
+          (t.status === "pending" || t.status === "binding" || t.status === "cleaning" || t.status === "cancelling") &&
+          isString(t._id) && seen[t._id] !== true
+        ) {
+          seen[t._id] = true;
+          rows.push(t);
+        }
+      }
+    }
+    if (isString(assetId) && assetId !== "") {
+      await append({ household_id: deps.householdId, asset_id: assetId });
+    }
+    if (isString(fileId) && fileId !== "") {
+      await append({ household_id: deps.householdId, file_id: fileId });
+    }
+    return rows;
+  }
+
   function codePointLength(s) { return Array.from(s).length; }
 
   /** path_snapshot 段形状门:去首尾空白 1-30 码点(与 locations 的节点名同款门槛) */
@@ -1456,6 +1542,13 @@ function createVideoActions(h) {
     ) {
       return { ok: false, error: "OPERATION_CONFLICT" };
     }
+    // D2 §6 兜底门:自愈分支前重判「active 且未回收」——用户已删/位置已终结/
+    // 视频已回收的 scan 不得被旧 sceneCommit 重试复活(挡早门与落库之间的并发
+    // 删除/回收;commit 与 scanDelete 同一把 asset 锁互斥,此处必收敛)。
+    // 满足则 D1 自愈行为逐字节不变(§3)。
+    if (scanRowRevivable(existing) === false) {
+      return { ok: false, error: "OPERATION_CONFLICT" };
+    }
     var patch = {
       confirmed_item_ids: confirmedItemIds,
       confirmed_count: confirmedItemIds.length,
@@ -1470,20 +1563,127 @@ function createVideoActions(h) {
   }
 
   /**
-   * location_scans 按 asset/file 的引用复核(§2.4):任一 scan 行存在即视为有引用。
-   * 用于取消与孤儿回收——commit 已落 scan 但 0 件证据成功的会话,其视频是该 scan
-   * 的回看内容,不得删云文件;cancel-before-commit(scan 尚不存在)行为与 B 一致。
+   * location_scans 按 asset/file 的引用复核——D2 §1 收紧为矩阵 R2 语义:
+   * 「仍保留该视频」(status ∈ {active, location_deleted} 且未回收)的 scan 行
+   * 才持有引用;终态 deleted 的审计行与已回收行不再永久挡住取消/孤儿回收。
+   * 用于取消与孤儿回收——0 确认未到期(绝大多数)仍持引用,行为与 D1 一致;
+   * cancel-before-commit(scan 尚不存在)行为与 B 一致。
    */
   async function locationScanRefExists(deps, ticket) {
-    if (isString(ticket.asset_id) && ticket.asset_id !== "") {
-      var byAsset = await scanCol(deps).where({ household_id: deps.householdId, asset_id: ticket.asset_id }).get();
-      if (byAsset && byAsset.data && byAsset.data.length > 0) return true;
-    }
-    if (isString(ticket.file_id) && ticket.file_id !== "") {
-      var byFile = await scanCol(deps).where({ household_id: deps.householdId, file_id: ticket.file_id }).get();
-      if (byFile && byFile.data && byFile.data.length > 0) return true;
+    var rows = await scanRowsForFile(deps, isString(ticket.file_id) ? ticket.file_id : "", isString(ticket.asset_id) ? ticket.asset_id : "");
+    for (var i = 0; i < rows.length; i++) {
+      if (scanRowRetainsVideo(rows[i])) return true;
     }
     return false;
+  }
+
+  /**
+   * D2 §4 scanDelete:用户删除单次清点(写 action)。状态门(仅 active 可删,
+   * 幂等重放 replayed / 终态与跨家庭 NOT_FOUND)→ 单 asset 锁 → 锁内重读 +
+   * §1 矩阵末引用复核 → 无引用先云删成功(status 0/-503003 均成功)才条件终结
+   * → best-effort bound 票据收口。绝不写 items/video_evidence/其他 scan;
+   * 云删失败零状态残留(VIDEO_DELETE_FAILED 可重试);不可变字段
+   * (created_at/candidate_count/confirmed_count)绝不写入。
+   */
+  function scanDeleteReplay() {
+    return { ok: true, replayed: true, video_deleted: false };
+  }
+
+  /** 状态门三分支:可删 / 幂等重放 / 对用户不可见(NOT_FOUND) */
+  function scanDeleteGate(scan) {
+    if (scan.status === "active") return "proceed";
+    if (scan.status === "deleted" && scan.deleted_by === "user") return "replayed";
+    // location_deleted / 位置流程删(仅 deleted_at 无 deleted_by)→ 不可见行
+    return "not_found";
+  }
+
+  async function scanDelete(event, deps) {
+    if (isString(event.scan_id) === false || event.scan_id.length < SCENE_ID_MIN || event.scan_id.length > SCENE_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await scanCol(deps).where({ household_id: deps.householdId, scan_id: event.scan_id }).get();
+    var scan = got && got.data && got.data.length > 0 ? got.data[0] : null;
+    if (scan === null) return fail("NOT_FOUND");
+    var gate = scanDeleteGate(scan);
+    if (gate === "replayed") return scanDeleteReplay();
+    if (gate !== "proceed") return fail("NOT_FOUND");
+
+    // 单 asset 锁(§4 第 3 步;asset_id 缺失用 file_id 稳定摘要 legacy 键)。
+    // 只持 asset 锁不持 item 锁——scanDelete 不写任何 item/evidence,锁序纪律
+    // (item 升序 → asset 升序)在「无 item 锁」时天然满足。
+    var lockKey = lockKeyForEvidence(scan);
+    var lock = await acquireAssetLock(deps, lockKey, "scan_delete");
+    if (lock.ok !== true) return fail(lock.error || "VIDEO_ITEM_BUSY");
+    try {
+      var regot = await scanCol(deps).where({ household_id: deps.householdId, scan_id: event.scan_id }).get();
+      scan = regot && regot.data && regot.data.length > 0 ? regot.data[0] : null;
+      if (scan === null) return fail("NOT_FOUND");
+      gate = scanDeleteGate(scan);
+      if (gate === "replayed") return scanDeleteReplay();
+      if (gate !== "proceed") return fail("NOT_FOUND");
+
+      var fileId = isString(scan.file_id) ? scan.file_id : "";
+      var assetId = isString(scan.asset_id) ? scan.asset_id : "";
+      // 锁内末引用复核(§1 矩阵):R1 活 evidence / R2 其他仍保留视频的 scan
+      // (排除本行;终态与已回收行不占引用)/ R3 未结算票据(bound 不算)。
+      var evidenceRefs = await evidenceRowsForFile(deps, fileId, assetId);
+      if (evidenceRefs.length > 0) return await finishScanDelete(deps, scan, false);
+      var otherScans = await scanRowsForFile(deps, fileId, assetId);
+      for (var i = 0; i < otherScans.length; i++) {
+        if (otherScans[i]._id !== scan._id && scanRowRetainsVideo(otherScans[i])) {
+          return await finishScanDelete(deps, scan, false);
+        }
+      }
+      var unsettled = await unsettledTicketsForFile(deps, fileId, assetId);
+      if (unsettled.length > 0) return await finishScanDelete(deps, scan, false);
+
+      // 无引用:先云删成功才终结(§4 第 5 步);失败零状态残留,重试从第 1 步重跑。
+      var videoDeleted = false;
+      if (fileId !== "") {
+        var del = await deleteFilesStrict(deps, [fileId]);
+        if (del.ok !== true) {
+          var failedRes = fail("VIDEO_DELETE_FAILED");
+          failedRes.failed_file_ids = del.failed;
+          return failedRes;
+        }
+        videoDeleted = del.deleted.length > 0;
+      }
+      return await finishScanDelete(deps, scan, videoDeleted);
+    } finally {
+      await releaseAssetLock(deps, lockKey, lock.token);
+    }
+  }
+
+  /** §4 第 6-7 步:条件更新终结(active 抢先迁移 → 重读三分支收敛)+ bound 票据收口 */
+  async function finishScanDelete(deps, scan, videoDeleted) {
+    var now = deps.now();
+    var upd = await scanCol(deps).where({
+      _id: scan._id,
+      household_id: deps.householdId,
+      status: "active"
+    }).update({
+      data: { status: "deleted", deleted_at: now, deleted_by: "user", updated_at: now }
+    });
+    if (((upd && upd.stats && upd.stats.updated) || 0) === 0) {
+      var regot = await scanCol(deps).where({ household_id: deps.householdId, scan_id: scan.scan_id }).get();
+      var latest = regot && regot.data && regot.data.length > 0 ? regot.data[0] : null;
+      if (latest !== null && latest.status === "deleted" && latest.deleted_by === "user") return scanDeleteReplay();
+      return fail("NOT_FOUND");
+    }
+    // best-effort 票据收口(§4 第 7 步):仅 bound 态置 deleted(scan_deleted);
+    // 在途票据(pending/binding/…)有自身生命周期路径,留给票据路径收敛。
+    if (isString(scan.upload_ticket) && scan.upload_ticket !== "") {
+      try {
+        var tGot = await ticketCol(deps).doc(scan.upload_ticket).get();
+        var t = tGot && tGot.data;
+        if (t && t.household_id === deps.householdId && t.status === "bound") {
+          await markTicketsDeleted(deps, [scan.upload_ticket], "scan_deleted");
+        }
+      } catch (e) {
+        // 票据残留 bound 无害(矩阵 R 中 bound 不占引用);worker 后续收敛
+      }
+    }
+    return { ok: true, video_deleted: videoDeleted };
   }
 
   /** D1:scan 引用保留的取消收敛——票据修复为 bound(零证据场景),文件绝不删 */
@@ -1550,7 +1750,9 @@ function createVideoActions(h) {
       alive.push({ item_id: doc._id, name: doc.name, location_text: doc.location_text });
     }
     var videoUrl = "";
-    if (isString(scan.file_id) && scan.file_id !== "" && typeof deps.getTempFileUrls === "function") {
+    // D2 §2 增补:已回收行 video_reclaimed:true + video_url:"" 且不调换链
+    // (「上次清点」摘要与历史列表对最新一条的回收态显示一致)。
+    if (scanRowReclaimed(scan) === false && isString(scan.file_id) && scan.file_id !== "" && typeof deps.getTempFileUrls === "function") {
       try {
         var urlMap = h.mapTempUrls(await deps.getTempFileUrls([scan.file_id]));
         if (Object.prototype.hasOwnProperty.call(urlMap, scan.file_id)) videoUrl = urlMap[scan.file_id];
@@ -1565,11 +1767,71 @@ function createVideoActions(h) {
         candidate_count: Number.isInteger(scan.candidate_count) ? scan.candidate_count : 0,
         confirmed_count: Array.isArray(scan.confirmed_item_ids) ? scan.confirmed_item_ids.length : 0,
         confirmed_item_ids: confirmed,
-        duration_ms: Number.isInteger(scan.duration_ms) ? scan.duration_ms : 0
+        duration_ms: Number.isInteger(scan.duration_ms) ? scan.duration_ms : 0,
+        video_reclaimed: scanRowReclaimed(scan)
       },
       video_url: videoUrl,
       items: alive
     };
+  }
+
+  /**
+   * D2 §2 locationScanHistory(新只读 action,不进 WRITE_ACTIONS):
+   * 只列本位置 active 行(精确 location_id 匹配、不含子树),函数内 created_at
+   * 倒序(不依赖端上 orderBy),HISTORY_LIMIT=20 截断 + has_more(一期单页)。
+   * 投影白名单不含 confirmed_item_ids/file_id/asset_id/upload_ticket 等内部字段;
+   * 已回收行 video_reclaimed:true + video_url:"" 不参与换链;未回收行一次批量
+   * getTempFileUrls(≤20 个 file_id),换链异常/单链接失败仅该行 video_url:""
+   * (dangling 同款降级),列表与其余行照常。他家 location_id 天然空列表。
+   */
+  async function locationScanHistory(event, deps) {
+    if (isString(event.location_id) === false || event.location_id.length < 1 || event.location_id.length > LOCATION_ID_MAX) {
+      return fail("INVALID_INPUT");
+    }
+    var got = await scanCol(deps).where({
+      household_id: deps.householdId,
+      location_id: event.location_id,
+      status: "active"
+    }).get();
+    var rows = (got && got.data) || [];
+    rows.sort(h.byCreatedDesc);
+    var hasMore = rows.length > HISTORY_LIMIT;
+    var page = rows.slice(0, HISTORY_LIMIT);
+    var urlMap = {};
+    var needUrls = [];
+    var seen = Object.create(null);
+    for (var n = 0; n < page.length; n++) {
+      var row = page[n];
+      if (scanRowReclaimed(row)) continue; // 已回收行不参与换链(§2)
+      if (isString(row.file_id) && row.file_id !== "" && seen[row.file_id] !== true) {
+        seen[row.file_id] = true;
+        needUrls.push(row.file_id);
+      }
+    }
+    if (needUrls.length > 0 && typeof deps.getTempFileUrls === "function") {
+      try {
+        urlMap = h.mapTempUrls(await deps.getTempFileUrls(needUrls));
+      } catch (e) {
+        urlMap = {}; // 整次换链失败:全部行 video_url:"",不废列表
+      }
+    }
+    var scans = [];
+    for (var i = 0; i < page.length; i++) {
+      var r = page[i];
+      var reclaimed = scanRowReclaimed(r);
+      scans.push({
+        scan_id: isString(r.scan_id) ? r.scan_id : "",
+        created_at: r.created_at,
+        candidate_count: Number.isInteger(r.candidate_count) ? r.candidate_count : 0,
+        confirmed_count: Number.isInteger(r.confirmed_count) ? r.confirmed_count : 0,
+        duration_ms: Number.isInteger(r.duration_ms) ? r.duration_ms : 0,
+        video_reclaimed: reclaimed,
+        video_url: reclaimed === false && isString(r.file_id) && Object.prototype.hasOwnProperty.call(urlMap, r.file_id)
+          ? urlMap[r.file_id]
+          : ""
+      });
+    }
+    return { ok: true, scans: scans, has_more: hasMore };
   }
 
   /**
@@ -1745,6 +2007,15 @@ function createVideoActions(h) {
         return fail(resolvedLocation.error);
       }
       locationInfo = resolvedLocation;
+      // D2 §6 早门(票据 CAS 之前的零写段,与 resolveLocationContext 同段):
+      // 按 (household_id, scan_id) 查 scan,查得且非「active 且未回收」→ 整批
+      // 零写返回 OPERATION_CONFLICT——用户已删/位置已终结/视频已回收的 scan
+      // 生命周期已终结,旧提交重试不得复活(与 scan_id 复用硬门同码同义)。
+      var earlyScanGot = await scanCol(deps).where({ household_id: deps.householdId, scan_id: locationCtx.scan_id }).get();
+      var earlyScan = earlyScanGot && earlyScanGot.data && earlyScanGot.data.length > 0 ? earlyScanGot.data[0] : null;
+      if (earlyScan !== null && scanRowRevivable(earlyScan) === false) {
+        return fail("OPERATION_CONFLICT");
+      }
     }
 
     var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
@@ -2175,6 +2446,9 @@ function createVideoActions(h) {
     videoSceneCommit: videoSceneCommit,
     locationScanLatest: locationScanLatest,
     locationScanContext: locationScanContext,
+    // D2 清点记录管理(issue #96):历史列表只读 + 用户删除单次清点
+    locationScanHistory: locationScanHistory,
+    scanDelete: scanDelete,
     cleanupForItem: cleanupForItem,
     acquireItemLock: acquireItemLock,
     acquireAssetLock: acquireAssetLock,
