@@ -22,7 +22,9 @@ var STATE_STALE_MS = 10 * 60 * 1000;
 // 保证 20 秒函数超时内完成,超出留给下一次每日运行)。
 var RECLAIM_RETAIN_MS = 30 * 24 * 60 * 60 * 1000;
 var RECLAIM_BATCH_MAX = 50;
-var RECLAIM_STATUSES = ["active", "location_deleted"];
+// 终审裁定(PR #97 review 5615841777):purge 终态 deleted 的 0 确认行同样到期回收,
+// 防其云文件永久滞留;deleted_by:"user" 除外——scanDelete 已当场结算云删结果。
+var RECLAIM_STATUSES = ["active", "location_deleted", "deleted"];
 var RECLAIM_REASON = "zero_confirm_expired";
 
 var lockSeq = 0;
@@ -383,15 +385,17 @@ async function cleanupExpiredPending(deps, now, cutoffMs) {
 
 /**
  * D2 §5 第三阶段:0 确认 scan 的视频到期回收。
- * 候选 = status ∈ {active, location_deleted}(两条各查一次后合并,status 之外的
- * 过滤一律函数内做——confirmed_count 整数零、未回收、恰满 30 天(含端点)、
- * file_id 非空)。单候选序列:asset 锁 → 锁内重读复核(挡候选查询与抢锁之间的
+ * 候选 = status ∈ {active, location_deleted, deleted}(三条各查一次后合并,status
+ * 之外的过滤一律函数内做——confirmed_count 整数零、未回收、恰满 30 天(含端点)、
+ * file_id 非空、deleted_by !== "user"(用户删除行已在 scanDelete 当场结算云删
+ * 结果,不重复记为到期回收——终审裁定))。单候选序列:asset 锁 → 锁内重读复核(挡候选查询与抢锁之间的
  * 删除/自愈)→ 锁内末引用复核(§1 矩阵,排除本行;异常视为有引用,fail-closed)
  * → 云删成功(status 0/-503003)才条件置 video_reclaimed_at——status 不迁移、
  * created_at/candidate_count/confirmed_count 一概不动;云删失败留待下次不假报。
  * 单轮 RECLAIM_BATCH_MAX=50,超出留给下一次每日运行。
  */
 function isReclaimCandidate(row, nowMs) {
+  if (row.deleted_by === "user") return false;
   if (Number.isInteger(row.confirmed_count) === false || row.confirmed_count !== 0) return false;
   if (scanRowReclaimed(row) === true) return false;
   var ts = Date.parse(typeof row.created_at === "string" ? row.created_at : "");

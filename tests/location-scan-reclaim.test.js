@@ -3,7 +3,8 @@
 // videoCleanup 第三阶段 reclaimZeroConfirmScans(同一 deps.now 可控时钟):
 // 30 天边界恰好含端点(29 天不收/恰满 30 天收)、confirmed_count>0 永不进候选、
 // 已回收不重复处理、行保留与 created_at/计数逐字节不动、R1/R2/R3 引用跳过、
-// 云删失败留待下次不假报、location_deleted 同策、终态 deleted 不进候选、
+// 云删失败留待下次不假报、location_deleted 与 purge 终态 deleted 同策回收、
+// 用户删除行(deleted_by:user)不重复记账(终审裁定 PR #97)、
 // 无 file_id 行跳过、单轮批上限 50、asset 锁忙跳过;§1 收紧:终态/已回收 scan
 // 行不再永久挡住 24h 孤儿回收(矩阵 R2 语义替换「任意行存在即引用」)。
 const test = require("node:test");
@@ -265,18 +266,71 @@ test("RC-LOC-DELETED:location_deleted 的 0 确认超期行同策回收(页面�
   assert.deepEqual(deps.deleted, [scan.file_id]);
 });
 
-test("RC-DELETED-EXCLUDED:终态 deleted 行不进候选(一期冻结范围)", async () => {
+test("RC-PURGE-DELETED:purge 终态 deleted 的 0 确认超期行同策回收(终审裁定补口,文件不再永久滞留)", async () => {
   const db = createMemoryDb({ uniqueIndexes: { location_scans: [["household_id", "scan_id"]] } });
-  const scan = await seedScan(db, "scanrc-terminal", {
-    status: "deleted", deleted_at: daysAgo(35),
+  const scan = await seedScan(db, "scanrc-purgedel", {
+    status: "deleted", deleted_at: daysAgo(35), created_at: daysAgo(36),
   });
   const deps = makeDeps(db);
   const res = await handler(deps);
   assert.equal(res.ok, true, JSON.stringify(res));
   const row = (await scansOf(db))[0];
-  assert.equal(row.video_reclaimed_at, undefined);
+  assert.equal(row.status, "deleted", "回收不迁移 status,终态原样");
+  assert.equal(row.created_at, daysAgo(36), "created_at 不动");
+  assert.equal(row.video_reclaimed_at, NOW);
+  assert.equal(row.video_reclaim_reason, "zero_confirm_expired");
+  assert.deepEqual(deps.deleted, [scan.file_id]);
+});
+
+test("RC-PURGE-DELETED-29D:purge 终态未满 30 天不收(边界与 active 同尺)", async () => {
+  const db = createMemoryDb({ uniqueIndexes: { location_scans: [["household_id", "scan_id"]] } });
+  await seedScan(db, "scanrc-purgedel-29", {
+    status: "deleted", deleted_at: daysAgo(5), created_at: daysAgo(29),
+  });
+  const deps = makeDeps(db);
+  const res = await handler(deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const row = (await scansOf(db))[0];
+  assert.equal(row.video_reclaimed_at, undefined, "29 天不收");
   assert.equal(row.status, "deleted");
-  assert.deepEqual(deps.deleted, [], "终态行文件处置是 §9 开放问题,一期不碰");
+  assert.deepEqual(deps.deleted, []);
+});
+
+test("RC-PURGE-DELETED-REF:purge 终态行的文件被其他仍保留视频的 scan 持有 → 跳过不删不标", async () => {
+  const db = createMemoryDb({ uniqueIndexes: { location_scans: [["household_id", "scan_id"]] } });
+  const shared = "cloud://bucket/video-evidence/hh_a/shared-purge.mp4";
+  await seedScan(db, "scanrc-purge-ref", {
+    status: "deleted", deleted_at: daysAgo(35), created_at: daysAgo(36),
+    file_id: shared, asset_id: "va_rc_purge",
+  });
+  // 持有行:active 且 ≥1 确认(永不自动回收)但按矩阵 R2 仍持有该视频
+  await seedScan(db, "scanrc-purge-holder", {
+    file_id: shared, asset_id: "va_rc_purge", confirmed_count: 1, created_at: daysAgo(2),
+  });
+  const deps = makeDeps(db);
+  const res = await handler(deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const rows = Object.fromEntries((await scansOf(db)).map((x) => [x.scan_id, x]));
+  assert.equal(rows["scanrc-purge-ref"].video_reclaimed_at, undefined, "有 R2 引用跳过");
+  assert.equal(rows["scanrc-purge-holder"].video_reclaimed_at, undefined, "持有行非候选,不动");
+  assert.equal(rows["scanrc-purge-holder"].confirmed_count, 1);
+  assert.deepEqual(deps.deleted, [], "共享文件不删");
+});
+
+test("RC-USER-DELETED-EXCLUDED:deleted_by:user 行不进候选(scanDelete 当场已结算,不重复记到期回收)", async () => {
+  const db = createMemoryDb({ uniqueIndexes: { location_scans: [["household_id", "scan_id"]] } });
+  await seedScan(db, "scanrc-userdel", {
+    status: "deleted", deleted_by: "user", deleted_at: daysAgo(35), created_at: daysAgo(36),
+  });
+  const deps = makeDeps(db);
+  const res = await handler(deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const row = (await scansOf(db))[0];
+  assert.equal(row.video_reclaimed_at, undefined, "用户删除行不重复记到期回收");
+  assert.equal(row.video_reclaim_reason, undefined);
+  assert.equal(row.status, "deleted");
+  assert.equal(row.deleted_by, "user");
+  assert.deepEqual(deps.deleted, []);
 });
 
 test("RC-BATCH-CAP:51 条候选单轮只处理 50,下一轮补齐", async () => {

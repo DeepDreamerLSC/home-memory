@@ -18,7 +18,7 @@
 
 | 裁定约束(原文见 issue #96 GO 评论) | 本文落点 |
 | --- | --- |
-| 1.「审计行存在」与「云文件仍被引用」分开;终态 deleted 与已回收 scan 不占引用;location_deleted 零确认行到期处置;不破坏 D1 migrate 语义 | §1 引用语义矩阵;§3 字段;§5 到期回收(候选含 location_deleted) |
+| 1.「审计行存在」与「云文件仍被引用」分开;终态 deleted 与已回收 scan 不占引用;location_deleted 零确认行到期处置;不破坏 D1 migrate 语义 | §1 引用语义矩阵;§3 字段;§5 到期回收(候选含 location_deleted 与 purge 终态 deleted;用户删除行除外) |
 | 2. 共享资产删除锁内末引用复核;bound 票据不算独立引用;复用 video_item_locks asset 锁;逐文件 status=0/-503003;禁 video-evidence/ 前缀 TTL;云删失败可重试不假报成功 | §1 矩阵;§4 scanDelete;§5 回收 |
 | 3. 先云删成功再终结状态;已有其他引用只终结当前 scan;用户删不动物品/evidence;回收不动 created_at/candidate_count/confirmed_count;29/30 天可控时钟钉住 | §4 scanDelete;§5 回收;§7 测试矩阵 |
 | 4. 旧提交重试/并发删除/位置删除收敛;upsert 防复活;latest 降级;dangling;跨家庭拒绝;位置页只查当前 location_id,首页不增入口 | §6 防复活;§2 历史;§7 测试矩阵;§8 客户端 |
@@ -133,13 +133,14 @@ active / location_deleted ──(0确认满30天)──→ 状态不变,置 vide
 
 **候选查询**(分页护栏同 `collectByStatus`:页 100 × 至多 100 页):
 
-- where 仅按 `status ∈ {"active", "location_deleted"}`(**两条各查一次后合并**;status 等值匹配在 memoryDb(严格 `!==`,缺失不匹配)与真实库语义一致,可安全入 where)。
+- where 仅按 `status ∈ {"active", "location_deleted", "deleted"}`(**三条各查一次后合并**;purge 终态纳入回收是 PR #97 终审裁定,防 0 确认云文件永久滞留;status 等值匹配在 memoryDb(严格 `!==`,缺失不匹配)与真实库语义一致,可安全入 where)。
 - **以下过滤一律函数内做,不进 where**(memoryDb 与真实库对字段缺失/数值零的等值查询语义有实现差异面,memoryDb `matches` 是严格全等 `memoryDb.js:44-52`;函数内过滤两端行为恒一致,`markSubtreeScans` 函数内子树过滤先例 `locations/lib/handler.js:1270-1271`):
+  - `deleted_by !== "user"`(终审裁定:用户删除行已在 scanDelete 当场结算云删结果——首删成功的 `video_deleted:true` 已如实返回——不得在 30 天后被重复记成一次新的「到期回收」);
   - `Number.isInteger(confirmed_count) && confirmed_count === 0`;
   - `video_reclaimed_at` 缺失或空串(等值查询表达不了「不存在」);
   - `Date.parse(created_at) <= nowMs - RETAIN_MS`,**`RETAIN_MS = 30 × 24h`(裁定采纳的默认阈值,改阈值由 Owner 另裁)**——恰好满 30 天即候选,**29 天不收**(边界含端点,§7 可控时钟钉住);
   - `file_id` 为非空字符串(无文件行的 scan 无从回收,跳过)。
-- **`deleted` 行不进候选集**(一期冻结范围:active 与 location_deleted;purge 终态行的文件处置见 §9 开放问题)。
+- **`deleted_by:"user"` 行不进候选集**(终审裁定:scanDelete 当场已结算云删结果);purge 终态 `deleted` 行(无 `deleted_by`)**进候选集**,与 active/location_deleted 同策——锁内重读复核的「原 status」对三种状态各自成立,回收只置 `video_reclaimed_at`,status 保持 `deleted` 不回迁。
 
 **单候选处理序列(逐行串行)**:
 
@@ -215,11 +216,14 @@ active / location_deleted ──(0确认满30天)──→ 状态不变,置 vide
 | RC-29D / RC-30D | 恰好 29 天不收、恰好 30 天收(可控时钟 `created_at = now - 29d/30d`,边界含端点) |
 | RC-CONFIRMED | confirmed_count ≥ 1:永不进候选(哪怕超期) |
 | RC-NO-DOUBLE | 已置 video_reclaimed_at:不重复处理 |
-| RC-KEEP-ROW-AND-COUNTS | 回收后:行仍在、status 不变(active 或 location_deleted 均验)、created_at/candidate_count/confirmed_count 逐字节不变,仅新增 video_reclaimed_at/video_reclaim_reason/updated_at |
+| RC-KEEP-ROW-AND-COUNTS | 回收后:行仍在、status 不变(active/location_deleted/deleted 均验)、created_at/candidate_count/confirmed_count 逐字节不变,仅新增 video_reclaimed_at/video_reclaim_reason/updated_at |
 | RC-REF-EVIDENCE / RC-REF-OTHER-SCAN / RC-REF-TICKET | 有 R1/R2/R3 引用:跳过不删文件、不置标记(留下次) |
 | RC-CLOUD-FAIL | 云删失败:scan 无任何标记,计 failed;下一轮(时钟再进)重试成功 |
 | RC-LOC-DELETED | location_deleted 0 确认超期行:同策回收(页面不可见不滞留) |
-| RC-DELETED-EXCLUDED | 终态 deleted 行:不进候选(冻结范围) |
+| RC-PURGE-DELETED | purge 终态 deleted 的 0 确认超期行:同策回收(文件删除+回收标记,status 保持 deleted;终审裁定补口) |
+| RC-PURGE-DELETED-29D | purge 终态未满 30 天:不收(边界与 active 同尺) |
+| RC-PURGE-DELETED-REF | purge 终态行有其他仍保留视频的 scan:跳过不删不标 |
+| RC-USER-DELETED-EXCLUDED | deleted_by:"user" 行:不进候选(scanDelete 当场已结算,不重复记账) |
 | RC-BATCH-CAP | 51 条候选:单轮只处理 50,stats 如实计剩余 |
 | RC-LOCK-BUSY | asset 锁被占:skipped,下一行;行原样 |
 | RC-B-REGRESSION | 既有 9 例(CLEANUP-*)全绿;scan 未到期时 D1 三例(D1-SCAN/FILE-ONLY/NO-SCAN)行为不变 |
@@ -272,6 +276,6 @@ active / location_deleted ──(0确认满30天)──→ 状态不变,置 vide
 
 **开放问题(留 Owner 裁决,实现不擅自处理)**:
 
-1. **purge 终态 `deleted` 的 0 确认行视频文件**:一期回收候选冻结为 active 与 location_deleted(裁定原文枚举);purge 已把行置 deleted 后,其 0 确认视频(无 evidence、票据 bound、无持有 scan)在任何路径下都不会被删——是一处已知滞留。若 Owner 要求收口,只需把回收候选的 status 集扩到 `deleted`(同一序列零新逻辑),本文 §5/§7 各加一行即可。
+1. **purge 终态 `deleted` 的 0 确认行视频文件——已裁决收口(2026-10-22,PR #97 终审 review 5615841777)**:回收候选 status 集扩至 `deleted`、`deleted_by:"user"` 行排除,本节 §5/§7 已同步,补 RC-PURGE-* / RC-USER-DELETED-EXCLUDED 四例定向测试。
 
 **工作流约束(裁定原文,重申)**:零新增模型调用;不扩张通用事务框架;只开 PR,不合并、不部署;验收门禁 = 本契约 + 反例测试先行,随后最小实现,全量 `npm test`/`typecheck`/`build:mp` + 小程序编译 + 真实云端删除/回收 + 真机历史/弱网逐项报数(不能仅凭离线测试上线)。
