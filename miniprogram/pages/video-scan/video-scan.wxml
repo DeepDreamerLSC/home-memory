@@ -68,6 +68,7 @@
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.locationText}}" placeholder="这件放在哪里" data-index="{{idx}}" bindinput="onDraftLocationInput" />
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.note}}" placeholder="备注（可选）" data-index="{{idx}}" bindinput="onDraftNoteInput" />
         <view class="draft-meta">{{d.observationCount}} 条线索 · {{d.highlightCount}} 条用户确认高亮{{d.isManual ? ' · 手动补件' : ''}}</view>
+        <view wx:if="{{d.highlightWarning}}" class="draft-warn">{{d.highlightWarning}}</view>
         <view wx:if="{{d.isManual}}" class="manual-times">
           <view>仅时间窗可无框：</view>
           <input class="time-input" type="digit" value="{{d.startSecText}}" data-index="{{idx}}" data-field="start" bindinput="onDraftManualTimeInput" /> 秒 —

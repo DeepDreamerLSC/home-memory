@@ -302,6 +302,8 @@ Page({
                 mergeSelected: this.data.mergeSelectedKeys.indexOf(d.draftKey) !== -1,
                 observationCount: d.observationIds.length,
                 highlightCount: highlights,
+                // §2.1:草稿线索数 >8 时草稿卡显式警示(组卡警示随剩余数,确认后归属到草稿上继续可见)
+                highlightWarning: (0, scene_groups_1.sceneHighlightWarningText)(d.observationIds.length),
                 isManual: d.observationIds.length === 0 && d.manualHighlights.length > 0,
                 startSecText: first === null ? "" : (first.start_ms / 1000).toFixed(1),
                 endSecText: first === null ? "" : (first.end_ms / 1000).toFixed(1),
@@ -496,12 +498,13 @@ Page({
         if (confirmSet.length === 0)
             return;
         if (group.sameFrameRisk) {
+            const riskModal = (0, scene_groups_1.sameFrameRiskModalCopy)(group.repFrame.timeText);
             const sure = await new Promise((resolve) => {
                 wx.showModal({
-                    title: "可能有多件",
-                    content: "这一组在第 " + group.repFrame.timeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
-                    confirmText: "就1件",
-                    cancelText: "再看看",
+                    title: riskModal.title,
+                    content: riskModal.content,
+                    confirmText: riskModal.confirmText,
+                    cancelText: riskModal.cancelText,
                     success: (r) => resolve(r.confirm === true),
                     fail: () => resolve(false),
                 });

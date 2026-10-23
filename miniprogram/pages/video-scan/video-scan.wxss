@@ -80,6 +80,8 @@
 .tiny-danger { flex: 0 0 auto; padding: 10rpx 6rpx; font-size: 22rpx; color: #b02a1b; }
 .target-row { margin-top: 10rpx; padding: 14rpx 12rpx; border-radius: 12rpx; background: #efe8d8; font-size: 23rpx; color: #5f5437; }
 .draft-meta { margin-top: 10rpx; font-size: 22rpx; color: var(--text-3); }
+/* §2.1 草稿卡 >8 高亮警示行(与组卡 sgc-warn 同一冻结文案,sceneHighlightWarningText 单一来源) */
+.draft-warn { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #b02a1b; }
 .manual-times { margin-top: 10rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 6rpx; font-size: 22rpx; color: var(--text-2); }
 .time-input { width: 100rpx; min-height: 58rpx; padding: 0 10rpx; border-radius: 10rpx; background: #fff; text-align: center; font-size: 24rpx; }
 .draft-actions { display: flex; gap: 12rpx; margin-top: 12rpx; flex-wrap: wrap; }

@@ -76,6 +76,37 @@ function claimTextOf(draftName: string): string {
   return "已用于:" + draftName;
 }
 
+/**
+ * §2.1 冻结警示串(单一来源,两页共用):线索数 > 单件高亮上限时显式警示,
+ * 绝不静默截断(保存被既有 8 条门拦截)。组卡按剩余未归属数、草稿卡按草稿
+ * 线索数(observationIds.length)取用;≤8 返回 ""。
+ */
+export function sceneHighlightWarningText(clueCount: number): string {
+  return clueCount > SCENE_HIGHLIGHTS_MAX
+    ? "线索 " + clueCount + " 条,单件最多 " + SCENE_HIGHLIGHTS_MAX + " 条高亮,保存前需减到 ≤" + SCENE_HIGHLIGHTS_MAX
+    : "";
+}
+
+/**
+ * §2.1 同帧风险二次确认 modal 的冻结文案(单一来源,两页共用,防单边漂移):
+ * 标题「可能有多件」/ 内容(含 {代表帧时间})/ 确认「就1件」/ 取消「再看看」。
+ */
+export interface SameFrameRiskModalCopy {
+  title: string;
+  content: string;
+  confirmText: string;
+  cancelText: string;
+}
+
+export function sameFrameRiskModalCopy(repFrameTimeText: string): SameFrameRiskModalCopy {
+  return {
+    title: "可能有多件",
+    content: "这一组在第 " + repFrameTimeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+    confirmText: "就1件",
+    cancelText: "再看看",
+  };
+}
+
 /** obsId → 首个归属草稿(扫描序;不变式下至多一个,防御性取首个) */
 function buildClaimIndex(drafts: SceneDraftItem[]): Map<string, SceneDraftItem> {
   const byObs = new Map<string, SceneDraftItem>();
@@ -192,10 +223,8 @@ export function buildSceneGroupViews(
       stateText,
       remainingCount,
       sameFrameRisk: sameFrameDuplicate(group.observations),
-      // §2.1:确认集>单件高亮上限时显式警示,绝不静默截断(保存被既有 8 条门拦截)
-      highlightWarning: remainingCount > SCENE_HIGHLIGHTS_MAX
-        ? "线索 " + remainingCount + " 条,单件最多 " + SCENE_HIGHLIGHTS_MAX + " 条高亮,保存前需减到 ≤" + SCENE_HIGHLIGHTS_MAX
-        : "",
+      // §2.1:确认集>单件高亮上限时显式警示(组卡按剩余未归属数;确认后警示随草稿走,见草稿卡),绝不静默截断
+      highlightWarning: sceneHighlightWarningText(remainingCount),
       repFrame: {
         obsId: rep.obsId,
         framePath: rep.framePath,

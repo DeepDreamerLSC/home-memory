@@ -19,6 +19,10 @@
  * - onGroupConfirmSingle:无风险组直接生成聚合草稿(newSceneDraft:name=组 label、
  *   locationText=video-scan 的 batchLocation / D1 的 locationPathText+nodeId、
  *   checked=true);风险组先弹 §2.1 冻结 modal,取消零变更;busy/非 review 禁用。
+ *   modal 四要素经 scene-groups.sameFrameRiskModalCopy 单一来源,两页漂移即红。
+ * - 草稿卡警示(§2.1):draftViews[].highlightWarning=sceneHighlightWarningText
+ *   (草稿线索数 >8 时为冻结警示串);组卡警示随剩余数,整组确认后由草稿卡接续。
+ * - onDraftNameInput:改草稿名后组卡「已用于:{草稿名}」claimText 实时刷新(两页一致)。
  * - onGenerateDraftsTap(e):收敛为组内作用域,e.detail.obsIds 载荷;先过 §2.4
  *   claimGuard(toast「第 {序号} 条线索已用于「{草稿名}」…」阻塞),再按
  *   mergeSameName:false 一条一草稿生成。
@@ -314,6 +318,114 @@ test("SGP-SINGLE-D1:D1 页同语义;位置=进入位置路径文本并补 nodeId
   assert.equal(d.checked, true);
   assert.equal(page.data.observationGroups[0].state, "single");
   assert.equal(page.data.sceneStats.topLineText, "AI 线索 3 条,已全部确认 1 件");
+});
+
+test("SGP-SINGLE-RISK-D1:D1 页风险组弹同一冻结 modal(与 B 页单一来源,单边漂移即红)(§2.1)", async () => {
+  resetStubs();
+  const observations = [
+    obs("充电器", { obsId: "obs-d1risk-a", frameIndex: 2, timeMs: 3000, box: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } }),
+    obs("充电器", { obsId: "obs-d1risk-b", frameIndex: 2, timeMs: 3000, box: { x1: 0.5, y1: 0.5, x2: 0.6, y2: 0.6 } }),
+  ];
+  const page = locScanPage();
+  page.setData({ phase: "review", mode: "scan", nodeId: "lc_shelf", locationPathText: "书房 / 书柜", observations, drafts: [] });
+  page.renderObservations();
+  assert.equal(page.data.observationGroups[0].sameFrameRisk, true);
+
+  const confirmSingle = mustPageMethod(page, "onGroupConfirmSingle");
+  const p = Promise.resolve(confirmSingle.call(page, { detail: { nameKey: "充电器", obsIds: [] } }));
+  await new Promise(function (r) { setImmediate(r); });
+  assert.equal(modalQueue.length, 1, "D1 风险组「就 1 件」同样先过二次确认");
+  // 四要素与 §2.1 冻结串逐字相等(此前仅 B 页被钉,D1 侧漂移不会被捕获)
+  assert.deepEqual(
+    { title: modalQueue[0].title, content: modalQueue[0].content, confirmText: modalQueue[0].confirmText, cancelText: modalQueue[0].cancelText },
+    {
+      title: "可能有多件",
+      content: "这一组在第 0:03 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+      confirmText: "就1件",
+      cancelText: "再看看",
+    },
+    "D1 页 modal 文案=§2.1 冻结串(经 scene-groups.sameFrameRiskModalCopy 单一来源)",
+  );
+  modalQueue[0].success({ confirm: false });
+  await p;
+  assert.equal(page.data.drafts.length, 0, "取消 → 无任何变更");
+});
+
+test("SGP-DRAFT-HIGHLIGHT-WARN:9 条确认后组卡警示消失、草稿卡接续同一冻结警示;两页 wxml 均渲染(§2.1)", async () => {
+  resetStubs();
+  // 两页 wxml 均挂草稿卡警示行(复审发现 1:此前仅组卡警示,确认后预警中断,保存才被门拦截)
+  assert.ok(
+    read("video-scan", "video-scan.wxml").indexOf("d.highlightWarning") !== -1,
+    "video-scan 草稿卡应渲染 highlightWarning 警示行",
+  );
+  assert.ok(
+    read("location-video-scan", "location-video-scan.wxml").indexOf("item.highlightWarning") !== -1,
+    "location-video-scan 草稿卡应渲染 highlightWarning 警示行",
+  );
+
+  const WARN = "线索 9 条,单件最多 8 条高亮,保存前需减到 ≤8";
+  const mk9 = function (prefix) {
+    const out = [];
+    for (let i = 0; i < 9; i++) out.push(obs("胶带", { obsId: "obs-" + prefix + "-" + i, frameIndex: i, timeMs: i * 1500 }));
+    return out;
+  };
+
+  // B 页:确认前组卡警示 → 「就 1 件」→ 组卡警示随剩余数清零,草稿卡接续警示
+  const vs = videoScanPage();
+  vs.setData({ phase: "review", observations: mk9("bwarn"), drafts: [], batchLocation: "书房" });
+  vs.renderObservations();
+  assert.equal(vs.data.observationGroups[0].highlightWarning, WARN, "确认前组卡警示");
+  await Promise.resolve(mustPageMethod(vs, "onGroupConfirmSingle").call(vs, { detail: { nameKey: "胶带", obsIds: [] } }));
+  assert.equal(vs.data.drafts.length, 1);
+  assert.equal(vs.data.observationGroups[0].highlightWarning, "", "整组归属后组卡警示消失(剩余 0)");
+  assert.equal(vs.data.drafts[0].observationIds.length, 9, "绝不静默截断,9 条线索全量进草稿");
+  assert.equal(vs.data.draftViews[0].highlightWarning, WARN, "草稿卡警示接续,保存前预警不中断");
+  assert.equal(vs.data.draftViews[0].observationCount, 9);
+
+  // D1 页同款
+  const ls = locScanPage();
+  ls.setData({ phase: "review", mode: "scan", nodeId: "lc_shelf", locationPathText: "书房 / 书柜", observations: mk9("d1warn"), drafts: [] });
+  ls.renderObservations();
+  await Promise.resolve(mustPageMethod(ls, "onGroupConfirmSingle").call(ls, { detail: { nameKey: "胶带", obsIds: [] } }));
+  assert.equal(ls.data.drafts.length, 1);
+  assert.equal(ls.data.observationGroups[0].highlightWarning, "");
+  assert.equal(ls.data.draftViews[0].highlightWarning, WARN, "D1 草稿卡同一冻结警示(两入口一致)");
+
+  // ≤8 的草稿与手动补件(零线索)不得警示
+  const page = videoScanPage();
+  page.setData({
+    phase: "review",
+    observations: crossFrameObs("电池", 2, "bwarn8"),
+    drafts: [
+      { draftKey: "k8", observationIds: ["obs-bwarn8-0"], manualHighlights: [], name: "电池", target: "new", operationId: "op8", itemId: "", locationText: "书房", note: "", checked: true },
+      { draftKey: "km", observationIds: [], manualHighlights: [{ start_ms: 0, end_ms: 900, box: null, frame_ms: 0 }], name: "手补", target: "new", operationId: "opm", itemId: "", locationText: "书房", note: "", checked: true },
+    ],
+    batchLocation: "书房",
+  });
+  page.renderDrafts();
+  assert.equal(page.data.draftViews[0].highlightWarning, "", "≤8 条线索的草稿不警示");
+  assert.equal(page.data.draftViews[1].highlightWarning, "", "手动补件(零线索)不警示");
+});
+
+test("SGP-DRAFT-RENAME-REFRESH:改草稿名后组卡「已用于:{草稿名}」实时刷新,两页一致(复审发现 2)", () => {
+  resetStubs();
+  const mkDraft = function (key, obsId, name) {
+    return { draftKey: key, observationIds: [obsId], manualHighlights: [], name, target: "new", operationId: "op-" + key, itemId: "", locationText: "书房", note: "", checked: true };
+  };
+
+  const vs = videoScanPage();
+  vs.setData({ phase: "review", observations: crossFrameObs("电池", 2, "rn-b"), drafts: [mkDraft("kb", "obs-rn-b-0", "旧名")], batchLocation: "书房" });
+  vs.renderObservations();
+  assert.equal(vs.data.observationGroups[0].observations[0].claimText, "已用于:旧名");
+  vs.onDraftNameInput({ currentTarget: { dataset: { index: 0 } }, detail: { value: "新名" } });
+  assert.equal(vs.data.drafts[0].name, "新名");
+  assert.equal(vs.data.observationGroups[0].observations[0].claimText, "已用于:新名", "B 页改名后组卡归属标签同步(此前陈旧到下一次重渲)");
+
+  const ls = locScanPage();
+  ls.setData({ phase: "review", mode: "scan", nodeId: "lc_shelf", locationPathText: "书房 / 书柜", observations: crossFrameObs("电池", 2, "rn-d"), drafts: [Object.assign(mkDraft("kd", "obs-rn-d-0", "旧名"), { nodeId: "lc_shelf" })] });
+  ls.renderObservations();
+  ls.onDraftNameInput({ currentTarget: { dataset: { index: 0 } }, detail: { value: "新名" } });
+  assert.equal(ls.data.observationGroups[0].observations[0].claimText, "已用于:新名", "D1 页同语义(既有行为,钉住防回归)");
 });
 
 /* ---------------- C-3 有多件 / 逐条生成 / 暂不确定 ---------------- */

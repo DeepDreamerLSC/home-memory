@@ -123,6 +123,7 @@
             <view class="item-location">{{ item.targetText }}</view>
             <view wx:if="{{ item.moveText }}" class="warn-line">{{ item.moveText }}</view>
           </view>
+          <view wx:if="{{ item.highlightWarning }}" class="warn-line">{{ item.highlightWarning }}</view>
           <view class="row-actions">
             <view class="link-text" data-index="{{ index }}" bindtap="onDraftMatchTap">找已有物品</view>
             <view class="link-text" data-index="{{ index }}" bindtap="onDraftSplitTap">拆分</view>

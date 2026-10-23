@@ -26,6 +26,10 @@
  * - claimGuard(observations, drafts, selectedIds) → null | { obsId, draftName }
  *   (首个冲突按观察数组扫描序取;§2.4 toast 的「第 {序号} 条」由页面按 obsId 回查)
  * - representativeObservation(group) → SceneObservation(输入为分组原语的组对象)
+ * - sceneHighlightWarningText(count) → §2.1 冻结警示串(>8 时非空;组卡按剩余数、
+ *   草稿卡按草稿线索数取用同一来源,两页零复制)
+ * - sameFrameRiskModalCopy(repFrameTimeText) → §2.1 同帧风险二次确认 modal 冻结文案
+ *   (title/content/confirmText/cancelText,两页共用单一来源,单边漂移即本文件红)
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -509,6 +513,42 @@ test("SG-HIGHLIGHT-CAP:确认集 9 条 → 草稿可生成、buildDraftHighlight
   assert.equal(scene.buildSceneCommitItems([d8], observations, 15000).ok, true, "≤8 条通过既有门");
   const afterClaim = buildSceneGroupViews(observations, [d8]);
   assert.equal(afterClaim[0].highlightWarning, "", "剩余确认集 ≤8 后不再警示");
+});
+
+test("SG-HIGHLIGHT-WARN-SHARED:警示串单一来源;9 条草稿(整组确认后)由草稿侧继续警示(§2.1)", () => {
+  const warnText = mustFn("sceneHighlightWarningText");
+  // §2.1 冻结串逐字;≤8 恒空
+  assert.equal(warnText(0), "");
+  assert.equal(warnText(8), "");
+  assert.equal(warnText(9), "线索 9 条,单件最多 8 条高亮,保存前需减到 ≤8");
+  assert.equal(warnText(12), "线索 12 条,单件最多 8 条高亮,保存前需减到 ≤8");
+
+  // 复审发现 1 回归:9 条「就 1 件」确认后组卡警示随剩余数消失,警示必须由草稿侧
+  // (draft.observationIds.length)继续承担——同一来源、同一冻结串,保存前始终可见
+  const buildSceneGroupViews = mustFn("buildSceneGroupViews");
+  const observations = [];
+  for (let i = 0; i < 8; i++) {
+    observations.push(obs("胶带", { obsId: "o-warn" + i, frameIndex: i, timeMs: i * 1500 }));
+  }
+  observations.push(obs("胶带", { obsId: "o-warn8", frameIndex: 7, timeMs: 10500 }));
+  const before = buildSceneGroupViews(observations, []);
+  assert.equal(before[0].highlightWarning, "线索 9 条,单件最多 8 条高亮,保存前需减到 ≤8", "确认前组卡警示");
+  const d = scene.newSceneDraft({ observationIds: before[0].observations.map((r) => r.obsId), name: "胶带", locationText: "书房", checked: true });
+  const after = buildSceneGroupViews(observations, [d]);
+  assert.equal(after[0].highlightWarning, "", "整组归属后组卡警示消失(剩余 0)");
+  assert.equal(warnText(d.observationIds.length), "线索 9 条,单件最多 8 条高亮,保存前需减到 ≤8", "草稿卡以草稿线索数取同一警示串,保存前预警不中断");
+  // 手动补件(零线索)永不警示
+  const manual = scene.newSceneDraft({ name: "手补", locationText: "书房", manualHighlights: [{ start_ms: 0, end_ms: 900, box: null, frame_ms: 0 }], checked: true });
+  assert.equal(warnText(manual.observationIds.length), "");
+});
+
+test("SG-RISK-MODAL-COPY:同帧风险 modal 冻结文案单一来源(§2.1;两页共用,漂移即红)", () => {
+  const modalCopy = mustFn("sameFrameRiskModalCopy");
+  const copy = modalCopy(videoTarget.videoTimeText(3000));
+  assert.equal(copy.title, "可能有多件");
+  assert.equal(copy.content, "这一组在第 0:03 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?");
+  assert.equal(copy.confirmText, "就1件");
+  assert.equal(copy.cancelText, "再看看");
 });
 
 /* ---------------- F. 统计口径(三数分立,冻结文案) ---------------- */
