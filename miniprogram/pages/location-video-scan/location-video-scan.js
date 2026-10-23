@@ -498,7 +498,8 @@ Page({
         if (confirmSet.length === 0)
             return;
         if (group.sameFrameRisk) {
-            const riskModal = (0, scene_groups_1.sameFrameRiskModalCopy)(group.repFrame.timeText);
+            // §2.1 修订(PR #105 review 5626920410):弹窗时间=重复实际发生帧,非代表帧
+            const riskModal = (0, scene_groups_1.sameFrameRiskModalCopy)(group.duplicateFrameTimeText);
             const sure = await new Promise((resolve) => {
                 wx.showModal({
                     title: riskModal.title,
@@ -669,15 +670,17 @@ Page({
         });
     },
     onMergeDraftsTap() {
-        const merged = (0, video_scene_1.mergeSceneDrafts)(this.data.drafts, this.data.mergeSelectedKeys);
-        if (merged === null) {
-            wx.showToast({ title: "请选择至少两件新建物品草稿", icon: "none" });
+        // 架构终裁(PR #105 review 5626920410):仅当被合并草稿目标位置一致时保留
+        // nodeId 合并;mergeSceneDrafts 返回普通草稿不带 nodeId,须走 D1 合并门补回。
+        const merged = (0, location_scan_1.mergeLocationScanDrafts)(this.data.drafts, this.data.mergeSelectedKeys, this.data.nodeId);
+        if (merged.ok === false) {
+            wx.showToast({ title: merged.message, icon: "none" });
             return;
         }
         const keys = new Set(this.data.mergeSelectedKeys);
         const firstIndex = this.data.drafts.findIndex((d) => keys.has(d.draftKey));
         const drafts = this.data.drafts.filter((d) => keys.has(d.draftKey) === false);
-        drafts.splice(Math.max(0, firstIndex), 0, merged);
+        drafts.splice(Math.max(0, firstIndex), 0, merged.draft);
         this.setData({ drafts, mergeSelectedKeys: [] }, () => {
             this.renderObservations();
             this.renderDrafts();

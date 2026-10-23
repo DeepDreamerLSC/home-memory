@@ -19,7 +19,13 @@
  * - onGroupConfirmSingle:无风险组直接生成聚合草稿(newSceneDraft:name=组 label、
  *   locationText=video-scan 的 batchLocation / D1 的 locationPathText+nodeId、
  *   checked=true);风险组先弹 §2.1 冻结 modal,取消零变更;busy/非 review 禁用。
- *   modal 四要素经 scene-groups.sameFrameRiskModalCopy 单一来源,两页漂移即红。
+ *   modal 四要素经 scene-groups.sameFrameRiskModalCopy 单一来源,两页漂移即红;
+ *   modal 时间=重复所在帧时间(scene-groups.duplicateFrameTimeText 单一来源,
+ *   §2.1 修订 PR #105 review 5626920410),代表帧与重复帧不同帧时不得指错帧。
+ * - D1「选去合并」nodeId 一致门(架构终裁,PR #105 review 5626920410):仅当
+ *   被合并草稿目标位置一致(nodeId 全部相等;空=默认进入位置)才合并并保留
+ *   nodeId;不一致(含「一件默认位置+一件子位置」)拒绝合并、草稿不变、toast
+ *   提示先统一子位置。B 页 mergeSceneDrafts(无位置上下文)语义不变。
  * - 草稿卡警示(§2.1):draftViews[].highlightWarning=sceneHighlightWarningText
  *   (草稿线索数 >8 时为冻结警示串);组卡警示随剩余数,整组确认后由草稿卡接续。
  * - onDraftNameInput:改草稿名后组卡「已用于:{草稿名}」claimText 实时刷新(两页一致)。
@@ -322,20 +328,24 @@ test("SGP-SINGLE-D1:D1 页同语义;位置=进入位置路径文本并补 nodeId
 
 test("SGP-SINGLE-RISK-D1:D1 页风险组弹同一冻结 modal(与 B 页单一来源,单边漂移即红)(§2.1)", async () => {
   resetStubs();
+  // 修订反例(PR #105 review 5626920410):重复发生在旧帧(frameIndex 2/0:03),
+  // 另有一条更新观察使代表帧=0:07——弹窗必须指向重复帧(0:03)而非代表帧
   const observations = [
     obs("充电器", { obsId: "obs-d1risk-a", frameIndex: 2, timeMs: 3000, box: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } }),
     obs("充电器", { obsId: "obs-d1risk-b", frameIndex: 2, timeMs: 3000, box: { x1: 0.5, y1: 0.5, x2: 0.6, y2: 0.6 } }),
+    obs("充电器", { obsId: "obs-d1risk-c", frameIndex: 5, timeMs: 7500 }),
   ];
   const page = locScanPage();
   page.setData({ phase: "review", mode: "scan", nodeId: "lc_shelf", locationPathText: "书房 / 书柜", observations, drafts: [] });
   page.renderObservations();
   assert.equal(page.data.observationGroups[0].sameFrameRisk, true);
+  assert.equal(page.data.observationGroups[0].repFrame.timeText, videoTarget.videoTimeText(7500), "代表帧=新帧(与重复帧不同帧)");
 
   const confirmSingle = mustPageMethod(page, "onGroupConfirmSingle");
   const p = Promise.resolve(confirmSingle.call(page, { detail: { nameKey: "充电器", obsIds: [] } }));
   await new Promise(function (r) { setImmediate(r); });
   assert.equal(modalQueue.length, 1, "D1 风险组「就 1 件」同样先过二次确认");
-  // 四要素与 §2.1 冻结串逐字相等(此前仅 B 页被钉,D1 侧漂移不会被捕获)
+  // 四要素与 §2.1 冻结串逐字相等(时间=重复所在帧 0:03,不是代表帧 0:07)
   assert.deepEqual(
     { title: modalQueue[0].title, content: modalQueue[0].content, confirmText: modalQueue[0].confirmText, cancelText: modalQueue[0].cancelText },
     {
@@ -344,8 +354,9 @@ test("SGP-SINGLE-RISK-D1:D1 页风险组弹同一冻结 modal(与 B 页单一来
       confirmText: "就1件",
       cancelText: "再看看",
     },
-    "D1 页 modal 文案=§2.1 冻结串(经 scene-groups.sameFrameRiskModalCopy 单一来源)",
+    "D1 页 modal 文案=§2.1 冻结串(经 scene-groups.sameFrameRiskModalCopy 单一来源;时间=重复帧,§2.1 修订)",
   );
+  assert.equal(modalQueue[0].content.indexOf(videoTarget.videoTimeText(7500)), -1, "弹窗绝不指向代表帧(新帧)时间");
   modalQueue[0].success({ confirm: false });
   await p;
   assert.equal(page.data.drafts.length, 0, "取消 → 无任何变更");
@@ -646,6 +657,109 @@ test("SGP-MERGE-FIX:D1「选去合并」行带 data-key,点选后 mergeSelectedK
   assert.deepEqual(page.data.mergeSelectedKeys, ["k1"]);
   page.onDraftMergeSelectTap({ currentTarget: { dataset: { key: "k1" } } });
   assert.deepEqual(page.data.mergeSelectedKeys, [], "再点取消选择");
+});
+
+/* ---------------- C-7b D1 合并 nodeId 一致门(架构终裁,PR #105 review 5626920410) ---------------- */
+
+function locMergeDraft(key, obsId, nodeId, pathText) {
+  const d = {
+    draftKey: key, observationIds: obsId ? [obsId] : [], manualHighlights: [], name: "电池",
+    target: "new", operationId: "op-" + key, itemId: "", locationText: pathText, note: "", checked: true,
+  };
+  if (nodeId !== undefined) d.nodeId = nodeId;
+  return d;
+}
+
+test("SGP-MERGE-NODE-ID:同 nodeId 合并保留 nodeId 且可构建合法提交载荷;不一致(含默认+子位置混合)拒绝且草稿不变(架构终裁,PR #105 review 5626920410)", () => {
+  resetStubs();
+  const paths = {
+    lc_shelf: ["书房", "书柜"],
+    lc_layer: ["书房", "书柜", "第一层"],
+  };
+  const observations = crossFrameObs("电池", 2, "mnode");
+
+  // ① 两件草稿同 nodeId(子位置)→ 合并保留 nodeId,提交载荷构建通过
+  let page = locScanPage();
+  page.setData({
+    phase: "review", mode: "scan", nodeId: "lc_shelf", observations,
+    drafts: [
+      locMergeDraft("k1", "obs-mnode-0", "lc_layer", "书房 / 书柜 / 第一层"),
+      locMergeDraft("k2", "obs-mnode-1", "lc_layer", "书房 / 书柜 / 第一层"),
+    ],
+    mergeSelectedKeys: ["k1", "k2"],
+  });
+  page.pathsByNodeId = paths;
+  page.renderDrafts();
+  mustPageMethod(page, "onMergeDraftsTap").call(page);
+  assert.equal(toasts.length, 0, "目标位置一致 → 合并不被拒");
+  assert.equal(page.data.drafts.length, 1, "两件并一件");
+  assert.equal(page.data.drafts[0].nodeId, "lc_layer", "合并结果保留一致的 nodeId(此前 mergeSceneDrafts 返回普通草稿丢 nodeId,保存被位置路径校验拦截)");
+  assert.deepEqual(page.data.drafts[0].observationIds, ["obs-mnode-0", "obs-mnode-1"]);
+  assert.deepEqual(page.data.mergeSelectedKeys, [], "合并后清空选择集");
+  let built = locationScanUtil.buildLocationScanCommitItems(
+    page.data.drafts, observations, 9000,
+    { locationId: "lc_shelf", pathsByNodeId: paths },
+    "scan-mnode-1",
+  );
+  assert.equal(built.ok, true, built.ok === false ? built.message : "");
+  assert.equal(built.items[0].node_id, "lc_layer", "提交载荷携带子位置 nodeId");
+  assert.equal(built.items[0].location_text, "书房 / 书柜 / 第一层", "location_text 与目标节点路径文本逐字一致");
+
+  // ② nodeId 不一致:一件子位置 + 一件显式默认位置(进入位置)→ 拒绝且草稿不变
+  page = locScanPage();
+  page.setData({
+    phase: "review", mode: "scan", nodeId: "lc_shelf", observations,
+    drafts: [
+      locMergeDraft("k1", "obs-mnode-0", "lc_layer", "书房 / 书柜 / 第一层"),
+      locMergeDraft("k2", "obs-mnode-1", "lc_shelf", "书房 / 书柜"),
+    ],
+    mergeSelectedKeys: ["k1", "k2"],
+  });
+  page.renderDrafts();
+  page.onMergeDraftsTap();
+  assert.equal(page.data.drafts.length, 2, "目标位置不一致 → 拒绝合并,草稿不变");
+  assert.equal(page.data.drafts[0].draftKey, "k1");
+  assert.equal(page.data.drafts[1].draftKey, "k2");
+  assert.deepEqual(page.data.mergeSelectedKeys, ["k1", "k2"], "选择集保持,便于统一位置后直接重试");
+  assert.equal(toasts.length, 1, "toast 提示先统一目标子位置");
+  assert.equal(toasts[0].title, "所选草稿的目标位置不一致,请先统一子位置再合并");
+  assert.equal(toasts[0].title.indexOf("找到"), -1, "不得使用「找到 N 件」类统计措辞(§4)");
+
+  // ②b 混合情形:一件默认位置(nodeId 缺省)+ 一件子位置 → 同样拒绝
+  page = locScanPage();
+  page.setData({
+    phase: "review", mode: "scan", nodeId: "lc_shelf", observations,
+    drafts: [
+      locMergeDraft("k1", "obs-mnode-0", "lc_layer", "书房 / 书柜 / 第一层"),
+      locMergeDraft("k2", "obs-mnode-1", undefined, "书房 / 书柜"),
+    ],
+    mergeSelectedKeys: ["k1", "k2"],
+  });
+  page.renderDrafts();
+  page.onMergeDraftsTap();
+  assert.equal(page.data.drafts.length, 2, "一件默认位置+一件子位置 → 拒绝合并");
+  assert.equal(toasts.length, 2, "同样以统一子位置 toast 阻塞");
+
+  // ③ 两件均为默认位置(nodeId 全部缺省=进入位置)→ 允许合并,结果 nodeId 取该一致目标
+  page = locScanPage();
+  page.setData({
+    phase: "review", mode: "scan", nodeId: "lc_shelf", observations,
+    drafts: [
+      locMergeDraft("k1", "obs-mnode-0", undefined, "书房 / 书柜"),
+      locMergeDraft("k2", "obs-mnode-1", undefined, "书房 / 书柜"),
+    ],
+    mergeSelectedKeys: ["k1", "k2"],
+  });
+  page.renderDrafts();
+  page.onMergeDraftsTap();
+  assert.equal(page.data.drafts.length, 1, "全部默认位置=目标一致,允许合并");
+  assert.equal(page.data.drafts[0].nodeId, "lc_shelf", "结果 nodeId 取一致目标(缺省=默认进入位置)");
+  built = locationScanUtil.buildLocationScanCommitItems(
+    page.data.drafts, observations, 9000,
+    { locationId: "lc_shelf", pathsByNodeId: paths },
+    "scan-mnode-2",
+  );
+  assert.equal(built.ok, true, built.ok === false ? built.message : "");
 });
 
 /* ---------------- C-8 会话恢复(零新增 storage 字段) ---------------- */
