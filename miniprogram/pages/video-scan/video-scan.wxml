@@ -34,38 +34,27 @@
         <view class="section-title">AI 线索</view>
         <view class="text-action" bindtap="onRestartTap">重拍</view>
       </view>
+      <view wx:if="{{observations.length > 0}}" class="stats-line">{{sceneStats.topLineText}}</view>
+      <view class="hint">组数不是物品件数;同名线索不会被自动合并</view>
       <view wx:if="{{observationGroups.length === 0}}" class="empty-small">没有 AI 线索。可直接补一件，或重拍。</view>
-      <view wx:for="{{observationGroups}}" wx:for-item="group" wx:key="nameKey" class="obs-group">
-        <view class="obs-group-title">{{group.label}} · {{group.countText}}</view>
-        <view
-          wx:for="{{group.observations}}"
-          wx:for-item="obs"
-          wx:key="obsId"
-          class="obs-row {{obs.checked ? 'selected' : ''}}"
-          data-obs-id="{{obs.obsId}}"
-          bindtap="onObservationToggle"
-        >
-          <view class="check {{obs.checked ? 'on' : ''}}">{{obs.checked ? '✓' : ''}}</view>
-          <view class="obs-img-wrap" data-obs-id="{{obs.obsId}}" catchtap="onObsImageTap">
-            <image class="obs-img" src="{{obs.framePath}}" mode="aspectFit" />
-            <view wx:if="{{obs.boxStyle !== 'display:none'}}" class="obs-box" style="{{obs.boxStyle}}"></view>
-          </view>
-          <view class="obs-info">
-            <view class="obs-name">{{obs.name}}</view>
-            <view class="obs-meta">{{obs.timeText}} · {{obs.confidenceText}}</view>
-          </view>
-        </view>
-      </view>
-      <view class="toggle-row">
-        <switch checked="{{mergeSameName}}" bindchange="onMergeSameNameChange" color="#e6b31e" />
-        <view class="toggle-copy">生成草稿时，把选中的同名线索视为一件（默认关闭；同名也默认分开）</view>
-      </view>
-      <view class="primary-btn" bindtap="onGenerateDraftsTap">把勾选线索生成待确认物品</view>
+      <scene-group-card
+        wx:for="{{observationGroups}}"
+        wx:for-item="group"
+        wx:key="nameKey"
+        group="{{group}}"
+        busy="{{busy}}"
+        bind:obsToggle="onObservationToggle"
+        bind:obsPreview="onObsImageTap"
+        bind:confirmSingle="onGroupConfirmSingle"
+        bind:confirmMulti="onGroupConfirmMulti"
+        bind:defer="onGroupDefer"
+        bind:generatePerObs="onGenerateDraftsTap"
+      />
     </view>
 
     <view class="card">
       <view class="section-head">
-        <view class="section-title">待确认物品（{{draftViews.length}}）</view>
+        <view class="section-title">待确认物品({{draftViews.length}})</view>
         <view class="text-action" bindtap="onAddManualDraftTap">＋ 补一件</view>
       </view>
       <view wx:if="{{draftViews.length === 0}}" class="empty-small">先勾选线索生成草稿，或点「补一件」。</view>
@@ -79,6 +68,7 @@
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.locationText}}" placeholder="这件放在哪里" data-index="{{idx}}" bindinput="onDraftLocationInput" />
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.note}}" placeholder="备注（可选）" data-index="{{idx}}" bindinput="onDraftNoteInput" />
         <view class="draft-meta">{{d.observationCount}} 条线索 · {{d.highlightCount}} 条用户确认高亮{{d.isManual ? ' · 手动补件' : ''}}</view>
+        <view wx:if="{{d.highlightWarning}}" class="draft-warn">{{d.highlightWarning}}</view>
         <view wx:if="{{d.isManual}}" class="manual-times">
           <view>仅时间窗可无框：</view>
           <input class="time-input" type="digit" value="{{d.startSecText}}" data-index="{{idx}}" data-field="start" bindinput="onDraftManualTimeInput" /> 秒 —
@@ -94,7 +84,7 @@
 
     <view class="privacy-note">确认保存后才会上传原视频。每件物品各存一行证据和各自的高亮；同一视频可被多件物品引用。删除某件物品时，只有最后一条引用消失才删原视频。</view>
     <view wx:if="{{busy}}" class="primary-btn disabled">处理中…</view>
-    <view wx:else class="primary-btn" bindtap="onSaveTap">确认并保存 {{draftViews.length}} 件</view>
+    <view wx:else class="primary-btn" bindtap="onSaveTap">确认并保存 {{sceneStats.checkedDraftCount}} 件</view>
   </block>
 
   <view wx:if="{{phase === 'partial'}}" class="card">
