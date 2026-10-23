@@ -207,6 +207,28 @@ export type ItemsApiEvent =
       quantity?: number;
       unit?: string;
     } & ScopeWriteBinding)
+  | ({
+      /**
+       * 语音/快捷数量操作(issue #102 Q2,Q0-CONTRACT §7):统一 mode action,
+       * 对已有物品数量的唯一 CAS 写路径。目标 item_id 必须来自确认页用户点选的
+       * 候选(客户端经 itemsApi list/query 读到的本家庭行),绝不由模型直填;
+       * expected_version 用候选读到的 version,绝不页面自造。
+       */
+      action: "quantityAdjust";
+      item_id: string;
+      expected_version: number;
+      /**
+       * 同一次用户确认的稳定标识(uuid);本 action 必填(与 update 的可选不同):
+       * 响应丢失后同 update_id+expected_version+payload 重试,服务端三重识别
+       * 重放,最多生效一次;改值必须生成新操作(新 update_id+刷新版本)。
+       */
+      update_id: string;
+      mode: "add" | "subtract" | "set";
+      /** add/subtract:1..9999;set:0..9999(0=确认目前没有,绝不删物品/位置/提醒/证据) */
+      amount: number;
+      /** 可选校验参数:携带时必须逐字等于目标当前 unit(不同单位绝不默默叠加) */
+      unit?: string;
+    } & ScopeWriteBinding)
   | ({ action: "delete"; item_id: string } & ScopeWriteBinding)
   | { action: "get"; item_id: string }
   | { action: "query"; q: string }
@@ -380,6 +402,17 @@ export interface UpdateItemResponse {
   replayed?: boolean;
 }
 
+/**
+ * quantityAdjust 响应(issue #102 Q2,§7.6):item 投影含结果数量;replayed
+ * 为 true 表示这是同 update_id 的重放(数量只生效一次)。VERSION_CONFLICT
+ * 失败体携带 current(最新完整投影),客户端先展示最新值再引导显式重核对。
+ */
+export interface QuantityAdjustResponse {
+  ok: true;
+  item: ItemSummary;
+  replayed?: boolean;
+}
+
 export interface GetItemResponse {
   ok: true;
   item: ItemSummary;
@@ -466,6 +499,7 @@ export interface ItemsApiErrorResponse {
 export type ItemsApiOkResponse =
   | CreateItemResponse
   | UpdateItemResponse
+  | QuantityAdjustResponse
   | DeleteItemResponse
   | GetItemResponse
   | QueryItemsResponse
@@ -1586,4 +1620,54 @@ export interface LocationSplitResponse {
   path: string[];
   /** true = 模型输出未过硬校验,整串单段兜底(客户端不优先采用,回落分隔符规则) */
   fallback: boolean;
+}
+
+/* ---------------- 语音数量意图提议(issue #102 Q2,extractDraft.quantityIntentParse) ---------------- */
+
+/** quantityIntentParse 的候选(客户端经 itemsApi list/query 读到的本家庭行,不是数据库事实) */
+export interface QuantityIntentCandidate {
+  item_id: string;
+  name: string;
+  location_text: string;
+  /** null/缺省 = 数量未确认(legacy),确认页展示「待核对」 */
+  quantity?: number | null;
+  unit?: string | null;
+  /** 确认页 quantityAdjust 的 expected_version 来源 */
+  version: number;
+}
+
+export interface QuantityIntentParseEvent {
+  action: "quantityIntentParse";
+  /** 用户原话(去空白后 1-200 码点) */
+  text: string;
+  /** 0-12 项 */
+  candidates: QuantityIntentCandidate[];
+}
+
+export type QuantityIntent = "add" | "subtract" | "set" | "unknown" | "other";
+
+export interface QuantityIntentMatch {
+  candidate_index: number;
+  matched_word: string;
+}
+
+/**
+ * 解析提议(零写库;模型只提议,目标必须用户点选):add/subtract → delta
+ * (add 正、subtract 负);set → value;数量意图才携带 unit/source_quote;
+ * unknown(maybe_total 歧义)绝不携带数量,绝不静默执行;other = 移动/找回/
+ * 新建句,客户端按词表提示,绝不折算成增减。
+ */
+export interface QuantityIntentParseResponse {
+  ok: true;
+  engine: string;
+  intent: QuantityIntent;
+  /** 模型挑中的候选提议;歧义/未命中/编造 → 缺席,由 needs_pick 弹选择 */
+  match?: QuantityIntentMatch;
+  needs_pick: boolean;
+  item_query: string;
+  delta?: number;
+  value?: number;
+  unit?: string;
+  source_quote?: string;
+  ambiguity?: "maybe_total" | "location_unclear" | "unit_unclear";
 }

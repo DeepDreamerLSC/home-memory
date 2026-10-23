@@ -25,6 +25,9 @@
 const { validateDraft, validateDrafts, applyRelativeConversion } = require("./validate");
 const { shanghaiTodayYmd } = require("./relative-date");
 const { normalizeVlBox, BOX_SCALE } = require("./vl");
+// 冻结数字解析器(§7.8.2,唯一数字语义实现):quantityIntentParse 的数字锚定
+// 与 v2 数量三项(validate.js)共用同一实现,绝不各写一份。
+const { parseQuantityQuote, UNIT_SET } = require("./quantity");
 
 const TEXT_MAX = 500;
 const USER_MARKER = "【用户输入】";
@@ -869,6 +872,363 @@ async function draftEditParse(event, deps) {
   return aiUnavailableResult(engine);
 }
 
+// ---------- quantityIntentParse(语音数量意图,Q2,issue #102 / Q0-CONTRACT §7.8) ----------
+//
+// 零写提议层:对已有物品的数量操作只产出「提议」{intent,item_query,delta|value,
+// unit,source_quote,match,needs_pick,ambiguity},绝不写库(本函数无 DB 客户端、
+// 无 openid 依赖,结构上不可能写);目标 item_id 必须来自客户端随请求传入的
+// 候选清单(客户端经 itemsApi get/query/list 读到的本家庭行,不是数据库事实),
+// 由用户在确认页点选——模型绝不能自填 item_id 直改数据库。
+// 服务端硬门(不信任模型输出,失败降级绝不猜):
+// - 移动句式(拿到/搬到/放到…别的位置)与找回句式(找一下/在哪…)→ intent:"other"
+//   (客户端提示一期不支持/走既有查询,移动绝不折算成 subtract);
+// - 「还有/大概/差不多」存在「加还是总数」歧义 → unknown + maybe_total,
+//   绝不静默按任一语义执行;
+// - 数字锚定:delta/value 与 unit 必须能由冻结数字解析器(lib/quantity.js,
+//   §7.8.2 唯一数字语义实现)从 source_quote(原话逐字子串,去空白比对)
+//   独立解析得到且一致——模型推算(「一箱」折 24)一律降级 unknown;
+// - 编造候选(candidate_index 越界/名称对不上)→ 丢弃 match、needs_pick:true;
+// - 同名多候选(多位置/多单位)→ needs_pick:true + location_unclear/unit_unclear,
+//   弹选择不默认选中由客户端纪律保证;
+// - 日志只记 action/textLength/candidateCount/elapsedMs/engine/intent/error,
+//   绝不记原文与解析结果。
+
+const QI_TEXT_MAX = 200;
+const QI_CANDIDATES_MAX = 12;
+const QI_ITEM_ID_MAX = 64;
+const QI_NAME_MAX = 50;
+const QI_LOCATION_MAX = 200;
+const QI_INTENTS = ["add", "subtract", "set", "unknown", "other"];
+const QI_QUANTITY_INTENTS = ["add", "subtract", "set"];
+// 移动/找回/总数歧义的词表(硬门,覆盖模型判断;「放到」在客户端路由层为保护
+// create 句(「剪刀放到书房」)不单独触发数量流,这里仍按 §7.8 列为移动词,
+// 仅当句子已经进入数量解析时兜底)
+const QI_MOVE_MARKERS = ["拿到", "搬到", "拿去", "挪到", "移到", "移去", "放到"];
+const QI_FIND_MARKERS = ["找一下", "找一找", "找找", "在哪里", "在哪儿", "哪儿有", "哪里有", "帮我找"];
+const QI_MAYBE_TOTAL_MARKERS = ["还有", "大概", "差不多", "大约"];
+
+const QI_SYSTEM_PROMPT = [
+  "你是家庭物品数量的语音意图解析器。用户对着家里已有的物品说了一句话,你只负责解析意图和数量,不负责执行、不回答、不闲聊。",
+  "【候选清单】是用户家里可能的目标物品(含当前位置与当前数量)。",
+  "规则:",
+  '1. intent 只能取:add(在现有数量上增加)/subtract(减少)/set(用户说出了现在的总数)/unknown(分不清是加、减还是总数)/other(不是对已有物品的数量操作:移动位置、找回查询、记新物品、闲聊等)。',
+  '2. add 时给 delta(正整数);subtract 时给 delta(负整数);set 时给 value(0-9999 整数);unknown/other 不给数量。',
+  '3. 数量必须来自原话里明确说出的「数字+单位」,单位只能是 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只 之一;source_quote 是原话中承载该数量的逐字子串(如「加两包」里的「两包」)。没说数量、模糊量(几包/一些/半打)、需要换算(一箱=多少包)时,intent 用 unknown,绝不推算。',
+  '4. 「还有 N」「大概 N」「差不多 N」说不清是加还是当前总数时,intent="unknown" 且 ambiguity="maybe_total",绝不猜成 set 或 add。',
+  '5. 把物品拿到/搬到/放到别的位置(移动)、找一下/在哪里(找回)、买新的/记一件新的(新建)都是 intent="other"。',
+  "6. 【候选清单】里名称与用户描述对得上且只有一件时,给 candidate_index(从 0 开始);对不上、同名多件分不清、或清单为空时省略 candidate_index。",
+  '只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:',
+  '{ "intent": "add", "item_query": "棉柔巾", "delta": 2, "value": null, "unit": "包", "source_quote": "两包", "candidate_index": 0, "ambiguity": null }',
+  '字段:item_query 是原话里指代物品的词(不超过 50 字);ambiguity 只能是 maybe_total/location_unclear/unit_unclear 或 null;数字字段给 null 表示没有。',
+].join("\n");
+
+function buildQuantityIntentPrompt(userText, candidates, retryInfo) {
+  const lines = candidates.map((c, i) => {
+    const q = typeof c.quantity === "number" && c.unit ? "当前:" + c.quantity + c.unit : "当前:待核对";
+    return "- " + i + ":" + c.name + "(位置:" + (c.location_text || "未归位") + "|" + q + ")";
+  });
+  let prompt =
+    QI_SYSTEM_PROMPT +
+    "\n\n【候选清单】\n" +
+    (lines.length > 0 ? lines.join("\n") : "(空)") +
+    "\n\n" +
+    USER_MARKER +
+    "\n" +
+    userText;
+  if (retryInfo) {
+    prompt +=
+      "\n\n" +
+      RETRY_OUTPUT_MARKER +
+      "\n" +
+      retryInfo.previousOutput +
+      "\n" +
+      RETRY_ERROR_MARKER +
+      "\n" +
+      retryInfo.reason +
+      "\n请重新输出,只输出一个符合上述字段要求的 JSON 对象,不要包含任何其他文字或代码块围栏。";
+  }
+  return prompt;
+}
+
+/** 候选名称匹配归一(服务端最小口径:trim → 小写 → 删全部空白;不含客户端五级匹配) */
+function qiNormalize(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function qiContainsMarker(normalizedText, markers) {
+  for (const m of markers) {
+    if (normalizedText.indexOf(m) !== -1) return true;
+  }
+  return false;
+}
+
+/*
+ * 模型输出校验 + 服务端硬门(§7.8,不信任模型输出):
+ * 返回 { ok:false, retryable:true, reason }(坏 JSON,handler 带错误重试一次)或
+ * { ok:true, parsed }。parsed = { intent, item_query, delta?, value?, unit?,
+ * source_quote?, match?, needs_pick, ambiguity? }。
+ * 命名匹配/needs_pick/ambiguity 由服务端按候选清单确定性重算:同名多件一律
+ * 用户点选(保守方向:绝不自动锁定同名行),单位不清优先于位置不清标注。
+ */
+function validateQuantityIntentOutput(rawText, normalizedText, candidates) {
+  const parsed = extractJsonObject(rawText);
+  if (parsed === undefined || parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, retryable: true, reason: "输出不是合法的 JSON 对象" };
+  }
+
+  let intent = typeof parsed.intent === "string" ? parsed.intent : "unknown";
+  if (QI_INTENTS.indexOf(intent) === -1) intent = "unknown";
+
+  let itemQuery = typeof parsed.item_query === "string" ? parsed.item_query.trim() : "";
+  if (codePointLength(itemQuery) > QI_NAME_MAX) itemQuery = "";
+
+  // 词表硬门(覆盖模型):移动/找回 → other;总数歧义 → unknown + maybe_total
+  let ambiguity = null;
+  if (qiContainsMarker(normalizedText, QI_MOVE_MARKERS) || qiContainsMarker(normalizedText, QI_FIND_MARKERS)) {
+    intent = "other";
+  } else if (
+    (intent === "add" || intent === "set") &&
+    qiContainsMarker(normalizedText, QI_MAYBE_TOTAL_MARKERS)
+  ) {
+    intent = "unknown";
+    ambiguity = "maybe_total";
+  }
+  if (intent === "unknown" && parsed.ambiguity === "maybe_total" && ambiguity === null) {
+    ambiguity = "maybe_total"; // 模型自报的总数歧义原样透传
+  }
+
+  // 数字锚定(仅数量意图):冻结数字解析器从 source_quote 独立解出「数字+单位」,
+  // 必须与模型报的 delta/value、unit 完全一致;任一失败整体降级 unknown,绝不采信
+  let delta = null;
+  let value = null;
+  let unit = null;
+  let sourceQuote = null;
+  if (QI_QUANTITY_INTENTS.indexOf(intent) !== -1) {
+    const rawQuote = typeof parsed.source_quote === "string" ? parsed.source_quote : "";
+    const quote = stripAllWhitespace(rawQuote);
+    let anchored = false;
+    let expectedNumber = null;
+    if (quote !== "" && codePointLength(quote) <= QI_TEXT_MAX && normalizedText.indexOf(quote) !== -1) {
+      const parsedQuote = parseQuantityQuote(quote);
+      if (parsedQuote !== null) {
+        expectedNumber = parsedQuote.number;
+        // 模型报的 unit 也必须逐字等于解析器从 quote 解出的单位(「两包」报盒 → 不采信)
+        const modelUnit = parsed.unit;
+        const unitAgrees =
+          typeof modelUnit === "string" && UNIT_SET.indexOf(modelUnit) !== -1 && modelUnit === parsedQuote.unit;
+        if (intent === "set") {
+          const v = parsed.value;
+          anchored =
+            unitAgrees &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 9999 &&
+            v === expectedNumber;
+          if (anchored) value = v;
+        } else {
+          const d = parsed.delta;
+          anchored =
+            unitAgrees &&
+            typeof d === "number" &&
+            Number.isInteger(d) &&
+            Math.abs(d) >= 1 &&
+            Math.abs(d) <= 9999 &&
+            Math.abs(d) === expectedNumber;
+          if (anchored) delta = intent === "subtract" ? -Math.abs(d) : Math.abs(d);
+        }
+        if (anchored) unit = parsedQuote.unit;
+      }
+    }
+    if (!anchored) {
+      intent = "unknown";
+      ambiguity = null;
+    } else {
+      sourceQuote = rawQuote.trim();
+    }
+  }
+
+  // 候选裁定(服务端确定性重算,模型只提议):编造/越界/名称对不上一律丢弃
+  let match = null;
+  let needsPick = false;
+  if (QI_QUANTITY_INTENTS.indexOf(intent) !== -1) {
+    const nq = qiNormalize(itemQuery);
+    const nameMatches = [];
+    candidates.forEach((c, i) => {
+      const nc = qiNormalize(c.name);
+      if (nq !== "" && nc !== "" && (nc.indexOf(nq) !== -1 || nq.indexOf(nc) !== -1)) {
+        nameMatches.push(i);
+      }
+    });
+    // 编造信号:模型给了 candidate_index 但越界,或在界内却与名称匹配对不上
+    // (E8/E8b)——即使名称唯一命中,只要模型指认与事实不符就强制用户点选
+    let modelIdx = null;
+    if (Number.isInteger(parsed.candidate_index) && parsed.candidate_index >= 0 && parsed.candidate_index < candidates.length) {
+      modelIdx = parsed.candidate_index;
+    }
+    const fabricated =
+      parsed.candidate_index !== undefined &&
+      parsed.candidate_index !== null &&
+      (modelIdx === null || nameMatches.indexOf(modelIdx) === -1);
+    if (!fabricated && nameMatches.length === 1 && (modelIdx === null || modelIdx === nameMatches[0])) {
+      const idx = nameMatches[0];
+      match = { candidate_index: idx, matched_word: candidates[idx].name };
+      needsPick = false;
+    } else {
+      // 未命中 / 同名多件 / 模型指认与名称对不上:目标必须由用户点选
+      needsPick = true;
+      if (nameMatches.length > 1) {
+        const units = new Set();
+        for (const i of nameMatches) {
+          units.add(typeof candidates[i].unit === "string" ? candidates[i].unit : "");
+        }
+        ambiguity = units.size > 1 ? "unit_unclear" : "location_unclear";
+      }
+    }
+  }
+
+  const out = {
+    intent: intent,
+    item_query: itemQuery,
+    needs_pick: needsPick,
+  };
+  if (delta !== null) out.delta = delta;
+  if (value !== null) out.value = value;
+  if (unit !== null) out.unit = unit;
+  if (sourceQuote !== null) out.source_quote = sourceQuote;
+  if (match !== null) out.match = match;
+  if (ambiguity !== null) out.ambiguity = ambiguity;
+  return { ok: true, parsed: out };
+}
+
+/*
+ * quantityIntentParse 入口:event = { action, text, candidates }。
+ * 校验(text 去空白 1-200 码点;candidates 0-12 项,item_id ≤64、name 1-50、
+ * location_text ≤200、version 正整数、quantity/unit 可选)失败 → INVALID_INPUT
+ * (引擎未参与)。引擎链复用 local→DeepSeek 双引擎降级(与 draftEditParse 同款);
+ * 坏 JSON 带错误重试一次仍走同一引擎;双失败/坏输出 → AI_UNAVAILABLE。
+ * 日志白名单见上;绝不触任何写。
+ */
+async function quantityIntentParse(event, deps) {
+  const startedAt = Date.now();
+  const logger = deps && typeof deps.logger === "function" ? deps.logger : function () {};
+  const callLLM = deps ? deps.callLLM : undefined;
+  const callLocalLLM = deps && typeof deps.callLocalLLM === "function" ? deps.callLocalLLM : null;
+  const elapsedMs = () => Date.now() - startedAt;
+
+  const rawText = event && typeof event.text === "string" ? event.text : null;
+  if (rawText === null) {
+    logger({ action: "quantityIntentParse", textLength: 0, candidateCount: 0, elapsedMs: elapsedMs(), engine: null, intent: null, error: "INVALID_INPUT" });
+    return { ok: false, error: "INVALID_INPUT", message: "数量指令不合法" };
+  }
+  const userText = rawText.trim();
+  const normalizedText = stripAllWhitespace(userText);
+  const textLength = codePointLength(normalizedText);
+  const failInput = () => {
+    logger({ action: "quantityIntentParse", textLength: textLength, candidateCount: 0, elapsedMs: elapsedMs(), engine: null, intent: null, error: "INVALID_INPUT" });
+    return { ok: false, error: "INVALID_INPUT", message: "数量指令不合法" };
+  };
+  if (textLength < 1 || textLength > QI_TEXT_MAX) return failInput();
+  if (!Array.isArray(event.candidates) || event.candidates.length > QI_CANDIDATES_MAX) {
+    return failInput();
+  }
+  const candidates = [];
+  for (const c of event.candidates) {
+    if (c === null || typeof c !== "object" || Array.isArray(c)) return failInput();
+    if (typeof c.item_id !== "string" || c.item_id.length < 1 || c.item_id.length > QI_ITEM_ID_MAX) {
+      return failInput();
+    }
+    if (typeof c.name !== "string") return failInput();
+    const nm = c.name.trim();
+    if (nm === "" || codePointLength(nm) > QI_NAME_MAX) return failInput();
+    if (
+      typeof c.location_text !== "string" ||
+      codePointLength(c.location_text.trim()) > QI_LOCATION_MAX
+    ) {
+      return failInput();
+    }
+    if (!Number.isInteger(c.version) || c.version < 1) return failInput();
+    candidates.push({
+      item_id: c.item_id,
+      name: nm,
+      location_text: c.location_text.trim(),
+      quantity: Number.isInteger(c.quantity) && c.quantity >= 0 && c.quantity <= 9999 ? c.quantity : null,
+      unit: typeof c.unit === "string" ? c.unit : null,
+      version: c.version,
+    });
+  }
+  const candidateCount = candidates.length;
+
+  const buildPrompt0 = (retryInfo) => buildQuantityIntentPrompt(userText, candidates, retryInfo);
+  const runChain = async (callFn, emptyOutputIsFailure) => {
+    const isEmptyFailure = (output) =>
+      emptyOutputIsFailure && (typeof output !== "string" || output.trim() === "");
+    let output;
+    try {
+      output = await callFn(buildPrompt0(null));
+    } catch (e) {
+      return { engineFailed: true };
+    }
+    if (isEmptyFailure(output)) {
+      return { engineFailed: true };
+    }
+    let result = validateQuantityIntentOutput(output, normalizedText, candidates);
+    if (!result.ok && result.retryable) {
+      let retryOutput;
+      try {
+        retryOutput = await callFn(
+          buildPrompt0({ previousOutput: output, reason: result.reason }),
+        );
+      } catch (e) {
+        return { engineFailed: true };
+      }
+      if (isEmptyFailure(retryOutput)) {
+        return { engineFailed: true };
+      }
+      result = validateQuantityIntentOutput(retryOutput, normalizedText, candidates);
+    }
+    return { engineFailed: false, result: result };
+  };
+
+  let engine = "deepseek";
+  let chain;
+  if (callLocalLLM) {
+    engine = "local";
+    chain = await runChain(callLocalLLM, true);
+    if (chain.engineFailed) {
+      engine = "deepseek";
+      chain = await runChain(callLLM, false);
+    }
+  } else {
+    chain = await runChain(callLLM, false);
+  }
+
+  if (!chain.engineFailed && chain.result.ok) {
+    logger({
+      action: "quantityIntentParse",
+      textLength: textLength,
+      candidateCount: candidateCount,
+      elapsedMs: elapsedMs(),
+      engine: engine,
+      intent: chain.result.parsed.intent,
+    });
+    return Object.assign({ ok: true, engine: engine }, chain.result.parsed);
+  }
+  logger({
+    action: "quantityIntentParse",
+    textLength: textLength,
+    candidateCount: candidateCount,
+    elapsedMs: elapsedMs(),
+    engine: engine,
+    intent: null,
+    error: "AI_UNAVAILABLE",
+  });
+  return aiUnavailableResult(engine);
+}
+
 // ---------- locationSplit(位置层级拆分,§1.6 真机 2026-10-17) ----------
 //
 // 无分隔符中文(「书房桌子右边抽屉」)用 splitLocationSegments 的分隔符规则
@@ -1276,6 +1636,10 @@ module.exports = {
   buildVlPrompt,
   validateVlOutput,
   validateDraftEditOutput,
+  quantityIntentParse,
+  buildQuantityIntentPrompt,
+  validateQuantityIntentOutput,
+  QI_SYSTEM_PROMPT,
   locationSplit,
   videoTargetRecognize,
   buildVideoTargetPrompt,

@@ -110,7 +110,7 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 
 ## 数量管理(issue #102 Q0 冻结合同;Q1 基础数量已实施,其余分段待授权)
 
-> 权威全文见 **docs/design/quantity/Q0-CONTRACT.md**(Q0 产物,含写入口总表、逐入口细则、反例矩阵);本节为 API 层摘要。实施分 Q1(基础数量)/Q2(语音增减)/Q3(视觉归组)三段,**每段须 Owner 单独授权**。**Q1(items 字段/投影/校验/幂等/签名、create·photoCommit·videoSceneCommit 数量入参、update「设为当前总数」、extractDraft v2 数量三项、客户端展示)已实施**(分支 feat/issue102-q1-quantity-base);Q2 的 quantityAdjust 与 Q3 的视觉归组仍未实现、不留桩。
+> 权威全文见 **docs/design/quantity/Q0-CONTRACT.md**(Q0 产物,含写入口总表、逐入口细则、反例矩阵);本节为 API 层摘要。实施分 Q1(基础数量)/Q2(语音增减)/Q3(视觉归组)三段,**每段须 Owner 单独授权**。**Q1(items 字段/投影/校验/幂等/签名、create·photoCommit·videoSceneCommit 数量入参、update「设为当前总数」、extractDraft v2 数量三项、客户端展示)已实施**(分支 feat/issue102-q1-quantity-base);**Q2(quantityAdjust 写 action、extractDraft.quantityIntentParse 零写提议、语音词表路由 + 数量确认页)已实施**(分支 feat/issue102-q2-voice-quantity);Q3 的视觉归组仍未实现、不留桩。
 
 - **数据字段(items 文档,只增不改)**:`quantity?: number`(整数,新建写入恒 ≥1,已有 0..9999;0=用户确认「目前没有」,绝不触发删除)、`unit?: string`(冻结闭集 UNIT_SET = 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只,只增不减,默认「件」)、`quantity_confirmed_at?: string`(ISO,最近一次数量确认时刻,PR #103 对齐新增,legacy 缺省;**客户端永不提交**,纯服务端写)。三字段**同现同缺**;quantity 是用户确认值,**绝不**由 observation 数/frame 数/VL confidence/名称匹配/note 文本推断;quantity_confirmed_at 是元数据,**绝不进任何指纹/幂等比对/载荷签名**(塞进指纹会让响应丢失重试的指纹永远失配)。存量 items 无字段 = 数量未确认,不回填、不迁移,旧 note 的 ×N/500ml 不升格。itemsApi.delete 不触碰三字段。
 - **投影(create/update/get/query/list 的 item 投影增补)**:`quantity: number|null`、`unit: string|null`、`quantity_confirmed_at: string|null`,**双 null ⇔ 未确认**(confirmed_at 在 quantity/unit 合法而自身缺失时读 null,不丢已确认数量);存储侧任何异常(半态/越界/闭集外)防御性按 null 读。remindList 行、locations.list 物品投影、locationScanContext 池**零变化**(后续经 change request 另议)。旧客户端忽略新键;新客户端把缺键归一为 null。
