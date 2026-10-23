@@ -496,7 +496,7 @@ Page<
     /** 单位选择器选项(issue #102 Q1,UNIT_SET 冻结顺序 = 展示序) */
     unitOptions: UNIT_SET as string[],
     headText: "保留 0 / 0(待核对)",
-    saveText: "存 0 件",
+    saveText: "存 0 条",
     saveDisabled: true,
     navSubtitle: "",
     batchLocation: "",
@@ -1193,7 +1193,7 @@ Page<
     let saveDisabled = view.saveDisabled;
     if (hasFail && counts.keep > 0) {
       // 部分失败:失败行标红可重试(§7.6),保存入口保持可用
-      saveText = "重试存 " + counts.keep + " 件";
+      saveText = "重试存 " + counts.keep + " 条";
       saveDisabled = false;
     }
     const qkHigh = this.rowsRaw.filter((r) => !r.done && r.confidence === "high").length;
@@ -1982,16 +1982,16 @@ Page<
     }
     const s = deriveSaveConfirm(this.rowsRaw, this.data.batchLocation);
     // 逐件数量行(Q0-CONTRACT §4.3):只列本次实际提交的行(勾选且未 done);
-    // Q1 行显示 ×N单位,pre-Q1 会话行如实标默认 1 件(提交不带数量键)
-    let rowNo = 0;
+    // Q1 行显示 ×N单位,pre-Q1 会话行如实标默认 1 件(提交不带数量键)。
+    // 编号口径 = 全数组下标(i+1):与屏幕清单 #d{index}(renderRows)和例外卡
+    // (deriveSaveConfirm 的 index)同号,部分行未勾选时同号同行,绝不串行
     const qtyLines: string[] = [];
-    this.rowsRaw.forEach((r) => {
+    this.rowsRaw.forEach((r, i) => {
       if (r.done || !r.checked) {
         return;
       }
-      rowNo += 1;
       qtyLines.push(
-        "#d" + rowNo + " " + r.name + " " + (typeof r.unit === "string" ? "×" + r.qty + r.unit : "(默认 1 件)")
+        "#d" + (i + 1) + " " + r.name + " " + (typeof r.unit === "string" ? "×" + r.qty + r.unit : "(默认 1 件)")
       );
     });
     this.setData({

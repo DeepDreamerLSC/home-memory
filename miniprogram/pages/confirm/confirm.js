@@ -123,6 +123,8 @@ Page({
                 // 数量(Q1):回写过(携带过)就用回写值并继续携带;缺省(pre-Q1 会话或
                 // 未携带)回落草稿值——pre-Q1 会话草稿三项 null → 不携带(E13 不注入)
                 const savedQuantity = typeof saved.quantity === "number" && typeof saved.unit === "string" && quantity_1.UNIT_SET.indexOf(saved.unit) !== -1;
+                // 触碰标记跨恢复保留:「待确认」角标已因用户触碰收起的行,恢复后不复现
+                const touched = saved.quantityTouched === true || rows[i].quantityTouched;
                 rows[i] = {
                     ...rows[i],
                     name: saved.name,
@@ -143,7 +145,8 @@ Page({
                     unit: savedQuantity ? saved.unit : rows[i].unit,
                     unitIndex: Math.max(0, quantity_1.UNIT_SET.indexOf(savedQuantity ? saved.unit : rows[i].unit)),
                     quantityProvided: savedQuantity || rows[i].quantityProvided,
-                    quantityTouched: saved.quantityTouched === true || rows[i].quantityTouched,
+                    quantityTouched: touched,
+                    quantityBadge: touched ? "" : rows[i].quantityBadge,
                 };
             });
         }
@@ -225,6 +228,9 @@ Page({
      * 保存:itemsApi create,成功 toast「已记住」返回首页。
      * 数量(issue #102 Q1,E2 手动表单):默认不填 → 不携带(服务端缺省 1/件);
      * 用户填了 → 1..9999 整数随行携带 + 所选单位;非法值前置拦截(服务端同口径双门)。
+     * 数量留空而单位已选非默认(如「包」)→ 按界面承诺「不填 = 1」携
+     * {quantity:1, unit:所选单位}:用户显式选过的单位绝不静默丢弃落回 1/件
+     * (否则选择器显示「包」、库里却是「件」);单位仍是默认「件」才维持不带键。
      */
     async onSaveTap() {
         if (this.data.saving) {
@@ -255,7 +261,11 @@ Page({
                 name,
                 location_text: locationText,
                 note,
-                ...(parsedQuantity === null ? {} : { quantity: parsedQuantity, unit }),
+                ...(parsedQuantity === null
+                    ? unit === quantity_1.DEFAULT_UNIT
+                        ? {}
+                        : { quantity: 1, unit }
+                    : { quantity: parsedQuantity, unit }),
             });
             wx.showToast({ title: "记住了,下次问我。", icon: "success" });
             setTimeout(() => {
@@ -331,6 +341,8 @@ Page({
             ["rows[" + index + "].quantity"]: next,
             ["rows[" + index + "].quantityProvided"]: true,
             ["rows[" + index + "].quantityTouched"]: true,
+            // 触碰 = 用户确认(§10.3):「待确认」角标随触碰收起,不再滞后到整行保存
+            ["rows[" + index + "].quantityBadge"]: "",
         });
     },
     /** 行内单位选择(issue #102 Q1):只能从 UNIT_SET 选;触碰同样 = 确认数量 */
@@ -352,6 +364,8 @@ Page({
             ["rows[" + index + "].unitIndex"]: idx,
             ["rows[" + index + "].quantityProvided"]: true,
             ["rows[" + index + "].quantityTouched"]: true,
+            // 触碰 = 用户确认(§10.3):「待确认」角标随触碰收起
+            ["rows[" + index + "].quantityBadge"]: "",
         });
     },
     onRowLocationInput(e) {

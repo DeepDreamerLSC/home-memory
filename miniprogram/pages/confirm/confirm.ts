@@ -75,12 +75,6 @@ interface ConfirmRow extends BatchRow {
    * 改位置文本即清空(用户否认了原路径,见 onRowLocationInput)。
    * 点「确认记住」才建路径并挂上,绝不静默建路径。
    */
-  /** 「放进」行的最终路径(issue #45 十七轮,#18 红线语义升级):AI 确定时
-   * 来自草稿 mount_path 预览,用户可经「换」(选位置弹层)替换;空数组 =
-   * 不显示该行、不挂靠(certain=false 一律空 = 照旧先进「尚未归类」)。
-   * 改位置文本即清空(用户否认了原路径,见 onRowLocationInput)。
-   * 点「确认记住」才建路径并挂上,绝不静默建路径。
-   */
   mountPath: string[];
   /** 「放进」行显示文本(路径 join " / ";wxml 无数组 join,预计算) */
   mountPathText: string;
@@ -302,6 +296,8 @@ Page<
         // 未携带)回落草稿值——pre-Q1 会话草稿三项 null → 不携带(E13 不注入)
         const savedQuantity =
           typeof saved.quantity === "number" && typeof saved.unit === "string" && UNIT_SET.indexOf(saved.unit) !== -1;
+        // 触碰标记跨恢复保留:「待确认」角标已因用户触碰收起的行,恢复后不复现
+        const touched = saved.quantityTouched === true || rows[i].quantityTouched;
         rows[i] = {
           ...rows[i],
           name: saved.name,
@@ -325,7 +321,8 @@ Page<
             UNIT_SET.indexOf(savedQuantity ? (saved.unit as string) : rows[i].unit)
           ),
           quantityProvided: savedQuantity || rows[i].quantityProvided,
-          quantityTouched: saved.quantityTouched === true || rows[i].quantityTouched,
+          quantityTouched: touched,
+          quantityBadge: touched ? "" : rows[i].quantityBadge,
         };
       });
     }
@@ -417,6 +414,9 @@ Page<
    * 保存:itemsApi create,成功 toast「已记住」返回首页。
    * 数量(issue #102 Q1,E2 手动表单):默认不填 → 不携带(服务端缺省 1/件);
    * 用户填了 → 1..9999 整数随行携带 + 所选单位;非法值前置拦截(服务端同口径双门)。
+   * 数量留空而单位已选非默认(如「包」)→ 按界面承诺「不填 = 1」携
+   * {quantity:1, unit:所选单位}:用户显式选过的单位绝不静默丢弃落回 1/件
+   * (否则选择器显示「包」、库里却是「件」);单位仍是默认「件」才维持不带键。
    */
   async onSaveTap() {
     if (this.data.saving) {
@@ -447,7 +447,11 @@ Page<
         name,
         location_text: locationText,
         note,
-        ...(parsedQuantity === null ? {} : { quantity: parsedQuantity, unit }),
+        ...(parsedQuantity === null
+          ? unit === DEFAULT_UNIT
+            ? {}
+            : { quantity: 1, unit }
+          : { quantity: parsedQuantity, unit }),
       });
       wx.showToast({ title: "记住了,下次问我。", icon: "success" });
       setTimeout(() => {
@@ -523,6 +527,8 @@ Page<
       ["rows[" + index + "].quantity"]: next,
       ["rows[" + index + "].quantityProvided"]: true,
       ["rows[" + index + "].quantityTouched"]: true,
+      // 触碰 = 用户确认(§10.3):「待确认」角标随触碰收起,不再滞后到整行保存
+      ["rows[" + index + "].quantityBadge"]: "",
     });
   },
 
@@ -545,6 +551,8 @@ Page<
       ["rows[" + index + "].unitIndex"]: idx,
       ["rows[" + index + "].quantityProvided"]: true,
       ["rows[" + index + "].quantityTouched"]: true,
+      // 触碰 = 用户确认(§10.3):「待确认」角标随触碰收起
+      ["rows[" + index + "].quantityBadge"]: "",
     });
   },
 

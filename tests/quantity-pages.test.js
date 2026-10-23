@@ -208,6 +208,51 @@ test("item 详情:VERSION_CONFLICT 响应 current → 展示最新值引导核�
   assert.equal(updates.length, 1, "绝不自动把旧值再发一次");
 });
 
+test("item 详情:旧服务端 VERSION_CONFLICT 无 current → refreshForConflict 对齐数量(§10.1 唯一来源/J5;Q1 复审)", async function () {
+  resetEnv();
+  itemsApiRouter = function (name, data) {
+    if (name === "households" && data.action === "status") {
+      return { ok: true, household_id: "default", shared: false };
+    }
+    if (name === "itemsApi") {
+      if (data.action === "update") {
+        // 旧服务端:冲突响应不带 current
+        return { ok: false, error: "VERSION_CONFLICT", message: "内容已被修改,已为你刷新,请重试" };
+      }
+      if (data.action === "get") {
+        // 家人并发改过数量:get 投影是权威(3包 → 7包)
+        return {
+          ok: true,
+          item: summaryItem({ quantity: 7, unit: "包", version: 2, quantity_confirmed_at: "2026-10-22T12:00:00.000Z" }),
+        };
+      }
+      if (data.action === "remindList") {
+        return { ok: true, reminders: [] };
+      }
+    }
+    return Promise.reject(new Error("意外调用 " + name + ":" + data.action));
+  };
+  var page = pageOf(itemConfig);
+  page.applySummary(summaryItem({ quantity: 3, unit: "包", quantity_confirmed_at: "2026-10-18T12:00:00.000Z" }));
+  page.onQuantityInput({ detail: { value: "5" } });
+  await page.onQuantitySaveTap();
+  assert.equal(page.data.quantityText, "上次确认 ×7包 · 10-22", "冲突刷新后数量区=最新投影,不停留陈旧值");
+  assert.equal(page.data.quantityConfirmed, true);
+  assert.equal(page.data.quantityUnitIndex, 2, "单位选择器对齐最新单位(包)");
+  assert.equal(page.data.version, 2);
+  assert.deepEqual(page.quantityOriginal, { quantity: 7, unit: "包" }, "数量基准对齐:比对不再用旧基准");
+  assert.equal(page.data.quantityDraft, "", "被拒草稿清空,引导按最新值重新核对");
+
+  // 基准对齐后:用户按最新值填 7 → 正确识别「内容没有变化」,绝不空写
+  page.onQuantityInput({ detail: { value: "7" } });
+  await page.onQuantitySaveTap();
+  var updates = cloudCalls.filter(function (c) {
+    return c.name === "itemsApi" && c.data.action === "update";
+  });
+  assert.equal(updates.length, 1, "与最新基准相同的提交被正确拦截");
+  assert.ok(toasts.indexOf("内容没有变化") !== -1);
+});
+
 /* ---------------- confirm 语音批量页 ---------------- */
 
 delete require.cache[path.join(ROOT, "miniprogram", "pages", "confirm", "confirm.js")];
@@ -354,4 +399,49 @@ test("confirm 手动表单:数量默认不填 → create 不带数量;填 4+盒 
   })[1];
   assert.equal(second.data.quantity, 4);
   assert.equal(second.data.unit, "盒");
+});
+
+test("confirm 手动表单:数量留空而单位选非默认 → 按界面承诺「不填 = 1」携 {quantity:1, unit}(Q1 复审)", async function () {
+  resetEnv();
+  itemsApiRouter = function (name, data) {
+    if (data.action === "create") {
+      return { ok: true, item: summaryItem({ quantity: data.quantity || null, unit: data.unit || null }) };
+    }
+    return Promise.reject(new Error("意外调用 " + name + ":" + data.action));
+  };
+  var page = pageOf(confirmConfig);
+  page.onLoad({ manual: "true" });
+  page.onNameInput({ detail: { value: "棉柔巾" } });
+  page.onLocationInput({ detail: { value: "卫生间" } });
+  page.onQuantityUnitChange({ detail: { value: 2 } }); // UNIT_SET[2] = "包";数量留空
+  await page.onSaveTap();
+  var call = cloudCalls.filter(function (c) {
+    return c.name === "itemsApi" && c.data.action === "create";
+  })[0];
+  assert.equal(call.data.quantity, 1, "不填=1,按所选单位落库");
+  assert.equal(call.data.unit, "包", "用户显式选过的单位绝不静默丢弃落回「件」");
+});
+
+test("confirm 行内:触碰步进器/单位选择器即收起「待确认」角标(触碰=确认,§10.3;Q1 复审);恢复会话不复现", async function () {
+  resetEnv();
+  draftSession.__setDraftSessionStorageForTest(null);
+  draftSession.__resetDraftSessionForTest();
+  var sid = draftSession.createDraftSession("棉柔巾放卫生间", [
+    draftWith({ quantity: null, unit: null, quantity_quote: null, source_quote: "棉柔巾放卫生间" }),
+  ], false);
+  var page = freshConfirmPage(sid);
+  assert.equal(page.data.rows[0].quantityBadge, "待确认", "预填行标「待确认」(需用户过目)");
+
+  page.onRowUnitChange({ currentTarget: { dataset: { index: 0 } }, detail: { value: 2 } });
+  assert.equal(page.data.rows[0].quantityBadge, "", "触碰单位选择器=确认,角标收起");
+
+  var page2 = freshConfirmPage(sid);
+  page2.onRowQtyStep({ currentTarget: { dataset: { index: 0, d: 1 } } });
+  assert.equal(page2.data.rows[0].quantityBadge, "", "触碰步进器=确认,角标收起");
+
+  // 触碰态已回写会话(persistRows):恢复后角标不复现、携带态保留
+  page2.persistRows();
+  var restored = freshConfirmPage(sid);
+  assert.equal(restored.data.rows[0].quantityBadge, "", "已触碰行恢复后「待确认」不复现");
+  assert.equal(restored.data.rows[0].quantityProvided, true);
 });

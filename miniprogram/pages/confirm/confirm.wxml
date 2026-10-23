@@ -27,14 +27,14 @@
           bindinput="onLocationInput"
         />
       </view>
-      <!-- 数量(issue #102 Q1):默认不填 → 1 件;填了随行携带 -->
+      <!-- 数量(issue #102 Q1):默认不填 → 1 + 所选单位(占位随单位联动,承诺与落库一致) -->
       <view class="field">
         <view class="label">数量</view>
         <view class="qty-inline">
           <input
             class="input qty-num"
             type="number"
-            placeholder="不填 = 1 件"
+            placeholder="不填 = 1 {{ unitOptions[manualUnitIndex] }}"
             placeholder-class="placeholder"
             value="{{ manualQuantity }}"
             disabled="{{ saving }}"

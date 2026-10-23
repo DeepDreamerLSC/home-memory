@@ -1109,7 +1109,8 @@ Page<
             duration: 2500,
           });
         } else {
-          // 旧服务端无 current:走既有冲突刷新(get + 三方合并),再引导核对
+          // 旧服务端无 current:走既有冲突刷新(get + 三方合并,含数量对齐),
+          // 再引导核对;草稿与 current 分支同款清空(基准已变,须按最新值重新核对)
           const result = await this.refreshForConflict();
           if (result === "notfound") {
             wx.showModal({
@@ -1121,6 +1122,7 @@ Page<
               },
             });
           } else {
+            this.setData({ quantityDraft: "" });
             wx.showToast({ title: "内容已被修改,已刷新,请核对后再确认", icon: "none", duration: 2500 });
           }
         }
@@ -1373,6 +1375,10 @@ Page<
    *   它们会退化成「仅本机修改」被静默合并,面板与门禁不能就此消失。
    * 提醒行拉取失败或家庭在途切换时不猜远端:该字段本轮不参与比较、基准维持
    * 原值,用户待写的提醒选择留在表单等下次保存补写(见函数内注释)。
+   * 数量(issue #102 Q1,Q0-CONTRACT §10.1/§14.1-4)不进三方合并:详情头
+   * 「上次确认 ×N单位」以服务端投影为唯一来源,家人并发改数量后刷新必须
+   * 对齐最新投影,不能停留陈旧值(J5 冲突展示最新值);数量基准
+   * quantityOriginal 同步对齐,否则后续「内容没有变化」比对会用旧基准误拦。
    */
   async refreshForConflict(): Promise<RefreshResult> {
     let item;
@@ -1391,6 +1397,11 @@ Page<
       });
       return "error";
     }
+    // 数量对齐(§10.1 唯一来源):展示文案/确认态/单位选择器与 quantityOriginal
+    // 基准一律取最新投影;用户未保存的数量草稿不因他处冲突被清(数量保存自身的
+    // 冲突路径在 onQuantitySaveTap 内清草稿,与 current 分支同款)
+    const q = normalizeQuantityFields(item as unknown as Record<string, unknown>);
+    this.quantityOriginal = { quantity: q.quantity, unit: q.unit };
     const row = await this.fetchReminderRow();
     // 提醒远端不可得(undefined,拉取失败/在途家庭切换)时不猜远端:本轮按「未变」
     // 参与比较(不判冲突、不改表单),但基准绝不向表单现值对齐——对齐会让用户
@@ -1483,6 +1494,9 @@ Page<
       note: outcome.merged.note,
       version: item.version,
       updatedAtText: formatDateTime(item.updated_at),
+      quantityText: quantityConfirmedText(q.quantity, q.unit, q.quantity_confirmed_at),
+      quantityConfirmed: q.quantity !== null,
+      quantityUnitIndex: q.unit === null ? 0 : Math.max(0, UNIT_SET.indexOf(q.unit)),
       conflicts: entries.map((c) => ({
         ...c,
         choice: null,
