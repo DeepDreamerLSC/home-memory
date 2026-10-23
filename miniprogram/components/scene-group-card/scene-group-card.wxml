@@ -1,0 +1,50 @@
+<!-- R0 候选组卡(契约 §5.2):折叠=代表帧+三动作;展开=全部原始观察行 -->
+<view class="sgc">
+  <view class="sgc-head" bindtap="onExpandToggle">
+    <view class="sgc-thumb" catchtap="onRepFrameTap">
+      <image class="sgc-thumb-img" src="{{group.repFrame.framePath}}" mode="aspectFill" />
+      <view wx:if="{{group.repFrame.boxStyle !== 'display:none'}}" class="sgc-box" style="{{group.repFrame.boxStyle}}"></view>
+    </view>
+    <view class="sgc-main">
+      <view class="sgc-title-row">
+        <view class="sgc-title">{{group.label}}</view>
+        <view wx:if="{{group.sameFrameRisk}}" class="sgc-risk">可能有多件,需拆分核对</view>
+      </view>
+      <view class="sgc-meta">{{group.countText}} · 代表帧 {{group.repFrame.timeText}}</view>
+      <view class="sgc-state">{{group.stateText}}</view>
+      <view wx:if="{{group.highlightWarning}}" class="sgc-warn">{{group.highlightWarning}}</view>
+    </view>
+    <view class="sgc-chev">{{expanded ? '收起' : '展开'}}</view>
+  </view>
+
+  <view class="sgc-actions">
+    <view class="sgc-act sgc-act-go {{busy || group.remainingCount === 0 ? 'sgc-act-off' : ''}}" bindtap="onConfirmSingleTap">就 1 件</view>
+    <view class="sgc-act {{busy ? 'sgc-act-off' : ''}}" bindtap="onConfirmMultiTap">有多件或需拆开</view>
+    <view class="sgc-act {{busy ? 'sgc-act-off' : ''}}" bindtap="onDeferTap">暂不确定</view>
+  </view>
+
+  <view wx:if="{{expanded}}" class="sgc-body">
+    <view class="sgc-hint">每条线索保留原始画面、候选框与时间;标注「已用于:」的线索已归入草稿,不可再勾选。</view>
+    <view
+      wx:for="{{ group.observations }}"
+      wx:for-item="obs"
+      wx:key="obsId"
+      class="sgc-row {{checkedMap[obs.obsId] ? 'sgc-row-on' : ''}} {{obs.claimed ? 'sgc-row-claimed' : ''}}"
+      data-obs-id="{{obs.obsId}}"
+      bindtap="onObsToggle"
+    >
+      <view wx:if="{{obs.claimed}}" class="sgc-used">归属</view>
+      <view wx:else class="sgc-check {{checkedMap[obs.obsId] ? 'on' : ''}}">{{checkedMap[obs.obsId] ? '✓' : ''}}</view>
+      <view class="sgc-row-thumb" data-obs-id="{{obs.obsId}}" catchtap="onObsImageTap">
+        <image class="sgc-row-img" src="{{obs.framePath}}" mode="aspectFill" />
+        <view wx:if="{{obs.boxStyle !== 'display:none'}}" class="sgc-box" style="{{obs.boxStyle}}"></view>
+      </view>
+      <view class="sgc-row-main">
+        <view class="sgc-row-name">{{obs.name}}</view>
+        <view class="sgc-row-meta">{{obs.timeText}} · {{obs.confidenceText}}</view>
+        <view wx:if="{{obs.claimed}}" class="sgc-row-claim">{{obs.claimText}}</view>
+      </view>
+    </view>
+    <view class="sgc-act sgc-per {{busy || checkedIds.length === 0 ? 'sgc-act-off' : ''}}" bindtap="onGeneratePerObsTap">勾选线索各成一件</view>
+  </view>
+</view>

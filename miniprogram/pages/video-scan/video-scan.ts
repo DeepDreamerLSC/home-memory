@@ -11,16 +11,24 @@ import { videoExtOf, type PickedVideoFile } from "../../utils/video-attach";
 import {
   buildSceneCommitItems,
   createDraftsFromObservations,
-  groupSceneObservations,
   mergeSceneDrafts,
   newSceneDraft,
   scanSceneVideo,
-  sceneConfidenceText,
   splitSceneDraft,
   type SceneDraftItem,
   type SceneObservation,
 } from "../../utils/video-scene";
-import { boxPercentStyle, createVideoFrameSession, videoTimeText, type VideoFrameSession } from "../../utils/video-target";
+import {
+  buildSceneGroupViews,
+  claimGuard,
+  confirmSingleSet,
+  groupStats,
+  sameFrameRiskModalCopy,
+  sceneHighlightWarningText,
+  type SceneGroupStats,
+  type SceneGroupView,
+} from "../../utils/scene-groups";
+import { createVideoFrameSession, type VideoFrameSession } from "../../utils/video-target";
 import { recognizeWithVl, type PhotoVlPrepared } from "../../utils/photo-vl";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { householdScopeId } from "../../utils/household-scope";
@@ -45,23 +53,6 @@ type ScenePhase =
   | "done"
   | "failed";
 
-interface ObsView {
-  obsId: string;
-  name: string;
-  timeText: string;
-  confidenceText: string;
-  framePath: string;
-  boxStyle: string;
-  checked: boolean;
-}
-
-interface ObsGroupView {
-  nameKey: string;
-  label: string;
-  countText: string;
-  observations: ObsView[];
-}
-
 interface DraftView {
   draftKey: string;
   name: string;
@@ -74,6 +65,7 @@ interface DraftView {
   mergeSelected: boolean;
   observationCount: number;
   highlightCount: number;
+  highlightWarning: string;
   isManual: boolean;
   startSecText: string;
   endSecText: string;
@@ -123,12 +115,11 @@ interface PageData {
   failureText: string;
   errorText: string;
   resultText: string;
-  mergeSameName: boolean;
   observations: SceneObservation[];
   drafts: SceneDraftItem[];
-  selectedObsIds: string[];
   mergeSelectedKeys: string[];
-  observationGroups: ObsGroupView[];
+  observationGroups: SceneGroupView[];
+  sceneStats: SceneGroupStats;
   draftViews: DraftView[];
   frozenItems: VideoSceneCommitItem[];
   pendingUpload: PendingUpload | null;
@@ -241,12 +232,11 @@ Page({
     failureText: "",
     errorText: "",
     resultText: "",
-    mergeSameName: false,
     observations: [] as SceneObservation[],
     drafts: [] as SceneDraftItem[],
-    selectedObsIds: [] as string[],
     mergeSelectedKeys: [] as string[],
-    observationGroups: [] as ObsGroupView[],
+    observationGroups: [] as SceneGroupView[],
+    sceneStats: groupStats([], []) as SceneGroupStats,
     draftViews: [] as DraftView[],
     frozenItems: [] as VideoSceneCommitItem[],
     pendingUpload: null as PendingUpload | null,
@@ -310,23 +300,12 @@ Page({
     storageRemove(scopeKey(PENDING_PREFIX));
   },
 
+  /** R0(§5.2):组视图与统计全部由 observations+drafts 推导,组态/归属随草稿实时刷新 */
   renderObservations() {
-    const selected = new Set(this.data.selectedObsIds);
-    const groups = groupSceneObservations(this.data.observations).map((g) => ({
-      nameKey: g.nameKey,
-      label: g.label,
-      countText: g.observations.length + " 条同名线索（不代表同一件）",
-      observations: g.observations.map((obs) => ({
-        obsId: obs.obsId,
-        name: obs.name,
-        timeText: videoTimeText(obs.timeMs),
-        confidenceText: sceneConfidenceText(obs.confidence),
-        framePath: obs.framePath,
-        boxStyle: boxPercentStyle(obs.box),
-        checked: selected.has(obs.obsId),
-      })),
-    }));
-    this.setData({ observationGroups: groups });
+    this.setData({
+      observationGroups: buildSceneGroupViews(this.data.observations, this.data.drafts),
+      sceneStats: groupStats(this.data.observations, this.data.drafts),
+    });
   },
 
   renderDrafts() {
@@ -345,6 +324,8 @@ Page({
         mergeSelected: this.data.mergeSelectedKeys.indexOf(d.draftKey) !== -1,
         observationCount: d.observationIds.length,
         highlightCount: highlights,
+        // §2.1:草稿线索数 >8 时草稿卡显式警示(组卡警示随剩余数,确认后归属到草稿上继续可见)
+        highlightWarning: sceneHighlightWarningText(d.observationIds.length),
         isManual: d.observationIds.length === 0 && d.manualHighlights.length > 0,
         startSecText: first === null ? "" : (first.start_ms / 1000).toFixed(1),
         endSecText: first === null ? "" : (first.end_ms / 1000).toFixed(1),
@@ -417,7 +398,6 @@ Page({
       videoAspect: file.width > 0 && file.height > 0 ? file.width + " / " + file.height : "16 / 9",
       observations: [],
       drafts: [],
-      selectedObsIds: [],
       mergeSelectedKeys: [],
       frozenItems: [],
       pendingUpload: null,
@@ -510,48 +490,92 @@ Page({
     this.clearSession();
   },
 
-  /** 点缩略图放大预览(真机反馈 2026-10-20:横图看不清、无法展开)——catchtap 不触发勾选 */
+  /** 点缩略图放大预览(组件事件 e.detail.obsId):current=该观察帧,urls=组内全部 framePath */
   onObsImageTap(e: WechatMiniprogram.CustomEvent) {
-    const obsId = String(e.currentTarget.dataset.obsId || "");
-    const group = this.data.observationGroups.find((g: { observations: Array<{ obsId: string }> }) => g.observations.some((o) => o.obsId === obsId));
+    const obsId = String((e.detail && e.detail.obsId) || "");
+    if (obsId === "") return;
+    const group = this.data.observationGroups.find((g) => g.observations.some((o) => o.obsId === obsId));
     const urls = (group ? group.observations : this.data.observations)
-      .map((o: { framePath: string }) => o.framePath)
-      .filter((p: string) => typeof p === "string" && p !== "");
+      .map((o) => o.framePath)
+      .filter((p) => typeof p === "string" && p !== "");
     const current = this.data.observations.find((o) => o.obsId === obsId);
     if (current && current.framePath) {
       wx.previewImage({ current: current.framePath, urls: urls.length > 0 ? urls : [current.framePath] });
     }
   },
 
-  onObservationToggle(e: WechatMiniprogram.CustomEvent) {
-    const obsId = String(e.currentTarget.dataset.obsId || "");
-    if (obsId === "") return;
-    const current = this.data.selectedObsIds;
-    const selected = current.indexOf(obsId) === -1
-      ? current.concat([obsId])
-      : current.filter((id) => id !== obsId);
-    this.setData({ selectedObsIds: selected });
-    this.renderObservations();
+  /** 行勾选是组卡内交互态(组件持有,§5.2);页面侧只保留接线,无全局跨组选择 */
+  onObservationToggle() {},
+
+  /* ---------------- R0 三动作(§2):就 1 件 / 有多件或需拆开 / 暂不确定 ---------------- */
+
+  /** 就 1 件:生成聚合草稿的唯一入口;同帧风险组先过 §2.1 二次确认 */
+  async onGroupConfirmSingle(e: WechatMiniprogram.CustomEvent) {
+    if (this.data.busy || this.data.phase !== "review") return;
+    const detail = e.detail || {};
+    const nameKey = String(detail.nameKey || "");
+    const group = this.data.observationGroups.find((g) => g.nameKey === nameKey);
+    if (group === undefined) return;
+    const obsIds = Array.isArray(detail.obsIds) ? detail.obsIds as string[] : null;
+    const confirmSet = confirmSingleSet(group, obsIds);
+    if (confirmSet.length === 0) return;
+    if (group.sameFrameRisk) {
+      // §2.1 修订(PR #105 review 5626920410):弹窗时间=重复实际发生帧,非代表帧
+      const riskModal = sameFrameRiskModalCopy(group.duplicateFrameTimeText);
+      const sure = await new Promise<boolean>((resolve) => {
+        wx.showModal({
+          title: riskModal.title,
+          content: riskModal.content,
+          confirmText: riskModal.confirmText,
+          cancelText: riskModal.cancelText,
+          success: (r) => resolve(r.confirm === true),
+          fail: () => resolve(false),
+        });
+      });
+      if (sure === false) return;
+    }
+    const draft = newSceneDraft({
+      observationIds: confirmSet,
+      name: group.label,
+      locationText: this.data.batchLocation,
+      checked: true,
+    });
+    this.setData({ drafts: this.data.drafts.concat([draft]) }, () => {
+      this.renderObservations();
+      this.renderDrafts();
+      this.saveSession();
+    });
   },
 
-  onMergeSameNameChange(e: WechatMiniprogram.CustomEvent) {
-    const value = isRecord(e.detail) && e.detail.value === true;
-    this.setData({ mergeSameName: value });
-  },
+  /** 有多件或需拆开:组卡切逐条模式(组件展开),零数据变更(§2.2) */
+  onGroupConfirmMulti() {},
 
-  onGenerateDraftsTap() {
-    if (this.data.selectedObsIds.length === 0) {
+  /** 暂不确定:组卡折叠,零数据变更(§2.3);组保留在待确认列表与统计里 */
+  onGroupDefer() {},
+
+  /** 逐条生成(组内作用域,§7):先过 §2.4 归属门,再按一条一草稿生成 */
+  onGenerateDraftsTap(e: WechatMiniprogram.CustomEvent) {
+    if (this.data.busy || this.data.phase !== "review") return;
+    const detail = e.detail || {};
+    const obsIds = Array.isArray(detail.obsIds) ? detail.obsIds as string[] : [];
+    if (obsIds.length === 0) {
       wx.showToast({ title: "先勾选至少一条线索", icon: "none" });
       return;
     }
-    const drafts = createDraftsFromObservations(this.data.observations, this.data.selectedObsIds, {
-      mergeSameName: this.data.mergeSameName,
+    const conflict = claimGuard(this.data.observations, this.data.drafts, obsIds);
+    if (conflict !== null) {
+      const index = this.data.observations.findIndex((o) => o.obsId === conflict.obsId);
+      wx.showToast({
+        title: "第 " + (index + 1) + " 条线索已用于「" + conflict.draftName + "」,先移除该草稿或拆分后再操作",
+        icon: "none",
+      });
+      return;
+    }
+    const drafts = createDraftsFromObservations(this.data.observations, obsIds, {
+      mergeSameName: false,
       batchLocation: this.data.batchLocation,
     });
-    this.setData({
-      drafts: this.data.drafts.concat(drafts),
-      selectedObsIds: [],
-    }, () => {
+    this.setData({ drafts: this.data.drafts.concat(drafts) }, () => {
       this.renderObservations();
       this.renderDrafts();
       this.saveSession();
@@ -590,7 +614,11 @@ Page({
     if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
     const drafts = this.data.drafts.slice();
     drafts[index] = { ...drafts[index], name: value };
-    this.setData({ drafts }, () => this.renderDrafts());
+    // 改名影响组卡「已用于:{草稿名}」归属标签(claimText 随草稿名推导),与 D1 页同步重算组视图
+    this.setData({ drafts }, () => {
+      this.renderObservations();
+      this.renderDrafts();
+    });
   },
 
   onDraftLocationInput(e: WechatMiniprogram.CustomEvent) {
@@ -646,6 +674,7 @@ Page({
     const drafts = this.data.drafts.filter((_, i) => i !== index);
     const keys = this.data.mergeSelectedKeys.filter((k) => k !== removed.draftKey);
     this.setData({ drafts, mergeSelectedKeys: keys }, () => {
+      this.renderObservations();
       this.renderDrafts();
       this.saveSession();
     });
@@ -663,6 +692,7 @@ Page({
     const drafts = this.data.drafts.slice();
     drafts.splice(index, 1, ...split);
     this.setData({ drafts }, () => {
+      this.renderObservations();
       this.renderDrafts();
       this.saveSession();
       wx.showToast({ title: "已拆成 " + split.length + " 件", icon: "none" });
@@ -680,6 +710,7 @@ Page({
     const drafts = this.data.drafts.filter((d) => keys.has(d.draftKey) === false);
     drafts.splice(Math.max(0, firstIndex), 0, merged);
     this.setData({ drafts, mergeSelectedKeys: [] }, () => {
+      this.renderObservations();
       this.renderDrafts();
       this.saveSession();
     });
@@ -699,6 +730,7 @@ Page({
       checked: true,
     });
     this.setData({ drafts: this.data.drafts.concat([draft]) }, () => {
+      this.renderObservations();
       this.renderDrafts();
       this.saveSession();
     });
@@ -773,7 +805,6 @@ Page({
           resultText: "",
           observations: [],
           drafts: [],
-          selectedObsIds: [],
           mergeSelectedKeys: [],
           frozenItems: [],
           pendingUpload: null,

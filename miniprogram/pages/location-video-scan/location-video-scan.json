@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "拍视频清点"
+  "navigationBarTitleText": "拍视频清点",
+  "usingComponents": {
+    "scene-group-card": "/components/scene-group-card/scene-group-card"
+  }
 }

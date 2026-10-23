@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LOCATION_SCAN_SESSION_TTL_MS = exports.LOCATION_SCAN_SESSION_PREFIX = void 0;
 exports.locationScanSessionKey = locationScanSessionKey;
+exports.mergeLocationScanDrafts = mergeLocationScanDrafts;
 exports.buildLocationScanCommitItems = buildLocationScanCommitItems;
 exports.scanDateText = scanDateText;
 exports.lastScanSummaryText = lastScanSummaryText;
@@ -13,6 +14,31 @@ exports.LOCATION_SCAN_SESSION_PREFIX = "home-memory:location-scan-session:";
 exports.LOCATION_SCAN_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 function locationScanSessionKey(scopeId, nodeId) {
     return exports.LOCATION_SCAN_SESSION_PREFIX + (scopeId || "default") + ":" + nodeId;
+}
+/**
+ * D1 合并门(架构终裁,PR #105 review 5626920410):「选去合并」只允许在目标
+ * 位置一致时进行——所有被选中草稿的 nodeId 全部相等(全部为空=默认进入位置,
+ * 或全部为同一非空子位置)才合并,合并结果保留该一致 nodeId;否则拒绝合并,
+ * 由页面 toast 提示先统一目标子位置。合并骨架仍走 mergeSceneDrafts(B 页无
+ * 位置上下文的既有语义零变化),这里只叠加位置纪律并补回 nodeId——
+ * mergeSceneDrafts 返回普通 SceneDraftItem,不带 LocationScanDraft 的 nodeId。
+ */
+function mergeLocationScanDrafts(drafts, draftKeys, entryNodeId) {
+    const wanted = new Set(draftKeys);
+    const picked = drafts.filter((d) => wanted.has(d.draftKey));
+    if (picked.length < 2 || picked.some((d) => d.target === "existing")) {
+        return { ok: false, message: "请选择至少两件新建物品草稿" };
+    }
+    const targetOf = (d) => d.nodeId !== undefined && d.nodeId !== "" ? d.nodeId : entryNodeId;
+    const target = targetOf(picked[0]);
+    if (picked.some((d) => targetOf(d) !== target)) {
+        return { ok: false, message: "所选草稿的目标位置不一致,请先统一子位置再合并" };
+    }
+    const merged = (0, video_scene_1.mergeSceneDrafts)(drafts, draftKeys);
+    if (merged === null) {
+        return { ok: false, message: "请选择至少两件新建物品草稿" };
+    }
+    return { ok: true, draft: { ...merged, nodeId: target } };
 }
 /**
  * 构建 D1 提交载荷(在 B 的 buildSceneCommitItems 骨架上叠加位置纪律):

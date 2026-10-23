@@ -60,19 +60,7 @@
   background: #f7f2e7;
   font-size: 26rpx;
 }
-.obs-group { margin-top: 18rpx; }
-.obs-group-title { font-size: 24rpx; font-weight: 800; color: #7a5c08; margin-bottom: 10rpx; }
-.obs-row {
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  padding: 12rpx;
-  margin-bottom: 10rpx;
-  border-radius: 16rpx;
-  border: 2rpx solid transparent;
-  background: #f7f2e7;
-}
-.obs-row.selected { border-color: var(--go-bg, #1d1c18); background: #fff8d8; }
+.stats-line { margin-top: 14rpx; font-size: 25rpx; font-weight: 800; color: #7a5c08; }
 .check {
   flex: 0 0 40rpx;
   width: 40rpx;
@@ -86,20 +74,14 @@
   background: transparent;
 }
 .check.on { background: var(--go-bg, #1d1c18); color: var(--go-fg, #fff4c7); border-color: var(--go-bg, #1d1c18); }
-.obs-img-wrap { position: relative; flex: 0 0 130rpx; width: 130rpx; height: 96rpx; overflow: hidden; border-radius: 10rpx; background: #e6dfd1; }
-.obs-img { width: 100%; height: 100%; }
-.obs-box { position: absolute; border: 4rpx solid #ffd600; border-radius: 4rpx; box-sizing: border-box; pointer-events: none; }
-.obs-info { min-width: 0; flex: 1; }
-.obs-name { font-size: 27rpx; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.obs-meta { margin-top: 6rpx; font-size: 22rpx; color: var(--text-3); }
-.toggle-row { display: flex; align-items: center; gap: 12rpx; margin-top: 20rpx; }
-.toggle-copy { flex: 1; font-size: 22rpx; line-height: 1.45; color: var(--text-2); }
 .draft-card { margin-top: 16rpx; padding: 16rpx; border-radius: 18rpx; background: #fbf7ed; border: 2rpx solid rgba(29, 28, 24, 0.1); }
 .draft-head { display: flex; align-items: center; gap: 12rpx; }
 .name-input { flex: 1; min-height: 72rpx; font-size: 28rpx; font-weight: 800; }
 .tiny-danger { flex: 0 0 auto; padding: 10rpx 6rpx; font-size: 22rpx; color: #b02a1b; }
 .target-row { margin-top: 10rpx; padding: 14rpx 12rpx; border-radius: 12rpx; background: #efe8d8; font-size: 23rpx; color: #5f5437; }
 .draft-meta { margin-top: 10rpx; font-size: 22rpx; color: var(--text-3); }
+/* §2.1 草稿卡 >8 高亮警示行(与组卡 sgc-warn 同一冻结文案,sceneHighlightWarningText 单一来源) */
+.draft-warn { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #b02a1b; }
 .manual-times { margin-top: 10rpx; display: flex; align-items: center; flex-wrap: wrap; gap: 6rpx; font-size: 22rpx; color: var(--text-2); }
 .time-input { width: 100rpx; min-height: 58rpx; padding: 0 10rpx; border-radius: 10rpx; background: #fff; text-align: center; font-size: 24rpx; }
 .draft-actions { display: flex; gap: 12rpx; margin-top: 12rpx; flex-wrap: wrap; }
