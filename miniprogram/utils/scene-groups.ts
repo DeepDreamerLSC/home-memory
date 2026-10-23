@@ -52,6 +52,8 @@ export interface SceneGroupView {
   stateText: string;
   remainingCount: number;
   sameFrameRisk: boolean;
+  /** §2.1 修订(PR #105 review 5626920410):重复实际发生帧的时间文本;无同帧重复为 "" */
+  duplicateFrameTimeText: string;
   highlightWarning: string;
   repFrame: SceneRepFrameView;
   observations: SceneObsView[];
@@ -88,8 +90,27 @@ export function sceneHighlightWarningText(clueCount: number): string {
 }
 
 /**
+ * §2.1 修订(架构复审 PR #105 review 5626920410):同帧风险弹窗显示
+ * 「重复实际发生的帧」的时间,而非代表帧时间。找到组内出现 ≥2 条观察的
+ * frameIndex(取扫描序最先命中者),返回该 frameIndex 下扫描序第一条观察的
+ * 时间文本;组无同帧重复时返回空串(调用方仅在有 sameFrameRisk 时使用)。
+ * 两页经组视图携带的本字段共用此单一来源,不得各自计算。
+ */
+export function duplicateFrameTimeText(group: SceneObservationGroup): string {
+  const counts = new Map<number, number>();
+  for (const obs of group.observations) {
+    counts.set(obs.frameIndex, (counts.get(obs.frameIndex) || 0) + 1);
+  }
+  for (const obs of group.observations) {
+    if ((counts.get(obs.frameIndex) || 0) >= 2) return videoTimeText(obs.timeMs);
+  }
+  return "";
+}
+
+/**
  * §2.1 同帧风险二次确认 modal 的冻结文案(单一来源,两页共用,防单边漂移):
- * 标题「可能有多件」/ 内容(含 {代表帧时间})/ 确认「就1件」/ 取消「再看看」。
+ * 标题「可能有多件」/ 内容(含 {重复所在帧时间},§2.1 修订 PR #105 review
+ * 5626920410——重复实际发生的帧,而非代表帧)/ 确认「就1件」/ 取消「再看看」。
  */
 export interface SameFrameRiskModalCopy {
   title: string;
@@ -98,10 +119,10 @@ export interface SameFrameRiskModalCopy {
   cancelText: string;
 }
 
-export function sameFrameRiskModalCopy(repFrameTimeText: string): SameFrameRiskModalCopy {
+export function sameFrameRiskModalCopy(duplicateFrameTimeText: string): SameFrameRiskModalCopy {
   return {
     title: "可能有多件",
-    content: "这一组在第 " + repFrameTimeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+    content: "这一组在第 " + duplicateFrameTimeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
     confirmText: "就1件",
     cancelText: "再看看",
   };
@@ -223,6 +244,8 @@ export function buildSceneGroupViews(
       stateText,
       remainingCount,
       sameFrameRisk: sameFrameDuplicate(group.observations),
+      // §2.1 修订(PR #105 review 5626920410):风险弹窗时间=重复实际发生帧,单一来源见 duplicateFrameTimeText
+      duplicateFrameTimeText: duplicateFrameTimeText(group),
       // §2.1:确认集>单件高亮上限时显式警示(组卡按剩余未归属数;确认后警示随草稿走,见草稿卡),绝不静默截断
       highlightWarning: sceneHighlightWarningText(remainingCount),
       repFrame: {

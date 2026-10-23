@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sceneHighlightWarningText = sceneHighlightWarningText;
+exports.duplicateFrameTimeText = duplicateFrameTimeText;
 exports.sameFrameRiskModalCopy = sameFrameRiskModalCopy;
 exports.representativeObservation = representativeObservation;
 exports.buildSceneGroupViews = buildSceneGroupViews;
@@ -34,10 +35,28 @@ function sceneHighlightWarningText(clueCount) {
         ? "线索 " + clueCount + " 条,单件最多 " + video_scene_1.SCENE_HIGHLIGHTS_MAX + " 条高亮,保存前需减到 ≤" + video_scene_1.SCENE_HIGHLIGHTS_MAX
         : "";
 }
-function sameFrameRiskModalCopy(repFrameTimeText) {
+/**
+ * §2.1 修订(架构复审 PR #105 review 5626920410):同帧风险弹窗显示
+ * 「重复实际发生的帧」的时间,而非代表帧时间。找到组内出现 ≥2 条观察的
+ * frameIndex(取扫描序最先命中者),返回该 frameIndex 下扫描序第一条观察的
+ * 时间文本;组无同帧重复时返回空串(调用方仅在有 sameFrameRisk 时使用)。
+ * 两页经组视图携带的本字段共用此单一来源,不得各自计算。
+ */
+function duplicateFrameTimeText(group) {
+    const counts = new Map();
+    for (const obs of group.observations) {
+        counts.set(obs.frameIndex, (counts.get(obs.frameIndex) || 0) + 1);
+    }
+    for (const obs of group.observations) {
+        if ((counts.get(obs.frameIndex) || 0) >= 2)
+            return (0, video_target_1.videoTimeText)(obs.timeMs);
+    }
+    return "";
+}
+function sameFrameRiskModalCopy(duplicateFrameTimeText) {
     return {
         title: "可能有多件",
-        content: "这一组在第 " + repFrameTimeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+        content: "这一组在第 " + duplicateFrameTimeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
         confirmText: "就1件",
         cancelText: "再看看",
     };
@@ -157,6 +176,8 @@ function buildSceneGroupViews(observations, drafts, checkedObsIds) {
             stateText,
             remainingCount,
             sameFrameRisk: sameFrameDuplicate(group.observations),
+            // §2.1 修订(PR #105 review 5626920410):风险弹窗时间=重复实际发生帧,单一来源见 duplicateFrameTimeText
+            duplicateFrameTimeText: duplicateFrameTimeText(group),
             // §2.1:确认集>单件高亮上限时显式警示(组卡按剩余未归属数;确认后警示随草稿走,见草稿卡),绝不静默截断
             highlightWarning: sceneHighlightWarningText(remainingCount),
             repFrame: {

@@ -14,6 +14,9 @@
  *     state: "pending" | "single" | "multi", stateText(§1.2 冻结文案),
  *     remainingCount(未归属观察数),
  *     sameFrameRisk(§3.1 同帧同名布尔),
+ *     duplicateFrameTimeText(§2.1 修订 PR #105 review 5626920410:重复实际
+ *       发生帧的时间文本——组内出现 ≥2 条观察的 frameIndex 取扫描序最先
+ *       命中者,时间取该帧下扫描序第一条观察的 timeText;无同帧重复为 ""),
  *     highlightWarning(默认确认集=整组未归属 ≤8 条时为 "";>8 时为 §2.1 冻结警示),
  *     repFrame: { framePath, boxStyle, timeText },
  *     observations: ObsView[](obsId/name/timeText/confidenceText/framePath/
@@ -28,8 +31,13 @@
  * - representativeObservation(group) → SceneObservation(输入为分组原语的组对象)
  * - sceneHighlightWarningText(count) → §2.1 冻结警示串(>8 时非空;组卡按剩余数、
  *   草稿卡按草稿线索数取用同一来源,两页零复制)
- * - sameFrameRiskModalCopy(repFrameTimeText) → §2.1 同帧风险二次确认 modal 冻结文案
- *   (title/content/confirmText/cancelText,两页共用单一来源,单边漂移即本文件红)
+ * - sameFrameRiskModalCopy(duplicateFrameTimeText) → §2.1 同帧风险二次确认
+ *   modal 冻结文案(title/content/confirmText/cancelText,两页共用单一来源,
+ *   单边漂移即本文件红)。时间参数=重复所在帧时间文本(§2.1 修订,PR #105
+ *   review 5626920410:此前误用代表帧时间,重复不在最新帧时弹窗指错帧),
+ *   由 duplicateFrameTimeText(group) 单一来源产出,页面不得各自计算。
+ * - duplicateFrameTimeText(group) → 重复实际发生帧的时间文本;组无同帧
+ *   重复返回 ""(调用方仅在有 sameFrameRisk 时使用)。
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -542,13 +550,60 @@ test("SG-HIGHLIGHT-WARN-SHARED:警示串单一来源;9 条草稿(整组确认后
   assert.equal(warnText(manual.observationIds.length), "");
 });
 
-test("SG-RISK-MODAL-COPY:同帧风险 modal 冻结文案单一来源(§2.1;两页共用,漂移即红)", () => {
+test("SG-RISK-MODAL-COPY:同帧风险 modal 冻结文案单一来源;时间=重复所在帧时间而非代表帧时间(§2.1 修订,PR #105 review 5626920410)", () => {
   const modalCopy = mustFn("sameFrameRiskModalCopy");
-  const copy = modalCopy(videoTarget.videoTimeText(3000));
+  const dupTime = mustFn("duplicateFrameTimeText");
+
+  // 参数语义=重复帧时间文本:重复发生在 frameIndex 2(0:03),另有更新的一帧(代表帧 0:09)
+  const observations = [
+    obs("充电器", { obsId: "o-mc-a", frameIndex: 2, timeMs: 3000 }),
+    obs("充电器", { obsId: "o-mc-b", frameIndex: 2, timeMs: 3000 }),
+    obs("充电器", { obsId: "o-mc-c", frameIndex: 6, timeMs: 9000 }),
+  ];
+  const group = scene.groupSceneObservations(observations)[0];
+  assert.equal(
+    dupTime(group),
+    videoTarget.videoTimeText(3000),
+    "重复帧时间=扫描序最先命中的重复 frameIndex 下第一条观察的时间",
+  );
+  assert.equal(
+    dupTime(scene.groupSceneObservations(crossFrameObs("电池", 3))[0]),
+    "",
+    "无同帧重复返回空串(调用方仅在有 sameFrameRisk 时使用)",
+  );
+
+  const copy = modalCopy(dupTime(group));
   assert.equal(copy.title, "可能有多件");
   assert.equal(copy.content, "这一组在第 0:03 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?");
   assert.equal(copy.confirmText, "就1件");
   assert.equal(copy.cancelText, "再看看");
+});
+
+test("SG-RISK-DUP-OLD-FRAME:重复发生在旧帧、代表帧为新帧时,弹窗时间指向旧帧(重复帧)而非新帧(§2.1 修订,PR #105 review 5626920410)", () => {
+  const buildSceneGroupViews = mustFn("buildSceneGroupViews");
+  const dupTime = mustFn("duplicateFrameTimeText");
+  const modalCopy = mustFn("sameFrameRiskModalCopy");
+
+  // 反例:两条同名观察重复出现在旧帧 frameIndex 1(0:01);代表帧=组内 timeMs
+  // 最大者=0:07(新帧)——弹窗必须指向重复实际发生的旧帧
+  const observations = [
+    obs("充电器", { obsId: "o-old-a", frameIndex: 1, timeMs: 1500 }),
+    obs("充电器", { obsId: "o-old-b", frameIndex: 1, timeMs: 1500 }),
+    obs("充电器", { obsId: "o-new-c", frameIndex: 5, timeMs: 7500 }),
+  ];
+  const views = buildSceneGroupViews(observations, []);
+  assert.equal(views[0].sameFrameRisk, true);
+  assert.equal(views[0].repFrame.timeText, videoTarget.videoTimeText(7500), "代表帧仍是 timeMs 最大者(新帧,§3.2 规则不变)");
+  assert.equal(views[0].duplicateFrameTimeText, videoTarget.videoTimeText(1500), "组视图携带重复帧时间(旧帧)");
+  assert.equal(dupTime(scene.groupSceneObservations(observations)[0]), videoTarget.videoTimeText(1500));
+
+  const copy = modalCopy(views[0].duplicateFrameTimeText);
+  assert.equal(
+    copy.content,
+    "这一组在第 0:01 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+    "弹窗文案指向重复实际发生的帧(旧帧)时间",
+  );
+  assert.equal(copy.content.indexOf(videoTarget.videoTimeText(7500)), -1, "弹窗绝不指向代表帧(新帧)时间");
 });
 
 /* ---------------- F. 统计口径(三数分立,冻结文案) ---------------- */

@@ -53,7 +53,8 @@
 - **确认集** = 组内**未归属**观察中,用户在展开态勾选的子集;展开态勾选为空或折叠态直接点击 → **整组未归属观察**。已归属观察行显示「已用于:{草稿名}」且不可勾选(§2.4 归属唯一不变式)。确认集为空(全组已归属)→ 按钮禁用。
 - **生成**:`newSceneDraft({ observationIds: 确认集(扫描序,无重复), name: 组 label, locationText: 页面位置(video-scan 用 `batchLocation`;location-video-scan 用进入位置路径文本并按 `location-video-scan.ts:656` 同款补 `nodeId`), checked: true })`。draftKey/operationId 由 `newSceneDraft` 的 uuid 独立生成(`video-scene.ts:238,243`),与其他草稿、其他组绝不共享。
 - **高亮**:确认时不计算、不截断任何高亮;高亮仍由保存时 `buildDraftHighlights` 从全部 `observationIds` 逐条构建(`video-scene.ts:382-410`)。单件 ≤8 条的既有硬门不动(`video-scene.ts:431`):确认集 >8 条时允许生成草稿,但组卡与草稿卡显示警示「线索 N 条,单件最多 8 条高亮,保存前需减到 ≤8」,保存被既有门拦截——**绝不静默截断**(截断=丢证据,禁止)。
-- **同帧风险二次确认**:组 `sameFrameRisk=true` 时,首次点击弹 `wx.showModal`:标题「可能有多件」,内容冻结「这一组在第 {代表帧时间} 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?」,确认 → 生成;取消 → 无任何变更。风险为假时无弹窗。
+- **同帧风险二次确认**:组 `sameFrameRisk=true` 时,首次点击弹 `wx.showModal`:标题「可能有多件」,内容冻结「这一组在第 {重复所在帧时间} 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?」,确认 → 生成;取消 → 无任何变更。风险为假时无弹窗。
+  - **修订(PR #105 架构复审 review 5626920410)**:冻结串原为 `{代表帧时间}`(组内 timeMs 最大者);当同帧重复不在最新帧、代表帧取到更新帧时,弹窗指错帧。修订为 `{重复所在帧时间}`——弹窗必须指向重复实际发生的帧:组内出现 ≥2 条观察的 `frameIndex` 取扫描序最先命中者,时间取该帧下扫描序第一条观察的 `timeText`(`scene-groups.duplicateFrameTimeText(group)` 单一来源,组视图携带 `duplicateFrameTimeText` 字段;无同帧重复返回空串,调用方仅在有 `sameFrameRisk` 时使用),两页不得各自计算。代表帧规则(§3.2)本身不变。
 - 确认后组卡自动折叠,推导态切到「就 1 件」;**撤销路径 = 既有草稿「移除」**(`onDraftRemoveTap`)→ 观察回到未归属,组回到待确认;事后改判多件 = 既有「拆成多件」(`onDraftSplitTap`)。
 
 ### 2.2 「有多件或需拆开」(进入逐条分配,不产生草稿)
@@ -116,11 +117,12 @@
 
 与 `video-scene.ts`/`item-match.ts` 同风格(node 可直接 require 测试)。职责:
 
-1. `buildSceneGroupViews(observations, drafts)`:内部调升级后的 `groupSceneObservations`,产出组视图模型 `{ nameKey, label, countText, state, stateText, remainingCount, sameFrameRisk, repFrame:{framePath,boxStyle,timeText}, observations: ObsView[](含 claimed/claimText/checked) }`。
+1. `buildSceneGroupViews(observations, drafts)`:内部调升级后的 `groupSceneObservations`,产出组视图模型 `{ nameKey, label, countText, state, stateText, remainingCount, sameFrameRisk, duplicateFrameTimeText(§2.1 修订,PR #105 review 5626920410), repFrame:{framePath,boxStyle,timeText}, observations: ObsView[](含 claimed/claimText/checked) }`。
 2. `groupStats(observations, drafts)`:§4 的 N/M/N_d/X 与顶部行文案串。
 3. `confirmSingleSet(group, checkedIds | null)`:§2.1 确认集计算(含归属过滤)。
 4. `claimGuard(observations, drafts, selectedIds)`:§2.4 阻塞判定,返回首个冲突(观察+草稿名)。
 5. `representativeObservation(group)`:§3.2 规则。
+6. `duplicateFrameTimeText(group)`:§2.1 修订(PR #105 review 5626920410)——同帧风险弹窗时间的单一来源,见 §2.1 修订条。
 
 依赖方向无环:`scene-groups.ts` → `video-scene.ts`(类型+分组)+ `item-match.ts`(归一化);`video-scene.ts` → `item-match.ts`(仅 `normalizeForMatch`)。**不新增 npm 依赖**。
 

@@ -520,7 +520,8 @@ Page({
     const confirmSet = confirmSingleSet(group, obsIds);
     if (confirmSet.length === 0) return;
     if (group.sameFrameRisk) {
-      const riskModal = sameFrameRiskModalCopy(group.repFrame.timeText);
+      // §2.1 修订(PR #105 review 5626920410):弹窗时间=重复实际发生帧,非代表帧
+      const riskModal = sameFrameRiskModalCopy(group.duplicateFrameTimeText);
       const sure = await new Promise<boolean>((resolve) => {
         wx.showModal({
           title: riskModal.title,
