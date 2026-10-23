@@ -13,12 +13,15 @@
 | 单位闭集 UNIT_SET | `件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只`(issue §1 候选 14 值全取,只增不减,见 §2.2) |
 | quantity 类型与边界 | `Number.isInteger`;新建(create 类插入)1..9999;已有(update/quantityAdjust 结果)0..9999;0=确认「目前没有」 |
 | legacy unset 读侧表达 | 投影携带 `quantity: number\|null` 与 `unit: string\|null`,**双 null ⇔ 数量未确认**;绝不回填、绝不由 note 推断(见 §2.4) |
+| 数量确认时间 | `quantity_confirmed_at`(ISO,随每次数量确认写入,legacy 缺省;PR #103 对齐新增,见 §2.6/§14.1-1) |
 | 新建缺省=1 触发条件 | 仅 create 类入口的**插入路径**且请求 `quantity` 键**缺席**(undefined)时写 `quantity:1, unit:"件"`(见 §5) |
 | 语音数量写 action | 统一为单一 action `quantityAdjust`,`mode: "add"\|"subtract"\|"set"`(见 §7.1) |
 | 语音数量解析提议 | extractDraft 新增零写 action `quantityIntentParse`(见 §7.8) |
+| 冲突响应带最新值 | update/quantityAdjust 的 VERSION_CONFLICT 携带 `current`(完整 item 投影,PR #103 对齐新增,见 §14.1-4) |
 | 照片同帧多框降级 | 合并行(≥2 个来源框)`photo.box = null` 整照关联;单来源行保留原框(见 §8) |
 | 视频 observation ≠ quantity | observation 数/frame 数/VL confidence/名称匹配永不赋值 quantity;`location_scans.confirmed_count` 语义不变(见 §9) |
-| UI 防双展示 | 确认态物品的 note 若为旧 `×N 后缀` 形状,展示时剥掉 `×N` 词元(存储原文不动,纯展示变换,见 §10) |
+| UI 防双展示 | note 折叠为原备注、绝不与数量并排(PR #103 主规则);displayNoteFor 剥 `×N` 词元降为兜底(见 §10) |
+| UI 文案口径 | 已确认=「上次确认 ×N 单位(时间)」;未确认=「待核对」(列表右槽/详情均用,见 §10.1) |
 | 不做 | 库存流水/SKU/阈值提醒/单位换算/自动合并已入库 item/跨位置数量搬移/#87/#85/#101 R1(见 §13) |
 
 ## 1. 领域铁律(逐条可测,L1-L12)
@@ -42,16 +45,18 @@
 
 ### 2.1 字段
 
-items 文档新增两个可选字段(与既有 `remind_vague_quote`、`location_node_id` 同款「只增不改」模式):
+items 文档新增三个可选字段(与既有 `remind_vague_quote`、`location_node_id` 同款「只增不改」模式):
 
 ```
-quantity?: number   // 正整数 0..9999(新建写入时恒 ≥1);缺省 = 数量未确认(legacy)
-unit?: string       // UNIT_SET 成员;缺省 = 数量未确认
+quantity?: number            // 正整数 0..9999(新建写入时恒 ≥1);缺省 = 数量未确认(legacy)
+unit?: string                // UNIT_SET 成员;缺省 = 数量未确认
+quantity_confirmed_at?: string  // ISO 时间戳,最近一次数量确认的时刻;缺省 = 数量未确认(legacy)
 ```
 
-- 不变量 **I1(成对不变量)**:文档上 `quantity` 与 `unit` **同现同缺**。任何写路径(Q1 的 create/update、Q2 的 quantityAdjust)不得产出半态(有 quantity 无 unit 或反之)。违反 I1 的存量/异常文档按「未确认」读(§2.4 防御性解析),不修复、不报错。
-- 不变量 **I2(单一版本链)**:quantity/unit 的一切写入都走既有 items 版本条件更新(version CAS +1)或 create 插入,不存在无条件改写。locations 函数族的挂载写(linkItem/unlinkItem/ensureAndLink/merge/applyScan/deleteLocation migrate)是**部分字段条件更新**,不得触碰 quantity/unit;Q1 须有测试断言「挂载/移动/合并后 quantity/unit 原样存活」。
-- 不变量 **I3(delete 不碰数量)**:itemsApi.delete 软删时抹空 name/name_norm/location_text/note(handler.js:1175)但**不触碰** quantity/unit(已删文档永不被投影,抹不抹无观察差异;最小改动,且避免 delete 路径新增字段语义)。
+- 不变量 **I1(成组不变量)**:文档上 `quantity`、`unit`、`quantity_confirmed_at` **三者同现同缺**。任何写路径(Q1 的 create/update、Q2 的 quantityAdjust)不得产出半态。违反 I1 的存量/异常文档按「未确认」读(§2.4 防御性解析),不修复、不报错。**读侧唯一放宽**:quantity/unit 合法而 `quantity_confirmed_at` 缺失/非 string → 数量仍按已确认读,confirmed_at 读 null(展示退化为「上次确认 ×N 单位」无时间;绝不因时间戳异常丢掉用户确认过的数量)。
+- 不变量 **I2(单一版本链)**:quantity/unit 的一切写入都走既有 items 版本条件更新(version CAS +1)或 create 插入,不存在无条件改写。locations 函数族的挂载写(linkItem/unlinkItem/ensureAndLink/merge/applyScan/deleteLocation migrate)是**部分字段条件更新**,不得触碰 quantity/unit/quantity_confirmed_at;Q1 须有测试断言「挂载/移动/合并后 quantity/unit 原样存活」。
+- 不变量 **I3(delete 不碰数量)**:itemsApi.delete 软删时抹空 name/name_norm/location_text/note(handler.js:1175)但**不触碰** quantity/unit/quantity_confirmed_at(已删文档永不被投影,抹不抹无观察差异;最小改动,且避免 delete 路径新增字段语义)。
+- 不变量 **I4(确认时间是元数据)**:`quantity_confirmed_at` 与 version/updated_at 同族——**绝不进入任何内容指纹、幂等内容比对或载荷签名**(§2.6;它随每次写入取当前时刻,进指纹会破坏响应丢失后的重放识别,这是实现层必须避开的坑)。
 
 ### 2.2 UNIT_SET 冻结(unit 闭集)
 
@@ -83,23 +88,33 @@ parseQuantityInput(v, min) →
 
 ### 2.4 读侧表达(投影字段名,legacy unset 的唯一表达)
 
-itemsApi 的 `project()` 家族(handler.js:227-236;`projectDetail` 在其上扩展,:243-247)投影**增补两个字段**:
+itemsApi 的 `project()` 家族(handler.js:227-236;`projectDetail` 在其上扩展,:243-247)投影**增补三个字段**:
 
 ```
 quantity: number | null
 unit: string | null
+quantity_confirmed_at: string | null
 ```
 
-- 投影覆盖的 action 响应:`create`、`update`、`get`、`query`、`list`(即全部走 `project()/projectDetail()` 的 items 投影)。**不覆盖**(保持零变化,后续经 change request 另议):`remindList` 行(remindRow,handler.js:860-874)、locations.list 的 items/unmounted_items、locationScanContext 的 subtree_items/household_items。Q2 语音定位候选经 `get/query` 读取当前数量,不需要扩这些投影。
-- 读侧防御性解析 `readQuantity(doc)`(冻结):`typeof doc.quantity === "number" && Number.isInteger(doc.quantity) && doc.quantity >= 0 && doc.quantity <= 9999 && typeof doc.unit === "string" && UNIT_SET.indexOf(doc.unit) !== -1` → 返回 `{ quantity, unit }`;否则 → 返回 `null`。投影时 `null` ⇢ `quantity: null, unit: null`。**任何存储异常(半态、越界、闭集外单位)一律按未确认读,绝不伪造已确认值**。
+- 投影覆盖的 action 响应:`create`、`update`、`get`、`query`、`list`(即全部走 `project()/projectDetail()` 的 items 投影),以及 §14.1-4 冻结的 update/quantityAdjust **VERSION_CONFLICT 响应的 `current`**(同一投影)。**不覆盖**(保持零变化,后续经 change request 另议):`remindList` 行(remindRow,handler.js:860-874)、locations.list 的 items/unmounted_items、locationScanContext 的 subtree_items/household_items。Q2 语音定位候选经 `get/query` 读取当前数量,不需要扩这些投影。
+- 读侧防御性解析 `readQuantity(doc)`(冻结):`typeof doc.quantity === "number" && Number.isInteger(doc.quantity) && doc.quantity >= 0 && doc.quantity <= 9999 && typeof doc.unit === "string" && UNIT_SET.indexOf(doc.unit) !== -1` → 返回 `{ quantity, unit, confirmedAt: typeof doc.quantity_confirmed_at === "string" ? doc.quantity_confirmed_at : null }`;否则 → 返回 `null`。投影时 `null` ⇢ 三字段全 null。**任何存储异常(半态、越界、闭集外单位)一律按未确认读,绝不伪造已确认值**;quantity/unit 合法而 confirmed_at 异常 → 已确认读 + confirmed_at:null(I1 放宽分支)。
 - 旧客户端对新增投影键天然忽略(与 `engine`、`version` 字段新增同款先例,API_CONTRACT.md §extractDraft「双引擎」、types.ts:1056-1059)。
-- 新客户端对**旧服务端**(部署窗口内)投影可能缺失这两个键:客户端统一归一 `typeof item.quantity === "number" ? item.quantity : null`(unit 同理),缺键 ≡ 未确认(§11)。
+- 新客户端对**旧服务端**(部署窗口内)投影可能缺失这些键:客户端统一归一 `typeof item.quantity === "number" ? item.quantity : null`(unit/quantity_confirmed_at 同理),缺键 ≡ 未确认(§11)。
 
 ### 2.5 类型(miniprogram/types.ts,Q1 实施)
 
-- `ItemRecord`(文档形状,types.ts:11-30)增 `quantity?: number; unit?: string;`(可选,反映存储缺省)。
-- `ItemSummary`(投影形状,types.ts:33-40)增 `quantity: number | null; unit: string | null;`。
-- `ItemsApiEvent` 的 create/update 分支、`PhotoCommitItem`、`VideoSceneCommitNewItem` 增对应可选入参;新增 `quantityAdjust` 分支(Q2 落,形状见 §7.1)。
+- `ItemRecord`(文档形状,types.ts:11-30)增 `quantity?: number; unit?: string; quantity_confirmed_at?: string;`(可选,反映存储缺省)。
+- `ItemSummary`(投影形状,types.ts:33-40)增 `quantity: number | null; unit: string | null; quantity_confirmed_at: string | null;`。
+- `ItemsApiEvent` 的 create/update 分支、`PhotoCommitItem`、`VideoSceneCommitNewItem` 增对应可选入参(确认时间**永不由客户端提交**,纯服务端写入);新增 `quantityAdjust` 分支(Q2 落,形状见 §7.1)。
+
+### 2.6 quantity_confirmed_at(数量确认时间,PR #103 对齐新增)
+
+- **语义**:最近一次「数量确认」发生的时刻——「上次确认 ×N 单位」的时间轴锚点(§10.1)。一次数量确认 = 下列三者之一:create 插入路径写 quantity(含缺省 1/件);update 携 quantity+unit(含仅改单位语义,§14.1-3);quantityAdjust 成功(含 set 首次确认)。名称/位置/备注编辑、挂载/移动/合并、提醒操作、证据操作**都不是**数量确认,不刷新它。
+- **写入**:服务端取 deps.now()(ISO),与该次写入的 updated_at 同刻;**客户端永不提交该字段**(出现在任何请求里一律被忽略,不校验不报错——与 §4.8 多余键忽略口径一致)。
+- **legacy**:存量行无此字段 ⇔ 数量未确认(与 quantity/unit 一致);不回填。
+- **I4(元数据纪律)**:不进 changesFingerprint / sameCreateContent / QA 指纹 / scene_payload_sig——任何「内容一致性」判定都不含它(实现顺序见 §4.2;塞进指纹会破坏响应丢失重试的重放识别)。
+- **读侧**:§2.4 readQuantity 的 I1 放宽分支——quantity/unit 合法而本字段缺失/非 string → 已确认读 + confirmed_at:null(展示退化为无时间,不丢数量)。
+- **上报**:超出 issue §1.2「数据最小字段」字面清单,见 §15-OQ1(Owner 追认)。
 
 ## 3. 写入口总表(全部 create/update 写入口枚举)
 
@@ -144,9 +159,9 @@ unit: string | null
 4. `unit` 在场而 `quantity` 缺席 → INVALID_INPUT(QUANTITY_UNIT_PAIR);
 5. quantity 相关 INVALID_INPUT 一律携带 `detail: { reason }`(§6)。
 
-**写入**:插入路径写 `quantity: effQ, unit: effU`,其中 `effQ = event.quantity ?? 1`、`effU = event.unit ?? "件"`(**缺省=1 的唯一落点**,§5)。
+**写入**:插入路径写 `quantity: effQ, unit: effU, quantity_confirmed_at: now`(now 与 created_at 同一时刻;新建本身就是一次数量确认,含缺省 1/件),其中 `effQ = event.quantity ?? 1`、`effU = event.unit ?? "件"`(**缺省=1 的唯一落点**,§5)。
 
-**幂等扩展(L10②)**:`sameCreateContent(doc, name, locationText, note)`(handler.js:72-79)增第四步数量比对,冻结规则:
+**幂等扩展(L10②)**:`sameCreateContent(doc, name, locationText, note)`(handler.js:72-79)增第四步数量比对(**只比 quantity/unit,绝不比 quantity_confirmed_at**——I4,重试的 duplicated 分支原样返回既有文档,不需要时间戳一致),冻结规则:
 
 ```
 sameQuantityContent(doc, eventQuantity, eventUnit):
@@ -173,12 +188,12 @@ sameQuantityContent(doc, eventQuantity, eventUnit):
   , ... F2 双 marker }
 ```
 
-- **成对纪律**:quantity 与 unit 在 update 上**同携同缺**(一方在场另一方缺席 → INVALID_INPUT(QUANTITY_UNIT_PAIR))。理由:update 是部分字段更新,半对会要求「保留当前单位」的解析,而对未确认物品不存在「当前单位」——成对携带让客户端永远显式,杜绝半态(I1)。
-- **允许改单位**:update 是详情表单编辑,用户同时看到并提交数量+单位,允许 `unit` 与当前不同(例:3 件 → 5 包,是显式修正,不是「默默叠加」;L3 禁止的是跨单位算术)。Q2 的 quantityAdjust 则永不改单位(§7.4)。
-- **不携带 quantity 的 update 完全不触碰数量字段**(名称/位置/备注编辑不回填数量,L6);对 legacy 行亦然。
-- **指纹(L10②,零新机制)**:quantity/unit 进 `changes` → `changesFingerprint`(handler.js:167-174,键排序 JSON)自动覆盖。同 update_id 异数量重试 → 指纹失配 → VERSION_CONFLICT(绝不把新内容当重放吞掉,现有语义 :1145-1155 原样适用)。
-- **响应增量**:`item` 投影增 quantity/unit。replayed:true 收敛分支照旧。
-- 详情页 UI 纪律:未确认行的数量输入框显示占位「未确认」,**绝不预填 1**;仅在用户主动填写后 update 才携带 quantity/unit(§10.3)。
+- **成组纪律**:quantity 与 unit 在 update 上**同携同缺**(一方在场另一方缺席 → INVALID_INPUT(QUANTITY_UNIT_PAIR))。理由:update 是部分字段更新,半对会要求「保留当前单位」的解析,而对未确认物品不存在「当前单位」——成对携带让客户端永远显式,杜绝半态(I1)。
+- **允许改单位,且改单位 = 一次数量确认(PR #103 对齐,§14.1-3)**:update 是详情表单编辑(「设为当前总数」),用户同时看到并提交数量+单位,允许 `unit` 与当前不同(例:3 件 → 5 包,是**重新核对后的显式修正**,不是换算、不是「默默叠加」;L3 禁止的是跨单位算术)。携带 quantity/unit 的 update 一律刷新 `quantity_confirmed_at`(改单位也不例外——单位变了,旧数量的确认时刻不再可信,必须重新确认);「仅改单位」不存在:API 上表现为携同重核后的总数 {quantity: <用户重核的值>, unit: <新单位>},数值可与旧值相同。Q2 的 quantityAdjust 则永不改单位(§7.4)。
+- **不携带 quantity 的 update 完全不触碰数量字段**(名称/位置/备注编辑不回填数量、不刷新确认时间,L6);对 legacy 行亦然。
+- **指纹与注入顺序(L10②/I4,实现层硬门)**:quantity/unit 进 `changes` → `changesFingerprint`(handler.js:167-174,键排序 JSON)自动覆盖;**`quantity_confirmed_at` 绝不进指纹**——实现顺序冻结为:①从请求构造内容 changes(只含 name/location_text/note/quantity/unit)→ ②算指纹 → ③注入 quantity_confirmed_at/last_update_id/last_update_fingerprint/version/updated_at 再落库(与现有 :1113-1121 对 updated_at 的处理同款)。若把 confirmed_at 塞进指纹,响应丢失重试时新时间戳会让指纹永远失配,重放识别整体失效。同 update_id 异数量重试 → 指纹失配 → VERSION_CONFLICT(绝不把新内容当重放吞掉,现有语义 :1145-1155 原样适用)。
+- **响应增量**:`item` 投影增 quantity/unit/quantity_confirmed_at。replayed:true 收敛分支照旧;**VERSION_CONFLICT 响应增补 `current`(该 item 当前完整投影,含最新 version/quantity/unit/quantity_confirmed_at,§14.1-4)**——旧客户端忽略该键并沿用 get 刷新路径,零回归。
+- 详情页 UI 纪律:未确认行的数量输入框显示占位「待核对」,**绝不预填 1**;仅在用户主动填写后 update 才携带 quantity/unit(§10.3)。
 
 ### 4.3 itemsApi.photoCommit(E4)
 
@@ -253,7 +268,7 @@ photoEvidenceRetry(E5)、video 证据/票据/scanDelete 各 action(E8)、remind 
 1. 入口 ∈ {itemsApi.create(E1/E2), photoCommit 的 items[i](E4), videoSceneCommit 的 target:"new" items[i](E6)}——即**所有最终走 createItem 插入路径**的入口;
 2. 阶段 = **插入路径**(新文档组包,handler.js:963-978);duplicated/OPERATION_CONFLICT 分支只比对、绝不写;
 3. 条件 = `event.quantity === undefined`(键**缺席**;显式 `null`/非法值 → INVALID_INPUT,见 §4.1);
-4. 效果 = 文档写 `quantity: 1, unit: (event.unit === undefined ? "件" : event.unit)`——而 unit 单独在场已被 §4.1-4 拒绝,故实际只有 `quantity: 1, unit: "件"` 一种缺省形态。
+4. 效果 = 文档写 `quantity: 1, unit: (event.unit === undefined ? "件" : event.unit), quantity_confirmed_at: now`——而 unit 单独在场已被 §4.1-4 拒绝,故实际只有 `quantity: 1, unit: "件", quantity_confirmed_at: <创建时刻>` 一种缺省形态。
 
 **明确不适用缺省的场景**(负面清单,可测):
 - update 不携带 quantity → 字段不动(legacy 行保持未确认;已确认行保持原值);
@@ -329,7 +344,7 @@ quantity/unit 相关的 INVALID_INPUT **必须**携带 `detail: { reason, index?
 
 ### 7.4 版本 CAS 与 QA 指纹
 
-- 条件更新:where(`_id` 且 `household_id` 且 `deleted:false` 且 `version === expected_version`)写 `{ quantity:newQ, unit:effU, version:expected_version+1, updated_at, last_update_id:update_id, last_update_fingerprint:qaFp }`。effU = 未确认 set ? event.unit : doc.unit(不动)。
+- 条件更新:where(`_id` 且 `household_id` 且 `deleted:false` 且 `version === expected_version`)写 `{ quantity:newQ, unit:effU, quantity_confirmed_at: now, version:expected_version+1, updated_at, last_update_id:update_id, last_update_fingerprint:qaFp }`。effU = 未确认 set ? event.unit : doc.unit(不动)。`quantity_confirmed_at` 是元数据,不进 qaFp(I4)。
 - **QA 指纹(L10②,冻结)**:`qaFp = changesFingerprint({ mode, amount, unit:effU })`(复用 handler.js:167-174 键排序 JSON)——**只覆盖请求内容,不含计算结果 newQ**。理由(重放可重算性):响应丢失重试时 CAS 未命中,服务端只能从「请求 + 当前文档」重算指纹;若指纹含 newQ,重试读到的 cur 已是首次写入后的 newQ,add 再算会得 newQ+amount,指纹永远对不上。请求内容指纹天然可重算:event.mode/amount 不变;effU = event.unit ?? doc.unit,而 quantityAdjust **永不改 unit**,重试读到的 doc.unit 与首次相同 → 指纹稳定重算。区分度仍完整:同 update_id 下 add 2 与 set 7 → {add,2,·} ≠ {set,7,·},mode/amount/unit 任一改 → 指纹失配 → VERSION_CONFLICT,「改值必须生成新操作」由结构保证。(边界如实披露:同一用户对同一 item 前后两次确认完全相同的 mode+amount 却复用同一 update_id,会被识别为重放——这是 update_id 语义的固有属性,与既有 update 重放同族,由客户端「新确认新 update_id」纪律约束。)
 - version+1;`quantityAdjust` 不改 name/location_text/note/name_norm/location_node_id/remind_vague_quote。
 
@@ -337,17 +352,19 @@ quantity/unit 相关的 INVALID_INPUT **必须**携带 `detail: { reason, index?
 
 - 同一次用户确认生成稳定 update_id;响应丢失的重试使用**原 expected_version 与原 payload**(同 item_id/mode/amount/unit/update_id),命中 0 条后回查(与 updateItem :1140-1157 完全同构):`version === expected_version+1 && last_update_id === update_id && last_update_fingerprint === qaFp` 三重全中 → `{ ok:true, item(投影), replayed:true }`(最多生效一次);
 - 相同 update_id 但 mode/amount/unit 任何不同 → 指纹失配 → **VERSION_CONFLICT,绝不把新内容当重放吞掉**;改值必须生成新 update_id + 刷新后的 expected_version(新操作);
-- **依赖 last_update_id/last_update_fingerprint 的「最后一笔」语义,不承诺识别任意交错之后的历史操作**(issue §3 如实表述):重试时若该 item 已被**其他**写入推进(version ≥ expected_version+2 或 last_update_id 是别人的)→ VERSION_CONFLICT,此时结果**不可知**(可能已生效可能没有)——客户端一律呈「结果待核对,请刷新」,经 get 重读当前数量后由用户决定下一步,**绝不自动把旧 delta 重新套用、绝不自动再减库**(issue §5-7「未知结果遇后续其他写入绝不盲重减」);
+- **依赖 last_update_id/last_update_fingerprint 的「最后一笔」语义,不承诺识别任意交错之后的历史操作**(issue §3 如实表述):重试时若该 item 已被**其他**写入推进(version ≥ expected_version+2 或 last_update_id 是别人的)→ VERSION_CONFLICT(响应携带 `current` 最新投影,§14.1-4),此时结果**不可知**(可能已生效可能没有)——客户端一律呈「结果不明:请核对当前实物总数后再确认」(PR #103 口径,§14.1-5):用 `current` 展示最新值,引导用户**核对实物**,再以**新操作**(通常 mode:"set" 到实点总数 + 新 update_id + 刷新后的 expected_version)显式落定,由用户决定下一步,**绝不自动把旧 delta 重新套用、绝不自动再减库**(issue §5-7「未知结果遇后续其他写入绝不盲重减」);
 - 不建永久流水(§13);Q1 的 update 重放与 Q2 的 quantityAdjust 重放共享同一 last_update_* 字段,互不干扰(指纹内容不同天然互斥)。
 
 ### 7.6 响应
 
 ```
-{ ok:true, item: { ...投影(含 quantity/unit) }, replayed?: true }
+{ ok:true, item: { ...投影(含 quantity/unit/quantity_confirmed_at) }, replayed?: true }
 失败:{ ok:false, error, message(中文), detail?: { reason, ... } }
+VERSION_CONFLICT 变体:{ ok:false, error:"VERSION_CONFLICT", message(中文), current: { ...该 item 当前完整投影 } }
 ```
 
-不额外返回 before/after(确认前客户端已展示「原数量 → 变化值 → 结果数量、位置/单位」;响应 item.quantity 即结果)。
+- **`current` 必带**(PR #103 对齐,§14.1-4):冲突分支本就重读了文档(handler.js:1140-1157 的 still 查询),随响应回传最新 version/quantity/unit/quantity_confirmed_at/name/location_text/note/updated_at,客户端一次往返即可展示「原 5 → 家人已更新为 7」,点击查看后才进入 7→x 的重新核对,**不直接写入**。
+- 不额外返回 before/after(确认前客户端已展示「原数量 → 变化值 → 结果数量、位置/单位」;响应 item.quantity 即结果)。
 
 ### 7.7 失败关闭矩阵(冻结)
 
@@ -360,7 +377,7 @@ quantity/unit 相关的 INVALID_INPUT **必须**携带 `detail: { reason, index?
 | unit 与当前不符 | INVALID_INPUT(UNIT_MISMATCH) | ✅ |
 | subtract 结果 < 0 | INVALID_INPUT(QUANTITY_BELOW_ZERO) | ✅ |
 | 结果 > 9999 | INVALID_INPUT(QUANTITY_OVER_MAX) | ✅ |
-| expected_version 过期且非重放 | VERSION_CONFLICT(客户端刷新→**显式重确认**后才可再发;绝不自动套旧 delta 到新版本) | ✅ |
+| expected_version 过期且非重放 | VERSION_CONFLICT(**响应携带 current 最新投影**,客户端先展示最新值,用户显式重确认后才可再发;绝不自动套旧 delta 到新版本) | ✅ |
 | 共享家庭缺/错双 marker | FAMILY_SWITCHED / FAMILY_STALE_SCOPE | ✅ |
 | 家庭解析失败 | HOUSEHOLD_UNAVAILABLE(先于一切) | ✅ |
 | 数量归零(set 0) | 成功;item/位置/提醒/证据全保留(L2) | — |
@@ -395,7 +412,7 @@ issue §3 交互合同:「解析结果只是提议 `{intent,item_query,quantity_
 - 阿拉伯数字串(0-9,十进制,无千分位);中文数字:一二两三四五六七八九十及其组合(十五、二十三、一百、两千),「两」=2;上限 9999,超出/小数(「1.5」)、「半」「几」「一些」→ 解析失败 → null;
 - 与 relative-date 的中文数字表(API_CONTRACT.md「v2 remind_converted」节)同源口径,但独立于日期换算(不复用其日历算术)。
 
-**客户端确认流(Q2)**:解析提议 → 候选匹配(五级匹配纯函数,item-match.ts 现状复用)+ needs_pick 时用户点选 → 弹层展示「原数量 N → N±delta / → value,位置/单位」→ 用户确认 → 生成 update_id + 携 expected_version(确认页从 candidates 读到的 version)调 quantityAdjust → VERSION_CONFLICT 时 get 刷新并**显式重确认**。取消 = 丢弃,零写入。
+**客户端确认流(Q2)**:解析提议 → 候选匹配(五级匹配纯函数,item-match.ts 现状复用)+ needs_pick 时用户点选(**弹层不默认选中任何候选**——PR #103 决定 5,模糊目标必须显式选择)→ 弹层展示「原话(source_quote)、目标位置、原数量 N → N±delta / → value、单位」(PR #103 决定 4:**用户中途切换增/减/设为模式后原话仍保留供核对**;单位与目标当前单位不符时禁止点确认,服务端 UNIT_MISMATCH 双门兜底)→ 用户确认 → 生成 update_id + 携 expected_version(确认页从 candidates 读到的 version)调 quantityAdjust → VERSION_CONFLICT 时以响应 `current`(§7.6)展示最新值,用户**显式重确认**后才再发。取消 = 丢弃,零写入。
 
 ## 8. 照片同帧多框:box=null 降级规则(Q3 交互,Q1 字段已备)
 
@@ -416,7 +433,8 @@ issue §3 交互合同:「解析结果只是提议 `{intent,item_query,quantity_
 - `observation_count`、frame 条数、`SceneDraftItem.observationIds.length`(video-scene.ts:201)、`highlights` 条数、VL confidence、同名分组大小——**任何一个都不得赋值给 quantity**。quantity 的唯一来源:确认页上用户对草稿行数量控件的显式设置(或其缺席时的 create 缺省 1,§5)。
 - 一件东西出现在 6 帧(6 个 observation,或 1 个草稿带 6 条高亮)≠ 6 件:提交 quantity 缺席 → 落 1;用户在合并行上手动确认 2 → 落 2。
 - 同帧两件同名:默认两个独立草稿(video-scene.ts:252-254 mergeSameName 默认 false)→ 2 条 item ×1;用户显式合并 → 1 条 ×2(用户填的数量),绝不由「同帧出现两次」自动推断成 1 或 2(issue §5-4「同帧同时两件:允许用户确认数量 2,不得自动推断成 1」)。
-- 拆分(splits)与证据保留:同名不同物可拆分为多件,每件保留自己的 observations/highlights/时间窗/帧(现状 manualHighlights/observationIds 机制零变化);单 item 高亮上限 8 条不变。
+- 拆分(splits)与证据保留:同名不同物可拆分为多件,每件保留自己的 observations/highlights/时间窗/帧(现状 manualHighlights/observationIds 机制零变化);单 item 高亮上限 8 条不变。**超限展示纪律(PR #103 决定 8,采纳)**:合并来源超过 8 条高亮上限时,客户端保留**全部**来源线索供核对、显式说明实际保存的高亮条数,绝不静默丢弃来源(数据层上限不变,纯展示层诚实义务,Q3 测试锁定)。
+- 视频确认页组级 UX(默认折叠候选组、整组来源一次确认、来源默认不勾选、不强迫逐帧点六次)归 **#101 R0 + Q3** 联合实施(默认不勾选/不自动判同一实物与 L1/L7 一致);「任意 N 条来源、部分待核对、跨组分配、撤销与会话恢复」的共同状态合同由 Q3/#101 后续提出,不由 Q0 吸收(PR #103 README「仍需后续设计」)。
 - target:"existing" 关联不碰数量(E7);#101 R0 的观察折叠/归组是纯前端 UX,其输出仍经本合同确认。
 
 ### 9.2 location_scans.confirmed_count 语义不变(L8)
@@ -424,30 +442,34 @@ issue §3 交互合同:「解析结果只是提议 `{intent,item_query,quantity_
 - confirmed_count = 本次提交确认的 item/草稿**条数**(现状,D1 契约 API_CONTRACT.md:90-93)。带数量后**仍数条数不数总量**:提交 2 条新物品(quantity 5 与 3)→ confirmed_count = 2(不是 8)。
 - 候选数 candidate_count 语义不变;scanDelete/videoCleanup/引用回收/D2 全部契约零变化(issue §5-8「视频资产引用回收合同不变」)。
 
-## 10. UI 展示规则(防「旧 ×N 与新数量」双展示)
+## 10. UI 展示规则(防「旧 ×N 与新数量」双展示;PR #103 对齐版,见 §14.1-6/§14.2)
 
-### 10.1 徽标规则
+### 10.1 数量槽与文案口径(冻结词表)
 
-- 已确认(quantity !== null):列表行/详情头显示数量徽标 `×{quantity}{unit}`(如「×3包」),数据来自投影字段,**唯一来源**;
-- 未确认(双 null):**不显示徽标**(绝不显示误导性的「×1件」——issue §1.3「不显示『确定有 1 件』的误导性值」);列表行无任何数量占位;详情页显示轻量入口「数量未确认 · 点击确认」(进数量表单,不预填)。
+- **已确认**(quantity !== null):列表行右侧数量槽显示 `×{quantity}{单位}`(单位紧随,如「×3包」;0 确认显示「×0包」并保留物品);详情头显示 **「上次确认 ×{quantity}{单位}」+ 确认时间**(时间来自 `quantity_confirmed_at`,缺失时退化为无时间后缀)。数据来自投影字段,**唯一来源**。
+- **未确认**(双 null):列表行右侧数量槽显示中性标记 **「待核对」**(无数字——绝不显示误导性的「×1件」,issue §1.3「不显示『确定有 1 件』的误导性值」);详情显示「待核对」+ 确认入口(进数量表单,不预填)。冻结文案词表:确认态一律「上次确认」、未确认一律「待核对」,两词不混用(「待确认」仅用于录入确认页的预填行,见 §10.3)。
+- **计数口径(PR #103 决定 1)**:列表/位置页的计数是**记录条数**(「3 条记录」),绝不把 item 数、实物数量(quantity 总和)与候选线索数相加;`location_scans.confirmed_count` 同口径(§9.2)。
 
-### 10.2 防 ×N 双展示(冻结纯函数)
+### 10.2 防 ×N 双展示(主规则=折叠不并排;displayNoteFor 为兜底)
 
-问题:存量行 note 可能是旧拼法 `×3 备忘`(composeNote 产物,intake-draft.ts:90-96);确认数量后徽标「×3包」与 note「×3 备忘」并排 = 双重/冲突展示(issue §1.3)。冻结:
+问题:存量行 note 可能是旧拼法 `×3 备忘`(composeNote 产物,intake-draft.ts:90-96);确认数量后徽标「×3包」与 note「×3 备忘」并排 = 双重/冲突展示(issue §1.3)。
+
+- **主规则(PR #103 决定 2,采纳)**:**note 原样折叠、绝不与数量并排**——详情页把数量作为主事实展示,note(原备注)折叠在次要位置(展开可见全文,**一字不改写**),绝不放在主数量旁;即便含「×3 / 500ml」,数量仍未知(未确认行)或仍以字段为准(已确认行),**不解析、不升格**。现状锚定:note 的唯一渲染面就是详情编辑框(item.wxml:331;index 列表/查询行不渲染 note),Q1 详情改版把查看态的 note 收进折叠区、编辑态 textarea 永远显示存储原文。
+- **兜底规则(冻结纯函数,防未来表面)**:任何确实要把 note 文本与数量徽标**并排渲染**的表面(现在没有,防 Q1/Q3 新增列表表面时误犯),用:
 
 ```
 displayNoteFor(note: string, quantityConfirmed: boolean): string
 ```
 
-- `quantityConfirmed === false` → note **原样**展示(旧 ×N 是仅有的信息,不隐藏、不升格);
-- `quantityConfirmed === true` 且 note 匹配旧形状 `^×\s*\d+(\s+.*)?$` → 剥掉 `×N` 词元,只展示后缀文本;后缀为默认占位「备注」或剥后为空 → 整条 note 不展示;
-- `quantityConfirmed === true` 且 note 不匹配该形状 → note 原样展示(用户自由备注与数量无关,如「2号抽屉那盒」——**绝不**因为含数字而隐藏或解析);
-- 该变换是**纯展示层**函数(实现于 miniprogram/utils,Q1 落地):存储 note 一字不改;详情页编辑框始终显示存储原文;正则即上面这一条,不做更聪明的解析(防误伤自由备注)。
+  - `quantityConfirmed === false` → note 原样(旧 ×N 是仅有的信息,不隐藏、不升格);
+  - `quantityConfirmed === true` 且 note 匹配旧形状 `^×\s*\d+(\s+.*)?$` → 剥掉 `×N` 词元只展示后缀;后缀为默认占位「备注」或剥后为空 → 整条 note 不展示;
+  - `quantityConfirmed === true` 且不匹配该形状 → 原样(自由备注与数量无关,如「2号抽屉那盒」——绝不含数字就隐藏);
+  - 纯展示层函数(Q1 落地于 miniprogram/utils);存储 note 一字不改;正则就这一条,不做更聪明的解析。
 
 ### 10.3 编辑与确认态纪律
 
-- 详情表单:未确认行数量框显示占位「未确认」、单位选择器默认「件」,不预填 1;提交仅在用户填了数量后携带 quantity+unit(成对,§4.2)。
-- 照片确认页:VL qty_note 预填行标「数量待核对」;最终确认弹层逐行列「名称 ×数量 单位」(含被预填值——用户点确认即 L1 确认)。
+- 详情表单(「设为当前总数」):未确认行数量框占位「待核对」、单位选择器默认「件」,不预填 1;提交仅在用户填了数量后携带 quantity+unit(成组,§4.2);改单位时表单提示**需重新核对总数**(PR #103 决定 3),保存即刷新确认时间。
+- 照片确认页:VL qty_note 预填行标「待核对」;最终确认弹层逐行列「名称 ×数量 单位」(含被预填值——用户点确认即 L1 确认)。
 - 语音 v2 确认页:quantity_quote 锚定成功的行预填并标「待确认」(用户说了数量但需过目);三项 null 的行预填 1/件 + 「待确认」。
 - Q1 起 photoCommit/create 载荷不再由数量拼 note(§4.3),新数据不再产生旧形状 note;10.2 只服务存量行。
 
@@ -571,14 +593,73 @@ displayNoteFor(note: string, quantityConfirmed: boolean): string
 | I4 | 微信 devtools upload 编译 | Owner 人工门(自动化不可替代,如实报告「未跑」不得假报) | 各阶段发版前 |
 | I5 | 双家庭身份并发 + 真机弱网重试 | Owner 人工门(重点:§F/§G 场景真机复现) | Q2/Q3 |
 
+### J. PR #103 对齐新增反例(§14)
+
+| # | 输入 | 期望 | 阶段 |
+| --- | --- | --- | --- |
+| J1 | create(任意,含缺省 1/件) | 文档 quantity_confirmed_at === created_at(同刻);投影携带 | Q1 |
+| J2 | update {quantity:5, unit:"包"} 响应丢失 → 同 update_id 同内容重试 | replayed:true(指纹只含 quantity/unit;confirmed_at 注入在指纹之后,重试重算指纹一致);文档 confirmed_at 仍为首次时刻 | Q1 |
+| J3 | update 改单位 {quantity:5, unit:"包"} 于 (3,件) 行 | 成功;confirmed_at 刷新为本次时刻(改单位=重新确认);name/location/note 的 update 不刷新 confirmed_at | Q1 |
+| J4 | update 于 legacy 行(不带 quantity)后读取 | quantity/unit/confirmed_at 三者仍缺(未被名称编辑触碰/回填) | Q1 |
+| J5 | update VERSION_CONFLICT(他人先改) | 响应携带 current:该 item 完整投影(最新 version/quantity/unit/confirmed_at);旧客户端忽略该键走 get,零回归 | Q1 |
+| J6 | quantityAdjust VERSION_CONFLICT | current 必带;客户端展示「原 5 → 家人已更新为 7」,重确认后才写入 | Q2 |
+| J7 | quantityAdjust 重试遇他人写入(结果不明) | VERSION_CONFLICT + current;客户端「结果不明:请核对当前实物总数」引导,不自动重放旧 delta | Q2 |
+| J8 | readQuantity:doc 有 quantity/unit 而无 confirmed_at(异常) | 读侧按已确认读 + confirmed_at:null(展示无时间),不丢数量 | Q1 |
+| J9 | 列表渲染:未确认行 | 右槽「待核对」(无数字);已确认行「×N单位」;计数=记录条数,不总和 quantity | Q1(客户端) |
+| J10 | 详情查看态:已确认行 note="×3 备忘" | note 折叠为原备注(原样、不与数量并排、不解析);displayNoteFor 兜底路径仅并排表面使用 | Q1(客户端) |
+
 ## 13. 明确不做(issue §6,重申)
 
 库存流水/账本、采购/补货提醒与阈值(#87 保持独立 Discovery)、库存预测、SKU/条码、批次/保质期、跨单位自动换算、自动合并已入库 item、跨位置数量迁移、无人确认的自动扣减、定时扫描、独立库存服务、向量库、通用事务引擎、V-JEPA/DINO 接入、#101 R1 多帧模型、#85。**不迁移生产数据**;不新增 npm 依赖;不建新集合(quantity/unit 落在 items 文档;quantityAdjust 落 itemsApi 既有 action 路由;quantityIntentParse 落 extractDraft 既有 action 路由,零新集合零新索引)。
 
-## 14. 开放问题
+## 14. 与 PR #103 UI 提案对齐(2026-10-23,PR #103 已由 Owner 合入 main)
 
-无(全部决定见 §0 摘要表;UNIT_SET 取 14 值全集的理由见 §2.2,若 Owner 希望首版更窄须在 Q1 开工前推翻本文——闭集只增不减,宽起步的唯一代价是单位选择器多几项)。
+输入:docs/design/quantity-v1/README.md(「六个查看入口」+「八条具体交互决定」)与 DESIGN.md 末节「Quantity management proposal」。对齐原则:**行为规则以 Q0 合同与 issue #102 为准;提案与 issue 冲突处上报(§15)而非自行二选一;UI 交互细节归 Q1/Q2/Q3 客户端实施,Q0 只冻结其依赖的数据/协议层**。逐条结论如下。
 
-## 15. 变更记录
+### 14.1 数据/协议层核对点(本任务指定的六项)
 
-- 2026-10-23:Q0 初版(Owner 授权工作包 0)。基线 main=944bef3;`npm test` = 1044/1044 全绿(交付前实测);`npm run typecheck` 未跑(纯文档交付,无 .ts 改动,见 §12-I2 为 Q1+ 阶段门)。
+1. **「上次确认数量带确认时间」→ 需要 `quantity_confirmed_at` 字段:采纳(新增)**。`updated_at` 不能承担(任何名称/位置/备注编辑都会刷新它,无法表达「上次**数量**确认」);复用 created_at 同样不行(后续确认会漂移)。冻结:items 增 `quantity_confirmed_at: string(ISO)`,写入点 = create 插入路径(与 created_at 同刻)/ update 携 quantity+unit 时 / quantityAdjust 成功时;legacy 缺省;投影携带(§2.4);**永不进指纹/幂等比对/载荷签名**(I4 + §4.2 注入顺序——把时间戳塞进指纹会让响应丢失重试的指纹永远失配,重放识别整体失效,这是 Q1 实现必须避开的坑);改单位也刷新(见下条)。**上报**:该字段超出 issue §1.2「数据最小字段 = quantity + unit」的字面清单,属 PR #103 驱动的增量,见 §15-OQ1。
+2. **「设为当前总数」语义与 quantitySet 的对应:采纳,映射冻结,不另设 quantitySet action**。详情页「设为当前总数」(绝对值、可填 0、说明物品/位置/提醒/证据保留、不暗示加减)→ **itemsApi.update 携 {quantity, unit}**(Q1,§4.2;0 合法 = L2);语音「设为总数」→ **quantityAdjust mode:"set"**(Q2,§7);语音「增加/减少」→ mode:"add"/"subtract"。PR #103「三个模式明确分开」与 §7.1 的统一 mode action 一致(mode 进指纹,add 2 与 set N+2 同 update_id 也判不同操作)。
+3. **改单位 = 一次数量确认;允许「仅改单位」但必须携同重核后的总数:采纳(并入 §4.2)**。API 层不存在只写 unit 的请求(成组纪律):「仅改单位」表达为 update {quantity: <用户重核后的值>, unit: <新单位>}(数值可与旧值相同);改单位不换算、必须重新核对总数,保存即刷新 quantity_confirmed_at(单位变了,旧确认时刻不再可信)。quantityAdjust 永不改单位(§7);语音对单位不匹配目标禁止确认 = 客户端预拦 + 服务端 UNIT_MISMATCH 双门(§7.2)。
+4. **版本冲突「先显示最新值再重核对」→ VERSION_CONFLICT 响应需带最新值:采纳(协议增量)**。现状 update 的 VERSION_CONFLICT 只有 message,客户端须二次 get;PR #103 要求冲突时直接展示「原 5 → 家人更新为 7」。冻结:update(Q1 起)与 quantityAdjust(Q2,**必带**)的 VERSION_CONFLICT 响应增补 `current: { 该 item 当前完整投影 }`(冲突分支本就重读了文档,零额外查询;OPERATION_CONFLICT 携带 existing 的既有先例 handler.js:150-164 同族)。旧客户端忽略该键沿用 get 路径,零回归;用户仍须显式重确认后才写入(issue §3「绝不自动把旧 delta 套用到新版本」不变)。
+5. **「结果不明引导核对实物总数」对重试语义的要求:采纳(强化 §7.5 客户端纪律,协议不变)**。重试遇 VERSION_CONFLICT(他人已推进)时结果不可知:客户端用 current 展示最新值,文案引导**核对当前实物总数**(而非只刷新 App 内数值),再以**新操作**(通常 mode:"set" 到实点总数 + 新 update_id + 刷新 expected_version)显式落定;自动重放旧 delta、自动再减库维持绝对禁止(issue §5-7)。
+6. **列表/详情文案口径与投影字段的映射:采纳(冻结词表,§10.1)**。已确认 ⇔ 投影 quantity !== null ⇔ 文案「上次确认 ×N 单位(时间 = quantity_confirmed_at,缺失退化无时间)」;未确认 ⇔ 三字段 null ⇔ 文案「待核对」(列表右槽中性标记、详情待核对入口,均无数字);录入确认页预填行用「待确认」(§10.3)。计数一律记录条数,不总和 quantity(「3 条记录」)。
+
+### 14.2 八条具体交互决定逐条对齐
+
+| # | PR #103 决定(README「具体交互决定」) | 结论 | Q0 对应 |
+| --- | --- | --- | --- |
+| 1 | 列表「N 条记录」不加总;数量右侧显示单位紧随;旧记录「待核对」 | **采纳**(调整原 §10.1「列表无占位」为「待核对」槽——issue §1.3 只要求不显示误导值,中性标记合规且更诚实) | §10.1 |
+| 2 | 详情「上次确认数量」带确认时间;旧备注折叠为原备注、不解析为库存(含 ×3/500ml)、不改写、不与主数量并排 | **采纳**(新增 quantity_confirmed_at;§10.2 主规则由「剥 ×N 词元」调整为「折叠不并排、原文不改写」,displayNoteFor 降为并排表面的兜底;现状核实:note 唯一渲染面是详情编辑框 item.wxml:331,列表/查询行不渲染 note) | §2.6/§10.2 |
+| 3 | 详情修改=「设为当前总数」,可填 0,说明保留物品/位置/提醒/证据;改单位需重新核对总数,不换算 | **采纳**(0=L2;保留说明=H1;改单位=重确认) | §4.2/§14.1-2/3 |
+| 4 | 语音确认优先展示比较结果;减少/增加/设为三模式分开;修改模式后保留原话供核对 | **采纳**(确认流 §7.8;「切换模式保留原话」为客户端纪律,冻结入 §7.8 确认流) | §7/§7.8 |
+| 5 | 模糊目标不默认选中;同名不同单位「包」不能加到「盒」;不匹配目标禁止确认 | **采纳**(needs_pick 无预选=客户端纪律新增入 §7.8;单位不匹配=客户端预拦 + UNIT_MISMATCH 服务端硬门) | §7.2/§7.8 |
+| 6 | 版本冲突先显示最新值,点击查看后才重新核对,不直接写入;结果不明引导核对实物总数,不盲重放扣减 | **采纳**(current 投影 + 重确认门 + 实物核对引导) | §14.1-4/5、§7.6 |
+| 7 | 照片归组区分「合成一条记录总数」与「分成两条各自记录」;前者限同类、同位置、同单位、可互换;不合并已入库 item | **采纳**(1×2 / 2×1 = L12/§8;合成行 box=null;已入库合并不在一期 = L7) | §8 |
+| 8 | 视频 6 线索两模式:整组一次确认自行填总数,或逐来源分给 A/B 两条;来源默认不勾选,不强迫逐帧点六次;8 段高亮超限保留全部来源线索并显式说明实际保存数,不静默丢弃 | **采纳**(默认不勾选/不自动判同一实物 = L1/L7;组级 UX 与「任意 N 条/部分待核对/跨组分配/撤销/会话恢复」状态合同归 #101 R0/Q3 联合设计,不由 Q0 吸收;高亮上限 8 不变,超限时客户端保留全部来源线索供核对并显式说明保存条数——冻结为 Q3 展示纪律) | §9.1 |
+
+### 14.3 六个查看入口逐条对齐
+
+| 入口 | PR #103 关键约束 | 结论 |
+| --- | --- | --- |
+| 物品与数量 | 列表看数量,详情点击修改;数量标为上次确认;0 保留物品;旧行明确待核对 | 采纳(§10.1 词表;0=L2;详情修改=update) |
+| 新建时核对 | 语音预填+步进器+单位选择;新建 1–9999;**已有同类仅提供新建/修改选择,不自动叠加** | 采纳(预填=§4.6;1–9999=L4;「新建/修改选择」=issue §1.5 原文,客户端保存前按名称 query 出同类已有记录、由用户选「新建」或「进指定已有 item 修改」(修改走该 item 的 update/quantityAdjust),**绝不自动叠加**——协议零新增,复用 query/update;冻结为 Q1 客户端流程纪律) |
+| 语音增减 | 原话、目标位置、原数量→变化→结果;同名目标需选择;不同单位拦截;旧数量先核对;跨位置移动提示不支持 | 采纳(§7.8 提议 + §7 确认流;多命中 needs_pick;UNIT_MISMATCH;QUANTITY_UNCONFIRMED 先核对;移动=other 不折算) |
+| 照片归组 | 选择来源候选,一条总数或两条独立记录;用户主动确认;两个不同框合成后整图留证 | 采纳(§8:≥2 来源框 → box=null;默认不合并) |
+| 视频核对 | 默认折叠候选组,展开原始线索;确认件数或拆分来源;线索数与数量独立;所有来源保留;不自动判同一实物 | 采纳(§9;折叠/整组确认归 #101 R0+Q3;observation ≠ quantity 硬不变) |
+| 异常与冲突 | 刷新后再确认;未知结果人工核对;归零/数量不足示例;冲突不套用旧变化;结果未知不自动重复扣减 | 采纳(§7.5/§7.7;数量不足=QUANTITY_BELOW_ZERO) |
+
+### 14.4 冲突上报
+
+与 issue #102 正文的张力仅一处:quantity_confirmed_at 超出 §1.2「数据最小字段」二字段字面清单(为支撑 PR #103 详情确认时间,PR #103 已由 Owner 合入)→ §15-OQ1 请 Owner 追认。其余各条经核对与 issue #102 及本合同零冲突;PR #103 README「仍需后续设计」清单(任意 N 条来源、部分待核对、手动补件、跨组分配、撤销与会话恢复、来源帧原图预览)与 Q0 无涉,归 Q3/#101 R0 后续合同,不由本文吸收。
+
+## 15. 开放问题
+
+- **OQ1(需 Owner 追认)**:`quantity_confirmed_at` 字段。issue §1.2 冻结「数据最小字段 = quantity:integer + unit:string」二字段;PR #103(Owner 已合入 main)详情「上次确认数量**带确认时间**」在数据上无既有字段可承载(updated_at 被任意编辑污染)。Q0 按 PR #103 + 本轮任务指令采纳为第三字段(随每次数量确认写入、legacy 缺省、不进指纹,§2.1/§2.6/§14.1-1)。因 issue #102 是冻结需求源而该字段扩出了其字面清单,请 Owner 追认或否决;否决则详情退化为「上次确认 ×N 单位」无时间后缀(读侧 I1 放宽分支天然支持该退化,无返工)。
+
+(其余决定见 §0 摘要表;UNIT_SET 取 14 值全集的理由见 §2.2,若 Owner 希望首版更窄须在 Q1 开工前推翻本文——闭集只增不减,宽起步的唯一代价是单位选择器多几项。)
+
+## 16. 变更记录
+
+- 2026-10-23:Q0 初版(Owner 授权工作包 0)。基线 main=944bef3;`npm test` = 1044/1044 全绿(交付前实测);`npm run typecheck` 零错误(交付前实测;纯文档交付,无 .ts 改动)。
+- 2026-10-23:对齐 PR #103 UI 提案(已合入 main,分支 rebase 至 7e1b625 基)。新增 §14 对齐小节与 §12-J 反例组;数据层增 `quantity_confirmed_at`(I1 三同现 + I4 元数据纪律,§2.1/§2.6/§4.1/§4.2/§7.4);update/quantityAdjust 的 VERSION_CONFLICT 增 `current` 投影(§4.2/§7.6);§7.5 结果不明文案强化为「核对实物总数」;§10 重写为 PR #103 口径(待核对列表槽/上次确认词表/折叠备注主规则 + displayNoteFor 兜底/记录条数计数);§15 开放问题增 OQ1(quantity_confirmed_at 追认)。对齐改动后复跑:`npm test` = 1044/1044 全绿、`npm run typecheck` 零错误(均实测)。
