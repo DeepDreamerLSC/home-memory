@@ -96,6 +96,10 @@ Page({
         rows: [],
         /** 单位选择器选项(issue #102 Q1,UNIT_SET 冻结顺序 = 展示序) */
         unitOptions: quantity_1.UNIT_SET,
+        /** (Q3)合并选择集中的 draftId(用户显式选行,默认绝不合并) */
+        mergeIds: [],
+        /** (Q3)展开来源查验的合成行 draftId(""=无) */
+        mergedSourcesFor: "",
         headText: "保留 0 / 0(待核对)",
         saveText: "存 0 条",
         saveDisabled: true,
@@ -645,6 +649,72 @@ Page({
         this.rebuildRows();
         this.persistSession();
     },
+    /* ---------------- 同帧多框合成(issue #102 Q3,Q0-CONTRACT §8) ---------------- */
+    /**
+     * 选行进/出合并集(用户显式动作;默认绝不合并):done 终态行与 pre-Q1 会话
+     * 恢复行(unit 缺席,E13 冻结载荷)不参与,toast 如实说明。
+     */
+    onRowMergeSelectTap(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const row = this.rowsRaw[index];
+        if (!row) {
+            return;
+        }
+        if (row.done) {
+            wx.showToast({ title: "已入库的行不能再合并", icon: "none" });
+            return;
+        }
+        if (typeof row.unit !== "string") {
+            wx.showToast({ title: "旧会话恢复的行不支持合并,请单独保存", icon: "none" });
+            return;
+        }
+        const ids = this.data.mergeIds.slice();
+        const at = ids.indexOf(row.draftId);
+        if (at === -1)
+            ids.push(row.draftId);
+        else
+            ids.splice(at, 1);
+        this.setData({ mergeIds: ids }, () => this.rebuildRows());
+    },
+    /** 把所选行合成 1 条 ×N:纯函数门(单位一致/非终态)全过后才落行集 */
+    onMergeSelectedTap() {
+        if (this.data.mergeIds.length < 2) {
+            wx.showToast({ title: "至少选择两行候选才能合成一条", icon: "none" });
+            return;
+        }
+        const out = (0, intake_draft_1.mergeRowsIntoOne)(this.rowsRaw, this.data.mergeIds);
+        if (out.ok === false) {
+            wx.showToast({ title: out.message, icon: "none" });
+            return;
+        }
+        this.rowsRaw = out.rows;
+        this.setData({ mergeIds: [], mergedSourcesFor: "" }, () => {
+            this.rebuildRows();
+            this.persistSession();
+            const merged = out.rows.find((r) => r.mergedFrom !== undefined && r.mergedFrom.length > 0);
+            const qtyText = merged ? " ×" + merged.qty + merged.unit : "";
+            // 复审发现5:来源步进值之和超照片数量域 99 时预填被钳回,绝不静默截断
+            // ——显式报出钳前合计;合成行仍标待核对,真实总数 >99 由用户改定
+            // (服务端 create 域 1..9999,步进器域 1-99,Q0-CONTRACT §2.3/L4)
+            const clamped = merged !== undefined && out.qtySum > merged.qty;
+            wx.showToast({
+                title: clamped
+                    ? "已合成 1 条" + qtyText + "(来源合计 " + out.qtySum + " 超上限 99 截断),请核对数量"
+                    : "已合成 1 条" + qtyText + ",数量请核对",
+                icon: "none",
+            });
+        });
+    },
+    /** 展开/收起合成行的来源候选查验(候选 id/框/名称;照片上同步描出来源框) */
+    onMergedSourcesTap(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const row = this.rowsRaw[index];
+        if (!row || row.mergedFrom === undefined || row.mergedFrom.length === 0) {
+            return;
+        }
+        const openFor = this.data.mergedSourcesFor === row.draftId ? "" : row.draftId;
+        this.setData({ mergedSourcesFor: openFor, photoCollapsed: false }, () => this.rebuildRows());
+    },
     /** 快速核实(真机反馈:逐件勾选繁琐):一键三档——全保留/只留高可信/清空。
      *  done 行是终态不动;点完立即重建计数,保存键/确认弹层随之更新。 */
     onQuickVerifyTap(e) {
@@ -701,6 +771,19 @@ Page({
                     ? "语音补录"
                     : "手动补录";
             const meta = (r.done ? "已入库 · " : "") + "#d" + (i + 1) + " · " + note + excText + " · " + origin;
+            // (Q3)合成行:来源候选数 + 可展开查验;普通行 mergedCount=0
+            const mergedFrom = Array.isArray(r.mergedFrom) ? r.mergedFrom : [];
+            const sourcesOpen = mergedFrom.length > 0 && this.data.mergedSourcesFor === r.draftId;
+            const sourceViews = sourcesOpen
+                ? mergedFrom.map((src) => ({
+                    draftId: src.draftId,
+                    name: src.name,
+                    boxText: src.box === null
+                        ? "整照(无框)"
+                        : "框 " + Math.round(src.box.x1 * 100) + "%," + Math.round(src.box.y1 * 100) + "% " +
+                            Math.round((src.box.x2 - src.box.x1) * 100) + "%×" + Math.round((src.box.y2 - src.box.y1) * 100) + "%",
+                }))
+                : [];
             return {
                 draftId: r.draftId,
                 index: i + 1,
@@ -721,6 +804,10 @@ Page({
                 metaText: meta,
                 failMsg: r.failMsg,
                 isHl: r.draftId === hl,
+                mergeSelected: this.data.mergeIds.indexOf(r.draftId) !== -1,
+                mergedCount: mergedFrom.length,
+                sourcesOpen,
+                sourceViews,
             };
         });
         const boxViews = [];
@@ -738,6 +825,28 @@ Page({
                 cls: r.src === "circle" ? "user" : r.confidence === "low" ? "amber" : "",
                 tag: (0, intake_draft_1.boxTagPrefix)(r) + r.name,
                 isHl: expanded && r.draftId === hl,
+            });
+        });
+        // (Q3)合成行来源框:展开查验时以虚线描出全部来源候选(坐标只进视图,
+        // 不进证据行——证据行 box=null 整照关联,Q0-CONTRACT §8 规则 1)
+        this.rowsRaw.forEach((r) => {
+            if (Array.isArray(r.mergedFrom) === false || this.data.mergedSourcesFor !== r.draftId) {
+                return;
+            }
+            r.mergedFrom.forEach((src) => {
+                if (src.box === null || src.box === undefined) {
+                    return;
+                }
+                boxViews.push({
+                    draftId: src.draftId,
+                    left: round2(src.box.x1 * 100),
+                    top: round2(src.box.y1 * 100),
+                    width: round2((src.box.x2 - src.box.x1) * 100),
+                    height: round2((src.box.y2 - src.box.y1) * 100),
+                    cls: "msrc",
+                    tag: "来源·" + src.name,
+                    isHl: false,
+                });
             });
         });
         const counts = (0, intake_draft_1.intakeCounts)(this.rowsRaw);

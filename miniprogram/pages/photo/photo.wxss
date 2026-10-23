@@ -1332,3 +1332,15 @@
 .qtywrap { display: flex; align-items: center; gap: 10rpx; }
 .qty-pending { font-size: 18rpx; color: var(--text-2, #999); margin-right: 4rpx; }
 .step-unit-btn { padding: 6rpx 12rpx; border-radius: 10rpx; background: rgba(0,0,0,.06); font-size: 22rpx; }
+
+/* ---------- 同帧多框合成(issue #102 Q3,Q0-CONTRACT §8) ---------- */
+.rowtools { display: flex; gap: 10rpx; margin-top: 8rpx; flex-wrap: wrap; }
+.mrg-chip { padding: 4rpx 14rpx; border-radius: 999rpx; border: 2rpx solid rgba(0,0,0,.12); font-size: 20rpx; color: var(--text-2, #666); }
+.mrg-chip.on { border-color: #1a73e8; color: #1a73e8; background: rgba(26,115,232,.08); }
+.mrg-chip.src { border-style: dashed; }
+.mrgbar { margin-top: 10rpx; padding: 16rpx 20rpx; border-radius: 14rpx; background: rgba(26,115,232,.08); color: #1a73e8; font-size: 24rpx; font-weight: 700; text-align: center; }
+.srcpanel { margin-top: 8rpx; padding: 12rpx 16rpx; border-radius: 10rpx; background: rgba(0,0,0,.04); }
+.src-line { font-size: 20rpx; color: var(--text-2, #666); line-height: 1.6; }
+.src-note { font-size: 18rpx; color: var(--text-3, #999); margin-top: 4rpx; }
+.bbox.msrc { border: 2rpx dashed #1a73e8; background: rgba(26,115,232,.06); }
+.bbox.msrc .tag { background: #1a73e8; }

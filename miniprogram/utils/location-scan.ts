@@ -9,6 +9,7 @@
 import type {
   LocationScanCommitLocation,
   VideoSceneCommitItem,
+  VideoSceneCommitNewItem,
 } from "../types";
 import {
   buildDraftHighlights,
@@ -18,6 +19,7 @@ import {
   type SceneDraftItem,
   type SceneObservation,
 } from "./video-scene";
+import { isUnit, isValidCreateQuantity } from "./quantity";
 
 /** 会话 storage key:按 scope + node_id 隔离(§6.2,独立于 B 的 scene 会话) */
 export const LOCATION_SCAN_SESSION_PREFIX = "home-memory:location-scan-session:";
@@ -152,7 +154,20 @@ export function buildLocationScanCommitItems(
         return { ok: false, message: "「" + name + "」的位置记录与所选位置不一致,请重选子位置" };
       }
       if (draft.operationId === "") return { ok: false, message: "草稿参数异常,请重试" };
-      items.push({
+      // 数量/单位(issue #102 Q3,与 B 页 buildSceneCommitItems 同一纪律):只透传
+      // 用户在草稿行显式确认的值,缺席不带键(服务端缺省 1/件);observationIds/
+      // highlights 条数永不赋值数量;形状门 fail-closed 整批拒绝。
+      if (draft.quantity !== undefined) {
+        if (isValidCreateQuantity(draft.quantity) === false) {
+          return { ok: false, message: "「" + name + "」的数量需为 1-9999 的整数" };
+        }
+        if (isUnit(draft.unit) === false) {
+          return { ok: false, message: "「" + name + "」的单位无效,请重新选择" };
+        }
+      } else if (draft.unit !== undefined) {
+        return { ok: false, message: "「" + name + "」的数量还没确认,请先核对数量" };
+      }
+      const item: VideoSceneCommitNewItem = {
         draft_key: draft.draftKey,
         target: "new",
         operation_id: draft.operationId,
@@ -161,7 +176,12 @@ export function buildLocationScanCommitItems(
         note: draft.note.trim(),
         highlights,
         node_id: nodeId,
-      });
+      };
+      if (draft.quantity !== undefined) {
+        item.quantity = draft.quantity;
+        item.unit = draft.unit;
+      }
+      items.push(item);
     }
   }
   return {
