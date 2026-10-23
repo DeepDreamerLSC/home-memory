@@ -284,3 +284,7 @@ npm run samples:live                                # 逐条真实调用 DeepSee
 
 **Q:想看真实 API 的提取效果?**
 见上文「真实样例试运行」,设置 `DEEPSEEK_API_KEY` 后运行 `npm run samples:live`,结果表在 `docs/samples-evidence.md`。
+
+### 11. 平面边界:为什么有些配置只能控制台(踩坑记录,2026-10-23)
+
+本环境为**微信小程序云开发**(微信侧平面,开发者工具/tcb 扫码登录管理)。已实测:腾讯云 CAM 密钥(SecretId/SecretKey)调 tcb API 返回 `ResourceNotFound: user not exist`——**腾讯云平面看不到本环境**;微信侧 HTTP API(appid+secret)公开接口含集合增删/索引/导入导出,**不含**集合权限与函数超时修改(仅第三方平台代云开发类目有 setpermission)。因此:**集合权限、函数超时、触发器图形化配置只能由人在云开发控制台操作**;devtools cli 可部署代码但不带 config.json;集合可经临时云函数 `db.createCollection` 创建(先例:location_scans、user_profiles)。任何智能体声称"用密钥改了权限/超时",要么走的是控制台 GUI 自动化,要么不实。
