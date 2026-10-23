@@ -693,7 +693,16 @@ Page({
             this.persistSession();
             const merged = out.rows.find((r) => r.mergedFrom !== undefined && r.mergedFrom.length > 0);
             const qtyText = merged ? " ×" + merged.qty + merged.unit : "";
-            wx.showToast({ title: "已合成 1 条" + qtyText + ",数量请核对", icon: "none" });
+            // 复审发现5:来源步进值之和超照片数量域 99 时预填被钳回,绝不静默截断
+            // ——显式报出钳前合计;合成行仍标待核对,真实总数 >99 由用户改定
+            // (服务端 create 域 1..9999,步进器域 1-99,Q0-CONTRACT §2.3/L4)
+            const clamped = merged !== undefined && out.qtySum > merged.qty;
+            wx.showToast({
+                title: clamped
+                    ? "已合成 1 条" + qtyText + "(来源合计 " + out.qtySum + " 超上限 99 截断),请核对数量"
+                    : "已合成 1 条" + qtyText + ",数量请核对",
+                icon: "none",
+            });
         });
     },
     /** 展开/收起合成行的来源候选查验(候选 id/框/名称;照片上同步描出来源框) */

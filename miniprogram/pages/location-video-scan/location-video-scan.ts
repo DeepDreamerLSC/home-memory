@@ -436,7 +436,9 @@ Page({
       const first = d.manualHighlights.length > 0 ? d.manualHighlights[0] : null;
       let targetText = "新建物品";
       if (d.target === "existing") {
-        targetText = "关联已有物品:" + d.itemId;
+        // itemId 空串回退「未选择」:与 pages/video-scan(B 入口)同文案,
+        // 两个视频入口一致(issue #102 §2);a1a2959 曾无说明删掉回退,复审发现3恢复
+        targetText = "关联已有物品:" + (d.itemId || "未选择");
       }
       // (Q3)数量视图:未确认行显示缺省口径 1/件(quantitySet=false 提示
       // 「不填按 1 件 · 线索数不代表件数」);线索数绝不预填数量

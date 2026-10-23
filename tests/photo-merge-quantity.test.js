@@ -166,18 +166,21 @@ test("PM-SUM 合成行数量=来源步进值之和的预填,标待核对;用户�
   var merged = out.rows[0];
   assert.equal(merged.qty, 5, "预填=3+2(来源行步进值之和)");
   assert.equal(merged.qtyTouched, false, "合成行重新标待核对,总和需用户过目确认");
+  assert.equal(out.qtySum, 5, "钳前合计随结果返回,未截断时等于预填");
   // 用户步进改总数 = 确认
   var stepped = intakeDraft.stepRowQty(merged, -1);
   assert.equal(stepped.qty, 4);
   assert.equal(stepped.qtyTouched, true);
 });
 
-test("PM-SUM-CLAMP 预填之和超 99 → 钳回 99(照片数量域 1-99)", function () {
+test("PM-SUM-CLAMP 预填之和超 99 → 钳回 99,且钳前合计随结果返回供显式提示截断(复审发现5)", function () {
   var r1 = aiRow("A", B1, { qty: 60, qtyTouched: true });
   var r2 = aiRow("A", B2, { qty: 60, qtyTouched: true });
   var out = intakeDraft.mergeRowsIntoOne([r1, r2], [r1.draftId, r2.draftId]);
   assert.equal(out.ok, true);
   assert.equal(out.rows[0].qty, 99);
+  assert.equal(out.qtySum, 120, "qtySum=钳前合计(60+60),调用方据此显式提示截断,绝不静默");
+  assert.ok(out.qtySum > out.rows[0].qty, "qtySum>合成行 qty 即截断发生的判据");
 });
 
 test("PM-SOURCES 来源候选可展开查验:mergedFrom 保留 id/框/名称,绝不进提交载荷", function () {

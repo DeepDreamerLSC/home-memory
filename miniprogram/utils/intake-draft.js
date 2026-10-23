@@ -195,7 +195,8 @@ function makeManualRow(name, qtyNote, genId) {
  *   载荷旧行,E13 纪律不注入不改造);单位全一致(L3:不同单位绝不默默叠加);
  * - 合成行(Q0-CONTRACT §8 规则 1/3/4):
  *   · box=null **整照关联**——绝不把其中任何一个框冒充「N 件」的全部位置;
- *   · qty = 来源行步进值之和的**预填提示**(钳 1-99),qtyTouched=false 行上
+ *   · qty = 来源行步进值之和的**预填提示**(钳 1-99;合计超 99 时调用方须以
+ *     返回的 qtySum 显式提示截断,绝不静默),qtyTouched=false 行上
  *     标「数量待核对」——合成总数必须由用户在步进器/最终确认弹层过目
  *     (L1:quantity 是用户确认值,永不由候选框数/VL 置信推断);
  *   · src:任一来源为圈选 → "circle",否则保留首行来源(§8 规则 4:凡含
@@ -256,7 +257,7 @@ function mergeRowsIntoOne(rows, draftIds) {
     const firstIndex = rows.findIndex((r) => r.draftId === first.draftId);
     const out = rows.filter((r) => wanted.indexOf(r.draftId) === -1);
     out.splice(Math.max(0, firstIndex), 0, merged);
-    return { ok: true, rows: out };
+    return { ok: true, rows: out, qtySum };
 }
 // ---------- 三态流转(原型 toggleRow / updateCounts / syncTag) ----------
 /** 行的归一化状态:candidate=候选(未勾)keep=保留(勾选)done=已确认记住 */
