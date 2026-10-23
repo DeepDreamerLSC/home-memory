@@ -1,0 +1,114 @@
+[
+  {
+    "name": "cream",
+    "mode": "light",
+    "text": 13.08,
+    "secondary": 5,
+    "button": 11.75
+  },
+  {
+    "name": "cream",
+    "mode": "dark",
+    "text": 13.51,
+    "secondary": 7.91,
+    "button": 9.23
+  },
+  {
+    "name": "sage",
+    "mode": "light",
+    "text": 11.63,
+    "secondary": 5.31,
+    "button": 7.45
+  },
+  {
+    "name": "sage",
+    "mode": "dark",
+    "text": 13.38,
+    "secondary": 8.29,
+    "button": 8.31
+  },
+  {
+    "name": "mist",
+    "mode": "light",
+    "text": 10.94,
+    "secondary": 5,
+    "button": 6.62
+  },
+  {
+    "name": "mist",
+    "mode": "dark",
+    "text": 13.35,
+    "secondary": 8.3,
+    "button": 8.19
+  },
+  {
+    "name": "clay",
+    "mode": "light",
+    "text": 11.33,
+    "secondary": 5.29,
+    "button": 6.47
+  },
+  {
+    "name": "clay",
+    "mode": "dark",
+    "text": 13.24,
+    "secondary": 8.12,
+    "button": 7.61
+  },
+  {
+    "name": "inkGold",
+    "mode": "light",
+    "text": 17.72,
+    "secondary": 9.56,
+    "button": 13.59
+  },
+  {
+    "name": "inkGold",
+    "mode": "dark",
+    "text": 19.15,
+    "secondary": 12.85,
+    "button": 13.59
+  },
+  {
+    "name": "cobalt",
+    "mode": "light",
+    "text": 16.06,
+    "secondary": 9.04,
+    "button": 9.76
+  },
+  {
+    "name": "cobalt",
+    "mode": "dark",
+    "text": 17.93,
+    "secondary": 12,
+    "button": 8.45
+  },
+  {
+    "name": "emerald",
+    "mode": "light",
+    "text": 15.02,
+    "secondary": 8.79,
+    "button": 9.25
+  },
+  {
+    "name": "emerald",
+    "mode": "dark",
+    "text": 18.1,
+    "secondary": 12.6,
+    "button": 9.74
+  },
+  {
+    "name": "berry",
+    "mode": "light",
+    "text": 16,
+    "secondary": 9.09,
+    "button": 9.14
+  },
+  {
+    "name": "berry",
+    "mode": "dark",
+    "text": 17.75,
+    "secondary": 11.77,
+    "button": 9.36
+  }
+]

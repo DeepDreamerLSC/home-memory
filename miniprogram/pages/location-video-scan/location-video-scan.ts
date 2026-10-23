@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * D1 位置级视频清点页(issue #94,docs/design/video-ai/D1-IMPLEMENTATION.md §6.2/§6.3):
  * - 从某个具体位置进入(browse 模式非根层底部入口卡),位置上下文固定不可全局改;
@@ -224,6 +225,7 @@ function matchLevelText(level: 1 | 2 | 3 | 4): string {
 }
 
 Page({
+  onShow() { applyPageAppearance(this); },
   data: {
     mode: "scan",
     phase: "idle" as ScanPhase,

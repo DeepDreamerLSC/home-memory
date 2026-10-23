@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <view class="page confirm-page">
   <!-- 手动录入:单表单(旧路径) -->
   <block wx:if="{{ isManual }}">
@@ -301,4 +302,6 @@
       <button class="btn primary block" loading="{{ batchSaving }}" disabled="{{ batchSaving || checkedCount === 0 }}" bindtap="onSaveBatchTap"><view class="btn-face">{{ rows.length > 1 ? '确认记住 ' + checkedCount + ' 件' : !rows[0].certain && checkedCount === 0 ? '先补充位置' : '确认记住' }}</view></button>
     </view>
   </block>
+</view>
+
 </view>

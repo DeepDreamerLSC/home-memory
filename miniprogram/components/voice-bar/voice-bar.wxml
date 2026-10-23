@@ -1,3 +1,4 @@
+<view style="{{themeStyle}}">
 <block wx:if="{{ !kbOpen && (voiceState === 'recording' || voiceState === 'cancelPending') }}">
   <view class="recback"></view>
   <view class="recsheet">
@@ -59,4 +60,6 @@
       <view class="action-name txtbtn-face">文字记录</view><text class="action-chevron">›</text>
     </button>
   </view>
+</view>
+
 </view>

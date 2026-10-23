@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <view class="page">
   <!-- 令牌预检中 -->
   <view wx:if="{{ phase === 'loading' }}" class="card">
@@ -54,4 +55,6 @@
     <button class="btn block" bindtap="onManualRetryTap"><view class="btn-face">重新输入邀请码</view></button>
     <view class="mode-link" bindtap="onCloseTap">关闭</view>
   </view>
+</view>
+
 </view>

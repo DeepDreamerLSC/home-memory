@@ -1,0 +1,27 @@
+.settings-page { padding:40rpx 44rpx calc(190rpx + env(safe-area-inset-bottom)); }
+.settings-title { font-size:54rpx; line-height:1.35; font-weight:600; letter-spacing:-1.6rpx; }
+.settings-section-label { font-size:22rpx; color:var(--text-2); margin:52rpx 0 16rpx; }
+.settings-row { min-height:130rpx; display:flex; align-items:center; gap:26rpx; border-radius:0; width:100%; margin:0; padding:28rpx 0; border-bottom:1rpx solid var(--line); color:var(--text); background:transparent; line-height:1.4; text-align:left; }
+.settings-row::after { border:0; }
+.setting-symbol { width:62rpx; height:62rpx; border-radius:20rpx; display:flex; align-items:center; justify-content:center; background:var(--card-inset); font-size:34rpx; flex:none; }
+.setting-label { flex:1; font-size:28rpx; }
+.setting-value { font-size:24rpx; color:var(--text-2); }
+.setting-chevron { font-size:36rpx; color:var(--text-2); }
+.settings-note { font-size:22rpx; color:var(--text-2); line-height:1.8; margin-top:28rpx; }
+.settings-error { font-size:24rpx; color:var(--danger); line-height:1.7; margin-top:24rpx; }
+.profile-avatar { flex:none; position:relative; border-radius:50%; overflow:hidden; border:1rpx solid var(--line); background:var(--card-inset); color:var(--text); display:flex; align-items:center; justify-content:center; }
+.profile-avatar image { width:100%; height:100%; }
+.person-icon { width:62%; height:72%; position:relative; }
+.person-head { width:42%; height:36%; border:3rpx solid var(--text-2); border-radius:50%; position:absolute; left:29%; top:7%; }
+.person-body { width:85%; height:42%; border:3rpx solid var(--text-2); border-bottom:0; border-radius:50% 50% 0 0; position:absolute; left:7.5%; bottom:7%; }
+.settings-field-label { font-size:22rpx; color:var(--text-2); margin-bottom:14rpx; }
+.settings-input { box-sizing:border-box; height:96rpx; width:100%; padding:0 28rpx; border:1rpx solid var(--line); border-radius:24rpx; background:var(--card); color:var(--text); font-size:28rpx; }
+.settings-dock { position:fixed; left:0; right:0; bottom:0; padding:24rpx 40rpx calc(8rpx + env(safe-area-inset-bottom)/2); background:var(--bg); border-top:1rpx solid var(--line); }
+.settings-primary { display:flex; align-items:center; justify-content:center; min-height:98rpx; margin:0; width:100%; padding:0 24rpx; border-radius:28rpx; background:var(--go-bg); color:var(--go-fg); font-size:28rpx; line-height:1.4; }
+.settings-primary::after { border:0; }
+.settings-primary[disabled] { opacity:.5; }
+.settings-text-button { background:transparent; color:var(--text-2); font-size:24rpx; min-height:88rpx; display:flex; align-items:center; justify-content:center; }
+.settings-text-button::after { border:0; }
+button.settings-row, button.profile-summary { width:100%; min-width:100%; max-width:100%; margin:0; box-sizing:border-box; }
+button.settings-primary { width:100%; min-width:100%; max-width:100%; margin:0; padding:0 24rpx; }
+button.avatar-edit { width:100%; min-width:100%; max-width:100%; }

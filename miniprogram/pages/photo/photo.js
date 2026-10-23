@@ -1,4 +1,6 @@
 "use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 /**
  * 拍照识物确认页(#3,屏①-⑤;docs/design/issue3-photo-intake/IMPLEMENTATION.md §4.1/§5/§7/§8)。
  *
@@ -23,7 +25,6 @@
  * onUnload 另递增 captureEpoch(PR #67 R2),在途识别/授权/降级弹窗/圈选的迟到
  * 回包按代数核对后静默丢弃,页面销毁后零建会话零上屏。
  */
-Object.defineProperty(exports, "__esModule", { value: true });
 const intake_draft_1 = require("../../utils/intake-draft");
 const quantity_1 = require("../../utils/quantity");
 const photo_box_1 = require("../../utils/photo-box");
@@ -207,6 +208,7 @@ Page({
         void this.beginCapture();
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
         this.refreshRecentLocations();
     },
     onHide() {

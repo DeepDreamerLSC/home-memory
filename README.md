@@ -183,6 +183,12 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 >
 > D2 已落地(issue #96):位置页提供**清点历史列表**(`locationScanHistory`,最近 20 次,只列本位置未终结记录)与**用户删除单次清点**(`scanDelete`,只删 scan 审计行;若视频没有其他引用则一并删除云文件,绝不影响已录入物品与它们的证据);**0 确认 scan 的视频不会被 videoCleanup 的 24h 孤儿回收**(视频是清点记录的一部分),保留满 30 天后由每日 `videoCleanup` 到期回收——云文件删除、scan 行保留并标记「视频已过期回收」(计数与创建时间不动),用户确认过(≥ 1 件)的视频永不自动回收;位置被清空(purge)后终态的 0 确认记录同样在 30 天后回收,用户手动删除的记录已在删除当场结算、不重复回收。
 
+**⑩ user_profiles(个人资料,PR #107;先建集合,再部署 userProfile/households)**:
+
+> 创建 `user_profiles` 集合,权限并入 ③(「所有用户不可读不可写」)。**无需任何索引**——`_id` 即 `sha256(OPENID)`(64 位十六进制,与 `household_members.member_key` 同源),天然唯一,每用户至多一行。
+>
+> 用途:全局个人资料(昵称 1–20 码点 + 头像,`version` CAS 并发互斥;头像走 10 分钟一次性上传凭据 `avatars/{摘要}/{nonce}.jpg`,云函数读文件校验 JPEG/PNG 头与 2MiB 上限,nonce 用后即焚)。仅 `userProfile` 云函数读写本人行;`households` 的成员列表在已鉴权家庭范围内读取各成员的展示字段,**集合缺失或查询异常时回退旧成员资料,不影响家庭功能**(旧部署兼容)。注意:更换头像后旧头像文件不自动删除(已知小额存储债务,后续视量再收口)。
+
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
 云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
@@ -193,9 +199,9 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify` 与 `cloudfunctions/videoCleanup` →「**上传并部署:云端安装依赖**」。六个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify`、`cloudfunctions/videoCleanup` 与 `cloudfunctions/userProfile` →「**上传并部署:云端安装依赖**」。七个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。**`userProfile` 首次部署出现 Creating 状态属正常,约 50 秒后重试**;它不持有家庭解析副本(不进「四函数必须一起部署」约束),但 `households` 若更新到读 `user_profiles` 的版本需重部署(读失败自动回退旧资料)。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20),**userProfile 建议 10 秒**(头像校验要云下载 ≤2MiB 文件,默认 3 秒在冷启动下可能不够;`config.json` 仅声明权限,超时须控制台设置)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
 **timer 触发器**:
 - remindNotify:`dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间);

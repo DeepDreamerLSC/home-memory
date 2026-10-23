@@ -4,8 +4,8 @@
   margin-top: 18rpx;
   padding: 18rpx;
   border-radius: 20rpx;
-  background: #f7f2e7;
-  border: 2rpx solid rgba(29, 28, 24, 0.08);
+  background: var(--card-inset, #f7f2e7);
+  border: 2rpx solid var(--line, rgba(29, 28, 24, 0.08));
 }
 .sgc-head {
   display: flex;
@@ -19,12 +19,12 @@
   height: 96rpx;
   overflow: hidden;
   border-radius: 10rpx;
-  background: #e6dfd1;
+  background: var(--room-bg, #e6dfd1);
 }
 .sgc-thumb-img { width: 100%; height: 100%; }
 .sgc-box {
   position: absolute;
-  border: 4rpx solid #ffd600;
+  border: 4rpx solid var(--accent, #ffd600);
   border-radius: 4rpx;
   box-sizing: border-box;
   pointer-events: none;
@@ -34,7 +34,7 @@
 .sgc-title {
   font-size: 28rpx;
   font-weight: 800;
-  color: #292d25;
+  color: var(--text, #292d25);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -45,19 +45,19 @@
   border-radius: 999rpx;
   font-size: 20rpx;
   font-weight: 700;
-  color: #8b2318;
-  background: #ffe1dc;
+  color: var(--danger, #8b2318);
+  background: var(--danger-bg, #ffe1dc);
 }
-.sgc-meta { margin-top: 8rpx; font-size: 22rpx; color: #7a5c08; font-weight: 600; }
-.sgc-state { margin-top: 8rpx; font-size: 23rpx; color: #5f5437; }
+.sgc-meta { margin-top: 8rpx; font-size: 22rpx; color: var(--text-2, #7a5c08); font-weight: 600; }
+.sgc-state { margin-top: 8rpx; font-size: 23rpx; color: var(--text-2, #5f5437); }
 .sgc-warn {
   margin-top: 8rpx;
   padding: 8rpx 12rpx;
   border-radius: 10rpx;
   font-size: 21rpx;
   line-height: 1.5;
-  color: #8b2318;
-  background: #ffe1dc;
+  color: var(--danger, #8b2318);
+  background: var(--danger-bg, #ffe1dc);
 }
 .sgc-chev {
   flex: 0 0 auto;
@@ -75,11 +75,11 @@
 .sgc-act {
   padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  border: 2rpx solid rgba(29, 28, 24, 0.2);
+  border: 2rpx solid var(--line, rgba(29, 28, 24, 0.2));
   font-size: 23rpx;
   font-weight: 700;
-  color: #292d25;
-  background: #fffdf7;
+  color: var(--text, #292d25);
+  background: var(--card, #fffdf7);
 }
 .sgc-act-go {
   border-color: var(--go-bg, #1d1c18);
@@ -88,7 +88,7 @@
 }
 .sgc-act-off { opacity: 0.45; }
 .sgc-body { margin-top: 16rpx; }
-.sgc-hint { font-size: 21rpx; line-height: 1.5; color: #7a5c08; }
+.sgc-hint { font-size: 21rpx; line-height: 1.5; color: var(--text-2, #7a5c08); }
 .sgc-row {
   display: flex;
   align-items: center;
@@ -97,22 +97,22 @@
   margin-top: 10rpx;
   border-radius: 16rpx;
   border: 2rpx solid transparent;
-  background: #fffdf7;
+  background: var(--card, #fffdf7);
 }
-.sgc-row-on { border-color: var(--go-bg, #1d1c18); background: #fff8d8; }
+.sgc-row-on { border-color: var(--go-bg, #1d1c18); background: var(--accent-dim, #fff8d8); }
 .sgc-row-claimed { opacity: 0.72; }
 .sgc-used {
   flex: 0 0 40rpx;
   width: 40rpx;
   height: 40rpx;
   border-radius: 12rpx;
-  border: 2rpx solid rgba(29, 28, 24, 0.22);
+  border: 2rpx solid var(--line, rgba(29, 28, 24, 0.22));
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18rpx;
   font-weight: 700;
-  color: #5f5437;
+  color: var(--text-2, #5f5437);
   box-sizing: border-box;
 }
 .sgc-check {
@@ -120,7 +120,7 @@
   width: 40rpx;
   height: 40rpx;
   border-radius: 12rpx;
-  border: 2rpx solid rgba(29, 28, 24, 0.35);
+  border: 2rpx solid var(--text-3, rgba(29, 28, 24, 0.35));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -140,18 +140,18 @@
   height: 82rpx;
   overflow: hidden;
   border-radius: 10rpx;
-  background: #e6dfd1;
+  background: var(--room-bg, #e6dfd1);
 }
 .sgc-row-img { width: 100%; height: 100%; }
 .sgc-row-main { flex: 1; min-width: 0; }
 .sgc-row-name {
   font-size: 26rpx;
   font-weight: 700;
-  color: #292d25;
+  color: var(--text, #292d25);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sgc-row-meta { margin-top: 6rpx; font-size: 21rpx; color: #7a6f52; }
-.sgc-row-claim { margin-top: 6rpx; font-size: 21rpx; color: #5f5437; }
+.sgc-row-meta { margin-top: 6rpx; font-size: 21rpx; color: var(--text-2, #7a6f52); }
+.sgc-row-claim { margin-top: 6rpx; font-size: 21rpx; color: var(--text-2, #5f5437); }
 .sgc-per { margin-top: 12rpx; text-align: center; }

@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 import {
   callLocationsApi,
   isLocationsApiErrorWithCode,
@@ -315,6 +316,7 @@ Page<
   },
 
   onShow() {
+    applyPageAppearance(this);
     void this.loadNode();
   },
 

@@ -1,0 +1,4 @@
+@import "../../styles/settings.wxss";
+.avatar-edit { display:flex; flex-direction:column; align-items:center; gap:20rpx; margin:54rpx auto 48rpx; padding:0; background:transparent; color:var(--text-2); font-size:24rpx; line-height:1.5; }
+.avatar-edit::after { border:0; }
+.avatar-edit .profile-avatar { width:164rpx; height:164rpx; font-size:64rpx; }

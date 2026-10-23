@@ -915,7 +915,7 @@ test("SGP-COPY:两页无「找到」混称;保存计数=checked 数;顶部统计
 
 /* ---------------- C-10 首页/D2/注册面零改动 ---------------- */
 
-test("SGP-NONCHANGE:首页零改动;app.json 页面清单不变;location-scan 原语面不变(§7/§10)", () => {
+test("SGP-NONCHANGE:首页不接组卡;保留页面及个性化入口;location-scan 原语面不变(§7/§10)", () => {
   const indexWxml = read("index", "index.wxml");
   const indexTs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/index/index.ts"), "utf8");
   for (const src of [indexWxml, indexTs]) {

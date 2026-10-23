@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <!-- D1 位置级视频清点(#94):scan=拍摄确认流;last=回看(不自动播放) -->
 <view class="page page-with-voice-bar">
 
@@ -233,4 +234,6 @@
       </view>
     </view>
   </block>
+</view>
+
 </view>

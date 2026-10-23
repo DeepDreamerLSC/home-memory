@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * 拍照识物确认页(#3,屏①-⑤;docs/design/issue3-photo-intake/IMPLEMENTATION.md §4.1/§5/§7/§8)。
  *
@@ -625,6 +626,7 @@ Page<
   },
 
   onShow() {
+    applyPageAppearance(this);
     this.refreshRecentLocations();
   },
 

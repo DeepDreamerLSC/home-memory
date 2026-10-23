@@ -250,3 +250,13 @@ event = { audio_base64(非空,base64 后 ≤3MB,官方限额), voice_format(字�
 - 成功 → { ok:true, text(已 trim) }
 - 日志只记:音频字符数、格式、耗时、错误码;绝不打印音频数据与识别结果。密钥仅云函数环境变量,绝不入库/入码/入日志。
 - 超时 20 秒(config.json);除 wx-server-sdk 外零 npm 依赖(TC3 签名手写纯函数)。
+
+## userProfile 协议（个人资料，独立于家庭）
+
+云函数 `userProfile` 的身份仅由微信上下文OPENID派生的SHA-256摘要决定，忽略客户端openid/member_key/household_id。集合 `user_profiles` 的 `_id` 为该摘要，权限全禁；该函数不依赖家庭解析。
+
+- `get`：返回 `{ok:true,profile:{nickname,avatar_file_id,version}}`；没有记录返回空资料与version0，数据库失败返回PROFILE_UNAVAILABLE。
+- `prepareAvatar`：为本人创建/更新10分钟有效的上传凭据，返回 `{ok:true,nonce,cloud_path}`。路径为 `avatars/{本人摘要}/{随机nonce}.jpg`，该操作不改变已保存昵称头像及version。
+- `save`：传入nickname（trim后1–20码点，无控制字符）、version；可选avatar_file_id与nonce。头像更新必须匹配本人最新未过期票据、完整文件路径及当前环境，云函数读取文件检查PNG/JPEG头和2MiB上限。通过version与nonce条件更新后递增version并消费nonce。昵称单独保存不清空头像。返回保存后的profile；旧版本/竞争返回PROFILE_CONFLICT，非法头像返回INVALID_AVATAR。失败不清空旧资料，不自动删除旧头像。
+- 全局个人资料只返回给本人；已有家庭成员列表仅在已鉴权家庭范围内读取对应成员全局资料，优先用于展示，旧成员资料作兼容，不暴露其他家庭资料，不改写成员行。
+- 外观配色、明暗与首页显示偏好当前只保存本机，均不改变家庭作用域、物品数据或提醒行为。

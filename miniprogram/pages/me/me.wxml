@@ -1,0 +1,11 @@
+<view class="appearance-root" style="{{themeStyle}}"><view class="settings-page">
+  <view class="settings-title">我的</view>
+  <button class="profile-summary" bindtap="onProfileTap"><view class="profile-avatar"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{initial}}">{{initial}}</text><view wx:else class="person-icon"><view class="person-head"/><view class="person-body"/></view></view><view class="profile-copy"><view class="profile-name">{{nickname || '设置昵称'}}</view><view class="profile-caption">编辑头像与昵称</view></view><text class="setting-chevron">›</text></button>
+  <view wx:if="{{error}}" class="settings-note">{{error}}</view>
+  <view class="settings-section-label">个性化</view>
+  <button class="settings-row" bindtap="onAppearanceTap"><view class="setting-symbol">◐</view><text class="setting-label">主题配色</text><text class="setting-value">{{paletteName}} · {{modeName}}</text><text class="setting-chevron">›</text></button>
+  <button class="settings-row" bindtap="onDisplayTap"><view class="setting-symbol">☷</view><text class="setting-label">首页显示</text><text class="setting-value">自定义</text><text class="setting-chevron">›</text></button>
+  <view class="settings-section-label">家庭</view>
+  <button class="settings-row" bindtap="onFamilyTap"><view class="setting-symbol">⌂</view><text class="setting-label">我的家庭</text><text class="setting-chevron">›</text></button>
+  <view class="settings-note">外观设置只影响你，不影响家人。</view>
+</view></view>

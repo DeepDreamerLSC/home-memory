@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const profile_api_1 = require("../../utils/profile-api");
+const appearance_page_1 = require("../../utils/appearance-page");
 const ui_1 = require("../../utils/ui");
 const api_1 = require("../../utils/api");
 const quantity_1 = require("../../utils/quantity");
@@ -63,6 +65,8 @@ function roomCountText(node) {
 }
 Page({
     data: {
+        avatarFileId: "",
+        profileInitial: "",
         queryText: "",
         querying: false,
         queried: false,
@@ -102,6 +106,8 @@ Page({
         famSheetOptions: [],
         switchingFamily: false,
     },
+    profileRequest: 0,
+    onMeTap() { wx.navigateTo({ url: "/pages/me/me" }); },
     recentRequestSeq: 0,
     recentScopeGen: null,
     voiceEntry: null,
@@ -137,6 +143,12 @@ Page({
         }
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
+        const profile = (0, profile_api_1.cachedUserProfile)();
+        this.setData({ avatarFileId: profile.avatarFileId, profileInitial: Array.from(profile.nickname)[0] || "" });
+        const profileRequest = ++this.profileRequest;
+        void (0, profile_api_1.getUserProfile)().then(p => { if (profileRequest === this.profileRequest)
+            this.setData({ avatarFileId: p.avatarFileId, profileInitial: Array.from(p.nickname)[0] || "" }); }).catch(() => { });
         this.refreshFamilyChip();
         void this.loadMapLayer();
         void this.loadRecent();
@@ -153,12 +165,14 @@ Page({
         void this.refreshDueBanner();
     },
     onHide() {
+        this.profileRequest++;
         this.recentRequestSeq += 1;
         if (this.voiceEntry !== null) {
             this.voiceEntry.invalidate();
         }
     },
     onUnload() {
+        this.profileRequest++;
         this.recentRequestSeq += 1;
         if (this.voiceEntry !== null) {
             this.voiceEntry.invalidate();

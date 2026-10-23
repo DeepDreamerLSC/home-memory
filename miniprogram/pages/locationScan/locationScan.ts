@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 import { callLocationsApi } from "../../utils/locations-api";
 import { errorMessage, uuid } from "../../utils/api";
 import type {
@@ -129,6 +130,7 @@ Page<
     onDone(): void;
   }
 >({
+  onShow() { applyPageAppearance(this); },
   data: {
     phase: "loading",
     scanError: "",

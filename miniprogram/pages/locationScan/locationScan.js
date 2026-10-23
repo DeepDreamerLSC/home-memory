@@ -1,10 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 const locations_api_1 = require("../../utils/locations-api");
 const api_1 = require("../../utils/api");
 /** 中断恢复:提交前写入 storage 的完整请求(operation_id 原样复用,收敛式重放) */
 const PENDING_KEY = "location_scan_pending";
 Page({
+    onShow() { (0, appearance_page_1.applyPageAppearance)(this); },
     data: {
         phase: "loading",
         scanError: "",

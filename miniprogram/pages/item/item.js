@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 const api_1 = require("../../utils/api");
 const quantity_1 = require("../../utils/quantity");
 const households_api_1 = require("../../utils/households-api");
@@ -310,6 +311,7 @@ Page({
         this.applySummary(summary);
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
         // 家庭上下文可能切换(创建/加入/退出):「分享给家人」只在共享家庭显示;
         // 订阅入口的本地「已开启」标记按家庭键隔离,回页时一并重读(作用域经
         // 服务端复核后 refreshReminderRow 末尾还会再读一次,双保险)

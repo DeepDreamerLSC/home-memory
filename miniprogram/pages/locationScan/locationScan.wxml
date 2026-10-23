@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <view class="page">
   <!-- 扫描中 -->
   <view wx:if="{{ phase === 'loading' }}" class="card">
@@ -144,4 +145,6 @@
       <button class="btn primary block" bindtap="onDone"><view class="btn-face">完成</view></button>
     </view>
   </block>
+</view>
+
 </view>

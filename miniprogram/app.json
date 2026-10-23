@@ -12,6 +12,10 @@
     "pages/join-family/join-family",
     "pages/reminders/reminders",
     "pages/diag-subscribe/diag-subscribe",
+    "pages/me/me",
+    "pages/profile/profile",
+    "pages/appearance/appearance",
+    "pages/home-display/home-display",
     "pages/quantity-voice/quantity-voice"
   ],
   "window": {

@@ -1,3 +1,5 @@
+import { initAppearance, subscribeAppearance } from "./utils/appearance";
+import { refreshVisibleAppearance } from "./utils/appearance-page";
 import { cloudEnv, isCloudEnvPlaceholder } from "./config";
 import { pruneLocationsCache } from "./utils/locations-cache";
 import {
@@ -24,6 +26,8 @@ function notifyScopeDrift(drift: HouseholdScopeDrift): void {
 
 App({
   onLaunch() {
+    initAppearance();
+    subscribeAppearance(refreshVisibleAppearance);
     // 清理超过 24 小时的空间树缓存层(issue #23:缓存带绝对过期,启动时收口)。
     // best-effort(P1-2):缓存模块内部已吃掉 storage 异常,这里再加一层保险,
     // 本地缓存问题绝不允许打断应用启动与云环境初始化。
@@ -58,6 +62,7 @@ App({
     void verifyHouseholdScope(notifyScopeDrift).catch(() => {});
   },
   onShow() {
+    refreshVisibleAppearance();
     // 前台切回:重置验证状态并重新复核(成员资格可能在后台期间变化——
     // 被移除/家庭解散/异地切换)。首次启动 onShow 紧随 onLaunch,复核幂等
     // (pendingVerify 去重);之前是共享态且漂移时如实提示。

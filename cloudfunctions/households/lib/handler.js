@@ -1052,6 +1052,18 @@ async function memberListAction(event, deps) {
       is_self: r.member_key === deps.memberKey
     };
   });
+  // Global personal profiles override display only; legacy member data remains intact.
+  // An undeployed optional profile collection must not break existing family lists.
+  for (var member of members) {
+    try {
+      var globalRows = await deps.db.collection("user_profiles").where({ _id: member.member_key }).get();
+      var profile = globalRows.data && globalRows.data[0];
+      if (profile && profile.version > 0 && typeof profile.nickname === "string" && profile.nickname) {
+        member.nickname = profile.nickname;
+        member.avatar_file_id = typeof profile.avatar_file_id === "string" && profile.avatar_file_id ? profile.avatar_file_id : member.avatar_file_id;
+      }
+    } catch (_) { break; /* Old deployments retain legacy names and avatars. */ }
+  }
   members.sort(function (a, b) {
     if (a.role !== b.role) {
       return a.role === "owner" ? -1 : 1;

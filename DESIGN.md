@@ -52,6 +52,13 @@ Native WXML/WXSS/TypeScript; no framework or runtime dependency changes. Real co
 ## Open questions
 None required for the approved UI implementation; any future visual direction change needs a new reference.
 
+## Personal settings
+- Approved for implementation 2026-10-23. Reference: `docs/design/personalization-v1/index.html` and its `README.md`. Native implementation and deployment boundary: `docs/design/personalization-v1/IMPLEMENTATION.md`.
+- Reserve the home content heading's right side for a 44px avatar touch target. Move the existing family switch to the count row; retain it as a separate household action. Keep the native WeChat capsule intact.
+- Avatar opens “我的”: edit profile, choose appearance, configure home sections, access family. Theme offers four soft palettes plus four stronger palettes (ink/gold, cobalt, emerald, berry), with independent system/light/dark mode; preview is discarded on return unless applied.
+- Preferences belong to the person/device and persist across household switches. Home-section toggles affect display only, never reminder scheduling or saved records.
+- Personal profiles use the independent userProfile service and user_profiles collection. Household membership fields remain a read fallback; do not rewrite membership rows as global identity. The HTML prototype uses browser-only sample data.
+
 ## Quantity management proposal
 - Draft UI proposal, 2026-10-23, based on issues #102 and #101. Reference: `docs/design/quantity-v1/index.html` and `README.md`. This is a standalone prototype, not implementation authorization.
 - Extend existing list/detail/confirmation pages with last-confirmed quantity and unit; show legacy unset explicitly and preserve zero-quantity records.

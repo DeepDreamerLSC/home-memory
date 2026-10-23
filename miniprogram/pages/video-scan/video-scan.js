@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 /**
  * PR B 场景扫描确认页：
  * - 用户主动录/选一段抽屉柜子视频；
@@ -111,6 +112,7 @@ function parseStoredSession(raw) {
     };
 }
 Page({
+    onShow() { (0, appearance_page_1.applyPageAppearance)(this); },
     data: {
         phase: "idle",
         sceneId: "",

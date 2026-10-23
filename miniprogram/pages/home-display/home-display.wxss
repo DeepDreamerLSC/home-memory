@@ -1,0 +1,11 @@
+.display-page { min-height:100vh; box-sizing:border-box; padding:40rpx 44rpx; color:var(--text); background:var(--bg); }
+.page-title { font-size:48rpx; font-weight:600; line-height:1.35; letter-spacing:-1rpx; }
+.setting-sub { font-size:24rpx; color:var(--text-2); margin:16rpx 0 42rpx; }
+.toggle-row { display:flex; align-items:center; justify-content:space-between; gap:16rpx; padding:32rpx 0; border-bottom:1rpx solid var(--line); min-height:88rpx; }
+.toggle-row>view { flex:1; }
+.toggle-title { font-size:27rpx; }
+.toggle-sub { color:var(--text-2); font-size:22rpx; line-height:1.7; margin-top:10rpx; }
+.scope-note { color:var(--text-2); font-size:22rpx; margin-top:32rpx; }
+button.home-button { min-height:88rpx; background:transparent; color:var(--text-2); font-size:25rpx; margin-top:26rpx; display:flex; align-items:center; justify-content:center; }
+button::after { border:none; }
+.error { font-size:24rpx; color:var(--danger); margin-top:20rpx; }

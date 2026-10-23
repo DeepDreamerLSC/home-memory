@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * 订阅手势诊断页(#36 鸿蒙真机手势排查,仅 develop 环境可从物品详情页进入):
  * 背景=0.9.3 真机(鸿蒙微信 8.0.22.35)原生 button + 规范调用(bindtap 回调内
@@ -67,6 +68,7 @@ function collectEnvLines(): string[] {
 }
 
 Page<DiagSubscribeData, DiagSubscribeCustom>({
+  onShow() { applyPageAppearance(this); },
   data: {
     envLines: [],
     results: [],

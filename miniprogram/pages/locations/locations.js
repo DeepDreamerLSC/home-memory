@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 const locations_api_1 = require("../../utils/locations-api");
 const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
@@ -110,6 +111,7 @@ Page({
         }
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
         void this.loadNode();
     },
     /** 下拉刷新:强制绕过 TTL 直连服务端,完成后收起原生转圈(约束 1/3) */
