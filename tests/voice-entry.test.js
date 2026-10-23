@@ -231,6 +231,52 @@ test("③ 噪音转写不进提取:如实提示「没听清」,不调云函数�
   handle.detach();
 });
 
+test("④b 真机时序:ActionSheet 关闭动画期 showModal 首次 fail → 退避重试一次仍能走通;两次 fail 绝不静默(2026-10-23 真机反馈复现)", async function () {
+  // 复现:真机上 ActionSheet success 回调里立刻 wx.showModal 可能因弹层动画未结束而 fail,
+  // 旧实现 fail → resolve(false) 静默返回——用户点了「放弃上一批,记新的」后毫无反应。
+  // (a) 首次 fail + 重试成功:链路必须继续(二次确认→提取→跳新确认页)
+  var seen = 0;
+  var ctxA = setup({
+    onSheet: function (o) { o.success({ tapIndex: 1 }); },
+    onModal: function (o) {
+      seen += 1;
+      if (seen === 1) { o.fail({ errMsg: "showModal:fail" }); return; } // 动画窗内首次 fail
+      o.success({ confirm: true });
+    },
+  });
+  draftSession.createDraftSession(
+    "旧原话",
+    [{ name: "旧物品", location_text: "旧位置", certain: true, qualifiers: [], source_quote: "旧原话" }],
+    false
+  );
+  var handleA = voiceEntry.attachVoiceEntry(makeHost("首页"));
+  await handleA.extract("新的物品一句话");
+  assert.ok(ctxA.stub.modals.length >= 2, "首次 fail 必须退避重试(而非静默按取消处理),modal 至少两次");
+  assert.equal(ctxA.stub.cloudCalls.length, 1, "重试确认后本次提取照常进行");
+  assert.equal(ctxA.stub.navs.length, 1, "提取后跳新确认页");
+  handleA.detach();
+
+  // (b) 连续两次 fail:绝不允许无声无息——必须有可见提示(toast),且零提取零跳页
+  var seenB = 0;
+  var ctxB = setup({
+    onSheet: function (o) { o.success({ tapIndex: 1 }); },
+    onModal: function (o) { seenB += 1; o.fail({ errMsg: "showModal:fail" }); },
+  });
+  draftSession.createDraftSession(
+    "旧原话2",
+    [{ name: "旧物品2", location_text: "旧位置", certain: true, qualifiers: [], source_quote: "旧原话2" }],
+    false
+  );
+  var oldSid = draftSession.getUnfinishedDraftSession().sid;
+  var handleB = voiceEntry.attachVoiceEntry(makeHost("首页"));
+  await handleB.extract("又一句话");
+  assert.equal(ctxB.stub.cloudCalls.length, 0, "两次 fail:不提取");
+  assert.equal(ctxB.stub.navs.length, 0, "两次 fail:不跳页");
+  assert.equal(draftSession.getUnfinishedDraftSession().sid, oldSid, "旧批次保留(用户选择未被静默执行)");
+  assert.ok(ctxB.stub.toasts.some(function (t) { return t.title.indexOf("重试") !== -1 || t.title.indexOf("放弃") !== -1; }), "两次 fail 必须有可见提示,不得静默");
+  handleB.detach();
+});
+
 test("④ 未完成批次三选门:继续核对 / 放弃(二次确认)/ 中止", async function () {
   // (a) 继续:跳回原会话,本次不提取(旧批次须在 setup 之后建立,避免被复位清掉)
   var ctxA = setup({

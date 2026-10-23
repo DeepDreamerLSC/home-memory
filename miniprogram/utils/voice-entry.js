@@ -192,19 +192,31 @@ function askDraftEntryIntent(count) {
  * 不是数据库撤销——已保存的物品不会回滚,结果未知的物品可能已入库。
  */
 function confirmDiscardDraft() {
+    // 真机时序(2026-10-23 反馈):ActionSheet 关闭动画期间立即 showModal 可能 fail,
+    // 绝不能把平台时序失败当成「用户取消」静默吞掉——退避一拍重试一次,仍失败给可见提示。
     return new Promise((resolve) => {
-        wx.showModal({
-            title: "放弃上一批?",
-            content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
-            confirmText: "放弃,记新的",
-            cancelText: "返回",
-            success: (r) => {
-                resolve(r.confirm);
-            },
-            fail: () => {
-                resolve(false);
-            },
-        });
+        let retried = false;
+        const open = () => {
+            wx.showModal({
+                title: "放弃上一批?",
+                content: "已保存的物品不会被撤销;结果未知的物品可能已入库,可稍后在「最近记住的」中查看。",
+                confirmText: "放弃,记新的",
+                cancelText: "返回",
+                success: (r) => {
+                    resolve(r.confirm);
+                },
+                fail: () => {
+                    if (!retried) {
+                        retried = true;
+                        setTimeout(open, 350);
+                        return;
+                    }
+                    wx.showToast({ title: "弹窗没打开,请再点一次「放弃,记新的」", icon: "none", duration: 2500 });
+                    resolve(false);
+                },
+            });
+        };
+        open();
     });
 }
 /**
