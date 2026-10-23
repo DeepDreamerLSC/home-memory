@@ -6,6 +6,7 @@ exports.callItemsApi = callItemsApi;
 exports.callExtractDraft = callExtractDraft;
 exports.callDraftEditParse = callDraftEditParse;
 exports.callLocationSplit = callLocationSplit;
+exports.callQuantityIntentParse = callQuantityIntentParse;
 exports.callVideoTargetRecognize = callVideoTargetRecognize;
 exports.uuid = uuid;
 exports.formatDateTime = formatDateTime;
@@ -251,6 +252,13 @@ function validateItemsOkResponse(action, r) {
                 throw bad();
             }
             break;
+        case "quantityAdjust":
+            // Q2 语音数量操作(§7.6):item 投影必带;replayed 可缺省(首次写入)
+            if (!isRecord(r.item) ||
+                (r.replayed !== undefined && typeof r.replayed !== "boolean")) {
+                throw bad();
+            }
+            break;
         case "get":
             if (!isRecord(r.item)) {
                 throw bad();
@@ -466,6 +474,8 @@ function validateItemsOkResponse(action, r) {
 const ITEMS_MUTATING_ACTIONS = new Set([
     "create",
     "update",
+    // Q2 语音数量操作(issue #102,§7.1/L9):服务端 WRITE_ACTIONS 同族,双 marker 硬门
+    "quantityAdjust",
     "delete",
     "remindComplete",
     "remindClear",
@@ -772,6 +782,97 @@ async function callLocationSplit(text) {
         path: result.path.map((seg) => seg),
         fallback: result.fallback === true,
     };
+}
+/** quantityIntentParse 响应的 intent 闭集(§7.8,与服务端硬门同源) */
+const QUANTITY_INTENT_VALUES = [
+    "add",
+    "subtract",
+    "set",
+    "unknown",
+    "other",
+];
+const QUANTITY_INTENT_AMBIGUITY_VALUES = [
+    "maybe_total",
+    "location_unclear",
+    "unit_unclear",
+];
+/**
+ * 语音数量意图提议(issue #102 Q2,extractDraft.quantityIntentParse,§7.8):
+ * 零写库——服务端只产出提议 {intent,item_query,delta|value,unit,source_quote,
+ * match,needs_pick,ambiguity},目标 item_id 由确认页用户从候选点选,绝不模型
+ * 直填。客户端只做形状门(残缺响应整体抛 CLIENT_BAD_RESPONSE,绝不半带);
+ * 数字锚定/词表硬门/编造候选丢弃均由服务端裁定。超时与 callExtractDraft 同款。
+ */
+async function callQuantityIntentParse(event) {
+    const result = await callCloudFunction(EXTRACT_DRAFT_FUNCTION, event, EXTRACT_DRAFT_TIMEOUT_MS);
+    if (!isRecord(result)) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    if (result.ok === false) {
+        throw toServerError(result.error, result.message, EXTRACT_DRAFT_MESSAGES);
+    }
+    if (result.ok !== true) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const bad = () => new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    const intent = result.intent;
+    if (typeof intent !== "string" ||
+        QUANTITY_INTENT_VALUES.indexOf(intent) === -1 ||
+        typeof result.needs_pick !== "boolean" ||
+        typeof result.item_query !== "string") {
+        throw bad();
+    }
+    if (result.delta !== undefined && Number.isInteger(result.delta) === false)
+        throw bad();
+    if (result.value !== undefined && Number.isInteger(result.value) === false)
+        throw bad();
+    if (result.unit !== undefined &&
+        (typeof result.unit !== "string" || quantity_1.UNIT_SET.indexOf(result.unit) === -1)) {
+        throw bad();
+    }
+    if (result.source_quote !== undefined && typeof result.source_quote !== "string")
+        throw bad();
+    if (result.ambiguity !== undefined) {
+        if (typeof result.ambiguity !== "string" ||
+            QUANTITY_INTENT_AMBIGUITY_VALUES.indexOf(result.ambiguity) === -1) {
+            throw bad();
+        }
+    }
+    let match;
+    if (result.match !== undefined) {
+        const m = result.match;
+        if (!isRecord(m) ||
+            Number.isInteger(m.candidate_index) === false ||
+            m.candidate_index < 0 ||
+            typeof m.matched_word !== "string") {
+            throw bad();
+        }
+        match = {
+            candidate_index: m.candidate_index,
+            matched_word: m.matched_word,
+        };
+    }
+    const out = {
+        ok: true,
+        engine: typeof result.engine === "string" ? result.engine : "",
+        intent: intent,
+        needs_pick: result.needs_pick,
+        item_query: result.item_query,
+    };
+    if (result.delta !== undefined)
+        out.delta = result.delta;
+    if (result.value !== undefined)
+        out.value = result.value;
+    if (result.unit !== undefined)
+        out.unit = result.unit;
+    if (result.source_quote !== undefined)
+        out.source_quote = result.source_quote;
+    if (result.ambiguity !== undefined) {
+        out.ambiguity = result.ambiguity;
+    }
+    if (match !== undefined)
+        out.match = match;
+    return out;
 }
 /**
  * 单件视频「AI 找这件物品」单帧识别(extractDraft.videoTargetRecognize):

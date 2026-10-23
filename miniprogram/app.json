@@ -11,7 +11,8 @@
     "pages/family/family",
     "pages/join-family/join-family",
     "pages/reminders/reminders",
-    "pages/diag-subscribe/diag-subscribe"
+    "pages/diag-subscribe/diag-subscribe",
+    "pages/quantity-voice/quantity-voice"
   ],
   "window": {
     "navigationBarTitleText": "我靠东西呢",

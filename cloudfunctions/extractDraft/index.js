@@ -28,7 +28,7 @@
  */
 
 const cloud = require("wx-server-sdk");
-const { handler, vlRecognize, videoTargetRecognize, draftEditParse, locationSplit } = require("./lib/handler");
+const { handler, vlRecognize, videoTargetRecognize, draftEditParse, locationSplit, quantityIntentParse } = require("./lib/handler");
 const { callDeepSeek } = require("./lib/deepseek");
 const localLlm = require("./lib/local-llm");
 const vl = require("./lib/vl");
@@ -83,6 +83,11 @@ exports.main = async function (event) {
   };
   if (action === "draftEditParse") {
     return draftEditParse(event, deps);
+  }
+  if (action === "quantityIntentParse") {
+    // 语音数量意图提议(issue #102 Q2,§7.8):零写库,候选清单由客户端随
+    // event 传入(本家庭行,非数据库事实);与语音编辑解析共用双引擎 deps
+    return quantityIntentParse(event, deps);
   }
   if (action === "locationSplit") {
     // 位置层级拆分(§1.6):与语音编辑解析共用 local→DeepSeek 双引擎 deps

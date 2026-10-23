@@ -32,6 +32,7 @@ exports.attachVoiceEntry = attachVoiceEntry;
 exports.__setVoiceEntryDepsForTest = __setVoiceEntryDepsForTest;
 exports.__resetVoiceEntryForTest = __resetVoiceEntryForTest;
 const api_1 = require("./api");
+const voice_quantity_1 = require("./voice-quantity");
 const voice_1 = require("./voice");
 const draft_session_1 = require("./draft-session");
 const household_scope_1 = require("./household-scope");
@@ -207,10 +208,91 @@ function confirmDiscardDraft() {
     });
 }
 /**
+ * Q2 语音数量意图流(issue #102 §3,Q0-CONTRACT §7.8 客户端确认流):
+ * 词表判为数量操作的句子 → itemsApi list 检索本家庭候选(名称出现在原话里,
+ * ≤12)→ extractDraft.quantityIntentParse 拿零写提议 → add/subtract/set 的
+ * 提议连同候选 handoff 给确认页(用户点选目标+显式确认后才可能写入);
+ * unknown/other 停在提示层,零写入。每个异步步骤回来都复核发起绑定。
+ */
+async function runQuantityIntentFlow(text, bind) {
+    patch({ extracting: true });
+    // 解析步骤的绑定:list 返回后重捕(list 会捕获服务端派生的家庭作用域,
+    // 首次捕获递增代数,属「记住当前家庭」而非切换)——候选的权威家庭 = list
+    // 观察到的家庭,重捕与首页搜索「请求前捕代数、响应后校验」同构;abortEpoch
+    // 仍沿用发起时的,发起页面失效照样作废在途结果。
+    let parseBind = bind;
+    try {
+        const listed = await (0, api_1.callItemsApi)({ action: "list" });
+        parseBind = {
+            scopeGen: (0, household_scope_1.captureScopeGeneration)(),
+            abortEpoch: bind.abortEpoch,
+        };
+        const candidates = (0, voice_quantity_1.buildQuantityCandidates)(text, listed.items);
+        const parsed = await (0, api_1.callQuantityIntentParse)({
+            action: "quantityIntentParse",
+            text,
+            candidates,
+        });
+        if (staleBindingReason(parseBind) !== null) {
+            dropStaleExtract(parseBind);
+            return;
+        }
+        if (parsed.intent === "other") {
+            // 移动/找回/新建句已被词表分流到各自入口;解析层再判 other = 没听出数量操作
+            wx.showToast({
+                title: "这句不是对已有物品的数量操作,记新的请直接说放哪里",
+                icon: "none",
+                duration: 2500,
+            });
+            return;
+        }
+        if (parsed.intent === "unknown") {
+            wx.showToast({
+                title: parsed.ambiguity === "maybe_total"
+                    ? "没听清是加、减还是现在的总数,请换个说法"
+                    : "没听清数量,请像「加两包」「用掉三包」「现在有四包」这样说",
+                icon: "none",
+                duration: 2500,
+            });
+            return;
+        }
+        (0, voice_quantity_1.beginQuantityConfirm)({
+            text,
+            proposal: {
+                intent: parsed.intent,
+                itemQuery: parsed.item_query,
+                amount: parsed.delta !== undefined
+                    ? Math.abs(parsed.delta)
+                    : parsed.value !== undefined
+                        ? parsed.value
+                        : null,
+                unit: parsed.unit !== undefined ? parsed.unit : null,
+                sourceQuote: parsed.source_quote !== undefined ? parsed.source_quote : "",
+                needsPick: parsed.needs_pick,
+                matchIndex: parsed.match !== undefined ? parsed.match.candidate_index : null,
+            },
+            candidates,
+        });
+        defaultGoConfirm("/pages/quantity-voice/quantity-voice");
+    }
+    catch (e) {
+        if (staleBindingReason(parseBind) !== null) {
+            dropStaleExtract(parseBind);
+            return;
+        }
+        wx.showToast({ title: (0, api_1.errorMessage)(e), icon: "none", duration: 2500 });
+    }
+    finally {
+        patch({ extracting: false });
+    }
+}
+/**
  * 文字/语音共用的提取链路。binding = 语音按压时的发起绑定;null(文字直提)
  * 在入口捕获此刻的代数。每个异步步骤(三选门弹窗/放弃确认/AI 提取)回来后、
  * 任何写草稿或跳页副作用之前显式复核绑定:家庭切换或发起页面失效 → 丢弃
  * 迟到结果(不建草稿、不导航),只给一句如实提示。
+ * Q2(issue #102 §3):数量意图词表先行分流——移动/找回句就地提示零写入;
+ * 加/减/设为句进数量确认流(先提议后确认);新建句零回归走既有 create 提取。
  */
 async function extractText(text, binding = null) {
     const trimmed = text.trim();
@@ -222,6 +304,23 @@ async function extractText(text, binding = null) {
         return;
     }
     const bind = binding !== null ? binding : { scopeGen: (0, household_scope_1.captureScopeGeneration)(), abortEpoch: extractAbortEpoch };
+    // Q2 数量意图词表路由:先于未完成批次三选门(数量操作不建草稿会话,
+    // 与待核对批次互不覆盖);move/find/新建句绝不定向到数量流
+    const signal = (0, voice_quantity_1.detectQuantityOpSignal)(trimmed);
+    if (signal === "move") {
+        // 一期不做跨位置数量搬移(issue §3:不能折算成 subtract),如实提示
+        wx.showToast({ title: "跨位置移动暂不支持,请到物品详情页手动修改位置", icon: "none", duration: 2500 });
+        return;
+    }
+    if (signal === "find") {
+        // 找回查询走既有搜索,绝不触碰数量(issue §3)
+        wx.showToast({ title: "找东西请用页面上的搜索", icon: "none", duration: 2500 });
+        return;
+    }
+    if (signal === "op") {
+        await runQuantityIntentFlow(trimmed, bind);
+        return;
+    }
     const unfinished = (0, draft_session_1.getUnfinishedDraftSession)();
     if (unfinished !== null) {
         const choice = await askDraftEntryIntent(unfinished.payload.drafts.length);
