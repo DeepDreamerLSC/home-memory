@@ -61,38 +61,32 @@
       <view wx:if="{{ errorText }}" class="error-text">{{ errorText }}</view>
     </view>
 
-    <!-- 线索与草稿(review) -->
+    <!-- 线索与草稿(review):组卡收拢(R0 #101),与 B 页同一组件 -->
     <block wx:if="{{ phase === 'review' || phase === 'uploading' || phase === 'committing' || phase === 'partial' }}">
-      <view wx:if="{{ observationGroups.length > 0 }}" class="card">
+      <view class="card">
         <view class="card-head">
           <view class="card-title">线索({{ observations.length }})</view>
-          <view class="hint">同名线索不会被自动合并</view>
+          <view wx:if="{{ phase === 'review' }}" class="link-text" bindtap="onRestartTap">重新拍摄</view>
         </view>
-        <view wx:for="{{ observationGroups }}" wx:key="nameKey" wx:for-item="group" class="obs-group">
-          <view class="group-label">{{ group.label }} · {{ group.countText }}</view>
-          <view
-            wx:for="{{ group.observations }}"
-            wx:key="obsId"
-            class="obs-row {{ item.checked ? 'obs-checked' : '' }}"
-            data-obs-id="{{ item.obsId }}"
-            bindtap="onObservationToggle"
-          >
-            <view class="frame-box">
-              <image class="frame-img" src="{{ item.framePath }}" mode="aspectFill" />
-              <view wx:if="{{ item.boxStyle !== 'display:none' }}" class="frame-box-outline" style="{{ item.boxStyle }}"></view>
-            </view>
-            <view class="item-main">
-              <view class="item-name">{{ item.name }}</view>
-              <view class="item-location">{{ item.timeText }} · {{ item.confidenceText }}</view>
-            </view>
-            <view class="pick-check">{{ item.checked ? '✓' : '' }}</view>
-          </view>
-        </view>
+        <block wx:if="{{ observations.length > 0 }}">
+          <view class="stats-line">{{ sceneStats.topLineText }}</view>
+          <view class="hint">组数不是物品件数;同名线索不会被自动合并</view>
+        </block>
+        <view wx:if="{{ observationGroups.length === 0 }}" class="empty-text">没有 AI 线索。可手动补一件，或重拍。</view>
+        <scene-group-card
+          wx:for="{{ observationGroups }}"
+          wx:key="nameKey"
+          wx:for-item="group"
+          group="{{ group }}"
+          busy="{{ busy }}"
+          bind:obsToggle="onObservationToggle"
+          bind:obsPreview="onObsImageTap"
+          bind:confirmSingle="onGroupConfirmSingle"
+          bind:confirmMulti="onGroupConfirmMulti"
+          bind:defer="onGroupDefer"
+          bind:generatePerObs="onGenerateDraftsTap"
+        />
         <view class="row-actions">
-          <label class="check-label">
-            <switch checked="{{ mergeSameName }}" bindchange="onMergeSameNameChange" />同名线索生成一件
-          </label>
-          <button class="btn" size="mini" bindtap="onGenerateDraftsTap"><view class="btn-face">生成草稿</view></button>
           <button class="btn" size="mini" bindtap="onAddManualDraftTap"><view class="btn-face">手动补一件</view></button>
         </view>
       </view>
@@ -132,7 +126,7 @@
           <view class="row-actions">
             <view class="link-text" data-index="{{ index }}" bindtap="onDraftMatchTap">找已有物品</view>
             <view class="link-text" data-index="{{ index }}" bindtap="onDraftSplitTap">拆分</view>
-            <view class="link-text" data-index="{{ index }}" bindtap="onDraftMergeSelectTap">{{ item.mergeSelected ? '取消合并' : '选去合并' }}</view>
+            <view class="link-text" data-key="{{ item.draftKey }}" bindtap="onDraftMergeSelectTap">{{ item.mergeSelected ? '取消合并' : '选去合并' }}</view>
             <view wx:if="{{ item.target === 'existing' }}" class="link-text" data-index="{{ index }}" bindtap="onDraftTargetResetTap">改回新建</view>
             <view class="link-text danger-text" data-index="{{ index }}" bindtap="onDraftRemoveTap">删除</view>
           </view>

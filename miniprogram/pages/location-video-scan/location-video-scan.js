@@ -11,11 +11,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * - 已有物品五级匹配只提示不自动选中;点选后挂载在子树外才弹三选移动
  *   (只关联 / 移动到当前位置并关联 / 取消),绝不自动移动、绝不自动合并;
  * - mode=last 回看:视频播放器不自动播放 + 仍存活确认物品清单(可跳物品详情)。
- * 不复用/不改动 pages/video-scan(B 已冻结)。
+ * 不复用/不改动 pages/video-scan(B 已冻结);R0 起线索卡区域经由共享
+ * components/scene-group-card + utils/scene-groups 与 B 同一呈现/状态逻辑
+ * (issue #101 契约 §5.3),两页互不引用。
  */
 const api_1 = require("../../utils/api");
 const video_attach_1 = require("../../utils/video-attach");
 const video_scene_1 = require("../../utils/video-scene");
+const scene_groups_1 = require("../../utils/scene-groups");
 const video_target_1 = require("../../utils/video-target");
 const photo_vl_1 = require("../../utils/photo-vl");
 const households_api_1 = require("../../utils/households-api");
@@ -94,12 +97,11 @@ Page({
         failureText: "",
         errorText: "",
         resultText: "",
-        mergeSameName: false,
         observations: [],
         drafts: [],
-        selectedObsIds: [],
         mergeSelectedKeys: [],
         observationGroups: [],
+        sceneStats: (0, scene_groups_1.groupStats)([], []),
         draftViews: [],
         frozenItems: [],
         pendingUpload: null,
@@ -266,23 +268,12 @@ Page({
             this.setData({ lastLoaded: true, lastSummaryText: "读取清点记录失败:" + (0, api_1.errorMessage)(e) });
         }
     },
+    /** R0(§5.2):组视图与统计全部由 observations+drafts 推导,与 B 页同一 helper */
     renderObservations() {
-        const selected = new Set(this.data.selectedObsIds);
-        const groups = (0, video_scene_1.groupSceneObservations)(this.data.observations).map((g) => ({
-            nameKey: g.nameKey,
-            label: g.label,
-            countText: g.observations.length + " 条同名线索(不代表同一件)",
-            observations: g.observations.map((obs) => ({
-                obsId: obs.obsId,
-                name: obs.name,
-                timeText: (0, video_target_1.videoTimeText)(obs.timeMs),
-                confidenceText: (0, video_scene_1.sceneConfidenceText)(obs.confidence),
-                framePath: obs.framePath,
-                boxStyle: (0, video_target_1.boxPercentStyle)(obs.box),
-                checked: selected.has(obs.obsId),
-            })),
-        }));
-        this.setData({ observationGroups: groups });
+        this.setData({
+            observationGroups: (0, scene_groups_1.buildSceneGroupViews)(this.data.observations, this.data.drafts),
+            sceneStats: (0, scene_groups_1.groupStats)(this.data.observations, this.data.drafts),
+        });
     },
     renderDrafts() {
         const views = this.data.drafts.map((d) => {
@@ -384,7 +375,6 @@ Page({
             videoAspect: file.width > 0 && file.height > 0 ? file.width + " / " + file.height : "16 / 9",
             observations: [],
             drafts: [],
-            selectedObsIds: [],
             mergeSelectedKeys: [],
             frozenItems: [],
             pendingUpload: null,
@@ -475,36 +465,92 @@ Page({
     onContextRetryTap() {
         void this.loadContext();
     },
-    onObservationToggle(e) {
-        const obsId = String(e.currentTarget.dataset.obsId || "");
+    /** 行勾选是组卡内交互态(组件持有,§5.2);页面侧只保留接线,无全局跨组选择 */
+    onObservationToggle() { },
+    /** 点缩略图放大预览(组件事件 e.detail.obsId):current=该观察帧,urls=组内全部 framePath */
+    onObsImageTap(e) {
+        const obsId = String((e.detail && e.detail.obsId) || "");
         if (obsId === "")
             return;
-        const current = this.data.selectedObsIds;
-        const selected = current.indexOf(obsId) === -1
-            ? current.concat([obsId])
-            : current.filter((id) => id !== obsId);
-        this.setData({ selectedObsIds: selected });
-        this.renderObservations();
+        const group = this.data.observationGroups.find((g) => g.observations.some((o) => o.obsId === obsId));
+        const urls = (group ? group.observations : this.data.observations)
+            .map((o) => o.framePath)
+            .filter((p) => typeof p === "string" && p !== "");
+        const current = this.data.observations.find((o) => o.obsId === obsId);
+        if (current && current.framePath) {
+            wx.previewImage({ current: current.framePath, urls: urls.length > 0 ? urls : [current.framePath] });
+        }
     },
-    onMergeSameNameChange(e) {
-        const value = isRecord(e.detail) && e.detail.value === true;
-        this.setData({ mergeSameName: value });
+    /* ---------------- R0 三动作(§2):就 1 件 / 有多件或需拆开 / 暂不确定 ---------------- */
+    /** 就 1 件:生成聚合草稿的唯一入口;位置=进入位置路径文本并补 nodeId;同帧风险组先过 §2.1 二次确认 */
+    async onGroupConfirmSingle(e) {
+        if (this.data.busy || this.data.phase !== "review")
+            return;
+        const detail = e.detail || {};
+        const nameKey = String(detail.nameKey || "");
+        const group = this.data.observationGroups.find((g) => g.nameKey === nameKey);
+        if (group === undefined)
+            return;
+        const obsIds = Array.isArray(detail.obsIds) ? detail.obsIds : null;
+        const confirmSet = (0, scene_groups_1.confirmSingleSet)(group, obsIds);
+        if (confirmSet.length === 0)
+            return;
+        if (group.sameFrameRisk) {
+            const sure = await new Promise((resolve) => {
+                wx.showModal({
+                    title: "可能有多件",
+                    content: "这一组在第 " + group.repFrame.timeText + " 的同一帧里出现了两条同名线索,可能是两件同名物品。确定只有 1 件吗?",
+                    confirmText: "就1件",
+                    cancelText: "再看看",
+                    success: (r) => resolve(r.confirm === true),
+                    fail: () => resolve(false),
+                });
+            });
+            if (sure === false)
+                return;
+        }
+        const base = (0, video_scene_1.newSceneDraft)({
+            observationIds: confirmSet,
+            name: group.label,
+            locationText: this.data.locationPathText,
+            checked: true,
+        });
+        const draft = { ...base, nodeId: this.data.nodeId };
+        this.setData({ drafts: this.data.drafts.concat([draft]) }, () => {
+            this.renderObservations();
+            this.renderDrafts();
+            this.saveSession();
+        });
     },
-    /** 生成草稿:新草稿统一带 nodeId=进入位置 + locationText=进入位置路径文本 */
-    onGenerateDraftsTap() {
-        if (this.data.selectedObsIds.length === 0) {
+    /** 有多件或需拆开:组卡切逐条模式(组件展开),零数据变更(§2.2) */
+    onGroupConfirmMulti() { },
+    /** 暂不确定:组卡折叠,零数据变更(§2.3);组保留在待确认列表与统计里 */
+    onGroupDefer() { },
+    /** 逐条生成(组内作用域,§7):先过 §2.4 归属门,再一条一草稿;新草稿带 nodeId=进入位置 */
+    onGenerateDraftsTap(e) {
+        if (this.data.busy || this.data.phase !== "review")
+            return;
+        const detail = e.detail || {};
+        const obsIds = Array.isArray(detail.obsIds) ? detail.obsIds : [];
+        if (obsIds.length === 0) {
             wx.showToast({ title: "先勾选至少一条线索", icon: "none" });
             return;
         }
-        const base = (0, video_scene_1.createDraftsFromObservations)(this.data.observations, this.data.selectedObsIds, {
-            mergeSameName: this.data.mergeSameName,
+        const conflict = (0, scene_groups_1.claimGuard)(this.data.observations, this.data.drafts, obsIds);
+        if (conflict !== null) {
+            const index = this.data.observations.findIndex((o) => o.obsId === conflict.obsId);
+            wx.showToast({
+                title: "第 " + (index + 1) + " 条线索已用于「" + conflict.draftName + "」,先移除该草稿或拆分后再操作",
+                icon: "none",
+            });
+            return;
+        }
+        const base = (0, video_scene_1.createDraftsFromObservations)(this.data.observations, obsIds, {
+            mergeSameName: false,
             batchLocation: this.data.locationPathText,
         });
         const drafts = base.map((d) => ({ ...d, nodeId: this.data.nodeId }));
-        this.setData({
-            drafts: this.data.drafts.concat(drafts),
-            selectedObsIds: [],
-        }, () => {
+        this.setData({ drafts: this.data.drafts.concat(drafts) }, () => {
             this.renderObservations();
             this.renderDrafts();
             this.saveSession();
@@ -516,7 +562,10 @@ Page({
             return;
         const drafts = this.data.drafts.slice();
         drafts[index] = { ...drafts[index], checked: drafts[index].checked === false };
-        this.setData({ drafts }, () => this.renderDrafts());
+        this.setData({ drafts }, () => {
+            this.renderObservations();
+            this.renderDrafts();
+        });
     },
     onDraftMergeSelectTap(e) {
         const key = String(e.currentTarget.dataset.key || "");
@@ -537,7 +586,10 @@ Page({
             return;
         const drafts = this.data.drafts.slice();
         drafts[index] = { ...drafts[index], name: value };
-        this.setData({ drafts }, () => this.renderDrafts());
+        this.setData({ drafts }, () => {
+            this.renderObservations();
+            this.renderDrafts();
+        });
     },
     onDraftNoteInput(e) {
         const index = Number(e.currentTarget.dataset.index);
@@ -589,6 +641,7 @@ Page({
         const drafts = this.data.drafts.filter((_, i) => i !== index);
         const keys = this.data.mergeSelectedKeys.filter((k) => k !== removed.draftKey);
         this.setData({ drafts, mergeSelectedKeys: keys }, () => {
+            this.renderObservations();
             this.renderDrafts();
             this.saveSession();
         });
@@ -606,6 +659,7 @@ Page({
         const drafts = this.data.drafts.slice();
         drafts.splice(index, 1, ...(split.map((d) => ({ ...d, nodeId: draft.nodeId }))));
         this.setData({ drafts }, () => {
+            this.renderObservations();
             this.renderDrafts();
             this.saveSession();
             wx.showToast({ title: "已拆成 " + split.length + " 件", icon: "none" });
@@ -622,6 +676,7 @@ Page({
         const drafts = this.data.drafts.filter((d) => keys.has(d.draftKey) === false);
         drafts.splice(Math.max(0, firstIndex), 0, merged);
         this.setData({ drafts, mergeSelectedKeys: [] }, () => {
+            this.renderObservations();
             this.renderDrafts();
             this.saveSession();
         });
@@ -640,6 +695,7 @@ Page({
             checked: true,
         });
         this.setData({ drafts: this.data.drafts.concat([{ ...draft, nodeId: this.data.nodeId }]) }, () => {
+            this.renderObservations();
             this.renderDrafts();
             this.saveSession();
         });
@@ -723,6 +779,7 @@ Page({
                 expectedVersion,
             };
             this.setData({ drafts, matchPanelVisible: false, matchPanelFor: -1, matchViews: [] }, () => {
+                this.renderObservations();
                 this.renderDrafts();
                 this.saveSession();
             });
@@ -789,7 +846,6 @@ Page({
                     resultText: "",
                     observations: [],
                     drafts: [],
-                    selectedObsIds: [],
                     mergeSelectedKeys: [],
                     frozenItems: [],
                     pendingUpload: null,
