@@ -14,7 +14,7 @@
 - cloudfunctions/locations/:index.js(胶水层 + DEEPSEEK_API_KEY 检查)、config.json(超时 60 秒)、lib/handler.js(db 类 action 路由)、lib/parse.js(parseLocation/scanHousehold LLM 编排)、lib/validate.js(LLM 输出校验 + 有序锚定)、lib/tree.js(纯函数:子树收集/path 级联/深度)、lib/normalize.js(与 itemsApi 逐字节同源副本)、lib/deepseek.js(与 extractDraft 逐字节同源副本)、lib/household.js(与 itemsApi 逐字节同源副本)、package.json
 - cloudfunctions/households/(issue #34 P1-A):index.js(胶水层:OPENID→member_key、三向解析、genToken/sha256 注入)、config.json(超时 10 秒)、lib/handler.js(纯函数:生命周期/邀请/成员管理 action 路由)、lib/household.js(与 itemsApi 逐字节同源副本)、package.json
 - tests/:helpers/memoryDb.js、itemsApi.test.js、extractDraft.test.js、extractDraft-local-llm.test.js(本地主路/降级/围栏剥离/请求契约,零外网)、locations.test.js、transcribe.test.js、glue.test.js、voice.test.js、household.test.js(解析/写入硬门/副本同源)、households.test.js(生命周期/邀请/修订号/失败关闭/日志脱敏/胶水)、samples-live.js、fixtures/samples/ 下若干 JSON 样例
-- docs/:API_CONTRACT.md(本文件)、design/location-tree.md(issue #18 设计合同)、PR1.md(文档阶段编写)
+- docs/:API_CONTRACT.md(本文件)、design/location-tree.md(issue #18 设计合同)、design/quantity/Q0-CONTRACT.md(issue #102 数量管理 Q0 冻结合同,权威全文)、PR1.md(文档阶段编写)
 - 根 package.json:scripts 为 test 等于 "node --test tests/"、typecheck 等于 "tsc -p miniprogram --noEmit"、samples:live 等于 "node tests/samples-live.js";devDependencies 仅 typescript 与 miniprogram-api-typings
 
 ## 身份与隔离
@@ -107,6 +107,23 @@ event 形如 { action, ... };统一响应 { ok:true, ... } 或 { ok:false, error
 - **upsertLocationScan 防复活(两道门,同一裁定)**:① commit 早门——`event.location` 存在时在票据 CAS 之前的零写段查 scan,已有且(status ≠ "active" 或 video_reclaimed_at 已置)→ **整批零写 OPERATION_CONFLICT**(与 scan_id 复用硬门同族:生命周期已终结的 scan_id 不得被旧提交复活);② 锁内兜底门——自愈分支前重判 active 且未回收,不满足 → OPERATION_CONFLICT;满足 → D1 自愈行为不变(confirmed 活证据重查/candidate max/duplicated)。旧 sceneCommit 重试遇已删/已回收/位置终结 scan 一律 OPERATION_CONFLICT,客户端丢弃 pending 会话。
 - **客户端(位置页增量,首页零改动)**:入口卡「历史」入口 → 半屏弹层历史列表(时间/候选数/确认数/回看 + 行删除);删除确认弹层预告冻结文案「只删这条清点记录,不影响已录入的物品和它们的视频证据;若这段视频没有其他引用,将一并删除视频文件」;「视频已过期回收」/「视频已随物品证据删除」两种降级态无回看入口但不废列表;VIDEO_DELETE_FAILED 可重试提示、VIDEO_ITEM_BUSY 稍后再试、NOT_FOUND 刷新收敛。
 - **部署(itemsApi + videoCleanup + 包;无新集合/索引/环境变量;locations 不动;顺序先 itemsApi 后 videoCleanup)**;README 步骤 4⑨ 的「0 确认视频不回收/留 D2」口径需同步为 30 天到期回收事实。
+
+## 数量管理(issue #102 Q0 冻结合同,DESIGN FROZEN / NOT AUTHORIZED TO IMPLEMENT)
+
+> 权威全文见 **docs/design/quantity/Q0-CONTRACT.md**(Q0 产物,含写入口总表、逐入口细则、反例矩阵);本节为 API 层摘要。实施分 Q1(基础数量)/Q2(语音增减)/Q3(视觉归组)三段,**每段须 Owner 单独授权**,当前未授权任何实现。
+
+- **数据字段(items 文档,只增不改)**:`quantity?: number`(整数,新建写入恒 ≥1,已有 0..9999;0=用户确认「目前没有」,绝不触发删除)、`unit?: string`(冻结闭集 UNIT_SET = 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只,只增不减,默认「件」)。两字段**同现同缺**;quantity 是用户确认值,**绝不**由 observation 数/frame 数/VL confidence/名称匹配/note 文本推断。存量 items 无字段 = 数量未确认,不回填、不迁移,旧 note 的 ×N/500ml 不升格。itemsApi.delete 不触碰两字段。
+- **投影(create/update/get/query/list 的 item 投影增补)**:`quantity: number|null`、`unit: string|null`,**双 null ⇔ 未确认**;存储侧任何异常(半态/越界/闭集外)防御性按 null 读。remindList 行、locations.list 物品投影、locationScanContext 池**零变化**(后续经 change request 另议)。旧客户端忽略新键;新客户端把缺键归一为 null。
+- **新建缺省=1(精确触发)**:仅 create / photoCommit items[i] / videoSceneCommit target:"new" items[i] 的**插入路径**,且请求 `quantity` 键**缺席**时写 `quantity:1, unit:"件"`;`unit` 在场而 `quantity` 缺席 → INVALID_INPUT(QUANTITY_UNIT_PAIR);duplicated/OPERATION_CONFLICT 分支与一切读路径不写缺省。
+- **create 增量入参**:`quantity?`(1..9999 整数,Number.isInteger,显式 null/字符串/小数一律 INVALID_INPUT)、`unit?`(UNIT_SET);幂等内容比对 sameCreateContent 增数量维度(请求未带数量:命中 pre-Q1 无字段文档或 post-Q1 (1,件) 文档均视为同内容;带数量:逐值比对,不同 → OPERATION_CONFLICT)。
+- **update 增量入参**:`quantity?`+`unit?` **成对携带**(只携其一 → INVALID_INPUT);允许显式改单位(表单编辑);不携带则字段不动(legacy 行保持未确认);两字段进 changes → 自动进 last_update_fingerprint(重放识别零新机制)。
+- **photoCommit 增量**:items[i] 增 `quantity?/unit?`(规则同 create,缺省 1/件),整批纯参数校验阶段拦截(附 detail.index);数量进字段后 **note 不再由数量拼出**;同帧多框合并为 1 条 ×N 时 `photo.box` 必须 null(整照关联,绝不拿其中一个框冒充),单来源行保留原框;服务端不做合并判定。
+- **videoSceneCommit 增量**:target:"new" items[i] 增 `quantity?/unit?`,**进 canonical 签名**(不携带时签名与现行逐字节一致;同票据重试改数量 → OPERATION_CONFLICT);target:"existing" **禁止携带数量**(QUANTITY_ON_EXISTING_TARGET 整批零写——数量变更只走 update/quantityAdjust,不存在第二条数量写路径)。observation_count/frame 数/highlights 数与 quantity 永不互相赋值;`location_scans.confirmed_count` 仍数确认条数不数数量总和(2 条 ×5/×3 → confirmed_count=2)。
+- **quantityAdjust(Q2,新增写类 action,当前不存在)**:`{ item_id, expected_version, update_id(必填 1-64), mode:"add"|"subtract"|"set", amount(add/subtract 1..9999;set 0..9999), unit?(携带必须等于当前 unit), expected_household_id?, expected_scope_revision? }`。校验顺序:形状 → 目标存活(NOT_FOUND)→ 未确认/单位门(add/subtract 于未确认行 → QUANTITY_UNCONFIRMED;set 于未确认行须携 unit → UNIT_REQUIRED;单位不符 → UNIT_MISMATCH)→ 计算(add/subtract 结果 <0 → QUANTITY_BELOW_ZERO,>9999 → QUANTITY_OVER_MAX,**范围验证在写前**)→ 版本 CAS 条件更新(quantity/unit/version+1/updated_at/last_update_id/last_update_fingerprint)。指纹 = changesFingerprint({mode,amount,unit})(只覆盖请求内容、不含计算结果,保证响应丢失重试可重算;quantityAdjust 永不改 unit,重试读到的 unit 与首次一致):同 update_id 同 payload 重试 → replayed:true 最多生效一次;改任何参数 → VERSION_CONFLICT;结果不可知(他人写入推进了版本)→ 客户端「待核对/请刷新」,绝不自动重套旧 delta。set 永不改单位、add 不是新建、「把两包拿到卧室」(移动)/「找一下」(查询)绝不折算成数量操作。进 WRITE_ACTIONS/客户端 mutating 清单(共享家庭双 marker 硬门同族)。
+- **数量相关 INVALID_INPUT 携带 `detail:{ reason, index?, current_quantity?, current_unit? }`**(不新增错误码):reason 冻结枚举 11 值 PARAM_SHAPE / QUANTITY_NOT_INTEGER / QUANTITY_OUT_OF_RANGE / QUANTITY_BELOW_ZERO / QUANTITY_OVER_MAX / QUANTITY_UNIT_PAIR / UNIT_UNSUPPORTED / UNIT_REQUIRED / UNIT_MISMATCH / QUANTITY_UNCONFIRMED / QUANTITY_ON_EXISTING_TARGET。
+- **extractDraft v2 数量三项(Q1)**:每件 draft 增 `quantity/unit/quantity_quote` 三项同现同缺;服务端硬门——冻结数字解析器(阿拉伯+中文数字,≤9999,无小数/半/几)从 quantity_quote(原话逐字子串)解析出的数量+单位必须与模型输出一致,锚定失败三项整体置 null(不废件);「买了 3 包」= 新建预填 3 待确认,不是对已有 item 的 add;v1 响应零变化。**quantityIntentParse(Q2,新增零写 action)**:输出 `{intent: add|subtract|set|unknown|other, match?, needs_pick, item_query, delta?/value?, unit?, source_quote, ambiguity?}` 纯提议,模型不得填 item_id 直接改库,歧义(「还有四包」)→ unknown 绝不静默执行。
+- **UI 防双展示**:已确认行显示 `×{quantity}{unit}` 徽标(唯一来源是投影字段);未确认行无徽标、详情页显示「数量未确认」入口(不预填 1);已确认行 note 若匹配旧形状 `^×\s*\d+(\s+.*)?$`,展示层剥掉 ×N 词元(存储原文不动,纯展示变换 displayNoteFor)。
+- **不做**:库存流水/SKU/阈值提醒(#87 独立)/单位换算/自动合并已入库 item/跨位置数量搬移/新集合/新索引/新 npm 依赖。
 
 ## extractDraft 协议
 ### v2 多件拆分协议(Issue #14,2026-10-10)
