@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import type { Box } from "./photo-box";
 import { uuid } from "./api";
+import { normalizeForMatch } from "./item-match";
 import {
   buildFramePlan,
   createVideoFrameSession,
@@ -215,8 +216,15 @@ export interface SceneObservationGroup {
   observations: SceneObservation[];
 }
 
+/**
+ * 分组键(R0 契约 §1.1):委托 item-match 的 normalizeForMatch——与五级匹配
+ * 同一口径(trim → NFKC → 小写 → 删空白 → 删常见标点)。「同名」只有一种定义:
+ * 全半角(Ｍａｇ≡Mag)、空白与常见标点差异(充电器、≡充电器)归同键。
+ * 这是字符级规范化,不是同义词归并;模糊匹配(isFuzzyMatch)不进分组。
+ * 键为空(名称仅由标点/空白构成)由调用方回退 obsId 各成单条组。
+ */
 function nameKeyOf(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, "");
+  return normalizeForMatch(name);
 }
 
 export function groupSceneObservations(observations: SceneObservation[]): SceneObservationGroup[] {

@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "拍视频找多件"
+  "navigationBarTitleText": "拍视频找多件",
+  "usingComponents": {
+    "scene-group-card": "/components/scene-group-card/scene-group-card"
+  }
 }
