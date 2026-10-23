@@ -51,3 +51,10 @@ Native WXML/WXSS/TypeScript; no framework or runtime dependency changes. Real co
 
 ## Open questions
 None required for the approved UI implementation; any future visual direction change needs a new reference.
+
+## Quantity management proposal
+- Draft UI proposal, 2026-10-23, based on issues #102 and #101. Reference: `docs/design/quantity-v1/index.html` and `README.md`. This is a standalone prototype, not implementation authorization.
+- Extend existing list/detail/confirmation pages with last-confirmed quantity and unit; show legacy unset explicitly and preserve zero-quantity records.
+- Voice adjustments show target, original value, operation and result before explicit confirmation. Ambiguous targets, mismatched units, version conflicts and unknown write results require user resolution.
+- Photo/video candidate grouping is explicit. Observation counts never imply quantity; retain original sources, and use whole-photo evidence when multiple boxes are combined.
+- Keep the existing visual tokens and short Chinese copy; no separate inventory navigation, low-stock thresholds or automatic deduction.
