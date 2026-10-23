@@ -94,14 +94,22 @@ function buildQuantityCandidates(text, items) {
         if (normText.indexOf(normName) === -1) {
             continue;
         }
+        // version 是确认页 expected_version 的唯一来源(types.ts「绝不页面自造」),
+        // 与服务端 quantityIntentParse 候选门同口径:必须正整数;不合法的行整行
+        // 跳过(宁可漏判,绝不伪造 version 送进 CAS)。
+        if (Number.isInteger(item.version) === false || item.version < 1) {
+            continue;
+        }
         seen.add(item.item_id);
         out.push({
             item_id: item.item_id,
             name: item.name,
             location_text: item.location_text,
             quantity: typeof item.quantity === "number" ? item.quantity : null,
-            unit: typeof item.unit === "string" ? item.unit : null,
-            version: typeof item.version === "number" ? item.version : 1,
+            // L5 镜像:闭集外 unit 一律按「未确认」表达(null),绝不随候选进入
+            // quantityIntentParse(服务端闭集硬门会将整个请求判 INVALID_INPUT)
+            unit: (0, quantity_1.isUnit)(item.unit) ? item.unit : null,
+            version: item.version,
         });
         if (out.length >= exports.QUANTITY_CANDIDATES_MAX) {
             break;

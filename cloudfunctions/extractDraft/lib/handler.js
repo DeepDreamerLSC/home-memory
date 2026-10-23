@@ -883,7 +883,7 @@ async function draftEditParse(event, deps) {
 // - 移动句式(拿到/搬到/放到…别的位置)与找回句式(找一下/在哪…)→ intent:"other"
 //   (客户端提示一期不支持/走既有查询,移动绝不折算成 subtract);
 // - 「还有/大概/差不多」存在「加还是总数」歧义 → unknown + maybe_total,
-//   绝不静默按任一语义执行;
+//   三种数量语义(add/subtract/set)任一都不许静默执行;
 // - 数字锚定:delta/value 与 unit 必须能由冻结数字解析器(lib/quantity.js,
 //   §7.8.2 唯一数字语义实现)从 source_quote(原话逐字子串,去空白比对)
 //   独立解析得到且一致——模型推算(「一箱」折 24)一律降级 unknown;
@@ -914,7 +914,7 @@ const QI_SYSTEM_PROMPT = [
   '1. intent 只能取:add(在现有数量上增加)/subtract(减少)/set(用户说出了现在的总数)/unknown(分不清是加、减还是总数)/other(不是对已有物品的数量操作:移动位置、找回查询、记新物品、闲聊等)。',
   '2. add 时给 delta(正整数);subtract 时给 delta(负整数);set 时给 value(0-9999 整数);unknown/other 不给数量。',
   '3. 数量必须来自原话里明确说出的「数字+单位」,单位只能是 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只 之一;source_quote 是原话中承载该数量的逐字子串(如「加两包」里的「两包」)。没说数量、模糊量(几包/一些/半打)、需要换算(一箱=多少包)时,intent 用 unknown,绝不推算。',
-  '4. 「还有 N」「大概 N」「差不多 N」说不清是加还是当前总数时,intent="unknown" 且 ambiguity="maybe_total",绝不猜成 set 或 add。',
+  '4. 「还有 N」「大概 N」「差不多 N」说不清是加、减还是当前总数时,intent="unknown" 且 ambiguity="maybe_total",绝不猜成 set、add 或 subtract。',
   '5. 把物品拿到/搬到/放到别的位置(移动)、找一下/在哪里(找回)、买新的/记一件新的(新建)都是 intent="other"。',
   "6. 【候选清单】里名称与用户描述对得上且只有一件时,给 candidate_index(从 0 开始);对不上、同名多件分不清、或清单为空时省略 candidate_index。",
   '只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:',
@@ -990,9 +990,11 @@ function validateQuantityIntentOutput(rawText, normalizedText, candidates) {
   if (qiContainsMarker(normalizedText, QI_MOVE_MARKERS) || qiContainsMarker(normalizedText, QI_FIND_MARKERS)) {
     intent = "other";
   } else if (
-    (intent === "add" || intent === "set") &&
+    QI_QUANTITY_INTENTS.indexOf(intent) !== -1 &&
     qiContainsMarker(normalizedText, QI_MAYBE_TOTAL_MARKERS)
   ) {
+    // §7.8 硬门:三种数量语义(add/subtract/set)任一都不许静默执行——
+    // 「还有 N」模型答 subtract 同样落入 unknown + maybe_total(E4 补口)
     intent = "unknown";
     ambiguity = "maybe_total";
   }
@@ -1107,8 +1109,8 @@ function validateQuantityIntentOutput(rawText, normalizedText, candidates) {
 /*
  * quantityIntentParse 入口:event = { action, text, candidates }。
  * 校验(text 去空白 1-200 码点;candidates 0-12 项,item_id ≤64、name 1-50、
- * location_text ≤200、version 正整数、quantity/unit 可选)失败 → INVALID_INPUT
- * (引擎未参与)。引擎链复用 local→DeepSeek 双引擎降级(与 draftEditParse 同款);
+ * location_text ≤200、version 正整数、quantity 0-9999 可选、unit ∈ UNIT_SET
+ * 闭集可选)失败 → INVALID_INPUT(引擎未参与)。引擎链复用 local→DeepSeek 双引擎降级(与 draftEditParse 同款);
  * 坏 JSON 带错误重试一次仍走同一引擎;双失败/坏输出 → AI_UNAVAILABLE。
  * 日志白名单见上;绝不触任何写。
  */
@@ -1151,12 +1153,22 @@ async function quantityIntentParse(event, deps) {
       return failInput();
     }
     if (!Number.isInteger(c.version) || c.version < 1) return failInput();
+    // L5/§2.2:候选 unit(展示与 unit_unclear 判定输入)同样必须 ∈ UNIT_SET
+    // 闭集逐字成员,缺席/null = 数量未确认;闭集外字符串一律 INVALID_INPUT
+    // (引擎未参与),不随候选进入提示词与歧义判定。
+    let unit = null;
+    if (c.unit !== undefined && c.unit !== null) {
+      if (typeof c.unit !== "string" || UNIT_SET.indexOf(c.unit) === -1) {
+        return failInput();
+      }
+      unit = c.unit;
+    }
     candidates.push({
       item_id: c.item_id,
       name: nm,
       location_text: c.location_text.trim(),
       quantity: Number.isInteger(c.quantity) && c.quantity >= 0 && c.quantity <= 9999 ? c.quantity : null,
-      unit: typeof c.unit === "string" ? c.unit : null,
+      unit: unit,
       version: c.version,
     });
   }

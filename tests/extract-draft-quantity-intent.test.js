@@ -128,6 +128,21 @@ test("E4b 模型自报 unknown+maybe_total 原样透传", async () => {
   assert.equal(res.ambiguity, "maybe_total");
 });
 
+test("E4c 「还有 N」模型答 subtract 同样被硬门压下(词表门覆盖全部数量语义)", async () => {
+  const res = await quantityIntentParse(
+    { action: "quantityIntentParse", text: "棉柔巾还有四包", candidates: [cand()] },
+    depsWith({ intent: "subtract", item_query: "棉柔巾", delta: -4, unit: "包", source_quote: "四包", candidate_index: 0 }),
+  );
+  assert.equal(res.ok, true);
+  assert.equal(res.intent, "unknown", "绝不静默按任一数量语义执行(§7.8)");
+  assert.equal(res.ambiguity, "maybe_total");
+  assert.equal(res.delta, undefined, "unknown 不携带 delta,绝不给执行层留抓手");
+  assert.equal(res.value, undefined);
+  assert.equal(res.unit, undefined);
+  assert.equal(res.match, undefined);
+  assert.equal(res.needs_pick, false);
+});
+
 test("E5 「把两包棉柔巾拿到卧室」→ other(移动句式,模型报 add 也被硬门压下),不携带数量", async () => {
   const res = await quantityIntentParse(
     { action: "quantityIntentParse", text: "把两包棉柔巾拿到卧室", candidates: [cand()] },
@@ -332,6 +347,9 @@ test("INVALID_INPUT:text 空/超 200 码点、candidates 缺席/13 项/形状错
     { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "", location_text: "卫生间", version: 1 }] },
     { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "棉柔巾", location_text: "卫生间" }] },
     { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "棉柔巾", location_text: "卫生间", version: "3" }] },
+    { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "棉柔巾", location_text: "卫生间", version: 1, unit: "ml" }] },
+    { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "棉柔巾", location_text: "卫生间", version: 1, unit: "" }] },
+    { action: "quantityIntentParse", text: "棉柔巾加两包", candidates: [{ item_id: "it", name: "棉柔巾", location_text: "卫生间", version: 1, unit: 3 }] },
   ];
   for (const ev of bad) {
     const res = await quantityIntentParse(ev, deps);
@@ -339,6 +357,37 @@ test("INVALID_INPUT:text 空/超 200 码点、candidates 缺席/13 项/形状错
     assert.equal(res.error, "INVALID_INPUT");
   }
   assert.equal(calls, 0, "参数校验失败不得触碰引擎");
+});
+
+test("候选 unit ∈ UNIT_SET 闭集(L5):合法成员/缺席/null/显式 null 均放行", async () => {
+  // 确认行(闭集成员)与 legacy 未确认行(缺席/显式 null)都合法
+  const confirmed = await quantityIntentParse(
+    { action: "quantityIntentParse", text: "卫生间棉柔巾加两包", candidates: [cand()] },
+    depsWith(ADD_TWO),
+  );
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.intent, "add");
+
+  const absent = await quantityIntentParse(
+    {
+      action: "quantityIntentParse",
+      text: "旧抽纸加两包",
+      candidates: [{ item_id: "it-2", name: "旧抽纸", location_text: "客厅", quantity: null, version: 2 }],
+    },
+    depsWith({ intent: "add", item_query: "旧抽纸", delta: 2, unit: "包", source_quote: "加两包", candidate_index: 0 }),
+  );
+  assert.equal(absent.ok, true, "unit 缺席(legacy 未确认行)合法");
+  assert.equal(absent.intent, "add");
+
+  const explicitNull = await quantityIntentParse(
+    {
+      action: "quantityIntentParse",
+      text: "旧抽纸加两包",
+      candidates: [{ item_id: "it-2", name: "旧抽纸", location_text: "客厅", quantity: null, unit: null, version: 2 }],
+    },
+    depsWith({ intent: "add", item_query: "旧抽纸", delta: 2, unit: "包", source_quote: "加两包", candidate_index: 0 }),
+  );
+  assert.equal(explicitNull.ok, true, "unit 显式 null 合法");
 });
 
 // ---------- 引擎链与日志纪律 ----------

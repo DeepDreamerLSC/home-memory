@@ -15,7 +15,7 @@
  */
 
 import { normalizeForMatch } from "./item-match";
-import { QUANTITY_MAX, quantitySlotText } from "./quantity";
+import { QUANTITY_MAX, isUnit, quantitySlotText } from "./quantity";
 import type { ItemSummary } from "../types";
 
 /** 路由信号:op=数量增减/设为句;move=跨位置移动句;find=找回查询句;null=新建句(create) */
@@ -127,14 +127,22 @@ export function buildQuantityCandidates(
     if (normText.indexOf(normName) === -1) {
       continue;
     }
+    // version 是确认页 expected_version 的唯一来源(types.ts「绝不页面自造」),
+    // 与服务端 quantityIntentParse 候选门同口径:必须正整数;不合法的行整行
+    // 跳过(宁可漏判,绝不伪造 version 送进 CAS)。
+    if (Number.isInteger(item.version) === false || item.version < 1) {
+      continue;
+    }
     seen.add(item.item_id);
     out.push({
       item_id: item.item_id,
       name: item.name,
       location_text: item.location_text,
       quantity: typeof item.quantity === "number" ? item.quantity : null,
-      unit: typeof item.unit === "string" ? item.unit : null,
-      version: typeof item.version === "number" ? item.version : 1,
+      // L5 镜像:闭集外 unit 一律按「未确认」表达(null),绝不随候选进入
+      // quantityIntentParse(服务端闭集硬门会将整个请求判 INVALID_INPUT)
+      unit: isUnit(item.unit) ? item.unit : null,
+      version: item.version,
     });
     if (out.length >= QUANTITY_CANDIDATES_MAX) {
       break;

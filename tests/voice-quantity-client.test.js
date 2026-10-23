@@ -179,6 +179,21 @@ test("候选检索:名称(归一)出现在原话中的行入选,封顶 12,按 it
   assert.equal(legacy[0].quantity, null, "未确认行原样进候选(确认页展示待核对)");
 });
 
+test("候选检索:version 缺失/非正整数的行整行跳过(绝不伪造 version 进 CAS);闭集外 unit 按 null(未确认)表达", function () {
+  var got = voiceQuantity.buildQuantityCandidates("卫生间棉柔巾加两包", [
+    summaryItem({ item_id: "it-1" }),
+    { item_id: "it-nov", name: "棉柔巾", location_text: "客厅", quantity: 5, unit: "包" },
+    { item_id: "it-zero", name: "棉柔巾", location_text: "阳台", quantity: 5, unit: "包", version: 0 },
+    { item_id: "it-frac", name: "棉柔巾", location_text: "书房", quantity: 5, unit: "包", version: 2.5 },
+    summaryItem({ item_id: "it-ml", name: "棉柔巾", location_text: "厨房", unit: "ml" }),
+  ]);
+  assert.equal(got.length, 2, "version 不合法的三行跳过,合法两行入选");
+  assert.equal(got[0].item_id, "it-1");
+  assert.equal(got[0].version, 3);
+  assert.equal(got[1].item_id, "it-ml");
+  assert.equal(got[1].unit, null, "闭集外 unit 不随候选进 quantityIntentParse(服务端 L5 闭集硬门)");
+});
+
 test("数量预览:add/subtract/set 算术与失败关闭(BELOW_ZERO/OVER_MAX/UNCONFIRMED)", function () {
   assert.deepEqual(voiceQuantity.previewQuantity("add", 2, 5), { ok: true, result: 7 });
   assert.deepEqual(voiceQuantity.previewQuantity("subtract", 3, 5), { ok: true, result: 2 });
@@ -536,6 +551,54 @@ test("确认页:VERSION_CONFLICT → 先展示家人最新值;重核对进入 se
   assert.equal(qa.calls[1].amount, 6);
   assert.equal(qa.calls[1].expected_version, 8);
   assert.notEqual(qa.calls[1].update_id, qa.calls[0].update_id, "改值必须生成新操作");
+});
+
+test("确认页:服务端确定性零写拒绝(FAMILY_SWITCHED/NOT_FOUND,§7.7)→ 服务端文案 toast,绝不弹「结果不明」、不留同键重试", async function () {
+  // FAMILY_SWITCHED:服务端明确未写入,结果不是「不明」
+  var qa = quantityAdjustRouter(function (n, data) {
+    if (n === 1) {
+      return { ok: false, error: "FAMILY_SWITCHED", message: "家庭已切换,本次操作未保存,请确认当前家庭后重试" };
+    }
+    return okAdjustRes({ quantity: data.amount });
+  });
+  var stub = installPageWx(qa.router);
+  voiceQuantity.beginQuantityConfirm({
+    text: "卫生间棉柔巾加两包",
+    proposal: { intent: "add", itemQuery: "棉柔巾", amount: 2, unit: "包", sourceQuote: "加两包", needsPick: false, matchIndex: 0 },
+    candidates: [{ item_id: "it-1", name: "棉柔巾", location_text: "卫生间镜柜", quantity: 5, unit: "包", version: 3 }],
+  });
+  var page = pageOf(pageConfig);
+  page.onLoad({});
+  await page.onConfirmTap();
+  await settle();
+  assert.equal(stub.modals.length, 0, "确定性拒绝绝不弹「可能已保存」误导(§7.5 结果不明仅限响应丢失)");
+  assert.equal(page.data.phase, "confirm");
+  assert.ok(
+    stub.toasts.indexOf("家庭已切换,本次操作未保存,请确认当前家庭后重试") !== -1,
+    "按服务端文案 toast",
+  );
+  // pendingRetry 已清:用户再次确认是全新操作(新 update_id),不是同键重试
+  await page.onConfirmTap();
+  await settle();
+  assert.equal(qa.calls.length, 2);
+  assert.notEqual(qa.calls[1].update_id, qa.calls[0].update_id, "确定性拒绝后不得复用旧 update_id");
+
+  // NOT_FOUND(目标已删/跨家庭)同分支:零写事实如实呈现,零弹窗
+  var qa2 = quantityAdjustRouter(function () {
+    return { ok: false, error: "NOT_FOUND", message: "没有找到这条记录" };
+  });
+  var stub2 = installPageWx(qa2.router);
+  voiceQuantity.beginQuantityConfirm({
+    text: "卫生间棉柔巾加两包",
+    proposal: { intent: "add", itemQuery: "棉柔巾", amount: 2, unit: "包", sourceQuote: "加两包", needsPick: false, matchIndex: 0 },
+    candidates: [{ item_id: "it-1", name: "棉柔巾", location_text: "卫生间镜柜", quantity: 5, unit: "包", version: 3 }],
+  });
+  var page2 = pageOf(pageConfig);
+  page2.onLoad({});
+  await page2.onConfirmTap();
+  await settle();
+  assert.equal(stub2.modals.length, 0);
+  assert.ok(stub2.toasts.indexOf("没有找到这条记录") !== -1);
 });
 
 test("确认页:响应丢失(网络失败)→ 结果不明弹窗;重试复用同 update_id+expected_version+payload(最多生效一次)", async function () {

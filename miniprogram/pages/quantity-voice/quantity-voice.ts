@@ -10,12 +10,22 @@
  * - 提交 quantityAdjust:update_id(uuid)+expected_version(候选读到的 version,
  *   绝不页面自造);VERSION_CONFLICT 先用响应 current 展示家人最新值,用户
  *   显式重核对(默认「设为当前总数」、金额清空——绝不自动套旧 delta)后才
- *   以新 update_id+新版本再发;响应丢失(网络/超时)保留原 payload,重试复用
- *   同一 update_id+expected_version+payload(服务端三重识别重放,最多生效一次),
+ *   以新 update_id+新版本再发;服务端已应答的确定性零写拒绝(NOT_FOUND/
+ *   FAMILY_SWITCHED 等 §7.7 矩阵)按服务端文案 toast,不进重试;仅响应丢失
+ *   (网络失败/超时/响应损坏)保留原 payload,重试复用同一
+ *   update_id+expected_version+payload(服务端三重识别重放,最多生效一次),
  *   绝不盲目再扣减。
  */
 
-import { ApiError, callItemsApi, uuid } from "../../utils/api";
+import {
+  ApiError,
+  CLIENT_BAD_RESPONSE,
+  CLIENT_NETWORK,
+  CLIENT_TIMEOUT,
+  callItemsApi,
+  errorMessage,
+  uuid,
+} from "../../utils/api";
 import {
   UNIT_SET,
   isUnit,
@@ -316,8 +326,25 @@ Page<
           });
           return;
         }
-        // 结果不明(网络/超时):保留原 payload,同键重试最多生效一次;
-        // 取消 = 稍后到详情页核对,绝不自动重放旧 delta
+        if (
+          e instanceof ApiError &&
+          e.code !== CLIENT_TIMEOUT &&
+          e.code !== CLIENT_NETWORK &&
+          e.code !== CLIENT_BAD_RESPONSE
+        ) {
+          // 服务端已应答的结构化错误(§7.7 确定性零写拒绝:NOT_FOUND /
+          // FAMILY_SWITCHED / FAMILY_STALE_SCOPE / HOUSEHOLD_UNAVAILABLE /
+          // UNAUTHORIZED / 无 detail 的 INVALID_INPUT 等):服务端明确未写入,
+          // 结果不是「不明」——按服务端文案 toast,绝不弹「可能已保存」误导、
+          // 绝不诱导注定失败的同键重试(§7.5 结果不明仅限响应丢失场景)。
+          this.pendingRetry = null;
+          this.setData({ saving: false });
+          wx.showToast({ title: errorMessage(e), icon: "none", duration: 2500 });
+          return;
+        }
+        // 结果不明(仅传输层:网络失败/超时/响应损坏,或非 ApiError 的意外异常):
+        // 保留原 payload,同键重试最多生效一次;取消 = 稍后到详情页核对,
+        // 绝不自动重放旧 delta
         this.pendingRetry = {
           updateId,
           itemId: target.item_id,
