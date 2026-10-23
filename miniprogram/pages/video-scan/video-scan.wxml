@@ -67,7 +67,19 @@
         <view class="target-row" data-index="{{idx}}" bindtap="onDraftTargetTap">{{d.targetText}} ›</view>
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.locationText}}" placeholder="这件放在哪里" data-index="{{idx}}" bindinput="onDraftLocationInput" />
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.note}}" placeholder="备注（可选）" data-index="{{idx}}" bindinput="onDraftNoteInput" />
-        <view class="draft-meta">{{d.observationCount}} 条线索 · {{d.highlightCount}} 条用户确认高亮{{d.isManual ? ' · 手动补件' : ''}}</view>
+        <view wx:if="{{d.target === 'new'}}" class="qtyrow">
+          <text class="qty-label">数量</text>
+          <view class="step">
+            <view class="stepBtn" data-index="{{idx}}" data-d="{{ -1 }}" bindtap="onDraftQtyStep">−</view>
+            <text class="stepNum">{{d.qty}}</text>
+            <view class="stepBtn" data-index="{{idx}}" data-d="{{ 1 }}" bindtap="onDraftQtyStep">+</view>
+          </view>
+          <picker class="step-unit" range="{{unitOptions}}" value="{{d.unitIndex}}" data-index="{{idx}}" bindchange="onDraftUnitChange">
+            <view class="step-unit-btn">{{d.unit}} ▾</view>
+          </picker>
+          <text wx:if="{{!d.quantitySet}}" class="qty-pending">不填按 1 {{d.unit}} · 线索数不代表件数</text>
+        </view>
+        <view class="draft-meta">{{d.observationCount}} 条线索 · {{d.highlightCount}} 条用户确认高亮{{d.isManual ? ' · 手动补件' : ''}}{{d.quantitySet ? ' · ×' + d.qty + d.unit : ''}}</view>
         <view wx:if="{{d.highlightWarning}}" class="draft-warn">{{d.highlightWarning}}</view>
         <view wx:if="{{d.isManual}}" class="manual-times">
           <view>仅时间窗可无框：</view>

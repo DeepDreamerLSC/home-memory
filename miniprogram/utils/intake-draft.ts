@@ -48,7 +48,33 @@ export interface IntakeRow extends PhotoCandidate {
   done: boolean;
   /** 保存失败的错误文案(""=无失败;失败行沿用原 operationId 可重试) */
   failMsg: string;
+  /**
+   * 合成行的来源候选(issue #102 Q3,Q0-CONTRACT §8 规则 1):多框合成 1 条 ×N
+   * 后,来源候选(候选 id/框/名称)在此保留供确认页展开查验——**会话内存,
+   * 绝不进 photoCommit 载荷,不落库**;多框坐标不持久化到证据行(证据行 box=null
+   * 整照关联)。普通行为 undefined;合成行再合并时来源累积。
+   */
+  mergedFrom?: MergedRowSource[];
 }
+
+/** 合成行的来源候选快照(候选 id/框/名称;§8 规则 1 的「可展开查验」数据) */
+export interface MergedRowSource {
+  draftId: string;
+  name: string;
+  box: Box | null;
+}
+
+/** mergeRowsIntoOne 的失败原因(行集一律原样返回,零变更) */
+export type MergeRowsReason =
+  | "not-found"
+  | "done"
+  | "single"
+  | "legacy-row"
+  | "unit-mismatch";
+
+export type MergeRowsOutcome =
+  | { ok: true; rows: IntakeRow[] }
+  | { ok: false; reason: MergeRowsReason; message: string };
 
 /** 数量域:1-99(抽不到数字按 1,IMPLEMENTATION.md §4.1 ②) */
 const QTY_MIN = 1;
@@ -201,6 +227,78 @@ export function makeManualRow(name: string, qtyNote: string, genId?: GenId): Int
     failMsg: "",
     operationId: idOf(genId),
   };
+}
+
+// ---------- 同帧多框合成(issue #102 Q3,Q0-CONTRACT §8) ----------
+
+/**
+ * 把用户选中的多行候选合成一行 ×N(用户显式动作,默认绝不发生):
+ * - 门:≥2 行;不含 done 终态行;不含 pre-Q1 会话恢复行(unit 缺席 = 冻结
+ *   载荷旧行,E13 纪律不注入不改造);单位全一致(L3:不同单位绝不默默叠加);
+ * - 合成行(Q0-CONTRACT §8 规则 1/3/4):
+ *   · box=null **整照关联**——绝不把其中任何一个框冒充「N 件」的全部位置;
+ *   · qty = 来源行步进值之和的**预填提示**(钳 1-99),qtyTouched=false 行上
+ *     标「数量待核对」——合成总数必须由用户在步进器/最终确认弹层过目
+ *     (L1:quantity 是用户确认值,永不由候选框数/VL 置信推断);
+ *   · src:任一来源为圈选 → "circle",否则保留首行来源(§8 规则 4:凡含
+ *     用户圈选即用户确认痕迹,photoCommit source 归并口径);
+ *   · draftId/operationId/name/suffix/exc/remind 沿用首选中行(幂等键稳定:
+ *     同键改内容由服务端 OPERATION_CONFLICT 如实暴露,绝不静默吞);
+ *   · mergedFrom:全部来源候选(含再合并时既有合成行的来源)累积保留,
+ *     只进会话内存供展开查验,绝不进提交载荷;
+ * - 未选中的行原样保留;合成行落在首选中行的位置。
+ */
+export function mergeRowsIntoOne(
+  rows: readonly IntakeRow[],
+  draftIds: readonly string[],
+): MergeRowsOutcome {
+  const wanted = draftIds.filter((id) => typeof id === "string" && id !== "");
+  const picked: IntakeRow[] = [];
+  for (const r of rows) {
+    if (wanted.indexOf(r.draftId) !== -1) picked.push(r);
+  }
+  if (picked.length !== wanted.length) {
+    return { ok: false, reason: "not-found", message: "要合并的候选行不存在,请刷新后重试" };
+  }
+  if (picked.length < 2) {
+    return { ok: false, reason: "single", message: "至少选择两行候选才能合成一条" };
+  }
+  if (picked.some((r) => r.done)) {
+    return { ok: false, reason: "done", message: "已入库的行不能再合并" };
+  }
+  if (picked.some((r) => typeof r.unit !== "string")) {
+    return { ok: false, reason: "legacy-row", message: "旧会话恢复的行不支持合并,请单独保存" };
+  }
+  const unit = picked[0].unit as string;
+  if (picked.some((r) => r.unit !== unit)) {
+    return { ok: false, reason: "unit-mismatch", message: "所选行单位不同,先统一单位再合并" };
+  }
+  const first = picked[0];
+  const qtySum = picked.reduce((acc, r) => acc + (typeof r.qty === "number" ? r.qty : 1), 0);
+  const mergedFrom: MergedRowSource[] = [];
+  for (const r of picked) {
+    if (Array.isArray(r.mergedFrom)) {
+      for (const src of r.mergedFrom) mergedFrom.push({ ...src });
+    } else {
+      mergedFrom.push({ draftId: r.draftId, name: r.name, box: r.box === undefined ? null : r.box });
+    }
+  }
+  const anyCircle = picked.some((r) => r.src === "circle");
+  const merged: IntakeRow = {
+    ...first,
+    qty: clampQty(qtySum),
+    qtyTouched: false,
+    box: null,
+    src: anyCircle ? "circle" : first.src,
+    checked: true,
+    done: false,
+    failMsg: "",
+    mergedFrom,
+  };
+  const firstIndex = rows.findIndex((r) => r.draftId === first.draftId);
+  const out: IntakeRow[] = rows.filter((r) => wanted.indexOf(r.draftId) === -1);
+  out.splice(Math.max(0, firstIndex), 0, merged);
+  return { ok: true, rows: out };
 }
 
 // ---------- 三态流转(原型 toggleRow / updateCounts / syncTag) ----------
