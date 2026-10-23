@@ -47,6 +47,16 @@ export interface DraftSessionRowState {
    * 会话)才回落草稿预览值(无预览 = 空数组)。
    */
   mountPath?: string[];
+  /**
+   * 数量(issue #102 Q1):**本行数量随 create 携带时才回写**(quantityProvided
+   * =语音锚定成功或用户触碰确认);缺省(pre-Q1 会话)→ 恢复后不携带
+   * (E13 冻结载荷:绝不给原载荷注入数量,服务端缺省 1/件)。恢复时以回写值
+   * 为准覆盖草稿提取值;单位是 UNIT_SET 成员(默认「件」)。
+   */
+  quantity?: number;
+  unit?: string;
+  /** 用户触碰过数量控件(恢复「待确认」标注用;缺省 false) */
+  quantityTouched?: boolean;
 }
 
 export interface DraftSessionPayload {

@@ -59,7 +59,7 @@ test("quantitySlotText:已确认 ×N单位(0 也如实);未确认「待核对」
 });
 
 test("quantityConfirmedText:详情口径「上次确认 ×N单位」+ 确认时间后缀;缺失退化无时间", function () {
-  assert.equal(quantity.quantityConfirmedText(3, "包", "2026-10-01T00:00:00.000Z"), "上次确认 ×3包 · 10-01");
+  assert.equal(quantity.quantityConfirmedText(3, "包", "2026-10-01T08:00:00.000Z"), "上次确认 ×3包 · 10-01");
   assert.equal(quantity.quantityConfirmedText(0, "包", null), "上次确认 ×0包");
   assert.equal(quantity.quantityConfirmedText(2, "盒", "不是日期"), "上次确认 ×2盒", "非法时间戳退化为无时间,不丢数量");
 });

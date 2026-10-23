@@ -33,6 +33,9 @@ function harness() {
       roomArtwork: (name, dark) => `room:${name}:${!!dark}`,
       itemArtwork: (name, dark) => `item:${name}:${!!dark}`,
     },
+    // 数量纯函数(issue #102 Q1):无 wx 依赖,直接用 build 产物(与 intake-draft
+    // 测试同源;UNIT_SET/归一/槽文案是纯函数,无需 stub)
+    "../../utils/quantity": require("../miniprogram/utils/quantity"),
   };
   const source = fs.readFileSync(path.join(__dirname, "../miniprogram/pages/index/index.ts"), "utf8");
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;

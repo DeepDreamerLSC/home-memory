@@ -151,7 +151,11 @@ test("PC-COMMIT-1:逐件建档走既有 createItem 路径,证据行形状与位�
   assert.equal(items[0].note, "×1 (空罐)");
   assert.equal(items[0].operation_id, "op-a");
   assert.equal(items[0].household_id, HOUSEHOLD_A);
-  assert.ok(!("quantity" in items[0]), "绝不引入 items.quantity(数量只是 note 文本)");
+  // issue #102 Q1(Q0-CONTRACT §4.3)取代 #65「数量只是 note 文本」旧约束:
+  // 旧载荷(不带 quantity)走服务端缺省 1/件;note 原样保留、绝不被解析成数量
+  assert.equal(items[0].quantity, 1, "未携带数量 → 服务端缺省 1(§5 唯一落点)");
+  assert.equal(items[0].unit, "件");
+  assert.equal(items[0].note, "×1 (空罐)", "旧 note 一字不改,不升格为数量事实");
 
   var evidence = await rawDocs(db, "photo_evidence");
   assert.equal(evidence.length, 2, "只有两件带了照片");

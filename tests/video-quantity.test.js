@@ -80,7 +80,7 @@ async function sceneTicket(deps, sceneId) {
     file_id: fileId,
   }, deps);
   assert.equal(receipt.ok, true, JSON.stringify(receipt));
-  return { begin, fileId };
+  return { begin, fileId, sceneId };
 }
 
 function newItem(draftKey, opId, name, highlights, over) {
@@ -97,7 +97,7 @@ function newItem(draftKey, opId, name, highlights, over) {
 function commitEvent(ticket, items, extra) {
   return Object.assign({
     action: "videoSceneCommit",
-    scene_id: ticket.begin.scene_id,
+    scene_id: ticket.sceneId,
     upload_ticket: ticket.begin.upload_ticket,
     asset_id: ticket.begin.asset_id,
     file_id: ticket.fileId,

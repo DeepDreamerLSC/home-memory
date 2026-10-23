@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const api_1 = require("../../utils/api");
+const quantity_1 = require("../../utils/quantity");
 const households_api_1 = require("../../utils/households-api");
 const ui_1 = require("../../utils/ui");
 const locations_api_1 = require("../../utils/locations-api");
@@ -216,6 +217,15 @@ Page({
         videoAiCandidates: [],
         videoAiError: "",
         videoAiNoHit: false,
+        quantityText: "待核对",
+        quantityConfirmed: false,
+        quantityPanelOpen: false,
+        quantityDraft: "",
+        quantityUnitIndex: 0,
+        quantitySaving: false,
+        /** 单位选择器选项(UNIT_SET 冻结顺序 = 展示序,Q0-CONTRACT §2.2) */
+        unitOptions: quantity_1.UNIT_SET,
+        noteFoldOpen: false,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
     original: { name: "", location: "", note: "" },
@@ -225,6 +235,8 @@ Page({
     videoEntryHint: null,
     videoEntryFocusConsumed: false,
     pendingRetry: null,
+    quantityRetry: null,
+    quantityOriginal: { quantity: null, unit: null },
     onLoad(options) {
         // 搜索 badge 的定位 hint 只存在页面实例内存；真正 seek 前还要用
         // videoEvidenceGet 的新鲜行和当前 item/household 重新校验。
@@ -272,6 +284,11 @@ Page({
                         note: p.note,
                         version: p.version,
                         updated_at: p.updated_at,
+                        // 数量(issue #102 Q1):跳转摘要可能带也可能缺(旧入口/旧服务端),
+                        // 非法形态一律按未确认;详情页随后 get 会以权威投影刷新
+                        quantity: (0, quantity_1.isValidExistingQuantity)(p.quantity) ? p.quantity : null,
+                        unit: (0, quantity_1.isUnit)(p.unit) ? p.unit : null,
+                        quantity_confirmed_at: typeof p.quantity_confirmed_at === "string" ? p.quantity_confirmed_at : null,
                     };
                 }
             }
@@ -501,6 +518,11 @@ Page({
         const vague = typeof s.remind_vague_quote === "string"
             ? s.remind_vague_quote || ""
             : this.data.vagueQuote;
+        // 数量(issue #102 Q1):投影字段是唯一来源;缺键/异常归一为未确认(双 null),
+        // 绝不从 note 的 ×N/500ml 推断;表单不预填(未确认行占位「待核对」,§10.3)
+        const q = (0, quantity_1.normalizeQuantityFields)(s);
+        this.quantityOriginal = { quantity: q.quantity, unit: q.unit };
+        const unitIndex = q.unit === null ? 0 : Math.max(0, quantity_1.UNIT_SET.indexOf(q.unit));
         this.setData({
             itemId: s.item_id,
             name: s.name,
@@ -517,10 +539,150 @@ Page({
                     ? "记录更新于 " + (0, api_1.formatDateTime)(s.updated_at)
                     : "",
             vagueQuote: vague,
+            quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
+            quantityConfirmed: q.quantity !== null,
+            quantityPanelOpen: false,
+            quantityDraft: "",
+            quantityUnitIndex: unitIndex,
+            noteFoldOpen: false,
             // 新基准落地:冲突面板随之作废(保存成功/重新进页都会走到这里)
             conflicts: [],
             conflictPending: false,
         });
+    },
+    /* ---------------- 数量:「设为当前总数」(issue #102 Q1,Q0-CONTRACT §4.2/§10.3) ---------------- */
+    onQuantityPanelToggle() {
+        this.setData({ quantityPanelOpen: !this.data.quantityPanelOpen });
+    },
+    onQuantityInput(e) {
+        this.setData({
+            quantityDraft: e.detail && e.detail.value ? e.detail.value : "",
+        });
+    },
+    onQuantityUnitChange(e) {
+        const idx = Number(e && e.detail ? e.detail.value : 0);
+        this.setData({ quantityUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < quantity_1.UNIT_SET.length ? idx : 0 });
+    },
+    onNoteFoldToggle() {
+        this.setData({ noteFoldOpen: !this.data.noteFoldOpen });
+    },
+    /**
+     * 「设为当前总数」保存:走 itemsApi.update 携 {quantity, unit}(成组,§4.2)。
+     * - 0 合法(= 确认目前没有,保留物品/位置/提醒/证据,L2);0..9999 整数;
+     * - 未填不提交(未确认行绝不预填 1——「待核对」就是答案,先核对实物);
+     * - 数量与已确认基准相同且单位相同 → 内容没有变化,不空写;
+     * - VERSION_CONFLICT:优先用响应 current 直接展示家人已更新的最新值并引导
+     *   核对实物总数后再确认(§14.1-4/5),绝不自动重放;旧服务端无 current 时
+     *   走既有 get 刷新路径;
+     * - 与文本表单独立提交,成功后只对齐版本与数量字段,不清用户未保存的文本草稿。
+     */
+    async onQuantitySaveTap() {
+        if (this.data.quantitySaving || this.data.saving || this.data.deleting || this.data.mountSaving) {
+            return;
+        }
+        const parsed = (0, quantity_1.parseQuantityText)(this.data.quantityDraft, 0);
+        if (parsed === null) {
+            wx.showToast({ title: "请先核对实物数量再填写", icon: "none" });
+            return;
+        }
+        if (parsed === "INVALID") {
+            wx.showToast({ title: "数量需为 0-9999 的整数", icon: "none" });
+            return;
+        }
+        const unit = quantity_1.UNIT_SET[this.data.quantityUnitIndex] || "件";
+        if (this.quantityOriginal.quantity === parsed &&
+            this.quantityOriginal.unit === unit) {
+            wx.showToast({ title: "内容没有变化", icon: "none" });
+            return;
+        }
+        const retry = this.quantityRetry;
+        const samePayload = retry !== null && retry.quantity === parsed && retry.unit === unit;
+        const updateId = samePayload ? retry.updateId : (0, api_1.uuid)();
+        this.setData({ quantitySaving: true });
+        try {
+            const res = await (0, api_1.callItemsApi)({
+                action: "update",
+                item_id: this.data.itemId,
+                expected_version: this.data.version,
+                update_id: updateId,
+                quantity: parsed,
+                unit,
+            });
+            this.quantityRetry = null;
+            // 数量保存不动名称/位置/备注:只对齐版本与数量字段,保留用户未保存的文本草稿
+            const q = (0, quantity_1.normalizeQuantityFields)(res.item);
+            this.quantityOriginal = { quantity: q.quantity, unit: q.unit };
+            this.setData({
+                version: res.item.version,
+                updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
+                quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
+                quantityConfirmed: q.quantity !== null,
+                quantityPanelOpen: false,
+                quantityDraft: "",
+            });
+            wx.showToast({ title: "已记为当前总数", icon: "success" });
+        }
+        catch (e) {
+            this.quantityRetry = { updateId, quantity: parsed, unit };
+            if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
+                const cur = e.current;
+                if (cur && cur.item_id) {
+                    // 冲突响应带最新投影:一次往返展示「家人已更新为 X」,引导核对实物,
+                    // 用户显式重核对后再提交(绝不自动套用旧输入)
+                    const q = (0, quantity_1.normalizeQuantityFields)(cur);
+                    this.quantityOriginal = { quantity: q.quantity, unit: q.unit };
+                    this.setData({
+                        version: cur.version,
+                        quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
+                        quantityConfirmed: q.quantity !== null,
+                        quantityDraft: "",
+                        quantityUnitIndex: q.unit === null ? 0 : Math.max(0, quantity_1.UNIT_SET.indexOf(q.unit)),
+                    });
+                    wx.showToast({
+                        title: "家人刚更新过数量,请核对实物总数后再确认",
+                        icon: "none",
+                        duration: 2500,
+                    });
+                }
+                else {
+                    // 旧服务端无 current:走既有冲突刷新(get + 三方合并),再引导核对
+                    const result = await this.refreshForConflict();
+                    if (result === "notfound") {
+                        wx.showModal({
+                            title: "记录不存在",
+                            content: "没有找到这条记录,可能已被删除。",
+                            showCancel: false,
+                            success: () => {
+                                this.goBack();
+                            },
+                        });
+                    }
+                    else {
+                        wx.showToast({ title: "内容已被修改,已刷新,请核对后再确认", icon: "none", duration: 2500 });
+                    }
+                }
+            }
+            else if (e instanceof api_1.ApiError && e.detail && typeof e.detail.reason === "string") {
+                // 数量校验失败(detail.reason 冻结枚举):按原因给可操作文案
+                const reasonMap = {
+                    QUANTITY_NOT_INTEGER: "数量需为 0-9999 的整数",
+                    QUANTITY_OUT_OF_RANGE: "数量需为 0-9999 的整数",
+                    UNIT_UNSUPPORTED: "请从单位列表里选择单位",
+                    QUANTITY_UNIT_PAIR: "数量与单位需一起提交,请重试",
+                };
+                wx.showToast({ title: reasonMap[e.detail.reason] || (0, api_1.errorMessage)(e), icon: "none" });
+            }
+            else {
+                wx.showModal({
+                    title: "数量没存上",
+                    content: (0, api_1.errorMessage)(e),
+                    showCancel: false,
+                });
+            }
+        }
+        finally {
+            this.setData({ quantitySaving: false });
+        }
     },
     /**
      * 保存修改:文本字段走 itemsApi update(expected_version 条件更新);
@@ -599,6 +761,9 @@ Page({
                     note: it.note,
                     version: it.version,
                     updated_at: it.updated_at,
+                    quantity: (0, quantity_1.isValidExistingQuantity)(it.quantity) ? it.quantity : null,
+                    unit: (0, quantity_1.isUnit)(it.unit) ? it.unit : null,
+                    quantity_confirmed_at: typeof it.quantity_confirmed_at === "string" ? it.quantity_confirmed_at : null,
                 });
             }
             if (remindWrite !== null && this.data.remindGeneration < 0) {

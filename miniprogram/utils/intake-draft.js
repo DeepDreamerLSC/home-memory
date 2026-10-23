@@ -15,7 +15,12 @@
  * - 全部函数纯:入参不被改动,变更返回新对象;draftId/operationId 全程稳定
  *   (锁定、应用、计数一律按 draftId,绝不按行号——行号会因删行重排漂移);
  * - 「已确认记住」(done)是终态:done 行不可再勾选/取消勾选;
- * - 数量只是备注文本(一条记录=一件可查找的物品),绝不引入库存语义;
+ * - 数量(issue #102 Q1 起,Q0-CONTRACT §4.3):qty 是「数量预填提示 → 用户确认值」,
+ *   保存时随 photoCommit 的 quantity/unit 字段落库,不再拼进 note;VL qty_note 的
+ *   文字部分(suffix)永不解析成 unit(unit 只来自选择器,默认「件」);行上
+ *   「待核对」标记直到用户触碰步进器/单位选择器(qtyTouched);
+ * - 入列工厂建的新行恒带 unit;**unit 缺席 = pre-Q1 会话恢复的行**,保存层按
+ *   冻结载荷旧形态重放(note=×N 拼法、不注入 quantity/unit,E13/B9);
  * - 语音应用绝不改勾选(保留)状态,0 勾选字段不执行。
  */
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -33,6 +38,7 @@ exports.quickVerifyRows = quickVerifyRows;
 exports.toggleRowChecked = toggleRowChecked;
 exports.setRowsChecked = setRowsChecked;
 exports.stepRowQty = stepRowQty;
+exports.setRowUnit = setRowUnit;
 exports.markRowSaved = markRowSaved;
 exports.markRowFailed = markRowFailed;
 exports.applyDraftEdits = applyDraftEdits;
@@ -40,6 +46,7 @@ exports.intakeCounts = intakeCounts;
 exports.intakeCountView = intakeCountView;
 exports.deriveSaveConfirm = deriveSaveConfirm;
 const api_1 = require("./api");
+const quantity_1 = require("./quantity");
 /** 数量域:1-99(抽不到数字按 1,IMPLEMENTATION.md §4.1 ②) */
 const QTY_MIN = 1;
 const QTY_MAX = 99;
@@ -96,6 +103,8 @@ function makeAiRow(item, genId) {
         name: item.name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "ai",
         confidence: item.confidence,
@@ -118,6 +127,8 @@ function makeVoiceAddedRow(name, qtyNote, genId) {
         name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "voice",
         confidence: "low",
@@ -140,6 +151,8 @@ function makeCircleRow(item, circledBox, genId) {
         name: item.name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "circle",
         confidence: item.confidence,
@@ -162,6 +175,8 @@ function makeManualRow(name, qtyNote, genId) {
         name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "manual",
         confidence: "low",
@@ -216,14 +231,26 @@ function setRowsChecked(rows, checked) {
 /**
  * 数量步进器(±1):下限 1(原型 step 的 Math.max(1,…)),上限夹 99(与
  * parseIntakeQtyNote 的 qty 域一致);不改勾选态、draftId、operationId。
- * 步进值落在域内不变时返回原引用(无变更)。
+ * 步进值落在域内不变时返回原引用(无变更)。用户触碰步进器 = 数量确认
+ * (issue #102 Q1):qtyTouched 置 true,行上「待核对」标记随之消失。
  */
 function stepRowQty(row, delta) {
     const next = clampQty(row.qty + delta);
-    if (next === row.qty) {
+    if (next === row.qty && row.qtyTouched === true) {
         return row;
     }
-    return { ...row, qty: next };
+    return { ...row, qty: next, qtyTouched: true };
+}
+/**
+ * 单位选择器切换(issue #102 Q1):unit 只来自用户的选择器选择(UNIT_SET 闭集,
+ * 默认「件」);闭集外值原样返回绝不写入(防御)。触碰选择器同样是数量确认
+ * (qtyTouched=true),行上「待核对」标记随之消失。
+ */
+function setRowUnit(row, unit) {
+    if (!(0, quantity_1.isUnit)(unit) || unit === row.unit) {
+        return row;
+    }
+    return { ...row, unit, qtyTouched: true };
 }
 /** photoCommit 该行成功 → 「已确认记住」(终态) */
 function markRowSaved(row) {

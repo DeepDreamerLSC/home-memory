@@ -87,13 +87,22 @@ test("B2-index:首页列表日期保留「记录更新于 …」语义,不再出
   assert.equal(wxml.indexOf("上次确认"), -1, "首页 wxml 不得再出现「上次确认」");
 });
 
-test("B2-产物与源:源码与编译产物均无「上次确认」;D1「可能已移动」提示保留不动", function () {
+test("B2-产物与源:位置/日期文案无「上次确认」(数量区除外);D1「可能已移动」提示保留不动", function () {
+  // issue #102 Q1 增量:数量区文案「上次确认 ×N单位」(Q0-CONTRACT §10.1 冻结
+  // 词表,数据来源 quantity_confirmed_at)是唯一允许的「上次确认」形态;PR #48
+  // B2 的禁令本质不变——updated_at(记录更新)绝不被称为「上次确认(位置)」。
   var js = read("pages/item/item.js");
-  assert.equal(js.indexOf("上次确认"), -1, "编译产物 item.js 不得残留「上次确认」");
-  assert.ok(js.indexOf("记录更新于 ") !== -1, "编译产物 item.js 应包含「记录更新于」");
-  ["pages/item/item.ts", "pages/item/item.wxml", "pages/index/index.wxml"].forEach(function (rel) {
-    assert.equal(read(rel).indexOf("上次确认"), -1, rel + " 不得残留「上次确认」");
+  var ts = read("pages/item/item.ts");
+  [js, ts].forEach(function (src, i) {
+    var which = i === 0 ? "编译产物 item.js" : "item.ts";
+    var pos = src.indexOf("上次确认");
+    while (pos !== -1) {
+      assert.ok(src.slice(pos, pos + 6) === "上次确认 ×", which + " 的「上次确认」只允许数量文案形态(上次确认 ×N单位)");
+      pos = src.indexOf("上次确认", pos + 1);
+    }
   });
+  assert.ok(js.indexOf("记录更新于 ") !== -1, "编译产物 item.js 应包含「记录更新于」");
+  assert.equal(read("pages/index/index.wxml").indexOf("上次确认"), -1, "首页 wxml 不得出现「上次确认」");
   // D1 只读大卡静态提示句保留(本批只改「上次确认」文案,不动 D1)
   var wxml = read("pages/item/item.wxml");
   assert.ok(

@@ -22,6 +22,57 @@
     <view wx:if="{{ vagueQuote && !expire }}" class="bigcard-quote vague-quote">当时提到时间:『{{ vagueQuote }}』(没换算成日期)</view>
   </view>
   <view class="bigcard-tiny">物品可能已移动。</view>
+
+  <!-- 数量区(issue #102 Q1,Q0-CONTRACT §10.1):「上次确认 ×N单位」或「待核对」,
+       唯一来源=items 投影字段;0=确认目前没有(物品/位置/提醒/证据全保留) -->
+  <view class="qty-row">
+    <view class="qty-main">
+      <view class="qty-t {{ quantityConfirmed ? '' : 'unconfirmed' }}">{{ quantityText }}</view>
+      <view class="qty-sub">改数量不影响位置、提醒和照片视频</view>
+    </view>
+    <view class="qty-act {{ quantitySaving ? 'busy' : '' }}" bindtap="onQuantityPanelToggle">{{ quantityPanelOpen ? '收起' : '设为当前总数 ›' }}</view>
+  </view>
+  <view wx:if="{{ quantityPanelOpen }}" class="card qty-card">
+    <view class="field">
+      <view class="label">当前总数(0-9999)</view>
+      <input
+        class="input"
+        type="number"
+        placeholder="{{ quantityConfirmed ? '填核对后的当前总数(0-9999)' : '待核对,数一数现在有几件' }}"
+        placeholder-class="placeholder"
+        value="{{ quantityDraft }}"
+        disabled="{{ quantitySaving }}"
+        bindinput="onQuantityInput"
+      />
+    </view>
+    <view class="field">
+      <view class="label">单位</view>
+      <picker
+        range="{{ unitOptions }}"
+        value="{{ quantityUnitIndex }}"
+        disabled="{{ quantitySaving }}"
+        bindchange="onQuantityUnitChange"
+      >
+        <view class="field-btn">
+          <text class="field-val">{{ unitOptions[quantityUnitIndex] }}</text>
+          <text class="field-chev">›</text>
+        </view>
+      </picker>
+    </view>
+    <view class="hint">填 0 = 确认目前没有(物品记录、位置、提醒和照片视频都保留);改单位需按新单位重新核对总数,不做换算。</view>
+    <button class="btn ink block" loading="{{ quantitySaving }}" bindtap="onQuantitySaveTap">
+      <view class="btn-face">记为当前总数</view>
+    </button>
+  </view>
+
+  <!-- 原备注折叠(Q0-CONTRACT §10.2 主规则:note 原样折叠、绝不与数量并排、
+       不解析为库存;旧 ×N/500ml 一字不改写;编辑态 textarea 永远显示存储原文) -->
+  <view wx:if="{{ note }}" class="note-fold-row" bindtap="onNoteFoldToggle">
+    <text>原备注</text>
+    <text class="note-fold-chev {{ noteFoldOpen ? 'open' : '' }}">{{ noteFoldOpen ? '收起' : '查看' }}</text>
+  </view>
+  <view wx:if="{{ noteFoldOpen }}" class="note-fold-body">{{ note }}</view>
+
   <view class="detail-quote-row" bindtap="onQuoteToggle"><text>原话</text><text>{{ detailQuoteOpen ? '收起' : '查看' }}</text></view>
   <view wx:if="{{ detailQuoteOpen }}" class="detail-quote">{{ recordedLocationText || locationText }}</view>
 
@@ -408,6 +459,6 @@
 </view>
 
 <view wx:if="{{ !editPanelOpen }}" class="detail-dock">
-  <button class="detail-found" hover-class="btn-press" bindtap="onFoundTap" disabled="{{ saving || deleting || mountSaving }}"><text class="found-check">✓</text>找到了</button>
-  <button class="detail-update" hover-class="btn-press" bindtap="onUpdateLocationTap" disabled="{{ saving || deleting || mountSaving }}">更新位置</button>
+  <button class="detail-found" hover-class="btn-press" bindtap="onFoundTap" disabled="{{ saving || deleting || mountSaving || quantitySaving }}"><text class="found-check">✓</text>找到了</button>
+  <button class="detail-update" hover-class="btn-press" bindtap="onUpdateLocationTap" disabled="{{ saving || deleting || mountSaving || quantitySaving }}">更新位置</button>
 </view>

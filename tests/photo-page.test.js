@@ -474,8 +474,12 @@ test("PP-STATE-1:勾选/取消三态流转 + 步进器同步备注(qty+suffix �
 
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: 1 } } });
   assert.equal(page.rowsRaw[1].qty, 2);
-  assert.equal(page.data.rows[1].noteText, "×2 备注", "屏幕数字与草稿同一份数据");
-  assert.equal(page.data.rows[1].metaText.indexOf("×2 备注") !== -1, true);
+  // issue #102 Q1(Q0-CONTRACT §4.3):Q1 行数量口径 = ×N单位(默认「件」);
+  // 用户步进后 qtyTouched=true,「数量待核对」标记随之消失
+  assert.equal(page.data.rows[1].noteText, "×2件", "屏幕数字与草稿同一份数据");
+  assert.equal(page.rowsRaw[1].qtyTouched, true, "触碰步进器=数量确认");
+  assert.equal(page.data.rows[1].qtyPending, false);
+  assert.equal(page.data.rows[1].metaText.indexOf("×2件") !== -1, true);
 
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: -1 } } });
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: -1 } } });
@@ -776,7 +780,10 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
   assert.equal(ev.items.length, 1, "未勾选件不提交");
   assert.equal(ev.items[0].name, "黄色薯片罐");
   assert.equal(ev.items[0].location_text, "厨房", "例外优先(客户端已合成)");
-  assert.equal(ev.items[0].note, "×1 备注");
+  // issue #102 Q1(Q0-CONTRACT §4.3):数量进 quantity/unit 字段,note 不再由数量拼出
+  assert.equal(ev.items[0].quantity, 1);
+  assert.equal(ev.items[0].unit, "件");
+  assert.equal(ev.items[0].note, undefined);
   assert.equal(ev.items[0].photo.file_id, "cloud://test-bucket/evidence-1.jpg");
   assert.equal(ev.items[0].photo.img_w, 1024);
   assert.equal(ev.items[0].photo.img_h, 768);

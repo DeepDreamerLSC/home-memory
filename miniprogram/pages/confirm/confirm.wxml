@@ -27,6 +27,30 @@
           bindinput="onLocationInput"
         />
       </view>
+      <!-- 数量(issue #102 Q1):默认不填 → 1 件;填了随行携带 -->
+      <view class="field">
+        <view class="label">数量</view>
+        <view class="qty-inline">
+          <input
+            class="input qty-num"
+            type="number"
+            placeholder="不填 = 1 件"
+            placeholder-class="placeholder"
+            value="{{ manualQuantity }}"
+            disabled="{{ saving }}"
+            bindinput="onQuantityInput"
+          />
+          <picker
+            class="qty-unit"
+            range="{{ unitOptions }}"
+            value="{{ manualUnitIndex }}"
+            disabled="{{ saving }}"
+            bindchange="onQuantityUnitChange"
+          >
+            <view class="qty-unit-btn">{{ unitOptions[manualUnitIndex] }} <text class="qty-chev">›</text></view>
+          </picker>
+        </view>
+      </view>
       <view class="manual-note-toggle" bindtap="onToggleManualNote">{{ manualNoteOpen ? '收起备注' : '备注（选填）' }}</view>
       <view wx:if="{{ manualNoteOpen || note }}" class="field">
         <view class="label">备注</view>
@@ -87,6 +111,26 @@
             data-index="0"
             bindtap="onRemindClear"
           >✕</view>
+        </view>
+        <!-- 数量行(issue #102 Q1):步进器 + 单位选择器,预填并标「待确认」;
+             用户触碰后即视为确认,随 create 携带 -->
+        <view wx:if="{{ rows[0].status !== 'saved' }}" class="sumrow">
+          <view class="k">数量<text class="qty-badge">{{ rows[0].quantityBadge }}</text></view>
+          <view class="qty-stepper">
+            <view class="qty-step-btn" data-index="0" data-d="{{ -1 }}" catchtap="onRowQtyStep">−</view>
+            <text class="qty-step-num">{{ rows[0].quantity }}</text>
+            <view class="qty-step-btn" data-index="0" data-d="{{ 1 }}" catchtap="onRowQtyStep">+</view>
+            <picker
+              class="qty-unit"
+              range="{{ unitOptions }}"
+              value="{{ rows[0].unitIndex }}"
+              disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
+              data-index="0"
+              bindchange="onRowUnitChange"
+            >
+              <view class="qty-unit-btn">{{ rows[0].unit }} <text class="qty-chev">›</text></view>
+            </picker>
+          </view>
         </view>
         <view wx:if="{{ rows[0].status !== 'pending' }}" class="sum-status">
           <text wx:if="{{ rows[0].status === 'saved' }}" class="st saved">已记住</text>
@@ -202,6 +246,25 @@
             data-index="{{ index }}"
             bindinput="onRowLocationInput"
           />
+        </view>
+        <!-- 数量行(issue #102 Q1):步进器 + 单位选择器,预填并标「待确认」 -->
+        <view wx:if="{{ item.status !== 'saved' }}" class="row-qty">
+          <view class="row-qty-label">数量<text class="qty-badge">{{ item.quantityBadge }}</text></view>
+          <view class="qty-stepper">
+            <view class="qty-step-btn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onRowQtyStep">−</view>
+            <text class="qty-step-num">{{ item.quantity }}</text>
+            <view class="qty-step-btn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onRowQtyStep">+</view>
+            <picker
+              class="qty-unit"
+              range="{{ unitOptions }}"
+              value="{{ item.unitIndex }}"
+              disabled="{{ batchSaving || item.status === 'saving' || item.status === 'saved' }}"
+              data-index="{{ index }}"
+              bindchange="onRowUnitChange"
+            >
+              <view class="qty-unit-btn">{{ item.unit }} <text class="qty-chev">›</text></view>
+            </picker>
+          </view>
         </view>
         <!-- 「将放入」副文(十七轮):certain 行明示挂靠预览,「换」=同款选位置;
              模糊行无副文(=确认后先进「尚未归类」),绝不静默建路径 -->

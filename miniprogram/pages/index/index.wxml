@@ -37,7 +37,7 @@
             <image wx:if="{{ item.evidenceUrl }}" class="item-photo" src="{{ item.evidenceUrl }}" mode="aspectFill" />
             <block wx:else><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></block>
           </view>
-          <view class="item-main"><view class="item-name">{{ item.name }}<text wx:if="{{ item.videoHint }}" class="video-badge {{ item.videoHint.playable ? '' : 'unavailable' }}" catchtap="onResultVideoTap" data-index="{{ index }}">{{ item.videoHint.badgeText }}</text></view><view class="item-location">{{ item.location_text }}</view></view>
+          <view class="item-main"><view class="item-name">{{ item.name }}<text wx:if="{{ item.videoHint }}" class="video-badge {{ item.videoHint.playable ? '' : 'unavailable' }}" catchtap="onResultVideoTap" data-index="{{ index }}">{{ item.videoHint.badgeText }}</text><text wx:if="{{ item.qtyText }}" class="qty-badge {{ item.quantity === null ? 'unconfirmed' : '' }}">{{ item.qtyText }}</text></view><view class="item-location">{{ item.location_text }}</view></view>
           <template is="icon" data="{{ name: 'chevron' }}" />
         </view>
       </view>
@@ -79,7 +79,7 @@
     <view wx:if="{{ rooms.length === 0 && directItems.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">这里还没有东西</view>
     <block wx:if="{{ isRootView && recentItems.length }}">
       <view class="section-header"><view class="section-label">最近记住</view><view wx:if="{{ recentItems.length > 2 }}" class="recent-more" bindtap="onRecentMore">{{ recentExpanded ? '收起' : '更多' }}</view></view>
-      <view class="result-card"><block wx:for="{{ recentItems }}" wx:key="item_id"><view wx:if="{{ recentExpanded || index < 2 }}" class="result-row" data-index="{{ index }}" bindtap="onRecentTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.location_text }}</view></view><view class="item-date" aria-label="记录更新于 {{ item.updated_at_short }}">{{ item.updated_at_short }}</view></view></block></view>
+      <view class="result-card"><block wx:for="{{ recentItems }}" wx:key="item_id"><view wx:if="{{ recentExpanded || index < 2 }}" class="result-row" data-index="{{ index }}" bindtap="onRecentTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}<text wx:if="{{ item.qtyText }}" class="qty-badge {{ item.quantity === null ? 'unconfirmed' : '' }}">{{ item.qtyText }}</text></view><view class="item-location">{{ item.location_text }}</view></view><view class="item-date" aria-label="记录更新于 {{ item.updated_at_short }}">{{ item.updated_at_short }}</view></view></block></view>
     </block>
     <view wx:if="{{ isRootView && recentError }}" class="recent-retry" bindtap="loadRecent">最近记录加载失败 · 重试</view>
   </block>

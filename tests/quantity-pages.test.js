@@ -129,7 +129,7 @@ require(path.join(ROOT, "miniprogram", "pages", "item", "item.js"));
 test("item 详情:已确认行显示「上次确认 ×N单位」+ 确认时间;未确认行显示「待核对」", function () {
   resetEnv();
   var page = pageOf(itemConfig);
-  page.applySummary(summaryItem({ quantity: 3, unit: "包", quantity_confirmed_at: "2026-10-18T08:00:00.000Z" }));
+  page.applySummary(summaryItem({ quantity: 3, unit: "包", quantity_confirmed_at: "2026-10-18T12:00:00.000Z" }));
   assert.equal(page.data.quantityText, "上次确认 ×3包 · 10-18");
   assert.equal(page.data.quantityConfirmed, true);
 
@@ -147,7 +147,7 @@ test("item 详情:未确认行数量输入不预填 1(占位待核对);填 0 合
       updated = data;
       return {
         ok: true,
-        item: summaryItem({ quantity: data.quantity, unit: data.unit, version: 2, quantity_confirmed_at: "2026-10-21T00:00:00.000Z" }),
+        item: summaryItem({ quantity: data.quantity, unit: data.unit, version: 2, quantity_confirmed_at: "2026-10-21T12:00:00.000Z" }),
       };
     }
     return Promise.reject(new Error("意外调用 " + name + ":" + data.action));
@@ -167,7 +167,7 @@ test("item 详情:未确认行数量输入不预填 1(占位待核对);填 0 合
   assert.equal(updateCall.data.unit, "个");
   assert.equal(updateCall.data.expected_version, 1);
   assert.ok(updateCall.data.update_id, "数量保存必须带 update_id(响应丢失可重放识别)");
-  assert.equal(page.data.quantityText, "上次确认 ×0个");
+  assert.equal(page.data.quantityText, "上次确认 ×0个 · 10-21");
 });
 
 test("item 详情:未填数量点保存 → 不发 update,提示先核对", async function () {
@@ -190,17 +190,17 @@ test("item 详情:VERSION_CONFLICT 响应 current → 展示最新值引导核�
         ok: false,
         error: "VERSION_CONFLICT",
         message: "内容已被修改,已为你刷新,请重试",
-        current: summaryItem({ quantity: 7, unit: "包", version: 2, quantity_confirmed_at: "2026-10-21T00:00:00.000Z" }),
+        current: summaryItem({ quantity: 7, unit: "包", version: 2, quantity_confirmed_at: "2026-10-21T12:00:00.000Z" }),
       };
     }
     return Promise.reject(new Error("意外调用 " + data.action));
   };
   var page = pageOf(itemConfig);
-  page.applySummary(summaryItem({ quantity: 3, unit: "包", quantity_confirmed_at: "2026-10-18T08:00:00.000Z" }));
+  page.applySummary(summaryItem({ quantity: 3, unit: "包", quantity_confirmed_at: "2026-10-18T12:00:00.000Z" }));
   page.onQuantityInput({ detail: { value: "5" } });
   page.onQuantityUnitChange({ detail: { value: 2 } }); // "包"
   await page.onQuantitySaveTap();
-  assert.equal(page.data.quantityText, "上次确认 ×7包", "冲突后以 current 展示家人已更新的最新值");
+  assert.equal(page.data.quantityText, "上次确认 ×7包 · 10-21", "冲突后以 current 展示家人已更新的最新值");
   assert.equal(page.data.version, 2, "版本对齐最新,重核对以新版本提交");
   var updates = cloudCalls.filter(function (c) {
     return c.name === "itemsApi" && c.data.action === "update";

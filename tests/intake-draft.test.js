@@ -140,15 +140,18 @@ test("全选/清空只动未 done 行,已确认记住的行不受影响", functi
 test("步进器:下限 1、上限 99;不改勾选态与 draftId/operationId", function () {
   var row = id.makeAiRow(aiItem({ confidence: "high", qty_note: "3" }), seqGen());
   assert.equal(row.qty, 3);
+  assert.equal(row.unit, "件", "Q1 行入列即带默认单位(issue #102)");
   var up = id.stepRowQty(row, 1);
   assert.equal(up.qty, 4);
   assert.equal(up.checked, true, "步进不改勾选态");
   assert.equal(up.draftId, row.draftId);
   assert.equal(up.operationId, row.operationId);
+  assert.equal(up.qtyTouched, true, "触碰步进器=数量确认(待核对标记随之消失)");
   var one = { ...row, qty: 1 };
   var floor = id.stepRowQty(one, -1);
   assert.equal(floor.qty, 1, "下限 1");
-  assert.equal(floor, one, "qty 无变化时返回原引用");
+  assert.equal(floor.qtyTouched, true, "首次触碰即使 qty 不变也翻触碰标记");
+  assert.equal(id.stepRowQty(floor, -1), floor, "已触碰且 qty 无变化时返回原引用");
   var capped = id.stepRowQty({ ...row, qty: 99 }, 1);
   assert.equal(capped.qty, 99, "上限 99");
 });

@@ -14,13 +14,19 @@
  * - 全部函数纯:入参不被改动,变更返回新对象;draftId/operationId 全程稳定
  *   (锁定、应用、计数一律按 draftId,绝不按行号——行号会因删行重排漂移);
  * - 「已确认记住」(done)是终态:done 行不可再勾选/取消勾选;
- * - 数量只是备注文本(一条记录=一件可查找的物品),绝不引入库存语义;
+ * - 数量(issue #102 Q1 起,Q0-CONTRACT §4.3):qty 是「数量预填提示 → 用户确认值」,
+ *   保存时随 photoCommit 的 quantity/unit 字段落库,不再拼进 note;VL qty_note 的
+ *   文字部分(suffix)永不解析成 unit(unit 只来自选择器,默认「件」);行上
+ *   「待核对」标记直到用户触碰步进器/单位选择器(qtyTouched);
+ * - 入列工厂建的新行恒带 unit;**unit 缺席 = pre-Q1 会话恢复的行**,保存层按
+ *   冻结载荷旧形态重放(note=×N 拼法、不注入 quantity/unit,E13/B9);
  * - 语音应用绝不改勾选(保留)状态,0 勾选字段不执行。
  */
 
 import { uuid } from "./api";
 import type { Box } from "./photo-box";
 import type { PhotoCandidate, VlCandidate } from "../types";
+import { DEFAULT_UNIT, isUnit } from "./quantity";
 
 /** 语音受限编辑的可编辑字段白名单(与服务端 draftEditParse 硬门同源) */
 export type IntakeEditField = "name" | "qty_note" | "location";
@@ -109,6 +115,8 @@ export function makeAiRow(item: VlCandidate, genId?: GenId): IntakeRow {
     name: item.name,
     qty,
     suffix,
+    unit: DEFAULT_UNIT,
+    qtyTouched: false,
     exc: null,
     src: "ai",
     confidence: item.confidence,
@@ -132,6 +140,8 @@ export function makeVoiceAddedRow(name: string, qtyNote: string, genId?: GenId):
     name,
     qty,
     suffix,
+    unit: DEFAULT_UNIT,
+    qtyTouched: false,
     exc: null,
     src: "voice",
     confidence: "low",
@@ -155,6 +165,8 @@ export function makeCircleRow(item: VlCandidate, circledBox: Box, genId?: GenId)
     name: item.name,
     qty,
     suffix,
+    unit: DEFAULT_UNIT,
+    qtyTouched: false,
     exc: null,
     src: "circle",
     confidence: item.confidence,
@@ -178,6 +190,8 @@ export function makeManualRow(name: string, qtyNote: string, genId?: GenId): Int
     name,
     qty,
     suffix,
+    unit: DEFAULT_UNIT,
+    qtyTouched: false,
     exc: null,
     src: "manual",
     confidence: "low",
@@ -246,14 +260,27 @@ export function setRowsChecked(rows: readonly IntakeRow[], checked: boolean): In
 /**
  * 数量步进器(±1):下限 1(原型 step 的 Math.max(1,…)),上限夹 99(与
  * parseIntakeQtyNote 的 qty 域一致);不改勾选态、draftId、operationId。
- * 步进值落在域内不变时返回原引用(无变更)。
+ * 步进值落在域内不变时返回原引用(无变更)。用户触碰步进器 = 数量确认
+ * (issue #102 Q1):qtyTouched 置 true,行上「待核对」标记随之消失。
  */
 export function stepRowQty(row: IntakeRow, delta: number): IntakeRow {
   const next = clampQty(row.qty + delta);
-  if (next === row.qty) {
+  if (next === row.qty && row.qtyTouched === true) {
     return row;
   }
-  return { ...row, qty: next };
+  return { ...row, qty: next, qtyTouched: true };
+}
+
+/**
+ * 单位选择器切换(issue #102 Q1):unit 只来自用户的选择器选择(UNIT_SET 闭集,
+ * 默认「件」);闭集外值原样返回绝不写入(防御)。触碰选择器同样是数量确认
+ * (qtyTouched=true),行上「待核对」标记随之消失。
+ */
+export function setRowUnit(row: IntakeRow, unit: string): IntakeRow {
+  if (!isUnit(unit) || unit === row.unit) {
+    return row;
+  }
+  return { ...row, unit, qtyTouched: true };
 }
 
 /** photoCommit 该行成功 → 「已确认记住」(终态) */

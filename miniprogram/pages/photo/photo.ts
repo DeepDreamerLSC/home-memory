@@ -39,12 +39,14 @@ import {
   quickVerifyRows,
   qtyNoteText,
   rowStateOf,
+  setRowUnit,
   setRowsChecked,
   stepRowQty,
   toggleRowChecked,
   type IntakeDraftEdit,
   type IntakeRow,
 } from "../../utils/intake-draft";
+import { UNIT_SET } from "../../utils/quantity";
 import type { Box } from "../../utils/photo-box";
 import { containPointToNormalized } from "../../utils/photo-box";
 import {
@@ -129,6 +131,12 @@ interface RowView {
   srcBadge: string;
   srcCls: string;
   qty: number;
+  /** 单位(issue #102 Q1):Q1 行 = UNIT_SET 成员;空串 = pre-Q1 会话恢复行(不渲染选择器) */
+  unit: string;
+  /** 单位选择器索引(wxml 无 indexOf,预计算) */
+  unitIndex: number;
+  /** VL 预填未被用户触碰 → 行上标「数量待核对」(§4.3 预填规则) */
+  qtyPending: boolean;
   noteText: string;
   excText: string;
   originText: string;
@@ -203,6 +211,12 @@ interface SaveSheetView {
   summaryText: string;
   keepCount: number;
   skipCount: number;
+  /**
+   * 逐件数量行(issue #102 Q1,Q0-CONTRACT §4.3):「#d{n} {name} ×{qty}{unit}」——
+   * 最终确认弹层逐行列出数量与单位,用户点「确认,记住了」= L1 的用户确认;
+   * pre-Q1 会话恢复的行(unit 缺席,提交不带数量)如实标「(默认 1 件)」
+   */
+  qtyLines: string[];
 }
 
 interface CircleResultView {
@@ -265,6 +279,8 @@ Page<
     highlightId: string;
     boxViews: BoxView[];
     rows: RowView[];
+    /** 单位选择器选项(issue #102 Q1,UNIT_SET 冻结顺序 = 展示序) */
+    unitOptions: string[];
     headText: string;
     saveText: string;
     saveDisabled: boolean;
@@ -379,6 +395,8 @@ Page<
     onRowTap(e: WechatMiniprogram.CustomEvent): void;
     onCheckTap(e: WechatMiniprogram.CustomEvent): void;
     onStepTap(e: WechatMiniprogram.CustomEvent): void;
+    /** 行内单位选择(issue #102 Q1):UNIT_SET picker;触碰=数量确认 */
+    onRowUnitChange(e: WechatMiniprogram.CustomEvent<{ value: number | string }>): void;
     onToggleAllTap(): void;
     onQuickVerifyTap(e: WechatMiniprogram.CustomEvent): void;
     showCelebrate(text: string): void;
@@ -475,6 +493,8 @@ Page<
     highlightId: "",
     boxViews: [] as BoxView[],
     rows: [] as RowView[],
+    /** 单位选择器选项(issue #102 Q1,UNIT_SET 冻结顺序 = 展示序) */
+    unitOptions: UNIT_SET as string[],
     headText: "保留 0 / 0(待核对)",
     saveText: "存 0 件",
     saveDisabled: true,
@@ -1025,7 +1045,35 @@ Page<
     if (!row || row.done || (delta !== 1 && delta !== -1)) {
       return;
     }
-    this.rowsRaw = this.rowsRaw.map((r) => (r.draftId === row.draftId ? stepRowQty(r, delta) : r));
+    // 用户触碰步进器 = 数量确认(§4.3):pre-Q1 会话恢复的行(unit 缺席)在此
+    // 升级为 Q1 行(默认单位「件」)——用户显式动作,不是注入;此后保存层改走
+    // quantity/unit 字段口径
+    this.rowsRaw = this.rowsRaw.map((r) => {
+      if (r.draftId !== row.draftId) {
+        return r;
+      }
+      const base = r.unit === undefined ? { ...r, unit: "件" as const } : r;
+      return stepRowQty(base, delta);
+    });
+    this.rebuildRows();
+    this.persistSession();
+  },
+
+  /**
+   * 行内单位选择(issue #102 Q1):unit 只来自选择器(UNIT_SET,默认「件」);
+   * 触碰选择器 = 数量确认(qtyTouched → 「数量待核对」标记消失)。pre-Q1 会话
+   * 恢复的行(unit 缺席)在此升级为 Q1 行——用户显式动作,不是注入。
+   */
+  onRowUnitChange(e: WechatMiniprogram.CustomEvent<{ value: number | string }>) {
+    const index = Number(e.currentTarget.dataset.index);
+    const idx = Number(e && e.detail ? e.detail.value : -1);
+    const row = this.rowsRaw[index];
+    if (!row || row.done || !Number.isInteger(idx) || idx < 0 || idx >= UNIT_SET.length) {
+      return;
+    }
+    this.rowsRaw = this.rowsRaw.map((r) =>
+      r.draftId === row.draftId ? setRowUnit(r.unit === undefined ? { ...r, unit: "件" } : r, UNIT_SET[idx]) : r
+    );
     this.rebuildRows();
     this.persistSession();
   },
@@ -1084,7 +1132,13 @@ Page<
     const expanded = !this.data.photoCollapsed;
     const rows: RowView[] = this.rowsRaw.map((r, i) => {
       const state = rowStateOf(r);
-      const note = qtyNoteText(r);
+      // 数量文案(issue #102 Q1):Q1 行(unit 在场)用 quantity/unit 字段口径
+      // 「×N单位」并按需标「数量待核对」(VL 预填未被触碰);pre-Q1 会话恢复的行
+      // (unit 缺席)沿用旧 ×N 备注拼法(冻结载荷语义,保存层负责逐字节重放)
+      const isQ1Row = typeof r.unit === "string";
+      const note = isQ1Row
+        ? "×" + r.qty + r.unit + (r.qtyTouched === true ? "" : " · 数量待核对")
+        : qtyNoteText(r);
       const excText = r.exc !== null && r.exc.trim() !== "" ? " · 位置例外:" + r.exc.trim() : "";
       const origin =
         r.src === "ai" || r.src === "circle"
@@ -1104,6 +1158,9 @@ Page<
         srcBadge: r.src === "voice" ? "语音" : r.src === "circle" ? "圈选" : r.src === "manual" ? "手动" : "",
         srcCls: r.src === "voice" ? "voice" : r.src === "circle" ? "boxsel" : r.src === "manual" ? "manual" : "",
         qty: r.qty,
+        unit: isQ1Row ? (r.unit as string) : "",
+        unitIndex: isQ1Row ? Math.max(0, UNIT_SET.indexOf(r.unit as string)) : 0,
+        qtyPending: isQ1Row && r.qtyTouched !== true && !r.done,
         noteText: note,
         excText,
         originText: origin,
@@ -1924,6 +1981,19 @@ Page<
       return;
     }
     const s = deriveSaveConfirm(this.rowsRaw, this.data.batchLocation);
+    // 逐件数量行(Q0-CONTRACT §4.3):只列本次实际提交的行(勾选且未 done);
+    // Q1 行显示 ×N单位,pre-Q1 会话行如实标默认 1 件(提交不带数量键)
+    let rowNo = 0;
+    const qtyLines: string[] = [];
+    this.rowsRaw.forEach((r) => {
+      if (r.done || !r.checked) {
+        return;
+      }
+      rowNo += 1;
+      qtyLines.push(
+        "#d" + rowNo + " " + r.name + " " + (typeof r.unit === "string" ? "×" + r.qty + r.unit : "(默认 1 件)")
+      );
+    });
     this.setData({
       saveSheet: {
         batchLocation: s.batchLocation,
@@ -1932,6 +2002,7 @@ Page<
         summaryText: s.summaryText,
         keepCount: s.keepCount,
         skipCount: s.skipCount,
+        qtyLines,
       },
     });
   },

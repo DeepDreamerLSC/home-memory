@@ -6,6 +6,7 @@ import {
   draftMountPathPreview,
   firstInvalidMsg,
   mountPathFromPick,
+  rowQuantityInput,
   rowReminderInput,
   rowVagueQuoteInput,
   rowsToSave,
@@ -14,6 +15,7 @@ import {
   shouldDefaultChecked,
   type BatchRow,
 } from "../../utils/batch-save";
+import { DEFAULT_UNIT, QUANTITY_MAX, UNIT_SET, parseQuantityText } from "../../utils/quantity";
 import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
   clearDraftSession,
@@ -73,11 +75,32 @@ interface ConfirmRow extends BatchRow {
    * 改位置文本即清空(用户否认了原路径,见 onRowLocationInput)。
    * 点「确认记住」才建路径并挂上,绝不静默建路径。
    */
+  /** 「放进」行的最终路径(issue #45 十七轮,#18 红线语义升级):AI 确定时
+   * 来自草稿 mount_path 预览,用户可经「换」(选位置弹层)替换;空数组 =
+   * 不显示该行、不挂靠(certain=false 一律空 = 照旧先进「尚未归类」)。
+   * 改位置文本即清空(用户否认了原路径,见 onRowLocationInput)。
+   * 点「确认记住」才建路径并挂上,绝不静默建路径。
+   */
   mountPath: string[];
   /** 「放进」行显示文本(路径 join " / ";wxml 无数组 join,预计算) */
   mountPathText: string;
   /** 行内固定挂靠幂等键(create 成功后 ensureAndLink 用;失败重试沿用) */
   mountUpdateId: string;
+  /**
+   * 数量(issue #102 Q1,Q0-CONTRACT §4.6 确认页):quantity = 步进器当前值
+   * (预填 = 服务端锚定值或 1);unit 默认「件」只来自选择器;quantityProvided
+   * 决定 create 是否携带(语音锚定成功或用户触碰过);「待确认」标注:预填值
+   * 需用户过目,点「确认记住」才是 L1 的用户确认。pre-Q1 会话恢复的行
+   * (三项 null 且未触碰)不携带数量键(E13:不注入原载荷没有的字段)。
+   */
+  quantity: number;
+  unit: string;
+  /** 单位选择器当前索引(UNIT_SET 序,wxml 无 indexOf,预计算) */
+  unitIndex: number;
+  quantityProvided: boolean;
+  quantityTouched: boolean;
+  /** 行内数量角标(「待确认」;保存成功后不再显示) */
+  quantityBadge: string;
 }
 
 /** 本地日期 → YYYY-MM-DD( picker mode=date 的 value 形态) */
@@ -127,15 +150,27 @@ Page<
     editingLocation: boolean;
     /** 今天(YYYY-MM-DD):提醒行日期选择器无值时的起点 */
     today: string;
+    /** 手动单表单数量输入(issue #102 Q1,E2):""=不填 → 服务端缺省 1/件 */
+    manualQuantity: string;
+    /** 手动单表单单位选择器索引(UNIT_SET 序,缺省 0=「件」) */
+    manualUnitIndex: number;
+    /** 单位选择器选项(UNIT_SET 冻结顺序) */
+    unitOptions: string[];
   },
   {
     onNameInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onLocationInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onToggleManualNote(): void;
     onNoteInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    /** 手动单表单数量/单位(issue #102 Q1) */
+    onQuantityInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    onQuantityUnitChange(e: WechatMiniprogram.CustomEvent<{ value: number | string }>): void;
     onSaveTap(): Promise<void>;
     onRowNameInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     onRowLocationInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    /** 批量行数量步进(data-index / data-d)与单位选择(issue #102 Q1):触碰=确认数量 */
+    onRowQtyStep(e: WechatMiniprogram.CustomEvent): void;
+    onRowUnitChange(e: WechatMiniprogram.CustomEvent<{ value: number | string }>): void;
     onRowToggle(e: WechatMiniprogram.CustomEvent): void;
     onRowDetail(e: WechatMiniprogram.CustomEvent): void;
     onToggleQuote(): void;
@@ -178,6 +213,9 @@ Page<
     editingName: false,
     editingLocation: false,
     today: todayYmd(),
+    manualQuantity: "",
+    manualUnitIndex: 0,
+    unitOptions: UNIT_SET as string[],
   },
 
   /** 草稿会话 id(onUnload 清理用) */
@@ -210,6 +248,10 @@ Page<
       // 「放进」路径预览(十七轮):仅 certain 且形状合法才透传,否则空数组
       // = 不显示「放进」行(certain=false 照旧先进「尚未归类」,绝不静默建路径)
       const mountPath = draftMountPathPreview(d);
+      // 数量候选三项(issue #102 Q1):服务端锚定成功才预填并随行携带;
+      // 没说数量预填 1/件 + 「待确认」,不携带(服务端缺省 1/件)——用户触碰后才携带
+      const quantityProvided =
+        typeof d.quantity === "number" && typeof d.unit === "string" && UNIT_SET.indexOf(d.unit) !== -1;
       return {
         key: "row-" + i,
         name: d.name,
@@ -236,6 +278,12 @@ Page<
         mountPath,
         mountPathText: mountPath.join(" / "),
         mountUpdateId: uuid(),
+        quantity: quantityProvided ? (d.quantity as number) : 1,
+        unit: quantityProvided ? (d.unit as string) : DEFAULT_UNIT,
+        unitIndex: quantityProvided ? Math.max(0, UNIT_SET.indexOf(d.unit as string)) : 0,
+        quantityProvided,
+        quantityTouched: false,
+        quantityBadge: "待确认",
       };
     });
     // 恢复上次未完成的行状态:沿用原 operation_id(幂等恢复,不重复建档),
@@ -250,6 +298,10 @@ Page<
         const mountPath = Array.isArray(saved.mountPath)
           ? saved.mountPath
           : rows[i].mountPath;
+        // 数量(Q1):回写过(携带过)就用回写值并继续携带;缺省(pre-Q1 会话或
+        // 未携带)回落草稿值——pre-Q1 会话草稿三项 null → 不携带(E13 不注入)
+        const savedQuantity =
+          typeof saved.quantity === "number" && typeof saved.unit === "string" && UNIT_SET.indexOf(saved.unit) !== -1;
         rows[i] = {
           ...rows[i],
           name: saved.name,
@@ -266,6 +318,14 @@ Page<
           remindConverted: typeof saved.remindConverted === "boolean" ? saved.remindConverted : rows[i].remindConverted,
           mountPath,
           mountPathText: mountPath.join(" / "),
+          quantity: savedQuantity ? (saved.quantity as number) : rows[i].quantity,
+          unit: savedQuantity ? (saved.unit as string) : rows[i].unit,
+          unitIndex: Math.max(
+            0,
+            UNIT_SET.indexOf(savedQuantity ? (saved.unit as string) : rows[i].unit)
+          ),
+          quantityProvided: savedQuantity || rows[i].quantityProvided,
+          quantityTouched: saved.quantityTouched === true || rows[i].quantityTouched,
         };
       });
     }
@@ -306,6 +366,10 @@ Page<
       remindConverted: r.remindConverted,
       // 「放进」路径可能被用户「换」过,一并回写(恢复时覆盖草稿预览)
       mountPath: r.mountPath,
+      // 数量(Q1):只有「随行携带」时回写(pre-Q1 会话行不写字段 → 恢复后不携带,
+      // E13 冻结载荷纪律);触碰标记一并回写(恢复「已核对」状态)
+      ...(r.quantityProvided ? { quantity: r.quantity, unit: r.unit } : {}),
+      quantityTouched: r.quantityTouched,
     }));
     updateDraftSessionRows(this.sid, rows);
   },
@@ -340,7 +404,20 @@ Page<
     this.setData({ note: e.detail && e.detail.value ? e.detail.value : "" });
   },
 
-  /** 保存:itemsApi create,成功 toast「已记住」返回首页 */
+  onQuantityInput(e) {
+    this.setData({ manualQuantity: e.detail && e.detail.value ? e.detail.value : "" });
+  },
+
+  onQuantityUnitChange(e) {
+    const idx = Number(e && e.detail ? e.detail.value : 0);
+    this.setData({ manualUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < UNIT_SET.length ? idx : 0 });
+  },
+
+  /**
+   * 保存:itemsApi create,成功 toast「已记住」返回首页。
+   * 数量(issue #102 Q1,E2 手动表单):默认不填 → 不携带(服务端缺省 1/件);
+   * 用户填了 → 1..9999 整数随行携带 + 所选单位;非法值前置拦截(服务端同口径双门)。
+   */
   async onSaveTap() {
     if (this.data.saving) {
       return;
@@ -356,6 +433,12 @@ Page<
       wx.showToast({ title: "位置为必填项,请填写位置", icon: "none" });
       return;
     }
+    const parsedQuantity = parseQuantityText(this.data.manualQuantity, 1);
+    if (parsedQuantity === "INVALID") {
+      wx.showToast({ title: "数量需为 1-9999 的整数(不填=1 件)", icon: "none" });
+      return;
+    }
+    const unit = UNIT_SET[this.data.manualUnitIndex] || DEFAULT_UNIT;
     this.setData({ saving: true });
     try {
       await callItemsApi({
@@ -364,6 +447,7 @@ Page<
         name,
         location_text: locationText,
         note,
+        ...(parsedQuantity === null ? {} : { quantity: parsedQuantity, unit }),
       });
       wx.showToast({ title: "记住了,下次问我。", icon: "success" });
       setTimeout(() => {
@@ -416,6 +500,51 @@ Page<
     const index = Number(e.currentTarget.dataset.index);
     this.setData({
       ["rows[" + index + "].name"]: e.detail && e.detail.value ? e.detail.value : "",
+    });
+  },
+
+  /**
+   * 行内数量步进(issue #102 Q1):data-d 为步进量(±1),下限 1、上限 9999;
+   * 用户触碰 = 确认数量 → quantityProvided 翻 true,create 随行携带
+   * (pre-Q1 会话恢复的行自此携带用户确认值,属用户动作而非注入)。
+   */
+  onRowQtyStep(e) {
+    if (this.data.batchSaving) {
+      return;
+    }
+    const index = Number(e.currentTarget.dataset.index);
+    const delta = Number(e.currentTarget.dataset.d);
+    const row = this.data.rows[index];
+    if (!row || row.status === "saving" || row.status === "saved" || !Number.isInteger(delta)) {
+      return;
+    }
+    const next = Math.min(QUANTITY_MAX, Math.max(1, row.quantity + delta));
+    this.setData({
+      ["rows[" + index + "].quantity"]: next,
+      ["rows[" + index + "].quantityProvided"]: true,
+      ["rows[" + index + "].quantityTouched"]: true,
+    });
+  },
+
+  /** 行内单位选择(issue #102 Q1):只能从 UNIT_SET 选;触碰同样 = 确认数量 */
+  onRowUnitChange(e) {
+    if (this.data.batchSaving) {
+      return;
+    }
+    const index = Number(e.currentTarget.dataset.index);
+    const idx = Number(e && e.detail ? e.detail.value : -1);
+    const row = this.data.rows[index];
+    if (!row || row.status === "saving" || row.status === "saved") {
+      return;
+    }
+    if (!Number.isInteger(idx) || idx < 0 || idx >= UNIT_SET.length) {
+      return;
+    }
+    this.setData({
+      ["rows[" + index + "].unit"]: UNIT_SET[idx],
+      ["rows[" + index + "].unitIndex"]: idx,
+      ["rows[" + index + "].quantityProvided"]: true,
+      ["rows[" + index + "].quantityTouched"]: true,
     });
   },
 
@@ -671,6 +800,7 @@ Page<
           (r) => {
             const reminder = rowReminderInput(r);
             const vagueQuote = rowVagueQuoteInput(r);
+            const quantityInput = rowQuantityInput(r);
             return callItemsApi({
               action: "create",
               operation_id: r.operationId,
@@ -678,6 +808,7 @@ Page<
               location_text: r.locationText.trim(),
               ...(reminder ? { reminder } : {}),
               ...(vagueQuote !== undefined ? { remind_vague_quote: vagueQuote } : {}),
+              ...(quantityInput ? { quantity: quantityInput.quantity, unit: quantityInput.unit } : {}),
             }).then((res) => res.item);
           },
           (args) =>

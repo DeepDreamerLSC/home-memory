@@ -20,6 +20,37 @@ export interface BatchRow {
   failMsg: string;
   /** 行内固定创建幂等键:重试沿用,内容修改后仍沿用(服务端同键同内容幂等/异内容冲突兜底) */
   operationId: string;
+  /**
+   * 数量(issue #102 Q1,Q0-CONTRACT §4.6 确认页):步进器当前值(预填 = 服务端
+   * 数量三项锚定值或 1)。**quantityProvided 才决定提交是否携带**——只有
+   * 「语音明确说了数量(服务端锚定成功)」或「用户触碰过数量控件」才随 create
+   * 携带;pre-Q1 会话恢复的行(草稿三项 null 且用户未触碰)不注入数量键
+   * (E13 冻结载荷纪律,服务端缺省 1/件)。
+   */
+  quantity?: number;
+  /** 单位(UNIT_SET 成员,默认「件」;与 quantity 同进退) */
+  unit?: string;
+  /** true = 本行数量随 create 携带(语音锚定或用户触碰确认) */
+  quantityProvided?: boolean;
+  /** 用户触碰过数量步进器/单位选择器(「待确认」标注的收敛口径,展示用) */
+  quantityTouched?: boolean;
+}
+
+/**
+ * 行 → create 的数量载荷(issue #102 Q1):quantityProvided 且形状合法才返回
+ * {quantity, unit};否则 undefined(请求不携带该键,由服务端缺省 1/件)。
+ * 与 draft-session 持久化字段一一对应(E13:恢复的 pre-Q1 会话行不注入)。
+ */
+export function rowQuantityInput(
+  row: Pick<BatchRow, "quantity" | "unit" | "quantityProvided">,
+): { quantity: number; unit: string } | undefined {
+  if (row.quantityProvided !== true) {
+    return undefined;
+  }
+  if (typeof row.quantity !== "number" || typeof row.unit !== "string") {
+    return undefined;
+  }
+  return { quantity: row.quantity, unit: row.unit };
 }
 
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
