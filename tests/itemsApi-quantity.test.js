@@ -546,6 +546,42 @@ test("H2 quantity=0 行照常 query/list/get(未删,正常出现)", async functi
   assert.equal(listed.items[0].quantity, 0);
 });
 
+test("H6 quantity=0 行的 remindList/remindComplete 照常(数量与提醒零耦合;Q1 复审补锁)", async function () {
+  var t = fresh();
+  var created = await handler(
+    createEvent("op-h6", {
+      quantity: 3,
+      unit: "包",
+      reminder: { due_date: "2026-12-01", kind: "下次维护" }
+    }),
+    t.deps
+  );
+  var itemId = created.item.item_id;
+  var zeroed = await handler(
+    { action: "update", item_id: itemId, expected_version: 1, update_id: "u-h6", quantity: 0, unit: "包" },
+    t.deps
+  );
+  assert.equal(zeroed.ok, true, JSON.stringify(zeroed));
+
+  // 数量 0 的行:提醒照常列出、照常完成,绝不因归零被隐藏或拦截
+  var listed = await handler({ action: "remindList" }, t.deps);
+  assert.equal(listed.ok, true);
+  var rows = listed.reminders.filter(function (r) {
+    return r.item_id === itemId;
+  });
+  assert.equal(rows.length, 1, "quantity=0 行的 active 提醒照常出现在 remindList");
+
+  var done = await handler({ action: "remindComplete", item_id: itemId }, t.deps);
+  assert.equal(done.ok, true, "quantity=0 行的提醒照常可完成");
+
+  var after = await handler({ action: "remindList" }, t.deps);
+  assert.equal(after.reminders.length, 0, "完成后列表收敛(与数量无关的既有语义)");
+  var doc = (await rawItems(t.db))[0];
+  assert.equal(doc.quantity, 0, "完成提醒不触碰数量");
+  assert.equal(doc.unit, "包");
+  assert.equal(doc.deleted, false, "完成提醒绝不删物品");
+});
+
 test("H3/H4 delete 独立于数量:quantity=0 可删;delete 不触碰 quantity/unit 字段;数量非零不阻删", async function () {
   var t = fresh();
   var zero = await handler(createEvent("op-h3a", { quantity: 2, unit: "包" }), t.deps);

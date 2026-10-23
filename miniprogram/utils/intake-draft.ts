@@ -474,21 +474,23 @@ export function intakeCounts(rows: readonly IntakeRow[]): IntakeCounts {
   return { total: rows.length, keep, done, unchecked };
 }
 
-/** 计数的展示形态(原型 updateCounts 的两条头部/按钮文案,含 0 勾选禁用) */
+/** 计数的展示形态(原型 updateCounts 的两条头部/按钮文案,含 0 勾选禁用)。
+ * 计数词一律「条」(记录条数,Q0-CONTRACT §10.1):「件」自 Q1 起是 UNIT_SET
+ * 真实单位,不再借用作计数词,避免与逐件行「×3包」同屏时误读为单位。 */
 export function intakeCountView(
   rows: readonly IntakeRow[],
 ): { headText: string; saveText: string; saveDisabled: boolean } {
   const c = intakeCounts(rows);
   if (c.done > 0) {
     return {
-      headText: "已确认记住 " + c.done + " 件 · 本批完成",
+      headText: "已确认记住 " + c.done + " 条 · 本批完成",
       saveText: "✓ 已入库",
       saveDisabled: true,
     };
   }
   return {
     headText: "保留 " + c.keep + " / " + c.total + "(待核对)",
-    saveText: "存 " + c.keep + " 件",
+    saveText: "存 " + c.keep + " 条",
     saveDisabled: c.keep === 0,
   };
 }
@@ -518,7 +520,7 @@ export interface SaveConfirmSummary {
   exceptionLines: string[];
   /** 空例外时的整段文案(无例外,全部继承本批位置) */
   exceptionText: string;
-  /** 「保留 N 件写入 · 未勾选 M 件不保存」 */
+  /** 「保留 N 条写入 · 未勾选 M 条不保存」(计数=记录条数,§10.1;「件」是单位不作计数词) */
   summaryText: string;
 }
 
@@ -561,6 +563,6 @@ export function deriveSaveConfirm(
       exceptions.length > 0
         ? exceptionLines.join("\n")
         : "无例外,全部继承本批位置",
-    summaryText: "保留 " + c.keep + " 件写入 · 未勾选 " + c.unchecked + " 件不保存",
+    summaryText: "保留 " + c.keep + " 条写入 · 未勾选 " + c.unchecked + " 条不保存",
   };
 }

@@ -241,7 +241,7 @@ test("markRowSaved / markRowFailed:成功进终态;失败保留原幂等键可�
 
 // ---------- 计数单一来源 ----------
 
-test("计数单一来源:保留 n / N(待核对);有 done 行改「已确认记住 n 件 · 本批完成」", function () {
+test("计数单一来源:保留 n / N(待核对);有 done 行改「已确认记住 n 条 · 本批完成」;计数词=条(件是单位)", function () {
   var rows = [
     id.makeAiRow(aiItem({ confidence: "high", name: "A" }), seqGen()),
     id.makeAiRow(aiItem({ confidence: "mid", name: "B" }), seqGen()),
@@ -249,15 +249,15 @@ test("计数单一来源:保留 n / N(待核对);有 done 行改「已确认记�
   ];
   var view = id.intakeCountView(rows);
   assert.equal(view.headText, "保留 1 / 3(待核对)");
-  assert.equal(view.saveText, "存 1 件");
+  assert.equal(view.saveText, "存 1 条");
   assert.equal(view.saveDisabled, false);
   var afterToggle = rows.map(function (r, i) {
     return i === 1 ? id.toggleRowChecked(r) : r;
   });
-  assert.equal(id.intakeCountView(afterToggle).saveText, "存 2 件");
+  assert.equal(id.intakeCountView(afterToggle).saveText, "存 2 条");
   var withDone = [id.markRowSaved(afterToggle[0]), afterToggle[1], afterToggle[2]];
   var doneView = id.intakeCountView(withDone);
-  assert.equal(doneView.headText, "已确认记住 1 件 · 本批完成");
+  assert.equal(doneView.headText, "已确认记住 1 条 · 本批完成");
   assert.equal(doneView.saveText, "✓ 已入库");
   assert.equal(doneView.saveDisabled, true);
   assert.deepEqual(id.intakeCounts(withDone), { total: 3, keep: 1, done: 1, unchecked: 1 });
@@ -275,7 +275,7 @@ test("0 勾选禁用保存;圈选入列后再勾选,计数实时联动(单一数
     return r === circled ? id.toggleRowChecked(r) : r;
   });
   assert.equal(id.intakeCounts(checked2).keep, 1, "勾选后保存计数联动");
-  assert.equal(id.intakeCountView(checked2).saveText, "存 1 件");
+  assert.equal(id.intakeCountView(checked2).saveText, "存 1 条");
 });
 
 // ---------- 保存最终确认数据派生(例外只含已勾选) ----------
@@ -312,7 +312,7 @@ test("保存确认派生:例外只含已勾选件(未保留候选不进,done 行
   assert.equal(s.exceptions[0].index, 1, "#d 序号 = 清单内 1-based 位置");
   assert.deepEqual(s.exceptionLines, ["📍 #d1 黄色薯片罐 → 厨房"]);
   assert.equal(s.exceptionText, "📍 #d1 黄色薯片罐 → 厨房");
-  assert.equal(s.summaryText, "保留 2 件写入 · 未勾选 1 件不保存");
+  assert.equal(s.summaryText, "保留 2 条写入 · 未勾选 1 条不保存");
   assert.equal(s.saveDisabled, true, "清单里已有 done 行 = 本批已完成,保存入口禁用(原型 confirmSave 早退)");
   assert.equal(s.batchLocation, "玄关柜 · 第二层");
   // 去掉 done 行后同一派生规则:例外清单不变,保存可用
