@@ -62,6 +62,7 @@ import {
 } from "./household-scope";
 import { notifyFamilyScopeDrift } from "./households-api";
 import { draftMountPathPreview } from "./batch-save";
+import { UNIT_SET } from "./quantity";
 
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
@@ -92,6 +93,17 @@ export class ApiError extends Error {
    * 被完成的原轮次之后提醒已被重新设置(他人 remindSet 已发新轮),本轮已完成、
    * 不再生成下一轮——文案区别于一般冲突 */
   readonly superseded?: boolean;
+  /**
+   * VERSION_CONFLICT 时服务端附带的该 item 当前完整投影(issue #102 Q1,
+   * Q0-CONTRACT §4.2/§14.1-4):数量冲突一次往返即可展示「家人已更新为 X」,
+   * 用户显式重核对后才再提交;旧服务端缺省(undefined)时沿用 get 刷新路径。
+   */
+  readonly current?: ItemSummary;
+  /**
+   * INVALID_INPUT 的结构化补充(Q0-CONTRACT §6):数量相关失败携带
+   * { reason, index? }(reason ∈ 冻结枚举);其余入口缺省。
+   */
+  readonly detail?: Record<string, unknown>;
 
   constructor(
     code: string,
@@ -99,6 +111,8 @@ export class ApiError extends Error {
     existing?: ItemSummary,
     cleared?: boolean,
     superseded?: boolean,
+    current?: ItemSummary,
+    detail?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -106,6 +120,8 @@ export class ApiError extends Error {
     this.existing = existing;
     this.cleared = cleared;
     this.superseded = superseded;
+    this.current = current;
+    this.detail = detail;
   }
 }
 
@@ -151,6 +167,42 @@ const REMIND_KIND_VALUES: readonly string[] = ["有效期", "开封后", "下次
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * 解析单件草稿的数量候选三项(issue #102 Q1,Q0-CONTRACT §4.6 客户端半边):
+ * 三项同现同缺才有效;残缺/形状非法(半态、quantity 非正整数或超 1..9999、
+ * unit 不在闭集、quote 空或超 200)整体置 null——与服务端硬门同口径:不带数量
+ * (确认页预填 1/件 + 待确认)、不废件。客户端绝不信模型推算值。
+ */
+function parseQuantityTriple(d: Record<string, unknown>): {
+  quantity: number | null;
+  unit: string | null;
+  quantity_quote: string | null;
+} {
+  const q = d.quantity;
+  const u = d.unit;
+  const quote = d.quantity_quote;
+  const qEmpty = q === null || q === undefined;
+  const uEmpty = u === null || u === undefined;
+  const quoteEmpty = quote === null || quote === undefined;
+  if (qEmpty && uEmpty && quoteEmpty) {
+    return { quantity: null, unit: null, quantity_quote: null };
+  }
+  if (
+    typeof q === "number" &&
+    Number.isInteger(q) &&
+    q >= 1 &&
+    q <= 9999 &&
+    typeof u === "string" &&
+    UNIT_SET.indexOf(u) !== -1 &&
+    typeof quote === "string" &&
+    quote.length > 0 &&
+    quote.length <= 200
+  ) {
+    return { quantity: q, unit: u, quantity_quote: quote };
+  }
+  return { quantity: null, unit: null, quantity_quote: null };
+}
+
+/**
  * 解析单件草稿的提醒候选三项(#36 日期纪律的客户端半边):
  * 三项同现同缺才有效;残缺/形状非法(半态、非 YYYY-MM-DD、词表外、空 quote)整体置
  * null——与服务端硬门同口径:不带提醒、不废件。客户端绝不从模糊表述补算日期。
@@ -191,7 +243,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared / superseded 附加数据 */
+/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared / superseded / current / detail 附加数据 */
 function toServerError(
   code: unknown,
   message: unknown,
@@ -199,6 +251,8 @@ function toServerError(
   existing?: unknown,
   cleared?: unknown,
   superseded?: unknown,
+  current?: unknown,
+  detail?: unknown,
 ): ApiError {
   const codeText =
     typeof code === "string" && code.length > 0 ? code : CLIENT_BAD_RESPONSE;
@@ -208,12 +262,17 @@ function toServerError(
   const existingSummary = isRecord(existing)
     ? (existing as unknown as ItemSummary)
     : undefined;
+  const currentSummary = isRecord(current)
+    ? (current as unknown as ItemSummary)
+    : undefined;
   return new ApiError(
     codeText,
     serverMessage || fallback || DEFAULT_ERROR_MESSAGE,
     existingSummary,
     cleared === true,
     superseded === true,
+    currentSummary,
+    isRecord(detail) ? detail : undefined,
   );
 }
 
@@ -724,6 +783,8 @@ export async function callItemsApi(
       result.existing,
       result.cleared,
       result.superseded,
+      result.current,
+      result.detail,
     );
     notifyFamilyScopeDrift(err);
     throw err;
@@ -837,6 +898,9 @@ export async function callExtractDraft(
           const preview = draftMountPathPreview(d as Record<string, unknown>);
           return preview.length > 0 ? preview : null;
         })(),
+        // 数量候选三项(issue #102 Q1):只透传服务端锚定成功的值,
+        // 残缺/推算值整体置 null(确认页预填 1/件 + 待确认)
+        ...parseQuantityTriple(d as Record<string, unknown>),
       })),
       original_text: result.original_text,
       truncated: result.truncated === true,

@@ -46,6 +46,9 @@
 .unverified-tag { color: var(--text-3); font-size: 20rpx; }
 .video-badge { margin-left: 12rpx; font-size: 20rpx; color: var(--text-2); }
 .video-badge.unavailable { opacity: .6; }
+/* 数量槽(issue #102 Q1,Q0-CONTRACT §10.1):已确认「×N单位」;未确认「待核对」中性标记 */
+.qty-badge { margin-left: 12rpx; font-size: 20rpx; color: var(--text-2); white-space: nowrap; }
+.qty-badge.unconfirmed { opacity: .7; }
 .direct-label { margin-top: 36rpx; }
 .manage-link, .collapse-link, .recent-retry { min-height: 88rpx; display: flex; align-items: center; justify-content: center; font-size: 22rpx; color: var(--text-2); margin-top: 30rpx; }
 .resume-banner, .stale-banner { padding: 22rpx 24rpx; margin-top: 20rpx; font-size: 22rpx; line-height: 1.6; border-radius: 24rpx; background: var(--card-inset); color: var(--text-2); }

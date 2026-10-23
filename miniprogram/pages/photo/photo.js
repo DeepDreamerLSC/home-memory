@@ -25,6 +25,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 const intake_draft_1 = require("../../utils/intake-draft");
+const quantity_1 = require("../../utils/quantity");
 const photo_box_1 = require("../../utils/photo-box");
 const photo_vl_1 = require("../../utils/photo-vl");
 const photo_intake_1 = require("../../utils/photo-intake");
@@ -93,8 +94,10 @@ Page({
         highlightId: "",
         boxViews: [],
         rows: [],
+        /** 单位选择器选项(issue #102 Q1,UNIT_SET 冻结顺序 = 展示序) */
+        unitOptions: quantity_1.UNIT_SET,
         headText: "保留 0 / 0(待核对)",
-        saveText: "存 0 件",
+        saveText: "存 0 条",
         saveDisabled: true,
         navSubtitle: "",
         batchLocation: "",
@@ -606,7 +609,32 @@ Page({
         if (!row || row.done || (delta !== 1 && delta !== -1)) {
             return;
         }
-        this.rowsRaw = this.rowsRaw.map((r) => (r.draftId === row.draftId ? (0, intake_draft_1.stepRowQty)(r, delta) : r));
+        // 用户触碰步进器 = 数量确认(§4.3):pre-Q1 会话恢复的行(unit 缺席)在此
+        // 升级为 Q1 行(默认单位「件」)——用户显式动作,不是注入;此后保存层改走
+        // quantity/unit 字段口径
+        this.rowsRaw = this.rowsRaw.map((r) => {
+            if (r.draftId !== row.draftId) {
+                return r;
+            }
+            const base = r.unit === undefined ? { ...r, unit: "件" } : r;
+            return (0, intake_draft_1.stepRowQty)(base, delta);
+        });
+        this.rebuildRows();
+        this.persistSession();
+    },
+    /**
+     * 行内单位选择(issue #102 Q1):unit 只来自选择器(UNIT_SET,默认「件」);
+     * 触碰选择器 = 数量确认(qtyTouched → 「数量待核对」标记消失)。pre-Q1 会话
+     * 恢复的行(unit 缺席)在此升级为 Q1 行——用户显式动作,不是注入。
+     */
+    onRowUnitChange(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        const idx = Number(e && e.detail ? e.detail.value : -1);
+        const row = this.rowsRaw[index];
+        if (!row || row.done || !Number.isInteger(idx) || idx < 0 || idx >= quantity_1.UNIT_SET.length) {
+            return;
+        }
+        this.rowsRaw = this.rowsRaw.map((r) => r.draftId === row.draftId ? (0, intake_draft_1.setRowUnit)(r.unit === undefined ? { ...r, unit: "件" } : r, quantity_1.UNIT_SET[idx]) : r);
         this.rebuildRows();
         this.persistSession();
     },
@@ -659,7 +687,13 @@ Page({
         const expanded = !this.data.photoCollapsed;
         const rows = this.rowsRaw.map((r, i) => {
             const state = (0, intake_draft_1.rowStateOf)(r);
-            const note = (0, intake_draft_1.qtyNoteText)(r);
+            // 数量文案(issue #102 Q1):Q1 行(unit 在场)用 quantity/unit 字段口径
+            // 「×N单位」并按需标「数量待核对」(VL 预填未被触碰);pre-Q1 会话恢复的行
+            // (unit 缺席)沿用旧 ×N 备注拼法(冻结载荷语义,保存层负责逐字节重放)
+            const isQ1Row = typeof r.unit === "string";
+            const note = isQ1Row
+                ? "×" + r.qty + r.unit + (r.qtyTouched === true ? "" : " · 数量待核对")
+                : (0, intake_draft_1.qtyNoteText)(r);
             const excText = r.exc !== null && r.exc.trim() !== "" ? " · 位置例外:" + r.exc.trim() : "";
             const origin = r.src === "ai" || r.src === "circle"
                 ? "置信度" + CONFIDENCE_LABEL[r.confidence]
@@ -678,6 +712,9 @@ Page({
                 srcBadge: r.src === "voice" ? "语音" : r.src === "circle" ? "圈选" : r.src === "manual" ? "手动" : "",
                 srcCls: r.src === "voice" ? "voice" : r.src === "circle" ? "boxsel" : r.src === "manual" ? "manual" : "",
                 qty: r.qty,
+                unit: isQ1Row ? r.unit : "",
+                unitIndex: isQ1Row ? Math.max(0, quantity_1.UNIT_SET.indexOf(r.unit)) : 0,
+                qtyPending: isQ1Row && r.qtyTouched !== true && !r.done,
                 noteText: note,
                 excText,
                 originText: origin,
@@ -710,7 +747,7 @@ Page({
         let saveDisabled = view.saveDisabled;
         if (hasFail && counts.keep > 0) {
             // 部分失败:失败行标红可重试(§7.6),保存入口保持可用
-            saveText = "重试存 " + counts.keep + " 件";
+            saveText = "重试存 " + counts.keep + " 条";
             saveDisabled = false;
         }
         const qkHigh = this.rowsRaw.filter((r) => !r.done && r.confidence === "high").length;
@@ -1450,6 +1487,17 @@ Page({
             return;
         }
         const s = (0, intake_draft_1.deriveSaveConfirm)(this.rowsRaw, this.data.batchLocation);
+        // 逐件数量行(Q0-CONTRACT §4.3):只列本次实际提交的行(勾选且未 done);
+        // Q1 行显示 ×N单位,pre-Q1 会话行如实标默认 1 件(提交不带数量键)。
+        // 编号口径 = 全数组下标(i+1):与屏幕清单 #d{index}(renderRows)和例外卡
+        // (deriveSaveConfirm 的 index)同号,部分行未勾选时同号同行,绝不串行
+        const qtyLines = [];
+        this.rowsRaw.forEach((r, i) => {
+            if (r.done || !r.checked) {
+                return;
+            }
+            qtyLines.push("#d" + (i + 1) + " " + r.name + " " + (typeof r.unit === "string" ? "×" + r.qty + r.unit : "(默认 1 件)"));
+        });
         this.setData({
             saveSheet: {
                 batchLocation: s.batchLocation,
@@ -1458,6 +1506,7 @@ Page({
                 summaryText: s.summaryText,
                 keepCount: s.keepCount,
                 skipCount: s.skipCount,
+                qtyLines,
             },
         });
     },

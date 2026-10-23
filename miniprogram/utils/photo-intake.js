@@ -214,9 +214,14 @@ function photoCloudPath(scopeId, now, id) {
     return "photo-evidence/" + scopeId + "/" + now.getTime() + "-" + id + ".jpg";
 }
 /**
- * 候选行 → photoCommit items(纯函数):
+ * 候选行 → photoCommit items(纯函数,issue #102 Q1 起数量进字段):
  * - location_text:该件例外优先,否则批次位置(客户端合成);
- * - note:"×{qty} {suffix}"(数量只是备注);
+ * - **unit 在场(Q1 行)**:数量进 `quantity`(=qty)/`unit` 字段,note 不再由
+ *   数量拼出——photo 行当前没有自由备注输入,不携带 note(旧拼法 note 只在
+ *   pre-Q1 会话行出现);qty 语义 = VL 预填提示 + 用户步进器确认(1-99);
+ * - **unit 缺席(pre-Q1 会话恢复行,E13/B9)**:按冻结载荷旧形态逐字节重放
+ *   ——note=composeNote(qty,suffix)、不携带 quantity/unit(注入会导致原键
+ *   幂等内容失配,宁可让服务端缺省 1/件并撞 duplicated 收敛);
  * - reminder:行内可选提醒(kind 冻结词表;日期选择器选的,无 quote/非换算候选);
  * - photo:全行绑本批照片——box 取行框(null=整照关联),source 按行来源
  *   (circle=用户圈选,其余=vl 识别批)。
@@ -228,7 +233,6 @@ function buildPhotoCommitItems(rows, batchLocation, photo) {
             operation_id: r.operationId,
             name: r.name,
             location_text: exc !== "" ? exc : batchLocation.trim(),
-            note: (0, intake_draft_1.composeNote)(r.qty, r.suffix),
             photo: {
                 file_id: photo.file_id,
                 img_w: photo.img_w,
@@ -237,6 +241,15 @@ function buildPhotoCommitItems(rows, batchLocation, photo) {
                 source: r.src === "circle" ? "circle" : "vl",
             },
         };
+        if (typeof r.unit === "string") {
+            // Q1 行:数量/单位进字段,note 只承载用户手输的自由备注(空则不携带)
+            item.quantity = r.qty;
+            item.unit = r.unit;
+        }
+        else {
+            // pre-Q1 会话行:冻结载荷逐字节重放(旧 ×N 拼法 note,无数量字段)
+            item.note = (0, intake_draft_1.composeNote)(r.qty, r.suffix);
+        }
         if (r.remind && typeof r.remind.due_date === "string" && r.remind.due_date !== "") {
             item.reminder = {
                 due_date: r.remind.due_date,

@@ -35,6 +35,10 @@
  *   - v2:mount_path(十七轮,#18 红线语义升级)=「放进」路径预览,仅 certain=true
  *     且位置分层明确时给出;纯方位段并入前段(既有分段逻辑)、首段纯方位/错序/
  *     编造/形状非法一律 null 不猜;v1 draft 与 remind/vague 字段零回归。
+ *   - v2:数量候选三项 quantity/unit/quantity_quote(issue #102 Q1,Q0-CONTRACT §4.6)
+ *     同现同缺;冻结数字解析器从 quantity_quote(原话逐字子串)解析出的数字+单位
+ *     必须与模型自报值一致,否则三项全 null(推算/模糊/闭集外单位一律不采信,
+ *     物品照常提取);v1 响应零变化。
  */
 
 const NAME_MAX = 50;
@@ -48,6 +52,9 @@ const REMIND_KINDS = ["有效期", "开封后", "下次维护"];
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /* 相对时间换算器(#36 真机反馈三件 A):闭集纯函数,handler 组包处对 vague 原文换算 */
 const { convertRelativeQuote } = require("./relative-date");
+/* 冻结数字解析器 + 单位闭集(issue #102 Q1 / Q0-CONTRACT §4.6/§7.8.2):
+ * 数量三项锚定的唯一数字语义实现,与 itemsApi/客户端各持逐字一致 UNIT_SET 副本 */
+const { UNIT_SET, parseQuantityQuote } = require("./quantity");
 /* 「放进」路径预览(十七轮,#18 红线):段数/段长与 locations 节点同限 */
 const MOUNT_PATH_MAX_SEGMENTS = 6;
 const MOUNT_SEGMENT_MAX = 30;
@@ -243,6 +250,37 @@ function applyRelativeConversion(draft, normalizedOriginal, anchorYmd) {
     return draft; // 复核不通过(理论不可达,防御):维持灰行现状
   }
   return Object.assign({}, draft, checked, { remind_vague_quote: null });
+}
+
+/*
+ * 数量候选三项校验(v2,issue #102 Q1 / Q0-CONTRACT §4.6 服务端硬门):
+ * quantity(1..9999 整数)/ unit(UNIT_SET 成员)/ quantity_quote(原话逐字子串,
+ * 承载该数量的最小片段,如「3包」「三包」)三项同现同缺;任一失败三项整体置 null
+ * (物品照常提取,绝不废件——同 remind 三项纪律)。
+ * 数量锚定(L1,防模型幻觉/推算):冻结数字解析器从 quantity_quote 独立解析出
+ * 「数字+单位」,必须与模型自报的 quantity/unit 完全一致——「买了 3 包」quote
+ * 「3包」→ 3/包 通过;模型把「一箱」按箱装数折报成 24 → 解析不出 → 全 null;
+ * 模糊(「几包」)/小数(「1.5升」)/闭集外单位(「一箱」「500ml」)同样全 null,
+ * 确认页预填 1/件 + 「待确认」。「买了/新增」等动词不产生 add 语义(只走 create)。
+ */
+function validateQuantityFields(item, normalizedOriginal) {
+  const none = { quantity: null, unit: null, quantity_quote: null };
+  const has = (key) => Object.prototype.hasOwnProperty.call(item, key);
+  if (!has("quantity") || item.quantity === null || item.quantity === undefined) {
+    return none;
+  }
+  if (typeof item.quantity !== "number" || !Number.isInteger(item.quantity)) return none;
+  if (item.quantity < 1 || item.quantity > 9999) return none;
+  if (!has("unit") || typeof item.unit !== "string" || UNIT_SET.indexOf(item.unit) === -1) return none;
+  if (!has("quantity_quote") || typeof item.quantity_quote !== "string") return none;
+  const quote = stripWhitespace(item.quantity_quote);
+  if (quote === "" || codePointLength(quote) > QUOTE_MAX) return none;
+  // 逐字锚定:数量证据必须是原话子串(去空白比对,同 source_quote 口径)
+  if (normalizedOriginal.indexOf(quote) === -1) return none;
+  // 对应锚定:quote 内解析出的数字+单位必须与模型自报值一致(绝不采信推算)
+  const parsed = parseQuantityQuote(quote);
+  if (parsed === null || parsed.number !== item.quantity || parsed.unit !== item.unit) return none;
+  return { quantity: item.quantity, unit: item.unit, quantity_quote: item.quantity_quote.trim() };
 }
 
 /*
@@ -520,6 +558,8 @@ function validateDrafts(rawText, originalText, todayYmd) {
           // 校验把该件降为 certain=false 时路径一律 null;与提醒字段互不影响
           mount_path: validateMountPath(item, draft),
         },
+        // 数量候选三项(issue #102 Q1):独立锚定,与位置/提醒字段互不影响
+        validateQuantityFields(item, normalizedOriginal),
       ),
     );
   }

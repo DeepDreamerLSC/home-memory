@@ -201,7 +201,7 @@ test("PI-4:ensurePhotoAuth——scope.camera 三态如实返回", async function
 
 /* ---------------- buildPhotoCommitItems(纯函数) ---------------- */
 
-test("PI-5:buildPhotoCommitItems——例外优先/批次兜底/note 拼接/photo 绑定与 source", function () {
+test("PI-5:buildPhotoCommitItems——例外优先/批次兜底/数量进字段/note 不再拼/photo 绑定与 source", function () {
   var rows = [
     makeRow({ name: "品客薯片罐" }), // 无例外 → 批次位置
     Object.assign(makeRow({ name: "黑色耳机" }), { exc: "厨房" }), // 例外
@@ -217,8 +217,14 @@ test("PI-5:buildPhotoCommitItems——例外优先/批次兜底/note 拼接/phot
   assert.equal(items.length, 5);
   assert.equal(items[0].location_text, "玄关柜 · 第二层抽屉", "无例外继承批次位置");
   assert.equal(items[1].location_text, "厨房", "例外优先(客户端已合成)");
-  assert.equal(items[0].note, "×1 备注", "note=×{qty} {suffix},空后缀按「备注」");
-  assert.equal(items[4].note, "×2 根", "qty+suffix 单一来源拼接");
+  // issue #102 Q1(Q0-CONTRACT §4.3)取代 #65「数量只是 note 文本」:Q1 行(工厂
+  // 入列即带 unit)数量进 quantity/unit 字段,note 不再由数量拼出(空则不携带)
+  assert.equal(items[0].quantity, 1, "数量进字段(缺省 1)");
+  assert.equal(items[0].unit, "件");
+  assert.equal(items[0].note, undefined, "note 不再拼 ×N(用户没写自由备注就不携带)");
+  assert.equal(items[4].quantity, 2);
+  assert.equal(items[4].unit, "件", "VL 原文『根』永不映射 unit(unit 只来自选择器)");
+  assert.equal(items[4].note, undefined);
   assert.equal(items[0].photo.file_id, "cloud://f1");
   assert.equal(items[0].photo.img_w, 1024);
   assert.equal(items[0].photo.img_h, 768);

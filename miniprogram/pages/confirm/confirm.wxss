@@ -67,3 +67,16 @@
 .trust-line { text-align: center; color: var(--text-2); font-size: 20rpx; line-height: 1.6; margin: 16rpx 0 0; }
 
 .manual-note-toggle { min-height: 88rpx; display: flex; align-items: center; margin-top: 20rpx; font-size: 24rpx; color: var(--text-2); }
+
+/* ---------- 数量行(issue #102 Q1,Q0-CONTRACT §4.6/§10.3) ---------- */
+.qty-inline { display: flex; align-items: center; gap: 16rpx; }
+.qty-inline .qty-num { flex: 1; min-width: 0; }
+.qty-stepper { display: flex; align-items: center; gap: 8rpx; }
+.qty-step-btn { width: 56rpx; height: 56rpx; display: flex; align-items: center; justify-content: center; border-radius: 12rpx; background: var(--card-inset, #f2f2f2); font-size: 30rpx; color: var(--text, #222); }
+.qty-step-num { min-width: 56rpx; text-align: center; font-size: 28rpx; color: var(--text, #222); }
+.qty-unit-btn { padding: 8rpx 16rpx; border-radius: 12rpx; background: var(--card-inset, #f2f2f2); font-size: 24rpx; color: var(--text, #222); }
+.qty-chev { margin-left: 6rpx; opacity: .55; }
+.qty-badge { margin-left: 10rpx; font-size: 20rpx; color: var(--text-2, #999); }
+.sumrow .qty-stepper { justify-content: flex-end; flex: 1; }
+.row-qty { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 16rpx; }
+.row-qty-label { font-size: 24rpx; color: var(--text-2, #999); }

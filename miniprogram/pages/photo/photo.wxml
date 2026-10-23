@@ -146,10 +146,23 @@
         <view class="meta">{{ item.metaText }}</view>
         <view wx:if="{{ item.failMsg }}" class="failmsg">{{ item.failMsg }} · 点「{{ saveText }}」重试</view>
       </view>
-      <view class="step" data-index="{{ index }}" catchtap="noop">
-        <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onStepTap">−</view>
-        <text class="stepNum">{{ item.qty }}</text>
-        <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onStepTap">+</view>
+      <view class="qtywrap" data-index="{{ index }}" catchtap="noop">
+        <view wx:if="{{ item.qtyPending }}" class="qty-pending">数量待核对</view>
+        <view class="step" data-index="{{ index }}" catchtap="noop">
+          <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onStepTap">−</view>
+          <text class="stepNum">{{ item.qty }}</text>
+          <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onStepTap">+</view>
+        </view>
+        <picker
+          wx:if="{{ item.unit }}"
+          class="step-unit"
+          range="{{ unitOptions }}"
+          value="{{ item.unitIndex }}"
+          data-index="{{ index }}"
+          bindchange="onRowUnitChange"
+        >
+          <view class="step-unit-btn">{{ item.unit }} ▾</view>
+        </picker>
       </view>
     </view>
     <view class="addmanual" hover-class="row-hover" hover-stay-time="60" bindtap="onManualAddTap">＋ 手动添加物品</view>
@@ -359,6 +372,12 @@
         <view wx:for="{{ saveSheet.exceptionLines }}" wx:key="*this" class="excline">{{ item }}</view>
       </view>
       <view wx:else class="excline dim2">{{ saveSheet.exceptionText }}</view>
+    </view>
+    <view class="card">
+      <view class="ct">逐件数量(issue #102:点确认即按此数量记住)</view>
+      <view class="exclist">
+        <view wx:for="{{ saveSheet.qtyLines }}" wx:key="*this" class="excline">{{ item }}</view>
+      </view>
     </view>
     <view class="card card-mb">
       <view class="ct">最终保存</view>

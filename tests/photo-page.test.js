@@ -416,7 +416,7 @@ test("PP-LOAD-1:拍照→压缩→base64 直传 vlRecognize(无 file_id)→候�
   assert.equal(page.rowsRaw[1].checked, false, "low 默认不勾");
 
   assert.equal(page.data.headText, "保留 1 / 2(待核对)", "计数单一来源");
-  assert.equal(page.data.saveText, "存 1 件");
+  assert.equal(page.data.saveText, "存 1 条");
   assert.equal(page.data.saveDisabled, false);
 
   assert.equal(env.vlCalls.length, 1, "首次整图识别恰好一次");
@@ -470,12 +470,16 @@ test("PP-STATE-1:勾选/取消三态流转 + 步进器同步备注(qty+suffix �
   page.onCheckTap({ currentTarget: { dataset: { index: 1 } } });
   assert.equal(page.rowsRaw[1].checked, true, "候选→保留");
   assert.equal(page.data.headText, "保留 2 / 2(待核对)");
-  assert.equal(page.data.saveText, "存 2 件");
+  assert.equal(page.data.saveText, "存 2 条");
 
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: 1 } } });
   assert.equal(page.rowsRaw[1].qty, 2);
-  assert.equal(page.data.rows[1].noteText, "×2 备注", "屏幕数字与草稿同一份数据");
-  assert.equal(page.data.rows[1].metaText.indexOf("×2 备注") !== -1, true);
+  // issue #102 Q1(Q0-CONTRACT §4.3):Q1 行数量口径 = ×N单位(默认「件」);
+  // 用户步进后 qtyTouched=true,「数量待核对」标记随之消失
+  assert.equal(page.data.rows[1].noteText, "×2件", "屏幕数字与草稿同一份数据");
+  assert.equal(page.rowsRaw[1].qtyTouched, true, "触碰步进器=数量确认");
+  assert.equal(page.data.rows[1].qtyPending, false);
+  assert.equal(page.data.rows[1].metaText.indexOf("×2件") !== -1, true);
 
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: -1 } } });
   page.onStepTap({ currentTarget: { dataset: { index: 1, d: -1 } } });
@@ -484,7 +488,7 @@ test("PP-STATE-1:勾选/取消三态流转 + 步进器同步备注(qty+suffix �
   page.onCheckTap({ currentTarget: { dataset: { index: 0 } } });
   page.onCheckTap({ currentTarget: { dataset: { index: 1 } } });
   assert.equal(page.data.headText, "保留 0 / 2(待核对)");
-  assert.equal(page.data.saveText, "存 0 件");
+  assert.equal(page.data.saveText, "存 0 条");
   assert.equal(page.data.saveDisabled, true, "0 勾选禁用保存");
 });
 
@@ -506,7 +510,7 @@ test("PP-STATE-2:全选/清空不动 done 行;done 是终态不可再勾", async
 
   page.rowsRaw[1] = intakeDraft.markRowSaved(page.rowsRaw[1]);
   page.rebuildRows();
-  assert.equal(page.data.headText, "已确认记住 2 件 · 本批完成");
+  assert.equal(page.data.headText, "已确认记住 2 条 · 本批完成");
   assert.equal(page.data.saveText, "✓ 已入库");
   assert.equal(page.data.saveDisabled, true);
   page.onCheckTap({ currentTarget: { dataset: { index: 0 } } });
@@ -743,7 +747,7 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
   assert.equal(s.batchLocation, "玄关柜 · 第二层抽屉");
   assert.equal(s.exceptionLines.length, 0, "已勾选件(#1)无例外 → 例外清单为空");
   assert.equal(s.exceptionText, "无例外,全部继承本批位置");
-  assert.equal(s.summaryText, "保留 1 件写入 · 未勾选 1 件不保存");
+  assert.equal(s.summaryText, "保留 1 条写入 · 未勾选 1 条不保存");
 
   // 给 #1(已勾选)加例外再开一次:例外只含已勾选件
   page.onSaveBackTap();
@@ -776,7 +780,10 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
   assert.equal(ev.items.length, 1, "未勾选件不提交");
   assert.equal(ev.items[0].name, "黄色薯片罐");
   assert.equal(ev.items[0].location_text, "厨房", "例外优先(客户端已合成)");
-  assert.equal(ev.items[0].note, "×1 备注");
+  // issue #102 Q1(Q0-CONTRACT §4.3):数量进 quantity/unit 字段,note 不再由数量拼出
+  assert.equal(ev.items[0].quantity, 1);
+  assert.equal(ev.items[0].unit, "件");
+  assert.equal(ev.items[0].note, undefined);
   assert.equal(ev.items[0].photo.file_id, "cloud://test-bucket/evidence-1.jpg");
   assert.equal(ev.items[0].photo.img_w, 1024);
   assert.equal(ev.items[0].photo.img_h, 768);
@@ -784,7 +791,7 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
 
   assert.equal(page.rowsRaw[0].done, true, "成功行进终态");
   assert.equal(page.rowsRaw[1].done, false, "未勾选行不入库");
-  assert.equal(page.data.headText, "已确认记住 1 件 · 本批完成");
+  assert.equal(page.data.headText, "已确认记住 1 条 · 本批完成");
   assert.equal(page.data.saveText, "✓ 已入库");
   assert.equal(page.data.saveDisabled, true);
   assert.equal(page.data.saveSheet, null);
@@ -792,6 +799,32 @@ test("PP-SAVE-1:确认弹层例外只含已勾选件;确认→先上传后 photo
   assert.equal(photoSession.getUnfinishedPhotoSession(), null, "全部入库清 photo 会话");
   assert.equal(page.data.boxViews[0].tag, "已记住·黄色薯片罐", "框标签同步已记住");
   assert.equal(page.data.boxViews[1].tag, "候选·黑色小盒子", "未勾选行仍是候选");
+});
+
+test("PP-SAVE-1b:确认弹层数量行 #d 编号 = 全数组下标,与屏幕清单/例外卡同号同行(Q1 复审)", async function () {
+  var ctx = await boot({});
+  var page = ctx.page;
+  // 3 行:①勾选 ②不勾选(low) ③勾选(克隆一行)——部分行未勾选时,
+  // 数量卡若按提交顺序计数会显示 #d2,与屏幕清单/例外卡的 #d3 串号
+  page.rowsRaw.push({
+    ...page.rowsRaw[0],
+    draftId: "d-clone",
+    name: "洗面奶",
+    checked: true,
+    qty: 2,
+    unit: "支",
+  });
+  page.rowsRaw[0] = { ...page.rowsRaw[0], exc: "厨房" };
+  page.rebuildRows();
+  await readyToSave(ctx, page);
+
+  var s = page.data.saveSheet;
+  assert.deepEqual(s.exceptionLines, ["📍 #d1 黄色薯片罐 → 厨房"], "例外卡按全数组下标(既有)");
+  assert.deepEqual(s.qtyLines, [
+    "#d1 黄色薯片罐 ×1件",
+    "#d3 洗面奶 ×2支",
+  ], "数量卡同口径:未勾选的 #d2 跳号,同号必同行");
+  assert.equal(s.summaryText, "保留 2 条写入 · 未勾选 1 条不保存");
 });
 
 test("PP-SAVE-2:上传失败 → 整批不提交、云端零残留、会话保留可重试", async function () {
@@ -820,8 +853,8 @@ test("PP-SAVE-3:部分失败不拦其余件——失败行标红可重试,重试
   assert.equal(page.rowsRaw[0].done, true, "成功行照常终态");
   assert.equal(page.rowsRaw[1].done, false);
   assert.notEqual(page.rowsRaw[1].failMsg, "", "失败行标红文案");
-  assert.equal(page.data.headText, "已确认记住 1 件 · 本批完成");
-  assert.equal(page.data.saveText, "重试存 1 件", "失败可重试入口保持可用");
+  assert.equal(page.data.headText, "已确认记住 1 条 · 本批完成");
+  assert.equal(page.data.saveText, "重试存 1 条", "失败可重试入口保持可用");
   assert.equal(page.data.saveDisabled, false);
   assert.ok(toastTexts(ctx.env).indexOf("1 件没存上") !== -1);
 
@@ -829,7 +862,7 @@ test("PP-SAVE-3:部分失败不拦其余件——失败行标红可重试,重试
   var firstOpId = page.rowsRaw[1].operationId;
   ctx.env.router = makeRouter({});
   page.onSaveTap();
-  assert.equal(page.data.saveSheet.summaryText, "保留 1 件写入 · 未勾选 0 件不保存");
+  assert.equal(page.data.saveSheet.summaryText, "保留 1 条写入 · 未勾选 0 条不保存");
   await page.onSaveGoTap();
   await settle();
   assert.equal(ctx.env.uploads.length, 1, "重试不重复上传(fileId 随会话保留)");

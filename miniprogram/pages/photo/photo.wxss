@@ -1327,3 +1327,8 @@
   font-weight: 600;
   opacity: 0.85;
 }
+
+/* ---------- 数量区(issue #102 Q1):步进器 + 单位选择器 + 待核对标 ---------- */
+.qtywrap { display: flex; align-items: center; gap: 10rpx; }
+.qty-pending { font-size: 18rpx; color: var(--text-2, #999); margin-right: 4rpx; }
+.step-unit-btn { padding: 6rpx 12rpx; border-radius: 10rpx; background: rgba(0,0,0,.06); font-size: 22rpx; }

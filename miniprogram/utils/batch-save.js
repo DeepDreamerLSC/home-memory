@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MOUNT_SEGMENT_MAX_CODEPOINTS = exports.MOUNT_PATH_MAX_SEGMENTS = void 0;
+exports.rowQuantityInput = rowQuantityInput;
 exports.rowsToSave = rowsToSave;
 exports.firstInvalidMsg = firstInvalidMsg;
 exports.allCheckedSaved = allCheckedSaved;
@@ -12,6 +13,20 @@ exports.draftMountPathPreview = draftMountPathPreview;
 exports.mountPathFromPick = mountPathFromPick;
 exports.saveRowWithMount = saveRowWithMount;
 exports.runBatchSave = runBatchSave;
+/**
+ * 行 → create 的数量载荷(issue #102 Q1):quantityProvided 且形状合法才返回
+ * {quantity, unit};否则 undefined(请求不携带该键,由服务端缺省 1/件)。
+ * 与 draft-session 持久化字段一一对应(E13:恢复的 pre-Q1 会话行不注入)。
+ */
+function rowQuantityInput(row) {
+    if (row.quantityProvided !== true) {
+        return undefined;
+    }
+    if (typeof row.quantity !== "number" || typeof row.unit !== "string") {
+        return undefined;
+    }
+    return { quantity: row.quantity, unit: row.unit };
+}
 /** 待保存的行:勾选且未 saved(首次 pending 与重试 failed 都算) */
 function rowsToSave(rows) {
     return rows.filter((r) => r.checked && r.status !== "saved");
