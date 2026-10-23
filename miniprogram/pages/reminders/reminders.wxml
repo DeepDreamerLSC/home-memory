@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <view class="page page-with-voice-bar">
   <view class="r-head">
     <view class="pagetitle">快到期的东西</view>
@@ -129,3 +130,5 @@
 
 <!-- 常驻语音条(issue #45 全局可达;R1 也不例外) -->
 <voice-bar />
+
+</view>

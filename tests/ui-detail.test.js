@@ -23,7 +23,7 @@ test("detail keeps the recorded position separate from unsaved edits", () => {
   value.onLocationInput({ detail: { value: "厨房抽屉" } });
   assert.equal(value.data.locationText, "厨房抽屉");
   assert.equal(value.data.recordedLocationText, "玄关抽屉");
-  assert.equal(value.data.artworkLight, "/assets/items/key.png");
+  assert.equal(value.data.artworkLight, "/assets/themes/cream/key.png");
   assert.match(value.data.lastConfirmedText, /^记录更新于 /);
 });
 

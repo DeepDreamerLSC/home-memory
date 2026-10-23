@@ -51,3 +51,10 @@ Native WXML/WXSS/TypeScript; no framework or runtime dependency changes. Real co
 
 ## Open questions
 None required for the approved UI implementation; any future visual direction change needs a new reference.
+
+## Personal settings
+- Approved for implementation 2026-10-23. Reference: `docs/design/personalization-v1/index.html` and its `README.md`. Native implementation and deployment boundary: `docs/design/personalization-v1/IMPLEMENTATION.md`.
+- Reserve the home content heading's right side for a 44px avatar touch target. Move the existing family switch to the count row; retain it as a separate household action. Keep the native WeChat capsule intact.
+- Avatar opens “我的”: edit profile, choose appearance, configure home sections, access family. Theme offers four soft palettes plus four stronger palettes (ink/gold, cobalt, emerald, berry), with independent system/light/dark mode; preview is discarded on return unless applied.
+- Preferences belong to the person/device and persist across household switches. Home-section toggles affect display only, never reminder scheduling or saved records.
+- Current profile storage belongs to shared-household membership. A stable personal identity needs a separate user-level profile; do not relabel existing member fields as global identity or rewrite member data without a migration decision. The prototype uses browser-only sample data.

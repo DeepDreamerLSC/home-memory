@@ -486,3 +486,7 @@ page {
   filter: brightness(0.94);
   transform: scale(0.97);
 }
+
+.appearance-root { min-height:100vh; background:var(--bg); color:var(--text); }
+.appearance-root .theme-light { display:var(--theme-light-display,block) !important; }
+.appearance-root .theme-dark { display:var(--theme-dark-display,none) !important; }

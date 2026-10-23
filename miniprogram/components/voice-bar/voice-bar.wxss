@@ -119,3 +119,6 @@ button.action-row { display: flex; align-items: center; gap: 28rpx; min-height: 
 
 button.actions-close { flex: 0 0 88rpx; min-width: 88rpx; max-width: 88rpx; }
 button.action-row { min-width: 100%; max-width: 100%; }
+
+.icon-light { display:var(--theme-light-display,block) !important; }
+.icon-dark { display:var(--theme-dark-display,none) !important; }

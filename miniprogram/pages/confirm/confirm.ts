@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 import { ApiError, callItemsApi, errorMessage, uuid } from "../../utils/api";
 import { callLocationsApi } from "../../utils/locations-api";
 import {
@@ -159,6 +160,7 @@ Page<
     sid: string;
   }
 >({
+  onShow() { applyPageAppearance(this); },
   data: {
     isManual: false,
     manualNoteOpen: false,

@@ -1,0 +1,7 @@
+@import "../../styles/settings.wxss";
+.profile-summary { display:flex; gap:34rpx; width:100%; margin:0; padding:50rpx 0 54rpx; border-radius:0; border-bottom:1rpx solid var(--line); background:transparent; align-items:center; text-align:left; line-height:1.4; }
+.profile-summary::after { border:0; }
+.profile-avatar { width:124rpx; height:124rpx; font-size:50rpx; }
+.profile-copy { flex:1; min-width:0; }
+.profile-name { font-size:42rpx; font-weight:500; word-break:break-all; }
+.profile-caption { font-size:24rpx; color:var(--text-2); margin-top:14rpx; }

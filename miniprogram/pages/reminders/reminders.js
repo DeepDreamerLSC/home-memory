@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 const api_1 = require("../../utils/api");
 const remind_ui_1 = require("../../utils/remind-ui");
 const household_scope_1 = require("../../utils/household-scope");
@@ -21,6 +22,7 @@ Page({
         completing: false,
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
         void this.load();
     },
     /**

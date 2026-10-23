@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>我靠东西呢 · 个性化设置原型</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; color: #292b25; background: #eae9e2; font-synthesis: none; }
+    body { margin: 0; }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #ae8935; outline-offset: 4px; }
+    button { border: 0; background: none; }
+    svg { display: block; }
+    .symbol-library { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .workbench { min-height: 100svh; display: grid; grid-template-columns: 330px 390px; gap: 100px; align-items: center; justify-content: center; padding: 24px 28px; background: radial-gradient(ellipse at 70% 40%, #f7f6f1 0, #eae9e2 64%); }
+    .intro { padding-bottom: 22px; }
+    .edition { display: flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 2px; color: #77796d; }
+    .edition::before { content: ""; width: 22px; height: 1px; background: #898c7d; }
+    .intro h1 { font-size: 43px; line-height: 1.45; font-weight: 500; letter-spacing: -2px; margin: 28px 0 19px; }
+    .intro h1 em { font-style: normal; position: relative; z-index: 0; }
+    .intro h1 em::after { content: ""; position: absolute; left: 0; bottom: 4px; height: 13px; background: #e9cb70; width: 100%; z-index: -1; transform: rotate(-2deg); }
+    .intro-copy { font-size: 14px; line-height: 1.9; color: #75786a; max-width: 280px; }
+    .design-notes { display: grid; gap: 17px; margin: 33px 0; padding: 27px 0; border-block: 1px solid #d4d5ca; }
+    .design-note { display: flex; align-items: baseline; gap: 17px; }
+    .design-note span { font: 11px ui-monospace, monospace; color: #8b8f7e; }
+    .design-note p { margin: 0; font-size: 13px; color: #626657; }
+    .view-picker { display: flex; flex-wrap: wrap; gap: 7px; }
+    .view-picker button { padding: 9px 13px; border: 1px solid #d1d3c7; border-radius: 7px; font-size: 12px; color: #686d5c; transition: background .2s; }
+    .view-picker button[aria-pressed="true"] { background: #30372c; color: #fffdf5; border-color: #30372c; }
+    .preview-note { margin-top: 18px; font-size: 11px; color: #898c7e; line-height: 1.7; }
+    .theme-button { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; padding: 8px 0; font-size: 12px; color: #6d7262; }
+    .theme-button svg { width: 15px; height: 15px; }
+    .phone { --paper: #f8f7f2; --surface: #fffefa; --ink: #292d25; --muted: #666d5e; --faint: #6d7363; --line: #e7e8de; --wash: #eeeee5; --yellow: #efd36e; --action: #30372c; --on-action: #fcfaf1; --room-bg: #efeee4; --room-line: #7b8069; --room-mid: #d3d5bf; --room-light: #f8f6e9; --room-dark: #a9ae91; --room-accent: #ddc486; width: 390px; height: min(844px, calc(100svh - 48px)); min-height: 650px; flex-shrink: 0; background: var(--paper); color: var(--ink); border-radius: 44px; border: 7px solid #f6f5ee; box-shadow: 0 0 0 1px #d1d2c5, 0 34px 75px -25px #4a503744, 0 3px 8px #4a50370b; position: relative; display: flex; flex-direction: column; overflow: hidden; color-scheme: light; }
+    .phone[data-theme="dark"] { --paper: #20241f; --surface: #2b3028; --ink: #efeee4; --muted: #b5baa8; --faint: #929a85; --line: #3d4436; --wash: #32392e; --yellow: #e8ce78; --action: #e8ce78; --on-action: #262c22; --room-bg: #30362d; --room-line: #abb598; --room-mid: #626f52; --room-light: #909a75; --room-dark: #3f4c37; --room-accent: #b29b65; color-scheme: dark; }
+    .phone button { transition: transform .15s ease, background .18s ease, opacity .18s ease; }
+    .phone button:active { transform: scale(.975); }
+    .status-bar { flex: none; height: 34px; padding: 10px 24px 0; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; }
+    .status-icons { display: flex; align-items: center; gap: 6px; }
+    .status-icons svg { width: 15px; height: 15px; }
+    .battery { width: 22px; height: 11px; border: 1px solid currentColor; border-radius: 3px; padding: 2px; position: relative; }
+    .battery::before { content: ""; display: block; height: 100%; width: 85%; border-radius: 1px; background: currentColor; }
+    .battery::after { content: ""; position: absolute; width: 2px; height: 5px; right: -4px; top: 2px; background: currentColor; border-radius: 0 1px 1px 0; }
+    .mini-nav { flex: none; height: 47px; display: grid; grid-template-columns: 75px 1fr 75px; align-items: center; padding: 0 16px; }
+    .mini-title { text-align: center; font-size: 13px; font-weight: 500; letter-spacing: .2px; }
+    .back { width: 38px; height: 38px; padding: 10px; }
+    .back svg { width: 19px; height: 19px; }
+    .capsule { height: 28px; display: flex; justify-content: space-around; align-items: center; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); padding: 0 8px; }
+    .capsule .dots { letter-spacing: 1px; font-weight: 700; font-size: 14px; line-height: 1; }
+    .capsule .capline { height: 14px; width: 1px; background: var(--line); }
+    .capsule .circle { width: 12px; height: 12px; border: 2px solid var(--ink); border-radius: 50%; position: relative; }
+    .capsule .circle::after { content: ""; position: absolute; inset: 2px; background: var(--ink); border-radius: 50%; }
+    .content { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 20px 22px 22px; scrollbar-width: none; }
+    .content::-webkit-scrollbar { display: none; }
+    .heading-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: .4px; margin: 0 0 6px; }
+    .page-title { font-size: 27px; font-weight: 600; letter-spacing: -.8px; line-height: 1.35; margin: 0; }
+    .home-sub { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+    .family-switch { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 10px 0 10px 8px; color: var(--muted); }
+    .family-switch svg { width: 13px; height: 13px; }
+    .green-dot { width: 5px; height: 5px; border-radius: 50%; background: #899276; margin-right: 2px; }
+    .search { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 5px 5px 5px 14px; margin: 24px 0 22px; }
+    .search > svg { width: 18px; height: 18px; color: var(--muted); flex-shrink: 0; }
+    .search input { background: transparent; color: var(--ink); border: 0; width: 100%; min-width: 0; height: 38px; font-size: 13px; outline-offset: 0; }
+    .search input::placeholder { color: var(--faint); }
+    .search button { width: 37px; height: 37px; display: grid; place-items: center; flex: none; border-radius: 11px; background: var(--action); color: var(--on-action); }
+    .search button svg { width: 17px; height: 17px; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 13px; }
+    .section-header h2 { font-size: 14px; font-weight: 600; margin: 0; }
+    .section-header span, .section-header button { font-size: 11px; color: var(--muted); }
+    .section-header button { min-height: 30px; padding: 0; }
+    .rooms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .room { text-align: left; padding: 0; border-radius: 17px; background: var(--surface); overflow: hidden; border: 1px solid var(--line); }
+    .room-art { height: 103px; background: var(--room-bg); display: grid; place-items: center; }
+    .room-art svg { width: 150px; max-width: 100%; height: 103px; }
+    .room-info { padding: 12px 13px; display: flex; align-items: center; justify-content: space-between; }
+    .room-name { font-size: 14px; font-weight: 500; display: block; }
+    .room-count { font-size: 10px; color: var(--muted); display: block; margin-top: 3px; }
+    .room-info > svg { width: 14px; height: 14px; color: var(--faint); }
+    .reminder { display: flex; gap: 9px; align-items: center; width: 100%; text-align: left; padding: 12px 0 11px; margin: 11px 0 17px; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+    .reminder > svg:first-child { color: #9c8a4b; width: 15px; height: 15px; }
+    .reminder > span { flex: 1; }
+    .reminder strong { font-weight: 500; color: var(--ink); }
+    .reminder > svg:last-child { width: 14px; height: 14px; }
+    .item-list { display: grid; }
+    .item { display: flex; gap: 13px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+    .item:last-child { border-bottom: 0; }
+    .item-thumb { width: 45px; height: 45px; flex-shrink: 0; border-radius: 12px; background: var(--wash); display: grid; place-items: center; }
+    .item-thumb svg { width: 35px; height: 35px; }
+    .item-copy { min-width: 0; flex: 1; }
+    .item-copy strong { font-size: 13px; font-weight: 500; display: block; }
+    .item-copy small { color: var(--muted); font-size: 11px; display: block; margin-top: 5px; line-height: 1.5; }
+    .item > svg { width: 14px; height: 14px; color: var(--faint); }
+    .item-date { font-size: 10px; color: var(--faint); align-self: flex-start; padding-top: 3px; }
+    .dock { flex: none; padding: 12px 20px 8px; background: var(--paper); border-top: 1px solid var(--line); }
+    .dock-actions { display: flex; gap: 10px; }
+    .voice { min-height: 51px; flex: 1; border-radius: 16px; background: var(--action); color: var(--on-action); display: flex; align-items: center; justify-content: center; gap: 11px; font-size: 13px; font-weight: 500; }
+    .voice svg { width: 18px; height: 18px; }
+    .mic-disc { width: 29px; height: 29px; border-radius: 50%; background: #efd36e; color: #30372c; display: grid; place-items: center; }
+    .plus { width: 51px; height: 51px; border: 1px solid var(--line); background: var(--surface); border-radius: 16px; display: grid; place-items: center; }
+    .plus svg { width: 22px; height: 22px; }
+    .dock-secondary { min-width: 88px; min-height: 51px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
+    .phone[data-view="empty"] .dock { border-top: 0; }
+    .home-indicator { width: 105px; height: 4px; background: var(--ink); opacity: .85; border-radius: 5px; margin: 15px auto 0; }
+    .breadcrumb { display: flex; align-items: center; gap: 7px; margin-bottom: 17px; color: var(--muted); font-size: 11px; }
+    .breadcrumb button { padding: 6px 0; }
+    .breadcrumb svg { width: 11px; height: 11px; }
+    .room-banner { height: 160px; background: var(--room-bg); border-radius: 20px; display: flex; align-items: center; justify-content: center; margin-top: 20px; }
+    .room-banner svg { width: 230px; height: 160px; }
+    .room-meta { margin: 21px 0 10px; font-size: 12px; color: var(--muted); }
+    .location-label { font-size: 11px; color: var(--muted); margin-top: 28px; }
+    .location-card { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+    .location-card h2 { font-size: 21px; font-weight: 500; margin: 10px 0 8px; line-height: 1.5; letter-spacing: -.5px; }
+    .location-path { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .location-path svg { width: 12px; height: 12px; }
+    .detail-visual { height: 134px; display: grid; place-items: center; background: var(--wash); border-radius: 17px; margin: 18px 0; }
+    .detail-visual svg { width: 120px; height: 100px; }
+    .detail-hint { font-size: 11px; line-height: 1.75; color: var(--muted); margin: 11px 0 22px; }
+    .text-row { padding: 15px 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .text-row > span { color: var(--muted); }
+    .text-row button { font-size: 12px; padding: 5px 0 5px 12px; }
+    .text-row svg { width: 14px; height: 14px; }
+    .primary { width: 100%; min-height: 49px; background: var(--action); color: var(--on-action); border-radius: 14px; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .primary svg { width: 18px; height: 18px; }
+    .secondary { min-height: 44px; width: 100%; font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .bottom-actions { margin-top: 25px; }
+    .trust { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--muted); font-size: 10px; line-height: 1.6; margin: 13px 0; }
+    .trust svg { width: 12px; height: 12px; }
+    .quote { font-size: 13px; line-height: 1.9; margin: 21px 0; padding: 14px 17px; border-left: 2px solid var(--yellow); background: var(--wash); border-radius: 0 12px 12px 0; }
+    .field { display: grid; gap: 7px; font-size: 11px; color: var(--muted); margin-top: 20px; }
+    .field input, .field textarea { width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 12px 14px; font-size: 14px; line-height: 1.5; resize: vertical; }
+    .field textarea { min-height: 110px; }
+    .confirm-note { display: flex; gap: 8px; align-items: center; font-size: 11px; line-height: 1.6; color: var(--muted); padding: 12px 14px; background: var(--wash); border-radius: 12px; margin-top: 18px; }
+    .confirm-note svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .empty { text-align: center; padding: 36px 15px; }
+    .empty > svg { width: 210px; max-width: 100%; height: 150px; margin: 0 auto 20px; }
+    .empty h2 { font-size: 22px; font-weight: 500; line-height: 1.5; margin: 0 0 12px; }
+    .empty p { font-size: 12px; color: var(--muted); line-height: 1.9; margin-bottom: 25px; }
+    .empty-compact { padding: 45px 10px; }
+    .empty-compact h2 { font-size: 17px; }
+    .overlay { position: absolute; inset: 0; z-index: 5; background: #171d1866; display: flex; align-items: flex-end; animation: fade-in .2s ease; }
+    .sheet { background: var(--paper); width: 100%; border-radius: 25px 25px 0 0; padding: 10px 22px 24px; max-height: 88%; overflow-y: auto; animation: rise .25s ease; }
+    .grab { width: 32px; height: 4px; border-radius: 4px; background: var(--line); margin: 0 auto 15px; }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+    .sheet-head h2 { font-size: 20px; font-weight: 500; margin: 0; }
+    .close { width: 36px; height: 36px; display: grid; place-items: center; color: var(--muted); }
+    .close svg { width: 18px; height: 18px; }
+    .sheet-sub { font-size: 12px; color: var(--muted); margin: 4px 0 20px; line-height: 1.7; }
+    .method { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; border-bottom: 1px solid var(--line); padding: 16px 0; }
+    .method-icon { width: 43px; height: 43px; border-radius: 13px; background: var(--wash); display: grid; place-items: center; }
+    .method-icon svg { width: 20px; height: 20px; }
+    .method-copy { flex: 1; }
+    .method strong { display: block; font-size: 14px; font-weight: 500; }
+    .method small { display: block; font-size: 11px; color: var(--muted); margin-top: 5px; }
+    .method > svg { width: 15px; height: 15px; color: var(--muted); }
+    .recording { text-align: center; padding-top: 18px; }
+    .recording h3 { font-size: 22px; font-weight: 500; margin: 6px 0 9px; }
+    .recording p { font-size: 12px; color: var(--muted); }
+    .wave { display: flex; justify-content: center; align-items: center; gap: 5px; height: 80px; color: var(--room-line); }
+    .wave i { width: 4px; height: 15px; border-radius: 3px; background: currentColor; animation: wave 1s ease-in-out infinite alternate; }
+    .wave i:nth-child(3n) { height: 39px; animation-delay: -.4s; }
+    .wave i:nth-child(3n + 1) { height: 25px; animation-delay: -.7s; }
+    .sample-transcript { padding: 15px; background: var(--surface); border-radius: 12px; font-size: 15px; line-height: 1.7; margin: 10px 0 22px; }
+    .toast { position: absolute; z-index: 10; bottom: 115px; left: 24px; right: 24px; background: #30372cf2; color: #fffdf5; border-radius: 12px; padding: 14px 15px; text-align: center; font-size: 12px; box-shadow: 0 8px 24px #12180f22; animation: rise .2s ease; }
+    .upload-preview { background: var(--room-bg); border-radius: 17px; padding: 25px; display: grid; place-items: center; margin: 20px 0; }
+    .upload-preview svg { width: 160px; height: 115px; }
+    @keyframes rise { from { transform: translateY(18px); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes wave { to { transform: scaleY(.45); opacity: .6; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+    @media (max-width: 900px) { .workbench { gap: 45px; grid-template-columns: 270px 390px; padding-inline: 20px; } .intro h1 { font-size: 38px; } }
+    @media (max-width: 740px) { .workbench { display: flex; flex-direction: column; padding: 22px 12px; gap: 20px; } .intro { padding: 0; width: min(100%, 390px); } .edition { font-size: 10px; letter-spacing: 1px; } .intro h1, .intro-copy, .design-notes, .preview-note { display: none; } .view-picker { margin-top: 14px; } .view-picker button { flex: 1; padding-inline: 8px; white-space: nowrap; } .theme-button { position: absolute; right: 20px; top: 14px; margin: 0; } }
+    @media (max-width: 420px) { .phone { width: 100%; max-width: 390px; border-radius: 32px; border-width: 4px; height: min(844px, calc(100svh - 110px)); min-height: 620px; } .workbench { padding-inline: 8px; } .content { padding-inline: 19px; } .status-bar { padding-inline: 20px; } .room-art { height: 96px; } .room-art svg { height: 96px; } }
+    .intro-copy { margin-bottom: 26px; }
+    .design-notes { margin: 26px 0 15px; gap: 15px; }
+    .demo-reset { display: block; color: #777d6e; padding: 6px 0; font-size: 11px; margin-top: 8px; text-decoration: underline; text-underline-offset: 4px; }
+    .phone .avatar-hit { width: 44px; height: 44px; padding: 3px; display: grid; place-items: center; border-radius: 50%; flex: none; }
+    .avatar-face { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--wash); border: 1px solid var(--line); color: var(--action); font-size: 16px; font-weight: 500; overflow: hidden; }
+    .avatar-face svg { width: 25px; height: 25px; }
+    .avatar-face.large { width: 62px; height: 62px; font-size: 25px; }
+    .avatar-face.large svg { width: 39px; height: 39px; }
+    .home-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 1px; }
+    .home-meta .home-sub { margin: 0; }
+    .home-meta .family-switch { min-height: 32px; padding: 0; }
+    .home-meta + .search { margin-top: 20px; }
+    .phone .dock { padding-bottom: 4px; }
+    .phone .home-indicator { margin-top: 7px; }
+    .phone[data-view="settings"] .dock, .phone[data-view="layout"] .dock { border-top: 0; padding-top: 0; }
+    .phone[data-view="appearance"] .dock-actions, .phone[data-view="home-preview"] .dock-actions { flex-wrap: wrap; gap: 8px; }
+    .phone[data-view="home-preview"] .primary { flex: 1; width: auto; }
+    .preview-return { min-height: 49px; font-size: 12px; color: var(--muted); padding: 0 12px; }
+    .setting-sub { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 8px 0 23px; }
+    .profile-summary { display: flex; align-items: center; gap: 17px; width: 100%; padding: 25px 0 27px; text-align: left; border-bottom: 1px solid var(--line); }
+    .profile-summary .profile-copy { flex: 1; }
+    .profile-summary strong { display: block; font-size: 21px; font-weight: 500; }
+    .profile-summary small { display: block; margin-top: 7px; font-size: 12px; color: var(--muted); }
+    .profile-summary > svg { width: 16px; height: 16px; color: var(--muted); }
+    .setting-group { margin-top: 26px; }
+    .group-title { font-size: 11px; font-weight: 400; color: var(--muted); margin: 0 0 8px; }
+    .setting-row { display: flex; align-items: center; gap: 13px; width: 100%; min-height: 65px; padding: 14px 0; border-bottom: 1px solid var(--line); text-align: left; }
+    .setting-row .row-icon { width: 31px; height: 31px; border-radius: 10px; background: var(--wash); display: grid; place-items: center; flex: none; }
+    .row-icon svg { width: 17px; height: 17px; }
+    .row-label { font-size: 14px; flex: 1; }
+    .row-value { font-size: 12px; color: var(--muted); }
+    .setting-row > svg { width: 13px; height: 13px; color: var(--muted); }
+    .tiny-palette { width: 15px; height: 15px; border-radius: 50%; background: var(--action); }
+    .scope-note { font-size: 11px; color: var(--muted); margin: 19px 0; line-height: 1.7; }
+    .theme-preview { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; margin: 20px 0 22px; padding: 15px 17px; }
+    .theme-preview-top { display: flex; justify-content: space-between; align-items: center; }
+    .theme-preview-top strong { font-size: 15px; font-weight: 500; }
+    .theme-preview-top .avatar-face { width: 25px; height: 25px; font-size: 11px; }
+    .mini-rooms { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 13px 0 12px; }
+    .mini-room { border-radius: 10px; background: var(--room-bg); padding: 8px 10px; }
+    .mini-room svg { width: 100%; height: 65px; }
+    .mini-room span { display: block; font-size: 10px; margin-top: 3px; }
+    .mini-voice { display: flex; align-items: center; justify-content: center; gap: 6px; height: 31px; border-radius: 10px; background: var(--action); color: var(--on-action); font-size: 10px; }
+    .mini-voice svg { height: 14px; width: 14px; }
+    .preview-caption { margin-top: 9px; display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+    .preview-caption button { font-size: 11px; color: var(--ink); padding: 0; text-decoration: underline; text-underline-offset: 3px; min-height: 28px; }
+    .palette-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 9px; margin: 12px 0 23px; }
+    .palette-choice { padding: 0; text-align: center; min-height: 72px; }
+    .palette-sample { position: relative; display: flex; height: 45px; border: 1px solid var(--line); border-radius: 12px; padding: 7px; gap: 3px; margin-bottom: 7px; }
+    .palette-sample i { height: 100%; flex: 1; border-radius: 4px; }
+    .palette-choice[aria-pressed="true"] .palette-sample { outline: 2px solid var(--action); outline-offset: 2px; }
+    .palette-check { position: absolute; right: -4px; top: -5px; width: 17px; height: 17px; border-radius: 50%; background: var(--action); color: var(--on-action); font-size: 11px; display: grid; place-items: center; }
+    .palette-name { font-size: 11px; color: var(--muted); }
+    .palette-choice[aria-pressed="true"] .palette-name { color: var(--ink); font-weight: 500; }
+    .mode-control { display: grid; grid-template-columns: repeat(3,1fr); background: var(--wash); padding: 4px; border-radius: 12px; margin: 11px 0 8px; gap: 4px; }
+    .mode-control button { font-size: 12px; min-height: 38px; border-radius: 9px; color: var(--muted); }
+    .mode-control button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px #20271c10; }
+    .restore-theme { font-size: 12px; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; color: var(--muted); padding: 0; }
+    .edit-avatar { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 27px auto 24px; padding: 0; min-width: 88px; font-size: 12px; color: var(--muted); }
+    .edit-avatar .avatar-face { width: 82px; height: 82px; font-size: 32px; }
+    .edit-avatar .avatar-face svg { width: 48px; height: 48px; }
+    .avatar-options { display: flex; gap: 18px; justify-content: center; padding: 20px 0; }
+    .avatar-option { padding: 6px; border: 2px solid transparent; border-radius: 50%; }
+    .avatar-option[aria-pressed="true"] { border-color: var(--action); }
+    .avatar-options .avatar-face { width: 62px; height: 62px; font-size: 24px; }
+    .profile-help { font-size: 11px; color: var(--muted); line-height: 1.8; margin-top: 13px; }
+    .profile-error { min-height: 18px; margin: 10px 0; font-size: 12px; color: #aa442e; }
+    .profile-footer-note { width: 100%; font-size: 10px; color: var(--muted); text-align: center; margin: 0 0 8px; }
+    .toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+    .toggle-row strong { display: block; font-size: 14px; font-weight: 400; }
+    .toggle-row small { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; margin-top: 7px; }
+    .toggle-track { flex: none; display: flex; align-items: center; width: 43px; height: 26px; border-radius: 15px; padding: 3px; background: var(--line); }
+    .toggle-track::after { content: ''; display: block; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); }
+    .toggle-row[aria-checked="true"] .toggle-track { background: var(--action); justify-content: flex-end; }
+    .toggle-row[aria-checked="true"] .toggle-track::after { background: var(--on-action); }
+    @media(max-width: 800px) { .intro-copy,.design-notes,.demo-reset { display: none; } .intro { padding-bottom:0; } .intro h1 { font-size:25px; margin:12px 0; } .intro h1 br { display:none; } .intro .theme-button { margin-top:8px; } .preview-note { margin:8px 0; } }
+
+    .mic-disc { background: var(--yellow); color: #30372c; }
+
+    .theme-preview { margin: 16px 0 12px; padding: 11px 14px; }
+    .mini-room svg { height: 38px; }
+    .mini-rooms { margin: 8px 0; }
+    .preview-caption { margin-top: 4px; }
+    .setting-sub { margin-bottom: 18px; }
+    .palette-grid { margin-bottom: 18px; }
+
+  </style>
+</head>
+<body>
+  <svg class="symbol-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.7" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m16 16 4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="m8 6 1-2h6l1 2h4v14H4V6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+      <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m15 10 6-3v10l-6-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+      <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 6V4h16v2M12 4v16m-3 0h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14a8.5 8.5 0 0 1-10-10 8.5 8.5 0 1 0 10 10Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+      <symbol id="i-signal" viewBox="0 0 20 20"><path d="M3 16v-3m4 3V9m4 7V6m4 10V3" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></symbol>
+      <symbol id="i-wifi" viewBox="0 0 20 20"><path d="M2 7a12 12 0 0 1 16 0M5 10a7.5 7.5 0 0 1 10 0m-7 3a3 3 0 0 1 4 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="10" cy="16" r="1" fill="currentColor"/></symbol>
+      <symbol id="art-living" viewBox="0 0 180 120">
+        <ellipse cx="92" cy="105" rx="65" ry="5" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M27 95V28h40v67" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M47 29v60M28 54h38" stroke="var(--room-line)" stroke-width=".8" opacity=".6"/>
+        <path d="m57 72 4-17h57l6 17" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="49" y="70" width="82" height="29" rx="6" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="45" y="68" width="13" height="30" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><rect x="122" y="68" width="13" height="30" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M58 82h64m-64 18v5m64-5v5" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="65" y="63" width="20" height="18" rx="4" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width=".8" transform="rotate(-7 75 72)"/>
+        <path d="M151 91V44m-10 0 10-23 10 23Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M142 93h18" stroke="var(--room-line)" stroke-width="1.3" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="art-bedroom" viewBox="0 0 180 120">
+        <ellipse cx="92" cy="105" rx="62" ry="5" fill="var(--room-dark)" opacity=".15"/>
+        <rect x="57" y="21" width="24" height="29" rx="1" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1"/><path d="m62 43 6-10 8 10" fill="var(--room-mid)"/><circle cx="73" cy="29" r="3" fill="var(--room-accent)"/>
+        <path d="M45 80V62q0-9 9-9h68q9 0 9 9v18" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <rect x="51" y="64" width="32" height="19" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width=".9"/><rect x="91" y="64" width="32" height="19" rx="5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width=".9"/>
+        <path d="m39 99 8-20h80l11 20Z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M39 99h99v5H39z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="m90 79 7 20h31l-10-20" fill="var(--room-accent)" opacity=".85"/>
+        <path d="M147 73h17v24h-17zm0 9h17" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.1"/><path d="M155 72V57m-8 0h16l-3-12h-10Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.1"/>
+      </symbol>
+      <symbol id="art-study" viewBox="0 0 180 120">
+        <ellipse cx="93" cy="106" rx="65" ry="4" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M124 24h31v77h-31z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M125 48h29m-29 25h29" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M130 45V31h5v14m3 0V29h5v16m3 0V34h4v11" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width=".8"/><rect x="132" y="60" width="15" height="10" rx="2" fill="var(--room-accent)"/>
+        <path d="M30 71h85v6H30zm7 6v27m70-27v27" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.3"/>
+        <path d="m49 69 4-24h31l4 24Zm-5 2h49" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M65 88v15m-10 2h20" stroke="var(--room-line)" stroke-width="1.3"/>
+        <rect x="52" y="78" width="26" height="16" rx="5" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M102 69V47l-7-8m-6 7 12-10-8-4Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2"/>
+        <path d="M34 67v-9m-4-2c-5-7 0-12 4-8 3-7 10-4 7 3-1 4-7 6-7 6" fill="var(--room-dark)"/><path d="M29 62h11l-2 9h-7Z" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width=".8"/>
+      </symbol>
+      <symbol id="art-kitchen" viewBox="0 0 180 120">
+        <ellipse cx="91" cy="106" rx="62" ry="4" fill="var(--room-dark)" opacity=".15"/>
+        <path d="M36 30h49v31H36z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M60 31v29m-6-17v6m12-6v6" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M31 74h108v29H31z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M27 70h117v6H27z" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.2"/><path d="M65 78v24m36-24v24M38 84h20m16 0h19m17 0h21" stroke="var(--room-line)" stroke-width="1"/>
+        <path d="M47 70V54q0-8 7-8t7 8" fill="none" stroke="var(--room-line)" stroke-width="1.6"/><path d="M38 70h29" stroke="var(--room-line)" stroke-width="2.5"/>
+        <path d="M99 55h22v14H99zm-3 0h28m-15-4h4" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M96 26h29m-23 0v10m15-10v10" stroke="var(--room-line)" stroke-width="1.2"/><path d="M99 36h6v10h-6zm15 0h6v10h-6z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width=".8"/>
+        <path d="M146 68h10v35h-10zm1-8q-7-12-2-16 9 1 7 12 5-12 11-7-1 10-12 14" fill="var(--room-dark)" stroke="var(--room-line)" stroke-width=".8"/>
+      </symbol>
+      <symbol id="art-key" viewBox="0 0 80 70"><ellipse cx="40" cy="57" rx="24" ry="4" fill="var(--room-dark)" opacity=".18"/><g transform="rotate(-28 40 35)"><path d="M32 30v28h11v-6h-5v-5h6v-6h-6V30" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.5"/><circle cx="35" cy="22" r="13" fill="var(--room-accent)" stroke="var(--room-line)" stroke-width="1.5"/><circle cx="35" cy="20" r="4.5" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1"/></g><path d="M43 10q14-3 13 7t-12 6" fill="none" stroke="var(--room-line)" stroke-width="2"/></symbol>
+      <symbol id="art-medicine" viewBox="0 0 80 70"><ellipse cx="40" cy="59" rx="23" ry="4" fill="var(--room-dark)" opacity=".18"/><rect x="24" y="18" width="32" height="40" rx="7" fill="var(--room-light)" stroke="var(--room-line)" stroke-width="1.4"/><rect x="26" y="11" width="28" height="12" rx="3" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.4"/><path d="M24 32h32v16H24z" fill="var(--room-mid)"/><path d="M40 35v10m-5-5h10" stroke="var(--room-line)" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="art-book" viewBox="0 0 80 70"><ellipse cx="40" cy="58" rx="24" ry="4" fill="var(--room-dark)" opacity=".18"/><path d="m20 17 34-4 6 39-34 6Z" fill="var(--room-mid)" stroke="var(--room-line)" stroke-width="1.4"/><path d="m26 16 6 40m-5-2 31-4" stroke="var(--room-line)" stroke-width="1"/><path d="m34 25 13-2m-12 7 12-2" stroke="var(--room-light)" stroke-width="2"/><path d="m46 13 2 13 4-3 3 2-2-13" fill="var(--room-accent)"/></symbol>
+    </defs>
+  </svg>
+  <div class="workbench">
+    <aside class="intro">
+      <div class="edition">我靠东西呢 / 个性化提案</div>
+      <h1>熟悉的家，<br><em>自己的颜色。</em></h1>
+      <p class="intro-copy">从右上角头像进入「我的」。<br>个人资料、主题和首页显示，集中在一处。</p>
+      <nav class="view-picker" aria-label="预览页面">
+        <button type="button" data-preview="home" aria-pressed="true">首页入口</button>
+        <button type="button" data-preview="settings" aria-pressed="false">个人设置</button>
+        <button type="button" data-preview="appearance" aria-pressed="false">主题配色</button>
+        <button type="button" data-preview="profile" aria-pressed="false">编辑资料</button>
+      </nav>
+      <div class="design-notes">
+        <div class="design-note"><span>01</span><p>头像固定入口，家庭切换独立保留</p></div>
+        <div class="design-note"><span>02</span><p>先看实际首页，再决定是否应用</p></div>
+        <div class="design-note"><span>03</span><p>个人外观，不改变家人的界面</p></div>
+      </div>
+      <button class="theme-button" id="theme-button" type="button" aria-pressed="false"><svg aria-hidden="true"><use href="#i-moon"/></svg><span>模拟系统切换为深色</span></button>
+      <button class="demo-reset" id="reset-demo" type="button">重置原型</button>
+      <p class="preview-note">交互原型 · 示例资料<br>偏好只保存在此浏览器，不连接微信或云端。</p>
+    </aside>
+    <section class="phone" id="phone" aria-label="小程序交互预览" data-theme="light">
+      <div class="status-bar" aria-hidden="true"><span>9:41</span><div class="status-icons"><svg><use href="#i-signal"/></svg><svg><use href="#i-wifi"/></svg><div class="battery"></div></div></div>
+      <header class="mini-nav"><div id="back-slot"></div><div class="mini-title">我靠东西呢</div><div class="capsule" aria-hidden="true"><span class="dots">•••</span><span class="capline"></span><span class="circle"></span></div></header>
+      <main class="content" id="content"></main>
+      <footer class="dock"><div class="dock-actions"><button class="voice" type="button" data-action="record"><span class="mic-disc"><svg aria-hidden="true"><use href="#i-mic"/></svg></span><span>按住说话</span></button><button class="plus" type="button" data-action="add" aria-label="选择其他录入方式"><svg aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="home-indicator" aria-hidden="true"></div></footer>
+      <div id="overlay-root"></div><div id="toast-root" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const phone = document.getElementById('phone');
+      const content = document.getElementById('content');
+      const overlayRoot = document.getElementById('overlay-root');
+      const backSlot = document.getElementById('back-slot');
+      const rooms = [
+        { id: 'living', name: '客厅', count: 12, art: 'living' },
+        { id: 'bedroom', name: '卧室', count: 16, art: 'bedroom' },
+        { id: 'study', name: '书房', count: 11, art: 'study' },
+        { id: 'kitchen', name: '厨房', count: 9, art: 'kitchen' }
+      ];
+      const items = [
+        { id: 'key', name: '备用钥匙', room: 'living', container: '玄关柜', position: '右侧第二个抽屉', art: 'key', when: '今天', quote: '备用钥匙放在玄关柜右侧第二个抽屉里了。' },
+        { id: 'medicine', name: '维生素', room: 'kitchen', container: '餐边柜', position: '上层收纳盒', art: 'medicine', when: '昨天', quote: '维生素收在厨房餐边柜上层的收纳盒里。' },
+        { id: 'book', name: '相机说明书', room: 'study', container: '书桌', position: '左侧第一个抽屉', art: 'book', when: '昨天', quote: '相机说明书在书房书桌左侧第一个抽屉。' }
+      ];
+      let view = 'home';
+      let history = [];
+      let selectedRoom = 'living';
+      let selectedItem = 'key';
+      let query = '';
+      let draft = { name: '备用钥匙', location: '玄关柜右侧第二个抽屉', room: 'living' };
+      let draftReturn = 'home';
+      let toastTimer;
+      let overlayOpener;
+      const esc = value => String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+      const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
+      const art = name => `<svg aria-hidden="true"><use href="#art-${name}"/></svg>`;
+      const roomFor = item => rooms.find(room => room.id === item.room);
+      const total = () => rooms.reduce((sum, room) => sum + room.count, 0);
+      const currentItem = () => items.find(item => item.id === selectedItem) || items[0];
+      const searchForm = () => `<form class="search" id="search-form">${icon('search')}<input id="search-input" aria-label="搜索物品" placeholder="搜索物品" value="${esc(query)}" autocomplete="off" enterkeyhint="search"><button type="submit" aria-label="搜索">${icon('arrow')}</button></form>`;
+      const itemRow = (item, date = false) => `<button class="item" type="button" data-action="detail" data-id="${esc(item.id)}"><span class="item-thumb">${art(item.art)}</span><span class="item-copy"><strong>${esc(item.name)}</strong><small>${esc(item.container)} · ${esc(item.position)}</small></span>${date ? `<span class="item-date">${esc(item.when)}</span>` : icon('chevron')}</button>`;
+      const heading = (title, sub = '') => `<h1 class="page-title">${title}</h1>${sub ? `<p class="home-sub">${sub}</p>` : ''}`;
+      const defaults = {palette:'cream', mode:'system', recent:true, expiry:true};
+      const paletteNames = {cream:'奶油', sage:'苔绿', mist:'雾蓝', clay:'陶土', inkGold:'墨金', cobalt:'钴蓝', emerald:'翠绿', berry:'莓红'};
+      const palettes = {
+        cream: {light:['#f8f7f2','#fffefa','#292d25','#666d5e','#e7e8de','#eeeee5','#30372c','#fcfaf1','#efd36e','#efeee4','#7b8069','#d3d5bf','#f8f6e9','#a9ae91','#ddc486'],dark:['#20241f','#2b3028','#efeee4','#b5baa8','#3d4436','#32392e','#e8ce78','#262c22','#e8ce78','#30362d','#abb598','#626f52','#909a75','#3f4c37','#b29b65']},
+        sage: {light:['#f2f5ef','#fcfdf9','#24362d','#58695d','#dde5d9','#e4ebe0','#3e5b46','#fffef9','#d8dfab','#e8eddf','#75876b','#ccd8be','#f5f7e9','#9aaa85','#bbc88f'],dark:['#1d2721','#29362c','#ebf1e6','#b2c3ae','#3c4d3e','#324435','#c5d7b2','#263723','#d8dfab','#2d3c2e','#a3b995','#627e58','#93a989','#465d40','#a3b881']},
+        mist: {light:['#f1f5f7','#fbfdfe','#253945','#586c78','#dce5e9','#e3edf1','#3d6176','#ffffff','#c9dce5','#e5edf0','#738895','#ccd9dd','#f4f8f9','#a0b2ba','#b4cbd7'],dark:['#1d252c','#28343d','#e8eff3','#afc0cc','#3a4b57','#30414d','#b8d4e4','#213544','#c9dce5','#2b3c47','#9db7c7','#59758a','#8ca8b8','#3e596a','#9cbdcf']},
+        clay: {light:['#f9f3ef','#fffaf6','#423028','#796052','#eadfd6','#f0e5dc','#85513e','#ffffff','#e7c69e','#f1e5da','#96806e','#dfcdbb','#fcf4e9','#b9a18d','#d1ae85'],dark:['#2b211e','#392c26','#f5eae0','#cbb7a8','#514036','#46352c','#dfb697','#39271d','#e7c69e','#3c2d24','#c1a88e','#92735a','#bfa78e','#654c38','#c4a17e']}
+,
+        inkGold: {light:['#fffdf5','#ffffff','#151713','#454536','#c7bb83','#f0e8ca','#171915','#ffe06b','#ffe06b','#f3edda','#655b32','#d8cfaa','#fffef4','#a59658','#dfb526'],dark:['#0c0e0a','#191c13','#fffef4','#d4d4b9','#64643f','#272c1a','#ffe06b','#171915','#ffe06b','#232719','#d3ce9f','#8f9561','#e3dfbc','#636a3d','#edcb4b']},
+        cobalt: {light:['#f5f8ff','#ffffff','#101b35','#344565','#a5b8e3','#dbe6ff','#123c9c','#ffffff','#ffd85f','#e5edff','#284783','#b0c6f1','#f8fbff','#6988c0','#edc245'],dark:['#080f22','#131f38','#f5f8ff','#bfcee9','#526a9e','#1d3052','#9cbdff','#0c2049','#ffd85f','#182a4a','#b4c9f5','#597eba','#d3e0ff','#34578d','#edc245']},
+        emerald: {light:['#f2fcf6','#ffffff','#09281e','#284f3e','#8dbda4','#d1eadb','#00523b','#ffffff','#e3d55d','#def2e5','#255f45','#acd2b9','#f6fff8','#5b9975','#d4bd3f'],dark:['#07150e','#10291c','#f0fff4','#badcc7','#457f5b','#1b3b28','#83e5af','#082e1a','#e3d55d','#173722','#a5d9b6','#4b8e65','#d0f1d9','#2c603f','#c9b74d']},
+        berry: {light:['#fff5f8','#ffffff','#32101f','#62374a','#d2a2b5','#f5dce6','#8b1741','#ffffff','#f2cc7d','#fae4ed','#863c58','#e7b8c9','#fff8fb','#ba708d','#d8b051'],dark:['#1b0912','#32131f','#fff3f8','#e8c0d0','#9b536e','#4b2032','#ffafcd','#3f1024','#f2cc7d','#412030','#e5adc4','#a55c7a','#f6d5e3','#773c55','#d8b051']}
+      };
+      const colorTokens = ['paper','surface','ink','muted','line','wash','action','on-action','yellow','room-bg','room-line','room-mid','room-light','room-dark','room-accent'];
+      let preferences = {...defaults};
+      let profile = {nickname:'小林',avatar:'initial'};
+      try {
+        const cached = JSON.parse(localStorage.getItem('home-memory:personalization-demo-v1') || 'null');
+        if (cached) {
+          if (palettes[cached.preferences?.palette]) preferences.palette = cached.preferences.palette;
+          if (['system','light','dark'].includes(cached.preferences?.mode)) preferences.mode = cached.preferences.mode;
+          for (const key of ['recent','expiry']) if (typeof cached.preferences?.[key] === 'boolean') preferences[key] = cached.preferences[key];
+          if (typeof cached.profile?.nickname === 'string' && cached.profile.nickname.trim().length <= 20) profile.nickname = cached.profile.nickname;
+          if (['initial','leaf','person'].includes(cached.profile?.avatar)) profile.avatar = cached.profile.avatar;
+        }
+      } catch (_) {}
+      let themeDraft = {...preferences};
+      let profileDraft = {...profile};
+      let systemDark = false; // The external control simulates the system appearance for this prototype.
+      function saveLocal() { try { localStorage.setItem('home-memory:personalization-demo-v1', JSON.stringify({preferences,profile})); } catch (_) { toast('当前浏览器无法保留设置，刷新后会恢复。'); } }
+      function applyPalette(settings) {
+        const dark = settings.mode === 'dark' || (settings.mode === 'system' && systemDark);
+        phone.dataset.theme = dark ? 'dark' : 'light';
+        const colors = palettes[settings.palette][dark ? 'dark' : 'light'];
+        colorTokens.forEach((key,i) => phone.style.setProperty(`--${key}`, colors[i]));
+        phone.style.setProperty('--faint', colors[3]);
+        phone.style.colorScheme = dark ? 'dark' : 'light';
+      }
+      function avatar(p = profile, extra = '') {
+        const glyph = p.avatar === 'initial' && p.nickname ? esc([...p.nickname][0]) : p.avatar === 'leaf' ? '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 25C2 13 15 5 26 6c0 14-7 22-18 19Z" fill="var(--room-mid)" stroke="currentColor" stroke-width="1.2"/><path d="M7 27 22 11m-9 9v-6m5 1h5" stroke="currentColor" fill="none" stroke-width="1.2"/></svg>' : '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="11" r="5.5" fill="var(--room-mid)" stroke="currentColor" stroke-width="1.2"/><path d="M5 28c0-13 22-13 22 0" fill="var(--room-mid)" stroke="currentColor" stroke-width="1.2"/></svg>';
+        return `<span class="avatar-face ${extra}">${glyph}</span>`;
+      }
+      function avatarButton() { return `<button class="avatar-hit" type="button" data-action="settings" aria-label="打开我的设置">${avatar()}</button>`; }
+      function homeContent(preview = false) {
+        const prefs = preview ? themeDraft : preferences;
+        return `<div class="heading-row"><div>${heading('家里有什么')}</div>${avatarButton()}</div><div class="home-meta"><p class="home-sub">已记住 ${total()} 件</p><button type="button" class="family-switch" data-action="family"><span class="green-dot"></span>我的家${icon('down')}</button></div>${searchForm()}<div class="section-header"><h2>房间</h2></div><div class="rooms">${rooms.map(room => `<button class="room" type="button" data-action="room" data-id="${room.id}" aria-label="${room.name}，${room.count} 件物品"><div class="room-art">${art(room.art)}</div><div class="room-info"><span><span class="room-name">${room.name}</span><span class="room-count">${room.count} 件</span></span>${icon('chevron')}</div></button>`).join('')}</div>${prefs.expiry ? `<button class="reminder" type="button" data-action="reminders">${icon('clock')}<span><strong>2 件物品</strong>即将到期</span>${icon('chevron')}</button>` : '<div style="height:20px"></div>'}${prefs.recent ? `<div class="section-header"><h2>最近记住</h2><button type="button" data-action="all">查看全部</button></div><div class="item-list">${items.slice(0,2).map(item=>itemRow(item,true)).join('')}</div>` : ''}`;
+      }
+      function settingsRow(label,value,action,symbol) { return `<button class="setting-row" type="button" data-action="${action}"><span class="row-icon">${icon(symbol)}</span><span class="row-label">${label}</span><span class="row-value">${value}</span>${icon('chevron')}</button>`; }
+      function paletteGrid(keys) { return `<div class="palette-grid">${keys.map(key=>{const c=palettes[key].light;return `<button class="palette-choice" type="button" data-action="palette" data-palette="${key}" aria-label="${paletteNames[key]}配色" aria-pressed="${themeDraft.palette===key}"><span class="palette-sample" style="background:${c[0]}"><i style="background:${c[5]}"></i><i style="background:${c[6]}"></i><i style="background:${c[8]}"></i>${themeDraft.palette===key?'<span class="palette-check">✓</span>':''}</span><span class="palette-name">${paletteNames[key]}</span></button>`}).join('')}</div>`; }
+      function renderPersonal() {
+        applyPalette(['appearance','home-preview'].includes(view) ? themeDraft : preferences);
+        if (!['settings','appearance','profile','layout','home-preview'].includes(view)) return false;
+        phone.dataset.view = view;
+        backSlot.innerHTML = `<button type="button" class="back" data-action="back" aria-label="返回">${icon('back')}</button>`;
+        document.querySelectorAll('[data-preview]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.preview===view)));
+        const dock = phone.querySelector('.dock-actions'); dock.innerHTML = '';
+        if (view === 'settings') {
+          const modes = {system:'跟随系统',light:'浅色',dark:'深色'};
+          content.innerHTML = `${heading('我的')}<button class="profile-summary" type="button" data-action="profile">${avatar(profile,'large')}<span class="profile-copy"><strong>${esc(profile.nickname || '设置昵称')}</strong><small>编辑头像与昵称</small></span>${icon('chevron')}</button><section class="setting-group"><h2 class="group-title">个性化</h2>${settingsRow('主题配色',`${paletteNames[preferences.palette]} · ${modes[preferences.mode]}`,'appearance','moon')}${settingsRow('首页显示','自定义','layout','text')}</section><section class="setting-group"><h2 class="group-title">家庭</h2>${settingsRow('我的家庭','我的家','family','plus')}</section><p class="scope-note">外观设置只影响你，不影响家人。</p>`;
+        } else if (view === 'appearance') {
+          content.innerHTML = `${heading('主题配色')}<p class="setting-sub">挑一个看着舒服的颜色。</p><h2 class="group-title">柔和配色</h2>${paletteGrid(['cream','sage','mist','clay'])}<h2 class="group-title">鲜明配色</h2>${paletteGrid(['inkGold','cobalt','emerald','berry'])}<h2 class="group-title">明暗</h2><div class="mode-control" role="group" aria-label="明暗模式">${[['system','跟随系统'],['light','浅色'],['dark','深色']].map(([key,label])=>`<button type="button" data-action="mode" data-mode="${key}" aria-pressed="${themeDraft.mode===key}">${label}</button>`).join('')}</div><div class="theme-preview"><div class="theme-preview-top"><strong>家里有什么</strong>${avatar()}</div><div class="mini-rooms"><div class="mini-room">${art('living')}<span>客厅</span></div><div class="mini-room">${art('bedroom')}<span>卧室</span></div></div><div class="mini-voice">${icon('mic')}按住说话</div><div class="preview-caption"><span>效果预览</span><button type="button" data-action="preview-home">在首页看看 ↗</button></div></div><p class="scope-note">只影响你的界面，切换家庭后也保留。</p><button class="restore-theme" type="button" data-action="reset-theme">恢复默认配色</button>`;
+          dock.innerHTML = '<p class="profile-footer-note">预览中的配色，应用后才会保留。</p><button class="primary" type="button" data-action="apply-theme">应用主题</button>';
+        } else if (view === 'home-preview') {
+          content.innerHTML = homeContent(true);
+          dock.innerHTML = '<p class="profile-footer-note">正在预览主题</p><button class="preview-return" type="button" data-action="back">返回调整</button><button class="primary" type="button" data-action="apply-theme">使用这个主题</button>';
+        } else if (view === 'profile') {
+          content.innerHTML = `${heading('编辑资料')}<form id="profile-form"><button class="edit-avatar" type="button" data-action="choose-avatar">${avatar(profileDraft)}<span>更换头像</span></button><label class="field" for="nickname">昵称<input id="nickname" value="${esc(profileDraft.nickname)}" maxlength="20" placeholder="怎么称呼你" autocomplete="off"></label><p class="profile-help">用于你的个人入口。</p><p class="profile-error" role="status" id="profile-error"></p></form>`;
+          dock.innerHTML = '<button class="primary" type="submit" form="profile-form">保存资料</button>';
+        } else if (view === 'layout') {
+          content.innerHTML = `${heading('首页显示')}<p class="setting-sub">留下你常看的内容。</p>${[['recent','最近记住','在首页显示最近的记录'],['expiry','到期提示','只控制首页提示，不改变已有提醒']].map(([key,title,sub])=>`<button class="toggle-row" role="switch" type="button" data-action="toggle-section" data-key="${key}" aria-label="${title}" aria-checked="${preferences[key]}"><span><strong>${title}</strong><small>${sub}</small></span><span class="toggle-track" aria-hidden="true"></span></button>`).join('')}<p class="scope-note">调整后自动保存，仅影响你的首页。</p><button class="secondary" type="button" data-action="home">回首页看看</button>`;
+        }
+        content.scrollTop = 0;
+        return true;
+      }
+      function saveProfile() {
+        const input = document.getElementById('nickname');
+        const name = input.value.trim();
+        if (!name || name.length > 20 || /[\u0000-\u001f\u007f]/.test(name)) { document.getElementById('profile-error').textContent = '请填写 1–20 个字的昵称。'; input.focus(); return; }
+        profile = {nickname:name, avatar:profileDraft.avatar}; saveLocal(); history = ['home']; navigate('settings',false); toast('资料已保存。');
+      }
+      function handlePersonal(action,target) {
+        if (['settings','appearance','profile','layout'].includes(action)) { navigate(action); return true; }
+        if (action === 'palette') { themeDraft.palette = target.dataset.palette; render(); return true; }
+        if (action === 'mode') { themeDraft.mode = target.dataset.mode; render(); return true; }
+        if (action === 'reset-theme') { themeDraft.palette='cream'; themeDraft.mode='system'; render(); return true; }
+        if (action === 'preview-home') { navigate('home-preview'); return true; }
+        if (action === 'apply-theme') { const toHome=view==='home-preview'; preferences={...themeDraft}; saveLocal(); history=toHome?[]:['home']; navigate(toHome?'home':'settings',false); toast('主题已应用。'); return true; }
+        if (action === 'toggle-section') { preferences[target.dataset.key]=!preferences[target.dataset.key]; saveLocal(); render(); return true; }
+        if (action === 'choose-avatar') {
+          profileDraft.nickname=document.getElementById('nickname').value;
+          showSheet('更换头像',`<div class="avatar-options">${['initial','leaf','person'].map((type,i)=>`<button type="button" class="avatar-option" data-action="pick-avatar" data-avatar="${type}" aria-label="${['昵称头像','叶子头像','默认头像'][i]}" aria-pressed="${profileDraft.avatar===type}">${avatar({...profileDraft,avatar:type})}</button>`).join('')}</div><p class="trust">原型使用示例头像</p>`); return true;
+        }
+        if (action === 'pick-avatar') { profileDraft.avatar=target.dataset.avatar; closeSheet(); render(); return true; }
+        if (action === 'back' && view === 'home-preview') { history.pop(); navigate('appearance',false); return true; }
+        if (action === 'back' && ['appearance','profile','layout'].includes(view)) { history=history.filter(x=>!['appearance','home-preview','profile','layout','settings'].includes(x)); navigate('settings',false); return true; }
+        if (action === 'back' && view === 'settings') { history=[]; navigate('home',false); return true; }
+        return false;
+      }
+
+      function render() {
+        if (renderPersonal()) return;
+        phone.dataset.view = view;
+        const dock = phone.querySelector('.dock-actions');
+        if (view === 'detail') dock.innerHTML = `<button class="voice" type="button" data-action="found">${icon('check')}找到了</button><button class="dock-secondary" type="button" data-action="edit">更新位置</button>`;
+        else if (view === 'confirm') dock.innerHTML = `<button class="primary" type="submit" form="confirm-form">确认记住</button>`;
+        else if (view === 'empty') dock.innerHTML = '';
+        else dock.innerHTML = `<button class="voice" type="button" data-action="record"><span class="mic-disc">${icon('mic')}</span><span>按住说话</span></button><button class="plus" type="button" data-action="add" aria-label="选择其他录入方式">${icon('plus')}</button>`;
+        backSlot.innerHTML = view === 'home' || view === 'empty' ? '' : `<button type="button" class="back" data-action="back" aria-label="返回">${icon('back')}</button>`;
+        document.querySelectorAll('[data-preview]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preview === view)));
+        if (view === 'home') {
+          content.innerHTML = homeContent();
+        } else if (view === 'room') {
+          const room = rooms.find(room => room.id === selectedRoom);
+          const list = items.filter(item => item.room === room.id);
+          content.innerHTML = `<div class="breadcrumb"><button type="button" data-action="home">我的家</button>${icon('chevron')}<span>${room.name}</span></div>${heading(room.name, `${room.count} 件物品`)}<div class="room-banner">${art(room.art)}</div><div class="room-meta">最近记录</div><div class="item-list">${list.length ? list.map(item => itemRow(item)).join('') : `<div class="empty empty-compact"><h2>还没有记录</h2><button class="primary" type="button" data-action="record">记一件</button></div>`}</div>`;
+        } else if (view === 'results') {
+          const matches = items.filter(item => `${item.name}${item.container}${item.position}${roomFor(item).name}`.includes(query));
+          content.innerHTML = `${heading('找东西')}${searchForm()}${matches.length ? `<div class="section-header"><h2>找到 ${matches.length} 件</h2></div>` : ''}${matches.length ? `<div class="item-list">${matches.map(item => itemRow(item)).join('')}</div>` : `<div class="empty empty-compact">${art('key')}<h2>没有「${esc(query)}」的记录</h2><button class="primary" type="button" data-action="text">记一件</button></div>`}`;
+        } else if (view === 'all') {
+          content.innerHTML = `${heading('最近记住')}<div class="item-list" style="margin-top:24px">${items.map(item => itemRow(item, true)).join('')}</div>`;
+        } else if (view === 'detail') {
+          const item = currentItem();
+          content.innerHTML = `${heading(esc(item.name))}<div class="detail-visual">${art(item.art)}</div><div class="location-label">上次记录位置</div><div class="location-card"><div class="location-path"><span>我的家</span>${icon('chevron')}<span>${esc(roomFor(item).name)}</span>${icon('chevron')}<span>${esc(item.container)}</span></div><h2>${esc(item.position)}</h2><div class="home-sub">记录更新于 ${esc(item.when)}</div></div><p class="detail-hint">物品可能已移动。</p><div class="text-row"><span>原话</span><button type="button" data-action="quote">查看</button></div>`;
+        } else if (view === 'confirm') {
+          content.innerHTML = `${heading('核对记录')}<form id="confirm-form"><label class="field" for="draft-name">物品<input id="draft-name" value="${esc(draft.name)}" maxlength="40" required></label><label class="field" for="draft-location">位置<input id="draft-location" value="${esc(draft.location)}" maxlength="120" required></label><div class="confirm-note">${icon('check')}归到「${rooms.find(room => room.id === draft.room).name}」</div><div class="bottom-actions"><button class="secondary" type="button" data-action="record">再说一次</button></div><p class="trust">${icon('check')}确认后才保存。</p></form>`;
+        } else if (view === 'empty') {
+          content.innerHTML = `<div class="heading-row"><button class="family-switch" type="button" data-action="family">我的家${icon('down')}</button>${avatarButton()}</div><div class="empty">${art('living')}<h2>先记一件东西</h2><p>告诉我物品和位置，下次帮你找。</p><button class="primary" type="button" data-action="record">${icon('mic')}语音记录</button><button class="secondary" type="button" data-action="text">文字记录</button><p class="trust">${icon('check')}确认后才保存。</p></div>`;
+        }
+        content.scrollTop = 0;
+      }
+      function navigate(next, push = true) { if (next === 'appearance' && !['appearance','home-preview'].includes(view)) themeDraft = {...preferences}; if (next === 'profile' && view !== 'profile') profileDraft = {...profile}; closeSheet(); if (push && view !== next) history.push(view); view = next; render(); }
+      function showSheet(title, body, sub = '') {
+        overlayOpener = document.activeElement;
+        overlayRoot.innerHTML = `<div class="overlay" data-action="dismiss"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><div class="grab"></div><div class="sheet-head"><h2 id="sheet-title">${title}</h2><button class="close" type="button" data-action="close" aria-label="关闭">${icon('close')}</button></div>${sub ? `<p class="sheet-sub">${sub}</p>` : ''}${body}</section></div>`;
+        overlayRoot.querySelector('.close').focus({ preventScroll: true });
+      }
+      function closeSheet() { overlayRoot.innerHTML = ''; if (overlayOpener?.isConnected) overlayOpener.focus({ preventScroll: true }); overlayOpener = null; }
+      function toast(message) { clearTimeout(toastTimer); document.getElementById('toast-root').innerHTML = `<div class="toast">${esc(message)}</div>`; toastTimer = setTimeout(() => { document.getElementById('toast-root').innerHTML = ''; }, 3000); }
+      function startDraft() { draftReturn = view === 'confirm' ? draftReturn : view; draft = { name: '备用钥匙', location: '玄关柜右侧第二个抽屉', room: 'living' }; }
+      function record() {
+        startDraft();
+        showSheet('说吧，我记着呢。', `<div class="recording"><div class="wave" aria-hidden="true">${'<i></i>'.repeat(17)}</div><div class="sample-transcript">备用钥匙放在玄关柜<br>右侧第二个抽屉里了。</div><button class="primary" type="button" data-action="record-done">去核对</button><button class="secondary" type="button" data-action="close">取消</button></div>`);
+      }
+      function method(name, sub, action, symbol) { return `<button class="method" type="button" data-action="${action}"><span class="method-icon">${icon(symbol)}</span><span class="method-copy"><strong>${name}</strong>${sub ? `<small>${sub}</small>` : ''}</span>${icon('chevron')}</button>`; }
+      phone.addEventListener('click', event => {
+        const target = event.target.closest('[data-action]');
+        if (!target) return;
+        const action = target.dataset.action;
+        if (handlePersonal(action, target)) return;
+        if (action === 'dismiss' && event.target !== target) return;
+        if (action === 'close' || action === 'dismiss') return closeSheet();
+        if (action === 'home') { history = []; return navigate('home', false); }
+        if (action === 'back') return navigate(history.pop() || 'home', false);
+        if (action === 'room') { selectedRoom = target.dataset.id; return navigate('room'); }
+        if (action === 'detail') { selectedItem = target.dataset.id; return navigate('detail'); }
+        if (action === 'all') return navigate('all');
+        if (action === 'record') return record();
+        if (action === 'record-done') return navigate('confirm');
+        if (action === 'add') return showSheet('想怎么记？', `${method('拍照记一件', '', 'photo', 'camera')}${method('视频记多件', '', 'video', 'video')}${method('文字记录', '', 'text', 'text')}`);
+        if (action === 'family') return showSheet('切换家庭', `${method('我的家', '当前使用', 'close', 'check')}${method('我们家', '与家人共享记录', 'family-info', 'plus')}`);
+        if (action === 'family-info') return showSheet('和家人一起记', `<p class="sheet-sub">家人可查看和更新共享记录。个人记录仍留在「我的家」。</p><button class="primary" type="button" data-action="family-demo">邀请家人</button>`);
+        if (action === 'family-demo') { closeSheet(); return toast('这是视觉演示，不会发送真实邀请。'); }
+        if (action === 'text') { startDraft(); return showSheet('文字记录', `<form id="text-form"><label class="field" for="text-record">物品和位置<textarea id="text-record" placeholder="例如：钥匙放在玄关抽屉" required maxlength="200"></textarea></label><div class="bottom-actions"><button class="primary" type="submit">去核对</button></div></form>`); }
+        if (action === 'photo' || action === 'video') { startDraft(); return showSheet(action === 'photo' ? '拍照记一件' : '视频记多件', `<div class="upload-preview">${art('key')}</div><p class="sheet-sub">${action === 'photo' ? '拍清物品，补充位置。' : '拍下多件物品，逐件核对。'}</p><button class="primary" type="button" data-action="sample-capture">体验示例</button><p class="trust">示例素材，不调用摄像头。</p>`); }
+        if (action === 'sample-capture') return navigate('confirm');
+        if (action === 'quote') return showSheet('原话', `<div class="quote">“${esc(currentItem().quote)}”</div><button class="primary" type="button" data-action="close">知道了</button>`);
+        if (action === 'edit') { const item = currentItem(); draftReturn = 'detail'; draft = { name: item.name, location: `${item.container}${item.position}`, room: item.room, editId: item.id }; return navigate('confirm'); }
+        if (action === 'found') { history = []; navigate('home', false); return toast('找到就好。'); }
+        if (action === 'reminders') return showSheet('即将到期', `<div class="item-list">${itemRow(items.find(item => item.id === 'medicine'))}</div><div class="text-row"><span>维生素 · 保质期</span><strong style="font-weight:500">还有 3 天</strong></div><div class="text-row"><span>酸奶 · 冰箱冷藏层</span><strong style="font-weight:500">还有 2 天</strong></div><p class="trust">日期来自已确认的记录。</p>`);
+      });
+      phone.addEventListener('submit', event => {
+        event.preventDefault();
+        if (event.target.id === 'profile-form') { saveProfile(); return; }
+        if (event.target.id === 'search-form') {
+          query = document.getElementById('search-input').value.trim();
+          if (!query) return toast('请输入物品名称。');
+          return navigate('results');
+        }
+        if (event.target.id === 'text-form') {
+          const text = document.getElementById('text-record').value.trim();
+          const match = text.match(/^(.+?)(?:放在|收在|在)(.+?)[。！!]?$/);
+          if (!match) return toast('再补一句位置，比如「钥匙放在玄关抽屉」。');
+          draft.name = match[1].trim(); draft.location = match[2].trim();
+          draft.room = text.includes('厨房') ? 'kitchen' : text.includes('书房') ? 'study' : text.includes('卧室') ? 'bedroom' : 'living';
+          return navigate('confirm');
+        }
+        if (event.target.id === 'confirm-form') {
+          draft.name = document.getElementById('draft-name').value.trim(); draft.location = document.getElementById('draft-location').value.trim();
+          if (!draft.name || !draft.location) return toast('请补全物品和位置。');
+          if (draft.editId) { const item = items.find(item => item.id === draft.editId); item.name = draft.name; item.container = rooms.find(room => room.id === draft.room).name; item.position = draft.location; item.quote = `${draft.name}放在${draft.location}。`; item.when = '刚刚'; }
+          else { rooms.find(room => room.id === draft.room).count++; items.unshift({ id: `demo-${Date.now()}`, name: draft.name, room: draft.room, container: rooms.find(room => room.id === draft.room).name, position: draft.location, art: 'key', when: '刚刚', quote: `${draft.name}放在${draft.location}。` }); }
+          history = []; query = ''; navigate(draftReturn === 'detail' ? 'detail' : 'home', false); toast('记住了。');
+        }
+      });
+      document.querySelectorAll('[data-preview]').forEach(button => button.addEventListener('click', () => { history = []; query = ''; if (button.dataset.preview === 'confirm') startDraft(); selectedItem = 'key'; navigate(button.dataset.preview, false); }));
+      document.getElementById('theme-button').addEventListener('click', event => { systemDark = !systemDark; event.currentTarget.setAttribute('aria-pressed', String(systemDark)); event.currentTarget.querySelector('span').textContent = systemDark ? '模拟系统切换为浅色' : '模拟系统切换为深色'; render(); });
+      document.getElementById('reset-demo').addEventListener('click', () => { preferences = {...defaults}; profile = {nickname:'小林', avatar:'initial'}; themeDraft = {...preferences}; profileDraft = {...profile}; saveLocal(); history = []; navigate('home', false); toast('已恢复默认。'); });
+
+      document.addEventListener('keydown', event => {
+        if (!overlayRoot.firstChild) return;
+        if (event.key === 'Escape') return closeSheet();
+        if (event.key === 'Tab') {
+          const controls = [...overlayRoot.querySelectorAll('button, input, textarea')].filter(node => !node.disabled);
+          const first = controls[0], last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+      });
+      render();
+    })();
+  </script>
+</body>
+</html>

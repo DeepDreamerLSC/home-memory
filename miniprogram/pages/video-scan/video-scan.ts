@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * PR B 场景扫描确认页：
  * - 用户主动录/选一段抽屉柜子视频；
@@ -228,6 +229,7 @@ function parseStoredSession(raw: unknown): StoredSceneSession | null {
 }
 
 Page({
+  onShow() { applyPageAppearance(this); },
   data: {
     phase: "idle" as ScenePhase,
     sceneId: "",

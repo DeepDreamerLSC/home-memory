@@ -1,4 +1,6 @@
 "use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_1 = require("../../utils/appearance");
 /**
  * 常驻语音条组件(issue #45:语音入口全局可达)。
  *
@@ -10,7 +12,6 @@
  *
  * 挂载范围(十一轮决策 1):locations / family / item;confirm 系列与 join-family 不挂。
  */
-Object.defineProperty(exports, "__esModule", { value: true });
 const voice_entry_1 = require("../../utils/voice-entry");
 function openEntryPage(state, entry, url) {
     if (state.voiceState !== "idle" || state.transcribing || state.extracting || (entry !== null && entry.isBusy())) {
@@ -33,6 +34,7 @@ Component({
         pressed: false,
         kbOpen: false,
         showActions: false,
+        themeStyle: "",
     },
     lifetimes: {
         created() {
@@ -41,6 +43,8 @@ Component({
             this.kbListener = null;
         },
         attached() {
+            this.setData({ themeStyle: (0, appearance_1.getAppearance)().themeStyle });
+            this.unsubscribeAppearance = (0, appearance_1.subscribeAppearance)(state => this.setData({ themeStyle: state.themeStyle }));
             this.entry = (0, voice_entry_1.attachVoiceEntry)({
                 onStateChange: (s) => {
                     this.setData({
@@ -73,6 +77,8 @@ Component({
             wx.onKeyboardHeightChange(this.kbListener);
         },
         detached() {
+            this.unsubscribeAppearance?.();
+            this.unsubscribeAppearance = null;
             if (this.entry !== null) {
                 this.entry.invalidate();
                 this.entry.detach();

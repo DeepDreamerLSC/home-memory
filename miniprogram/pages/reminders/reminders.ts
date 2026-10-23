@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 import { callItemsApi, errorMessage } from "../../utils/api";
 import {
   askKeepAfterDone,
@@ -64,6 +65,7 @@ Page<
   },
 
   onShow() {
+    applyPageAppearance(this);
     void this.load();
   },
 

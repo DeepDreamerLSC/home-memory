@@ -1,0 +1,7 @@
+<view class="appearance-root" style="{{themeStyle}}"><view class="settings-page profile-page">
+<view class="settings-title">编辑资料</view>
+<button class="avatar-edit" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar" disabled="{{!ready || loading || saving}}"><view class="profile-avatar"><image wx:if="{{avatarPath || avatarFileId}}" src="{{avatarPath || avatarFileId}}" mode="aspectFill"/><text wx:elif="{{initial}}">{{initial}}</text><view wx:else class="person-icon"><view class="person-head"/><view class="person-body"/></view></view><view>更换头像</view></button>
+<view class="settings-field-label">昵称</view><input class="settings-input" type="nickname" placeholder="怎么称呼你" value="{{nickname}}" maxlength="40" disabled="{{!ready || loading || saving}}" bindinput="onNicknameInput" bindchange="onNicknameInput" bindblur="onNicknameInput"/>
+<view class="settings-note">用于你的个人入口和家庭成员展示。</view>
+<view wx:if="{{loading}}" class="settings-note">读取资料中…</view><view wx:if="{{error}}" class="settings-error">{{error}}</view><button wx:if="{{error && !dirty}}" class="settings-text-button" bindtap="onRetryTap">重新读取</button>
+</view><view class="settings-dock"><button class="settings-primary" bindtap="onSaveTap" loading="{{saving}}" disabled="{{!ready || loading || saving}}">{{saving ? '保存中…' : '保存资料'}}</button></view></view>

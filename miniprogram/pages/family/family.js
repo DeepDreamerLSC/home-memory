@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 /**
  * 家庭管理页(issue #34 P1-B):浏览 + 管理一体。
  * - 单人态(status.shared=false):「个人家庭(仅自己可见)」+ 创建共享家庭入口。
@@ -46,6 +47,7 @@ Page({
         // 首开时 onShow 紧随 onLoad 触发,刷新统一收口在 onShow,避免双拉
     },
     onShow() {
+        (0, appearance_page_1.applyPageAppearance)(this);
         // 首开与从加入页/其他页面返回都刷新(轻量 status,幂等)
         void this.refresh();
     },

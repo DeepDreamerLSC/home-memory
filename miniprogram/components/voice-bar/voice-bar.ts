@@ -1,3 +1,4 @@
+import { getAppearance, subscribeAppearance } from "../../utils/appearance";
 /**
  * 常驻语音条组件(issue #45:语音入口全局可达)。
  *
@@ -23,10 +24,12 @@ interface VoiceBarData extends VoiceEntryState {
   /** 键盘弹起(条自动避让隐藏) */
   kbOpen: boolean;
   showActions: boolean;
+  themeStyle: string;
 }
 
 interface VoiceBarCustom {
   /** 语音入口共享句柄(attached 时挂,detached 时解除) */
+  unsubscribeAppearance: (() => void) | null;
   entry: VoiceEntryHandle | null;
   /** 键盘高度监听(detached 时移除) */
   kbListener: ((res: { height: number }) => void) | null;
@@ -67,6 +70,7 @@ Component<VoiceBarData, Record<string, never>, VoiceBarMethods, VoiceBarCustom>(
     pressed: false,
     kbOpen: false,
     showActions: false,
+    themeStyle: "",
   },
 
   lifetimes: {
@@ -77,6 +81,8 @@ Component<VoiceBarData, Record<string, never>, VoiceBarMethods, VoiceBarCustom>(
     },
 
     attached() {
+      this.setData({themeStyle:getAppearance().themeStyle});
+      this.unsubscribeAppearance = subscribeAppearance(state => this.setData({themeStyle:state.themeStyle}));
       this.entry = attachVoiceEntry({
         onStateChange: (s) => {
           this.setData({
@@ -110,6 +116,8 @@ Component<VoiceBarData, Record<string, never>, VoiceBarMethods, VoiceBarCustom>(
     },
 
     detached() {
+      this.unsubscribeAppearance?.();
+      this.unsubscribeAppearance = null;
       if (this.entry !== null) {
         this.entry.invalidate();
         this.entry.detach();

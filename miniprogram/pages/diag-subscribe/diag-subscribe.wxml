@@ -1,3 +1,4 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <view class="diag">
   <view class="diag-title">订阅手势诊断</view>
 
@@ -14,4 +15,6 @@
       #{{ index + 1 }} {{ item.time }} {{ item.text }}
     </view>
   </view>
+</view>
+
 </view>

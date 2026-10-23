@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 /**
  * 加入共享家庭确认页(issue #34 P1-B,邀请卡片落地):
  * - 分享卡片 path 直接指向本页(?invite=<token>),冷启动即落地;
@@ -17,6 +18,7 @@ const households_api_1 = require("../../utils/households-api");
 const PRIVACY_NOTICE = "加入后,这个家庭的成员都能看到你的共享记录,你也能看到他们的全部物品";
 const BLANK_NOTICE = "你现有的个人物品不会自动出现在共享家庭里";
 Page({
+    onShow() { (0, appearance_page_1.applyPageAppearance)(this); },
     data: {
         phase: "loading",
         token: "",

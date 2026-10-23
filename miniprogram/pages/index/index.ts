@@ -1,3 +1,5 @@
+import { cachedUserProfile, getUserProfile } from "../../utils/profile-api";
+import { applyPageAppearance } from "../../utils/appearance-page";
 import { roomArtwork, itemArtwork } from "../../utils/ui";
 import { callItemsApi, errorMessage } from "../../utils/api";
 import { attachVoiceEntry, type VoiceEntryHandle } from "../../utils/voice-entry";
@@ -113,6 +115,8 @@ function roomCountText(node: LocationNodeSummary): string {
 
 Page<
   {
+    avatarFileId: string;
+    profileInitial: string;
     queryText: string;
     querying: boolean;
     queried: boolean;
@@ -184,6 +188,8 @@ Page<
     switchingFamily: boolean;
   },
   {
+    onMeTap(): void;
+    profileRequest: number;
     onLoad(options: Record<string, string | undefined>): void;
     onShow(): void;
     loadRecent(): Promise<void>;
@@ -291,6 +297,8 @@ Page<
   }
 >({
   data: {
+    avatarFileId: "",
+    profileInitial: "",
     queryText: "",
     querying: false,
     queried: false,
@@ -331,6 +339,8 @@ Page<
     switchingFamily: false,
   },
 
+  profileRequest: 0,
+  onMeTap() { wx.navigateTo({ url: "/pages/me/me" }); },
   recentRequestSeq: 0,
   recentScopeGen: null,
   voiceEntry: null,
@@ -368,6 +378,11 @@ Page<
   },
 
   onShow() {
+    applyPageAppearance(this);
+    const profile = cachedUserProfile();
+    this.setData({ avatarFileId: profile.avatarFileId, profileInitial: Array.from(profile.nickname)[0] || "" });
+    const profileRequest = ++this.profileRequest;
+    void getUserProfile().then(p => { if (profileRequest === this.profileRequest) this.setData({avatarFileId:p.avatarFileId,profileInitial:Array.from(p.nickname)[0]||""}); }).catch(() => {});
     this.refreshFamilyChip();
     void this.loadMapLayer();
     void this.loadRecent();
@@ -385,6 +400,7 @@ Page<
   },
 
   onHide() {
+    this.profileRequest++;
     this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
       this.voiceEntry.invalidate();
@@ -392,6 +408,7 @@ Page<
   },
 
   onUnload() {
+    this.profileRequest++;
     this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
       this.voiceEntry.invalidate();

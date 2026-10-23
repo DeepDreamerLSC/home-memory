@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const appearance_page_1 = require("../../utils/appearance-page");
 const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
 const batch_save_1 = require("../../utils/batch-save");
@@ -19,6 +20,7 @@ function remindBadgeText(dateYmd, now = new Date()) {
     return (sameYear ? dateYmd.slice(5) : dateYmd) + " 到期";
 }
 Page({
+    onShow() { (0, appearance_page_1.applyPageAppearance)(this); },
     data: {
         isManual: false,
         manualNoteOpen: false,

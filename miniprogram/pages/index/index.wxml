@@ -1,18 +1,17 @@
+<view class="appearance-root" style="{{themeStyle}}">
 <template name="icon">
   <image class="ui-icon theme-light" src="{{ '/assets/icons/' + name + '.png' }}" mode="aspectFit" />
   <image class="ui-icon theme-dark" src="{{ '/assets/icons/' + name + '-dark.png' }}" mode="aspectFit" />
 </template>
 <view class="page page-with-voice-bar home-page">
-  <view wx:if="{{ firstUse && !queried }}" class="first-use-context"><view class="fam-chip" bindtap="onFamilyTap"><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" /></view></view>
+  <view wx:if="{{ firstUse && !queried }}" class="first-use-context"><view class="fam-chip" bindtap="onFamilyTap"><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" /></view><button class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button></view>
   <view wx:if="{{ backLabel }}" class="backchip" bindtap="onBackTap">‹ {{ backLabel }}</view>
   <view wx:if="{{ !firstUse || queried }}" class="heading-row">
     <view class="mtitle">{{ queried ? '找东西' : mapTitle }}</view>
-    <view wx:if="{{ isRootView && !unmountedView }}" class="fam-chip" bindtap="onFamilyTap">
-      <view class="fam-dot"></view><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" />
-    </view>
+    <button wx:if="{{isRootView && !unmountedView}}" class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button>
     <view wx:elif="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
   </view>
-  <view wx:if="{{ !firstUse && !queried && !unmountedView && rememberedCount !== null }}" class="home-sub">{{ isRootView ? '已记住' : '这里有' }} {{ rememberedCount }} 件</view>
+  <view wx:if="{{!firstUse && !queried && !unmountedView}}" class="home-meta"><view wx:if="{{rememberedCount !== null}}" class="home-sub">{{isRootView ? '已记住' : '这里有'}} {{rememberedCount}} 件</view><view wx:if="{{isRootView}}" class="fam-chip" bindtap="onFamilyTap"><view class="fam-dot"/><text>{{familyShared ? '我们家' : '我的家'}}</text><template is="icon" data="{{name:'down'}}"/></view></view>
   <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
   <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">{{ resumeSession.count }} 件待核对 <text>继续 ›</text></view>
   <view wx:if="{{ photoResume }}" class="resume-banner" bindtap="onPhotoResumeTap">{{ photoResume.count }} 件{{ photoResume.mode === 'evidence' ? '照片待关联' : '拍照待核对' }} <text>继续 ›</text></view>
@@ -52,7 +51,7 @@
   </block>
   <block wx:elif="{{ firstUse }}">
     <view class="empty-home">
-      <image class="empty-art theme-light" src="/assets/rooms/living.png" mode="aspectFit" /><image class="empty-art theme-dark" src="/assets/rooms/living-dark.png" mode="aspectFit" />
+      <image class="empty-art theme-light" src="{{artPrefix + 'living.png'}}" mode="aspectFit" /><image class="empty-art theme-dark" src="{{artPrefix + 'living-dark.png'}}" mode="aspectFit" />
       <view class="empty-title">先记一件东西</view>
       <view class="empty-sub">告诉我物品和位置，下次帮你找。</view>
       <view class="voice-cta {{ ctaPressed ? 'pressed' : '' }} {{ (transcribing || extracting) ? 'busy' : '' }} {{ voiceState === 'cancelPending' ? 'cancel' : '' }}" catchtouchstart="onTalkTouchStart" catchtouchmove="onTalkTouchMove" catchtouchend="onTalkTouchEnd" catchtouchcancel="onTalkTouchCancel">
@@ -73,17 +72,19 @@
       </view>
     </view>
     <view wx:if="{{ isRootView && unmountedCount > 0 }}" class="unmounted-entry" bindtap="onUnmountedTap"><view class="unmounted-symbol">?</view><view class="item-main"><view class="item-name">尚未归类</view><view class="item-location">{{ unmountedCount }} 件待核实</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view>
-    <view wx:if="{{ isRootView && dueBanner }}" class="due-banner" bindtap="onDueBannerTap"><template is="icon" data="{{ name: 'clock' }}" /><view class="due-banner-text">{{ dueBanner.text }}</view><template is="icon" data="{{ name: 'chevron' }}" /></view>
+    <view wx:if="{{ isRootView && dueBanner && appearanceExpiry !== false }}" class="due-banner" bindtap="onDueBannerTap"><template is="icon" data="{{ name: 'clock' }}" /><view class="due-banner-text">{{ dueBanner.text }}</view><template is="icon" data="{{ name: 'chevron' }}" /></view>
     <view wx:if="{{ !isRootView && directItems.length }}" class="section-label direct-label">这里的东西</view>
     <view wx:if="{{ directItems.length }}" class="result-card"><view wx:for="{{ directItems }}" wx:key="item_id" class="result-row" data-index="{{ index }}" bindtap="onDirectItemTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.location_text }}</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view></view>
     <view wx:if="{{ rooms.length === 0 && directItems.length === 0 && !(isRootView && unmountedCount > 0) }}" class="empty-map">这里还没有东西</view>
-    <block wx:if="{{ isRootView && recentItems.length }}">
+    <block wx:if="{{ isRootView && recentItems.length && appearanceRecent !== false }}">
       <view class="section-header"><view class="section-label">最近记住</view><view wx:if="{{ recentItems.length > 2 }}" class="recent-more" bindtap="onRecentMore">{{ recentExpanded ? '收起' : '更多' }}</view></view>
       <view class="result-card"><block wx:for="{{ recentItems }}" wx:key="item_id"><view wx:if="{{ recentExpanded || index < 2 }}" class="result-row" data-index="{{ index }}" bindtap="onRecentTap"><view class="item-icon"><image class="item-art theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="item-art theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.location_text }}</view></view><view class="item-date" aria-label="记录更新于 {{ item.updated_at_short }}">{{ item.updated_at_short }}</view></view></block></view>
     </block>
-    <view wx:if="{{ isRootView && recentError }}" class="recent-retry" bindtap="loadRecent">最近记录加载失败 · 重试</view>
+    <view wx:if="{{ isRootView && recentError && appearanceRecent !== false }}" class="recent-retry" bindtap="loadRecent">最近记录加载失败 · 重试</view>
   </block>
   <view wx:if="{{ isRootView && !firstUse && !unmountedView && !queried }}" class="manage-link" bindtap="onLocationsTap">管理位置 ›</view>
 </view>
 <view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose"><view class="sheet" catchtap="noop"><view class="sheet-title">切换家庭</view><view wx:for="{{ famSheetOptions }}" wx:key="key" class="sheet-act {{ switchingFamily ? 'disabled' : '' }}" data-key="{{ item.key }}" bindtap="onFamSheetPick"><view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view><view class="sheet-act-sub">{{ item.sub }}</view></view><view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view></view></view>
 <voice-bar id="global-voice-bar" wx:if="{{ !firstUse || queried }}" />
+
+</view>

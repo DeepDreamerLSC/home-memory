@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * 加入共享家庭确认页(issue #34 P1-B,邀请卡片落地):
  * - 分享卡片 path 直接指向本页(?invite=<token>),冷启动即落地;
@@ -42,6 +43,7 @@ Page<
     backToHome(): void;
   }
 >({
+  onShow() { applyPageAppearance(this); },
   data: {
     phase: "loading",
     token: "",

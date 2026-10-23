@@ -1,3 +1,4 @@
+import { applyPageAppearance } from "../../utils/appearance-page";
 /**
  * 家庭管理页(issue #34 P1-B):浏览 + 管理一体。
  * - 单人态(status.shared=false):「个人家庭(仅自己可见)」+ 创建共享家庭入口。
@@ -147,6 +148,7 @@ Page<
   },
 
   onShow() {
+    applyPageAppearance(this);
     // 首开与从加入页/其他页面返回都刷新(轻量 status,幂等)
     void this.refresh();
   },

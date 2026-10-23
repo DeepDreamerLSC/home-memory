@@ -1,0 +1,9 @@
+<view class="display-page" style="{{themeStyle}}">
+  <view class="page-title">首页显示</view>
+  <view class="setting-sub">留下你常看的内容。</view>
+  <view class="toggle-row"><view><view class="toggle-title">最近记住</view><view class="toggle-sub">在首页显示最近的记录</view></view><switch checked="{{recent}}" data-key="recent" bindchange="onToggle" color="{{switchColor}}" aria-label="最近记住"/></view>
+  <view class="toggle-row"><view><view class="toggle-title">到期提示</view><view class="toggle-sub">只控制首页提示，不改变已有提醒</view></view><switch checked="{{expiry}}" data-key="expiry" bindchange="onToggle" color="{{switchColor}}" aria-label="到期提示"/></view>
+  <view class="scope-note">调整后自动保存，仅影响你的首页。</view>
+  <view class="error" wx:if="{{errorText}}">{{errorText}}</view>
+  <button class="home-button" bindtap="onHomeTap">回首页看看</button>
+</view>
