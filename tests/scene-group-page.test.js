@@ -915,7 +915,7 @@ test("SGP-COPY:两页无「找到」混称;保存计数=checked 数;顶部统计
 
 /* ---------------- C-10 首页/D2/注册面零改动 ---------------- */
 
-test("SGP-NONCHANGE:首页零改动;app.json 页面清单不变;location-scan 原语面不变(§7/§10)", () => {
+test("SGP-NONCHANGE:首页不接组卡;保留页面及个性化入口;location-scan 原语面不变(§7/§10)", () => {
   const indexWxml = read("index", "index.wxml");
   const indexTs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/index/index.ts"), "utf8");
   for (const src of [indexWxml, indexTs]) {
@@ -939,7 +939,12 @@ test("SGP-NONCHANGE:首页零改动;app.json 页面清单不变;location-scan �
     "pages/join-family/join-family",
     "pages/reminders/reminders",
     "pages/diag-subscribe/diag-subscribe",
-  ], "R0 不新增页面,页面注册清单不变");
+    // 个性化设置独立新增四页；R0 仍复用原有两个视频入口。
+    "pages/me/me",
+    "pages/profile/profile",
+    "pages/appearance/appearance",
+    "pages/home-display/home-display",
+  ], "保留原有页面和个性化四页,R0 不新增视频路由");
   // D2 清点历史客户端原语面不变(零语义变化)
   assert.equal(typeof locationScanUtil.buildLocationScanCommitItems, "function");
   assert.equal(typeof locationScanUtil.locationScanSessionKey, "function");
