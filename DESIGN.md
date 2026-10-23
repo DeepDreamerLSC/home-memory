@@ -57,4 +57,11 @@ None required for the approved UI implementation; any future visual direction ch
 - Reserve the home content heading's right side for a 44px avatar touch target. Move the existing family switch to the count row; retain it as a separate household action. Keep the native WeChat capsule intact.
 - Avatar opens “我的”: edit profile, choose appearance, configure home sections, access family. Theme offers four soft palettes plus four stronger palettes (ink/gold, cobalt, emerald, berry), with independent system/light/dark mode; preview is discarded on return unless applied.
 - Preferences belong to the person/device and persist across household switches. Home-section toggles affect display only, never reminder scheduling or saved records.
-- Current profile storage belongs to shared-household membership. A stable personal identity needs a separate user-level profile; do not relabel existing member fields as global identity or rewrite member data without a migration decision. The prototype uses browser-only sample data.
+- Personal profiles use the independent userProfile service and user_profiles collection. Household membership fields remain a read fallback; do not rewrite membership rows as global identity. The HTML prototype uses browser-only sample data.
+
+## Quantity management proposal
+- Draft UI proposal, 2026-10-23, based on issues #102 and #101. Reference: `docs/design/quantity-v1/index.html` and `README.md`. This is a standalone prototype, not implementation authorization.
+- Extend existing list/detail/confirmation pages with last-confirmed quantity and unit; show legacy unset explicitly and preserve zero-quantity records.
+- Voice adjustments show target, original value, operation and result before explicit confirmation. Ambiguous targets, mismatched units, version conflicts and unknown write results require user resolution.
+- Photo/video candidate grouping is explicit. Observation counts never imply quantity; retain original sources, and use whole-photo evidence when multiple boxes are combined.
+- Keep the existing visual tokens and short Chinese copy; no separate inventory navigation, low-stock thresholds or automatic deduction.

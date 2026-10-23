@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import {
   buildDraftHighlights,
+  mergeSceneDrafts,
   SCENE_HIGHLIGHTS_MAX,
   SCENE_ITEMS_MAX,
   type SceneDraftItem,
@@ -49,6 +50,41 @@ export interface LocationScanCommitContext {
 export type LocationScanBuildResult =
   | { ok: true; items: VideoSceneCommitItem[]; location: LocationScanCommitLocation; candidateCount: number }
   | { ok: false; message: string };
+
+export type LocationScanMergeResult =
+  | { ok: true; draft: LocationScanDraft }
+  | { ok: false; message: string };
+
+/**
+ * D1 合并门(架构终裁,PR #105 review 5626920410):「选去合并」只允许在目标
+ * 位置一致时进行——所有被选中草稿的 nodeId 全部相等(全部为空=默认进入位置,
+ * 或全部为同一非空子位置)才合并,合并结果保留该一致 nodeId;否则拒绝合并,
+ * 由页面 toast 提示先统一目标子位置。合并骨架仍走 mergeSceneDrafts(B 页无
+ * 位置上下文的既有语义零变化),这里只叠加位置纪律并补回 nodeId——
+ * mergeSceneDrafts 返回普通 SceneDraftItem,不带 LocationScanDraft 的 nodeId。
+ */
+export function mergeLocationScanDrafts(
+  drafts: LocationScanDraft[],
+  draftKeys: string[],
+  entryNodeId: string,
+): LocationScanMergeResult {
+  const wanted = new Set(draftKeys);
+  const picked = drafts.filter((d) => wanted.has(d.draftKey));
+  if (picked.length < 2 || picked.some((d) => d.target === "existing")) {
+    return { ok: false, message: "请选择至少两件新建物品草稿" };
+  }
+  const targetOf = (d: LocationScanDraft): string =>
+    d.nodeId !== undefined && d.nodeId !== "" ? d.nodeId : entryNodeId;
+  const target = targetOf(picked[0]);
+  if (picked.some((d) => targetOf(d) !== target)) {
+    return { ok: false, message: "所选草稿的目标位置不一致,请先统一子位置再合并" };
+  }
+  const merged = mergeSceneDrafts(drafts, draftKeys);
+  if (merged === null) {
+    return { ok: false, message: "请选择至少两件新建物品草稿" };
+  }
+  return { ok: true, draft: { ...merged, nodeId: target } };
+}
 
 /**
  * 构建 D1 提交载荷(在 B 的 buildSceneCommitItems 骨架上叠加位置纪律):
