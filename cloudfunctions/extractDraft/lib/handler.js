@@ -25,6 +25,9 @@
 const { validateDraft, validateDrafts, applyRelativeConversion } = require("./validate");
 const { shanghaiTodayYmd } = require("./relative-date");
 const { normalizeVlBox, BOX_SCALE } = require("./vl");
+// 冻结数字解析器(§7.8.2,唯一数字语义实现):quantityIntentParse 的数字锚定
+// 与 v2 数量三项(validate.js)共用同一实现,绝不各写一份。
+const { parseQuantityQuote, UNIT_SET } = require("./quantity");
 
 const TEXT_MAX = 500;
 const USER_MARKER = "【用户输入】";
@@ -82,9 +85,10 @@ const SYSTEM_PROMPT_V2 = [
   "7. 日期纪律(违反即不带提醒,物品与位置仍照常提取):只接受原话里明确说了的绝对日期。「下个月」「快过期了」「大概冬天」「差不多半年」等模糊表达,「下周三」「半年后」「每三个月」等相对表达,只说到月份的(如「保修到2027年3月」——日没说,由用户自己选),以及「生产日期是10月5号保质期六个月」「开封后三个月」这类要换算的(到期日不在原话),一律 remind_at=null、remind_kind=null、remind_quote=null。禁止根据物品名称猜任何日期、保质期或周期。",
   "8. 时间没换算的透明标记(只标记,绝不换算):用户在这句话里提到了时间、但按第 7 条不该换算成日期时(模糊/相对/月精度/需换算),把该时间表述在原话中的逐字子串放进对应物品的 remind_vague_quote(如「半年后」「下个月」「快过期了」)。没提到任何时间、或该件已按第 6 条给出 remind_at 三项时,remind_vague_quote 为 null。remind_vague_quote 不是日期、也绝不会被换算成日期——它只是把「用户说了时间、但系统没换算」如实标出来。",
   "9. 放进路径预览 mount_path:当某件的位置 certain 为 true、且能明确拆成「从大到小」的层级时,把每一层的名字逐字取自该件的 location_text、按原文顺序放进该件的 mount_path 数组(字符串数组,1-6 段,每段不超过 30 字,首段是房间或大区域;位置只有一层时就是单段数组,如「玄关」→ [\"玄关\"];多层如「主卧的柜子上」→ [\"主卧\",\"柜子\"])。每一段同样剥离段尾的纯方位后缀(里/里面/里边/内/中/上/上面/上边/下/下面/下边/左边/右边/左侧/右侧/中间/旁边/附近/上方/下方),输出裸实体名(「冰箱里面有面条」→ [\"冰箱\"])——剥掉后缀后的段名仍必须是原话的逐字子串(「冰箱」⊂「冰箱里面」,天然成立)。「上」「左边」这类纯方位词不能单独成一层,并入前一层实体即可。层级拆不明确、位置含「某个」「大概」等模糊说法、层次关系不清时,mount_path 为 null——绝不猜测、绝不编造层次,拿不准就给 null。certain 为 false 的物品 mount_path 必须为 null。",
+  "10. 数量候选三项(只提取,绝不推算):用户在这句话里明确说出了某件物品的数量和单位(单位只能是 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只 之一,如「买了三包棉柔巾」「两盒抽纸」)时,为该件给出 quantity(整数,1-9999)、unit(上述单位之一)、quantity_quote(原话中承载该数量的逐字子串,如「三包」「3包」)。没说数量、说的是「几包」「一些」「半打」这类模糊量、单位不在上述列表(如「一箱」「一打」「500ml」)、或需要换算(「一箱 24 包」不得折成 24)时,三项一律为 null。「买了」「新增」只说明这是新记一件,不代表要加到已有的记录上。禁止根据物品名称或常识猜任何数量。",
   "只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:",
-  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…", "remind_at": "2026-11-20", "remind_kind": "有效期", "remind_quote": "11月20号", "remind_vague_quote": null, "mount_path": ["主卧", "柜子"] } ], "has_more": false }',
-  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串,不带纯方位后缀;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字;has_more 为布尔;remind_at 形如 YYYY-MM-DD 或 null,与 remind_kind、remind_quote 同时出现或同时为 null(没有提醒时三项均为 null);remind_kind 只能是 有效期/开封后/下次维护 之一或 null;remind_quote 不超过 200 字,必须是原话逐字子串;remind_vague_quote 不超过 200 字,必须是原话里时间表述的逐字子串,只在 remind_at 为 null 且确有时间表述时给出,否则为 null;mount_path 为字符串数组(1-6 段,每段 1-30 字、逐字取自该件 location_text、按原文顺序、首段为房间或大区域、段名不带纯方位后缀)或 null(certain 为 false、分层不明确或模糊时必须为 null)。",
+  '{ "items": [ { "name": "…", "location_text": "…", "certain": true, "qualifiers": ["…"], "source_quote": "…", "remind_at": "2026-11-20", "remind_kind": "有效期", "remind_quote": "11月20号", "remind_vague_quote": null, "mount_path": ["主卧", "柜子"], "quantity": 3, "unit": "包", "quantity_quote": "三包" } ], "has_more": false }',
+  "字段:name 不超过 50 字;location_text 不超过 200 字,可为空字符串,不带纯方位后缀;certain 为布尔;qualifiers 每项不超过 20 字、最多 5 个;source_quote 不超过 200 字;has_more 为布尔;remind_at 形如 YYYY-MM-DD 或 null,与 remind_kind、remind_quote 同时出现或同时为 null(没有提醒时三项均为 null);remind_kind 只能是 有效期/开封后/下次维护 之一或 null;remind_quote 不超过 200 字,必须是原话逐字子串;remind_vague_quote 不超过 200 字,必须是原话里时间表述的逐字子串,只在 remind_at 为 null 且确有时间表述时给出,否则为 null;mount_path 为字符串数组(1-6 段,每段 1-30 字、逐字取自该件 location_text、按原文顺序、首段为房间或大区域、段名不带纯方位后缀)或 null(certain 为 false、分层不明确或模糊时必须为 null);quantity 为 1-9999 整数或 null,与 unit、quantity_quote 同时出现或同时为 null(没说数量时三项均为 null);unit 只能是 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只 之一或 null;quantity_quote 不超过 200 字,必须是原话里数量表述的逐字子串。",
 ].join("\n");
 
 const TODAY_MARKER = "【今天】";
@@ -868,6 +872,375 @@ async function draftEditParse(event, deps) {
   return aiUnavailableResult(engine);
 }
 
+// ---------- quantityIntentParse(语音数量意图,Q2,issue #102 / Q0-CONTRACT §7.8) ----------
+//
+// 零写提议层:对已有物品的数量操作只产出「提议」{intent,item_query,delta|value,
+// unit,source_quote,match,needs_pick,ambiguity},绝不写库(本函数无 DB 客户端、
+// 无 openid 依赖,结构上不可能写);目标 item_id 必须来自客户端随请求传入的
+// 候选清单(客户端经 itemsApi get/query/list 读到的本家庭行,不是数据库事实),
+// 由用户在确认页点选——模型绝不能自填 item_id 直改数据库。
+// 服务端硬门(不信任模型输出,失败降级绝不猜):
+// - 移动句式(拿到/搬到/放到…别的位置)与找回句式(找一下/在哪…)→ intent:"other"
+//   (客户端提示一期不支持/走既有查询,移动绝不折算成 subtract);
+// - 「还有/大概/差不多」存在「加还是总数」歧义 → unknown + maybe_total,
+//   三种数量语义(add/subtract/set)任一都不许静默执行;
+// - 数字锚定:delta/value 与 unit 必须能由冻结数字解析器(lib/quantity.js,
+//   §7.8.2 唯一数字语义实现)从 source_quote(原话逐字子串,去空白比对)
+//   独立解析得到且一致——模型推算(「一箱」折 24)一律降级 unknown;
+// - 编造候选(candidate_index 越界/名称对不上)→ 丢弃 match、needs_pick:true;
+// - 同名多候选(多位置/多单位)→ needs_pick:true + location_unclear/unit_unclear,
+//   弹选择不默认选中由客户端纪律保证;
+// - 日志只记 action/textLength/candidateCount/elapsedMs/engine/intent/error,
+//   绝不记原文与解析结果。
+
+const QI_TEXT_MAX = 200;
+const QI_CANDIDATES_MAX = 12;
+const QI_ITEM_ID_MAX = 64;
+const QI_NAME_MAX = 50;
+const QI_LOCATION_MAX = 200;
+const QI_INTENTS = ["add", "subtract", "set", "unknown", "other"];
+const QI_QUANTITY_INTENTS = ["add", "subtract", "set"];
+// 移动/找回/总数歧义的词表(硬门,覆盖模型判断;「放到」在客户端路由层为保护
+// create 句(「剪刀放到书房」)不单独触发数量流,这里仍按 §7.8 列为移动词,
+// 仅当句子已经进入数量解析时兜底)
+const QI_MOVE_MARKERS = ["拿到", "搬到", "拿去", "挪到", "移到", "移去", "放到"];
+const QI_FIND_MARKERS = ["找一下", "找一找", "找找", "在哪里", "在哪儿", "哪儿有", "哪里有", "帮我找"];
+const QI_MAYBE_TOTAL_MARKERS = ["还有", "大概", "差不多", "大约"];
+
+const QI_SYSTEM_PROMPT = [
+  "你是家庭物品数量的语音意图解析器。用户对着家里已有的物品说了一句话,你只负责解析意图和数量,不负责执行、不回答、不闲聊。",
+  "【候选清单】是用户家里可能的目标物品(含当前位置与当前数量)。",
+  "规则:",
+  '1. intent 只能取:add(在现有数量上增加)/subtract(减少)/set(用户说出了现在的总数)/unknown(分不清是加、减还是总数)/other(不是对已有物品的数量操作:移动位置、找回查询、记新物品、闲聊等)。',
+  '2. add 时给 delta(正整数);subtract 时给 delta(负整数);set 时给 value(0-9999 整数);unknown/other 不给数量。',
+  '3. 数量必须来自原话里明确说出的「数字+单位」,单位只能是 件/个/包/盒/瓶/袋/支/双/套/卷/张/本/罐/只 之一;source_quote 是原话中承载该数量的逐字子串(如「加两包」里的「两包」)。没说数量、模糊量(几包/一些/半打)、需要换算(一箱=多少包)时,intent 用 unknown,绝不推算。',
+  '4. 「还有 N」「大概 N」「差不多 N」说不清是加、减还是当前总数时,intent="unknown" 且 ambiguity="maybe_total",绝不猜成 set、add 或 subtract。',
+  '5. 把物品拿到/搬到/放到别的位置(移动)、找一下/在哪里(找回)、买新的/记一件新的(新建)都是 intent="other"。',
+  "6. 【候选清单】里名称与用户描述对得上且只有一件时,给 candidate_index(从 0 开始);对不上、同名多件分不清、或清单为空时省略 candidate_index。",
+  '只输出一个 JSON 对象,不要输出任何其他文字、解释或代码块围栏。形状:',
+  '{ "intent": "add", "item_query": "棉柔巾", "delta": 2, "value": null, "unit": "包", "source_quote": "两包", "candidate_index": 0, "ambiguity": null }',
+  '字段:item_query 是原话里指代物品的词(不超过 50 字);ambiguity 只能是 maybe_total/location_unclear/unit_unclear 或 null;数字字段给 null 表示没有。',
+].join("\n");
+
+function buildQuantityIntentPrompt(userText, candidates, retryInfo) {
+  const lines = candidates.map((c, i) => {
+    const q = typeof c.quantity === "number" && c.unit ? "当前:" + c.quantity + c.unit : "当前:待核对";
+    return "- " + i + ":" + c.name + "(位置:" + (c.location_text || "未归位") + "|" + q + ")";
+  });
+  let prompt =
+    QI_SYSTEM_PROMPT +
+    "\n\n【候选清单】\n" +
+    (lines.length > 0 ? lines.join("\n") : "(空)") +
+    "\n\n" +
+    USER_MARKER +
+    "\n" +
+    userText;
+  if (retryInfo) {
+    prompt +=
+      "\n\n" +
+      RETRY_OUTPUT_MARKER +
+      "\n" +
+      retryInfo.previousOutput +
+      "\n" +
+      RETRY_ERROR_MARKER +
+      "\n" +
+      retryInfo.reason +
+      "\n请重新输出,只输出一个符合上述字段要求的 JSON 对象,不要包含任何其他文字或代码块围栏。";
+  }
+  return prompt;
+}
+
+/** 候选名称匹配归一(服务端最小口径:trim → 小写 → 删全部空白;不含客户端五级匹配) */
+function qiNormalize(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function qiContainsMarker(normalizedText, markers) {
+  for (const m of markers) {
+    if (normalizedText.indexOf(m) !== -1) return true;
+  }
+  return false;
+}
+
+/*
+ * 模型输出校验 + 服务端硬门(§7.8,不信任模型输出):
+ * 返回 { ok:false, retryable:true, reason }(坏 JSON,handler 带错误重试一次)或
+ * { ok:true, parsed }。parsed = { intent, item_query, delta?, value?, unit?,
+ * source_quote?, match?, needs_pick, ambiguity? }。
+ * 命名匹配/needs_pick/ambiguity 由服务端按候选清单确定性重算:同名多件一律
+ * 用户点选(保守方向:绝不自动锁定同名行),单位不清优先于位置不清标注。
+ */
+function validateQuantityIntentOutput(rawText, normalizedText, candidates) {
+  const parsed = extractJsonObject(rawText);
+  if (parsed === undefined || parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, retryable: true, reason: "输出不是合法的 JSON 对象" };
+  }
+
+  let intent = typeof parsed.intent === "string" ? parsed.intent : "unknown";
+  if (QI_INTENTS.indexOf(intent) === -1) intent = "unknown";
+
+  let itemQuery = typeof parsed.item_query === "string" ? parsed.item_query.trim() : "";
+  if (codePointLength(itemQuery) > QI_NAME_MAX) itemQuery = "";
+
+  // 词表硬门(覆盖模型):移动/找回 → other;总数歧义 → unknown + maybe_total
+  let ambiguity = null;
+  if (qiContainsMarker(normalizedText, QI_MOVE_MARKERS) || qiContainsMarker(normalizedText, QI_FIND_MARKERS)) {
+    intent = "other";
+  } else if (
+    QI_QUANTITY_INTENTS.indexOf(intent) !== -1 &&
+    qiContainsMarker(normalizedText, QI_MAYBE_TOTAL_MARKERS)
+  ) {
+    // §7.8 硬门:三种数量语义(add/subtract/set)任一都不许静默执行——
+    // 「还有 N」模型答 subtract 同样落入 unknown + maybe_total(E4 补口)
+    intent = "unknown";
+    ambiguity = "maybe_total";
+  }
+  if (intent === "unknown" && parsed.ambiguity === "maybe_total" && ambiguity === null) {
+    ambiguity = "maybe_total"; // 模型自报的总数歧义原样透传
+  }
+
+  // 数字锚定(仅数量意图):冻结数字解析器从 source_quote 独立解出「数字+单位」,
+  // 必须与模型报的 delta/value、unit 完全一致;任一失败整体降级 unknown,绝不采信
+  let delta = null;
+  let value = null;
+  let unit = null;
+  let sourceQuote = null;
+  if (QI_QUANTITY_INTENTS.indexOf(intent) !== -1) {
+    const rawQuote = typeof parsed.source_quote === "string" ? parsed.source_quote : "";
+    const quote = stripAllWhitespace(rawQuote);
+    let anchored = false;
+    let expectedNumber = null;
+    if (quote !== "" && codePointLength(quote) <= QI_TEXT_MAX && normalizedText.indexOf(quote) !== -1) {
+      const parsedQuote = parseQuantityQuote(quote);
+      if (parsedQuote !== null) {
+        expectedNumber = parsedQuote.number;
+        // 模型报的 unit 也必须逐字等于解析器从 quote 解出的单位(「两包」报盒 → 不采信)
+        const modelUnit = parsed.unit;
+        const unitAgrees =
+          typeof modelUnit === "string" && UNIT_SET.indexOf(modelUnit) !== -1 && modelUnit === parsedQuote.unit;
+        if (intent === "set") {
+          const v = parsed.value;
+          anchored =
+            unitAgrees &&
+            typeof v === "number" &&
+            Number.isInteger(v) &&
+            v >= 0 &&
+            v <= 9999 &&
+            v === expectedNumber;
+          if (anchored) value = v;
+        } else {
+          const d = parsed.delta;
+          anchored =
+            unitAgrees &&
+            typeof d === "number" &&
+            Number.isInteger(d) &&
+            Math.abs(d) >= 1 &&
+            Math.abs(d) <= 9999 &&
+            Math.abs(d) === expectedNumber;
+          if (anchored) delta = intent === "subtract" ? -Math.abs(d) : Math.abs(d);
+        }
+        if (anchored) unit = parsedQuote.unit;
+      }
+    }
+    if (!anchored) {
+      intent = "unknown";
+      ambiguity = null;
+    } else {
+      sourceQuote = rawQuote.trim();
+    }
+  }
+
+  // 候选裁定(服务端确定性重算,模型只提议):编造/越界/名称对不上一律丢弃
+  let match = null;
+  let needsPick = false;
+  if (QI_QUANTITY_INTENTS.indexOf(intent) !== -1) {
+    const nq = qiNormalize(itemQuery);
+    const nameMatches = [];
+    candidates.forEach((c, i) => {
+      const nc = qiNormalize(c.name);
+      if (nq !== "" && nc !== "" && (nc.indexOf(nq) !== -1 || nq.indexOf(nc) !== -1)) {
+        nameMatches.push(i);
+      }
+    });
+    // 编造信号:模型给了 candidate_index 但越界,或在界内却与名称匹配对不上
+    // (E8/E8b)——即使名称唯一命中,只要模型指认与事实不符就强制用户点选
+    let modelIdx = null;
+    if (Number.isInteger(parsed.candidate_index) && parsed.candidate_index >= 0 && parsed.candidate_index < candidates.length) {
+      modelIdx = parsed.candidate_index;
+    }
+    const fabricated =
+      parsed.candidate_index !== undefined &&
+      parsed.candidate_index !== null &&
+      (modelIdx === null || nameMatches.indexOf(modelIdx) === -1);
+    if (!fabricated && nameMatches.length === 1 && (modelIdx === null || modelIdx === nameMatches[0])) {
+      const idx = nameMatches[0];
+      match = { candidate_index: idx, matched_word: candidates[idx].name };
+      needsPick = false;
+    } else {
+      // 未命中 / 同名多件 / 模型指认与名称对不上:目标必须由用户点选
+      needsPick = true;
+      if (nameMatches.length > 1) {
+        const units = new Set();
+        for (const i of nameMatches) {
+          units.add(typeof candidates[i].unit === "string" ? candidates[i].unit : "");
+        }
+        ambiguity = units.size > 1 ? "unit_unclear" : "location_unclear";
+      }
+    }
+  }
+
+  const out = {
+    intent: intent,
+    item_query: itemQuery,
+    needs_pick: needsPick,
+  };
+  if (delta !== null) out.delta = delta;
+  if (value !== null) out.value = value;
+  if (unit !== null) out.unit = unit;
+  if (sourceQuote !== null) out.source_quote = sourceQuote;
+  if (match !== null) out.match = match;
+  if (ambiguity !== null) out.ambiguity = ambiguity;
+  return { ok: true, parsed: out };
+}
+
+/*
+ * quantityIntentParse 入口:event = { action, text, candidates }。
+ * 校验(text 去空白 1-200 码点;candidates 0-12 项,item_id ≤64、name 1-50、
+ * location_text ≤200、version 正整数、quantity 0-9999 可选、unit ∈ UNIT_SET
+ * 闭集可选)失败 → INVALID_INPUT(引擎未参与)。引擎链复用 local→DeepSeek 双引擎降级(与 draftEditParse 同款);
+ * 坏 JSON 带错误重试一次仍走同一引擎;双失败/坏输出 → AI_UNAVAILABLE。
+ * 日志白名单见上;绝不触任何写。
+ */
+async function quantityIntentParse(event, deps) {
+  const startedAt = Date.now();
+  const logger = deps && typeof deps.logger === "function" ? deps.logger : function () {};
+  const callLLM = deps ? deps.callLLM : undefined;
+  const callLocalLLM = deps && typeof deps.callLocalLLM === "function" ? deps.callLocalLLM : null;
+  const elapsedMs = () => Date.now() - startedAt;
+
+  const rawText = event && typeof event.text === "string" ? event.text : null;
+  if (rawText === null) {
+    logger({ action: "quantityIntentParse", textLength: 0, candidateCount: 0, elapsedMs: elapsedMs(), engine: null, intent: null, error: "INVALID_INPUT" });
+    return { ok: false, error: "INVALID_INPUT", message: "数量指令不合法" };
+  }
+  const userText = rawText.trim();
+  const normalizedText = stripAllWhitespace(userText);
+  const textLength = codePointLength(normalizedText);
+  const failInput = () => {
+    logger({ action: "quantityIntentParse", textLength: textLength, candidateCount: 0, elapsedMs: elapsedMs(), engine: null, intent: null, error: "INVALID_INPUT" });
+    return { ok: false, error: "INVALID_INPUT", message: "数量指令不合法" };
+  };
+  if (textLength < 1 || textLength > QI_TEXT_MAX) return failInput();
+  if (!Array.isArray(event.candidates) || event.candidates.length > QI_CANDIDATES_MAX) {
+    return failInput();
+  }
+  const candidates = [];
+  for (const c of event.candidates) {
+    if (c === null || typeof c !== "object" || Array.isArray(c)) return failInput();
+    if (typeof c.item_id !== "string" || c.item_id.length < 1 || c.item_id.length > QI_ITEM_ID_MAX) {
+      return failInput();
+    }
+    if (typeof c.name !== "string") return failInput();
+    const nm = c.name.trim();
+    if (nm === "" || codePointLength(nm) > QI_NAME_MAX) return failInput();
+    if (
+      typeof c.location_text !== "string" ||
+      codePointLength(c.location_text.trim()) > QI_LOCATION_MAX
+    ) {
+      return failInput();
+    }
+    if (!Number.isInteger(c.version) || c.version < 1) return failInput();
+    // L5/§2.2:候选 unit(展示与 unit_unclear 判定输入)同样必须 ∈ UNIT_SET
+    // 闭集逐字成员,缺席/null = 数量未确认;闭集外字符串一律 INVALID_INPUT
+    // (引擎未参与),不随候选进入提示词与歧义判定。
+    let unit = null;
+    if (c.unit !== undefined && c.unit !== null) {
+      if (typeof c.unit !== "string" || UNIT_SET.indexOf(c.unit) === -1) {
+        return failInput();
+      }
+      unit = c.unit;
+    }
+    candidates.push({
+      item_id: c.item_id,
+      name: nm,
+      location_text: c.location_text.trim(),
+      quantity: Number.isInteger(c.quantity) && c.quantity >= 0 && c.quantity <= 9999 ? c.quantity : null,
+      unit: unit,
+      version: c.version,
+    });
+  }
+  const candidateCount = candidates.length;
+
+  const buildPrompt0 = (retryInfo) => buildQuantityIntentPrompt(userText, candidates, retryInfo);
+  const runChain = async (callFn, emptyOutputIsFailure) => {
+    const isEmptyFailure = (output) =>
+      emptyOutputIsFailure && (typeof output !== "string" || output.trim() === "");
+    let output;
+    try {
+      output = await callFn(buildPrompt0(null));
+    } catch (e) {
+      return { engineFailed: true };
+    }
+    if (isEmptyFailure(output)) {
+      return { engineFailed: true };
+    }
+    let result = validateQuantityIntentOutput(output, normalizedText, candidates);
+    if (!result.ok && result.retryable) {
+      let retryOutput;
+      try {
+        retryOutput = await callFn(
+          buildPrompt0({ previousOutput: output, reason: result.reason }),
+        );
+      } catch (e) {
+        return { engineFailed: true };
+      }
+      if (isEmptyFailure(retryOutput)) {
+        return { engineFailed: true };
+      }
+      result = validateQuantityIntentOutput(retryOutput, normalizedText, candidates);
+    }
+    return { engineFailed: false, result: result };
+  };
+
+  let engine = "deepseek";
+  let chain;
+  if (callLocalLLM) {
+    engine = "local";
+    chain = await runChain(callLocalLLM, true);
+    if (chain.engineFailed) {
+      engine = "deepseek";
+      chain = await runChain(callLLM, false);
+    }
+  } else {
+    chain = await runChain(callLLM, false);
+  }
+
+  if (!chain.engineFailed && chain.result.ok) {
+    logger({
+      action: "quantityIntentParse",
+      textLength: textLength,
+      candidateCount: candidateCount,
+      elapsedMs: elapsedMs(),
+      engine: engine,
+      intent: chain.result.parsed.intent,
+    });
+    return Object.assign({ ok: true, engine: engine }, chain.result.parsed);
+  }
+  logger({
+    action: "quantityIntentParse",
+    textLength: textLength,
+    candidateCount: candidateCount,
+    elapsedMs: elapsedMs(),
+    engine: engine,
+    intent: null,
+    error: "AI_UNAVAILABLE",
+  });
+  return aiUnavailableResult(engine);
+}
+
 // ---------- locationSplit(位置层级拆分,§1.6 真机 2026-10-17) ----------
 //
 // 无分隔符中文(「书房桌子右边抽屉」)用 splitLocationSegments 的分隔符规则
@@ -1275,6 +1648,10 @@ module.exports = {
   buildVlPrompt,
   validateVlOutput,
   validateDraftEditOutput,
+  quantityIntentParse,
+  buildQuantityIntentPrompt,
+  validateQuantityIntentOutput,
+  QI_SYSTEM_PROMPT,
   locationSplit,
   videoTargetRecognize,
   buildVideoTargetPrompt,

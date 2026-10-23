@@ -27,9 +27,25 @@ export interface ItemRecord {
    * itemsApi 对该字段一律忽略、投影亦不含它——此处仅作文档类型注释。
    */
   location_node_id?: string | null;
+  /**
+   * 数量三字段(issue #102 Q1,docs/design/quantity/Q0-CONTRACT.md §2.1):
+   * 三者同现同缺;缺省 = 数量未确认(Q1 上线前的存量行不回填、不迁移,
+   * 旧 note 的 ×N/500ml 绝不升格为已确认事实)。quantity 是用户确认值,
+   * 绝不由 observation 数/frame 数/VL confidence/名称匹配推断。
+   */
+  quantity?: number;
+  /** UNIT_SET 成员(utils/quantity.ts 镜像,与服务端逐字一致) */
+  unit?: string;
+  /** 最近一次数量确认时刻(ISO);纯服务端写入,客户端永不提交 */
+  quantity_confirmed_at?: string;
 }
 
-/** query / list 返回的精简条目 */
+/**
+ * query / list / get / create / update 返回的精简条目。
+ * 数量三字段(Q0-CONTRACT §2.4):双 null ⇔ 数量未确认(legacy 或存储异常防御读);
+ * 旧服务端部署窗口内可能缺键,客户端一律经 utils/quantity.normalizeQuantityFields
+ * 归一(缺键 ≡ 未确认)。
+ */
 export interface ItemSummary {
   item_id: string;
   name: string;
@@ -37,6 +53,9 @@ export interface ItemSummary {
   note: string;
   version: number;
   updated_at: string;
+  quantity: number | null;
+  unit: string | null;
+  quantity_confirmed_at: string | null;
 }
 
 /** extractDraft 提取出的待确认草稿 */
@@ -87,6 +106,15 @@ export interface DraftWithQuote extends Draft {
    * 展示,不拆层、不猜。
    */
   mount_path?: string[] | null;
+  /**
+   * 数量候选三项(issue #102 Q1,Q0-CONTRACT §4.6,三项同现同缺,没说数量均为 null):
+   * 服务端用冻结数字解析器从 quantity_quote(原话逐字子串)锚定,与模型自报值不一致
+   * 一律全 null(推算/模糊/闭集外单位绝不采信)。确认页只预填并标「待确认」,
+   * 用户点「确认记住」才是 L1 的用户确认;「买了」不是对已有 item 的 add。
+   */
+  quantity?: number | null;
+  unit?: string | null;
+  quantity_quote?: string | null;
 }
 
 /** 提醒类别(issue #36 冻结词表,与 extractDraft v2 的 remind_kind 同源) */
@@ -151,6 +179,14 @@ export type ItemsApiEvent =
        * 服务端忽略)。服务端校验宽松(非空短文本即可)。
        */
       remind_vague_quote?: string;
+      /**
+       * 数量/单位(issue #102 Q1,Q0-CONTRACT §4.1):可选;quantity 1..9999 整数
+       * (显式 null/字符串/小数一律 INVALID_INPUT),unit ∈ UNIT_SET;两者都缺 →
+       * 服务端缺省 1/件(新建本身是一次数量确认);unit 单独在场 → INVALID_INPUT。
+       * 数量进 operation_id 幂等内容比对(同键改数量 → OPERATION_CONFLICT)。
+       */
+      quantity?: number;
+      unit?: string;
     } & ScopeWriteBinding)
   | ({
       action: "update";
@@ -161,6 +197,37 @@ export type ItemsApiEvent =
       name?: string;
       location_text?: string;
       note?: string;
+      /**
+       * 「设为当前总数」(issue #102 Q1,Q0-CONTRACT §4.2):quantity 0..9999 与 unit
+       * **成对携带**(只携其一 → INVALID_INPUT);0 = 确认目前没有(保留物品/位置/
+       * 提醒/证据);允许显式改单位 = 一次重新核对(不换算)。不携带则数量字段与
+       * 确认时间全不动。进 last_update_fingerprint,同 update_id 同内容重试 replayed。
+       * VERSION_CONFLICT 响应携带 current(最新完整投影)供先展示再重核对。
+       */
+      quantity?: number;
+      unit?: string;
+    } & ScopeWriteBinding)
+  | ({
+      /**
+       * 语音/快捷数量操作(issue #102 Q2,Q0-CONTRACT §7):统一 mode action,
+       * 对已有物品数量的唯一 CAS 写路径。目标 item_id 必须来自确认页用户点选的
+       * 候选(客户端经 itemsApi list/query 读到的本家庭行),绝不由模型直填;
+       * expected_version 用候选读到的 version,绝不页面自造。
+       */
+      action: "quantityAdjust";
+      item_id: string;
+      expected_version: number;
+      /**
+       * 同一次用户确认的稳定标识(uuid);本 action 必填(与 update 的可选不同):
+       * 响应丢失后同 update_id+expected_version+payload 重试,服务端三重识别
+       * 重放,最多生效一次;改值必须生成新操作(新 update_id+刷新版本)。
+       */
+      update_id: string;
+      mode: "add" | "subtract" | "set";
+      /** add/subtract:1..9999;set:0..9999(0=确认目前没有,绝不删物品/位置/提醒/证据) */
+      amount: number;
+      /** 可选校验参数:携带时必须逐字等于目标当前 unit(不同单位绝不默默叠加) */
+      unit?: string;
     } & ScopeWriteBinding)
   | ({ action: "delete"; item_id: string } & ScopeWriteBinding)
   | { action: "get"; item_id: string }
@@ -335,6 +402,17 @@ export interface UpdateItemResponse {
   replayed?: boolean;
 }
 
+/**
+ * quantityAdjust 响应(issue #102 Q2,§7.6):item 投影含结果数量;replayed
+ * 为 true 表示这是同 update_id 的重放(数量只生效一次)。VERSION_CONFLICT
+ * 失败体携带 current(最新完整投影),客户端先展示最新值再引导显式重核对。
+ */
+export interface QuantityAdjustResponse {
+  ok: true;
+  item: ItemSummary;
+  replayed?: boolean;
+}
+
 export interface GetItemResponse {
   ok: true;
   item: ItemSummary;
@@ -421,6 +499,7 @@ export interface ItemsApiErrorResponse {
 export type ItemsApiOkResponse =
   | CreateItemResponse
   | UpdateItemResponse
+  | QuantityAdjustResponse
   | DeleteItemResponse
   | GetItemResponse
   | QueryItemsResponse
@@ -989,10 +1068,22 @@ export interface PhotoCandidate {
   /** 入列即生成的稳定标识(uuid):锁定/语音编辑/计数一律以此为准,绝不按行号 */
   draftId: string;
   name: string;
-  /** 数量拆 qty+suffix(V0.4.2 单一来源;qty 域 1-99,数量只是备注不做库存) */
+  /**
+   * 数量(issue #102 Q1 起语义迁移为「数量预填提示 → 用户确认值」):VL qty_note
+   * 首段数字只作步进器预填(1-99),行上标「待核对」直到用户触碰步进器/单位选择器;
+   * 保存时随 photoCommit 的 quantity 字段落库(不再拼进 note)。
+   */
   qty: number;
-  /** 数量备注后缀(空串按「备注」展示;与 qty 共同拼成 note 文本) */
+  /** VL 原文后缀(如「约根」),仅供展示;永不解析成 unit(unit 只来自选择器) */
   suffix: string;
+  /**
+   * 单位(UNIT_SET 成员,默认「件」)。**缺席 = pre-Q1 会话恢复的行**:该行按
+   * 冻结载荷旧形态重放(note=×N 拼法、不携带 quantity/unit,Q0-CONTRACT E13/B9),
+   * 入列工厂建的新行恒有值。
+   */
+  unit?: string;
+  /** 用户触碰过步进器/单位选择器(待核对标记随之消失);缺省 false */
+  qtyTouched?: boolean;
   /** 位置例外(null=继承批次默认位置;非空=该件单独位置,保存确认只汇总已勾选件的例外) */
   exc: string | null;
   /**
@@ -1038,8 +1129,18 @@ export interface PhotoCommitItem {
   name: string;
   /** 批次位置或该件例外(客户端已合成) */
   location_text: string;
-  /** 数量备注,客户端拼 "×{qty} {suffix}" */
+  /**
+   * 自由备注(issue #102 Q1 起不再由数量拼出;空则不携带)。pre-Q1 会话恢复的行
+   * 仍按冻结载荷重放旧拼法 "×{qty} {suffix}",绝不注入原载荷没有的字段(E13)。
+   */
   note?: string;
+  /**
+   * 数量/单位(Q0-CONTRACT §4.3,规则同 create:1..9999、缺省 1/件、unit 不得单独
+   * 在场)。同帧多框合并为 1 条 ×N 时 photo.box 必须 null(整照关联,Q3 客户端合同);
+   * 单来源行保留原框。observation/VL 数量提示只作预填,用户确认后才随行提交。
+   */
+  quantity?: number;
+  unit?: string;
   /** 可选提醒,与 create 完全同形状 */
   reminder?: ReminderInput;
   photo?: PhotoCommitPhoto;
@@ -1232,6 +1333,14 @@ export interface VideoSceneCommitNewItem {
    * 路径文本(服务端权威,消除双份真相)。不带 location 的 B 提交绝不携带。
    */
   node_id?: string;
+  /**
+   * 数量/单位(issue #102 Q1,Q0-CONTRACT §4.4):规则同 create(1..9999、缺省
+   * 1/件、unit 不得单独在场);**进 scene_payload_sig 签名**(同票据重试改数量 →
+   * OPERATION_CONFLICT;不携带时签名与现行逐字节一致)。observation 数/frame 数/
+   * highlights 数永不赋值给它——6 帧出现 ≠ 6 件,用户确认才是来源。
+   */
+  quantity?: number;
+  unit?: string;
 }
 
 export interface VideoSceneCommitExistingItem {
@@ -1243,6 +1352,8 @@ export interface VideoSceneCommitExistingItem {
    * D1 显式移动(#94):用户在三选弹窗点了「移动到当前位置并关联」才携带;
    * 缺省 = 只关联不改位置。expected_version 必填当且仅当 move_to_node_id 出现
    * (来自匹配池读到的物品版本;冲突时该件不写证据,绝不静默降级为只关联)。
+   * 数量字段(quantity/unit)**禁止携带**(服务端 QUANTITY_ON_EXISTING_TARGET
+   * 整批零写):既有物品的数量变更只走 update/quantityAdjust 的 CAS 路径。
    */
   move_to_node_id?: string;
   expected_version?: number;
@@ -1509,4 +1620,54 @@ export interface LocationSplitResponse {
   path: string[];
   /** true = 模型输出未过硬校验,整串单段兜底(客户端不优先采用,回落分隔符规则) */
   fallback: boolean;
+}
+
+/* ---------------- 语音数量意图提议(issue #102 Q2,extractDraft.quantityIntentParse) ---------------- */
+
+/** quantityIntentParse 的候选(客户端经 itemsApi list/query 读到的本家庭行,不是数据库事实) */
+export interface QuantityIntentCandidate {
+  item_id: string;
+  name: string;
+  location_text: string;
+  /** null/缺省 = 数量未确认(legacy),确认页展示「待核对」 */
+  quantity?: number | null;
+  unit?: string | null;
+  /** 确认页 quantityAdjust 的 expected_version 来源 */
+  version: number;
+}
+
+export interface QuantityIntentParseEvent {
+  action: "quantityIntentParse";
+  /** 用户原话(去空白后 1-200 码点) */
+  text: string;
+  /** 0-12 项 */
+  candidates: QuantityIntentCandidate[];
+}
+
+export type QuantityIntent = "add" | "subtract" | "set" | "unknown" | "other";
+
+export interface QuantityIntentMatch {
+  candidate_index: number;
+  matched_word: string;
+}
+
+/**
+ * 解析提议(零写库;模型只提议,目标必须用户点选):add/subtract → delta
+ * (add 正、subtract 负);set → value;数量意图才携带 unit/source_quote;
+ * unknown(maybe_total 歧义)绝不携带数量,绝不静默执行;other = 移动/找回/
+ * 新建句,客户端按词表提示,绝不折算成增减。
+ */
+export interface QuantityIntentParseResponse {
+  ok: true;
+  engine: string;
+  intent: QuantityIntent;
+  /** 模型挑中的候选提议;歧义/未命中/编造 → 缺席,由 needs_pick 弹选择 */
+  match?: QuantityIntentMatch;
+  needs_pick: boolean;
+  item_query: string;
+  delta?: number;
+  value?: number;
+  unit?: string;
+  source_quote?: string;
+  ambiguity?: "maybe_total" | "location_unclear" | "unit_unclear";
 }

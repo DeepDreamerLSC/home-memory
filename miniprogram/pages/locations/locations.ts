@@ -1462,6 +1462,8 @@ Page<
   },
 
   openItem(item) {
+    // locations.list 的物品投影不带数量(Q0-CONTRACT §2.4:零变化)——跳详情的
+    // 初始摘要按未确认(null);详情页 onLoad 后 get 单查会以权威投影刷新
     const summary: ItemSummary = {
       item_id: item.item_id,
       name: item.name,
@@ -1469,6 +1471,9 @@ Page<
       note: item.note,
       version: item.version,
       updated_at: item.updated_at,
+      quantity: null,
+      unit: null,
+      quantity_confirmed_at: null,
     };
     const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
     // 条目直接记在当前层:带上这条路径给详情页(只读大卡「上次记在」);根层无路径

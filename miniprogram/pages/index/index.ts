@@ -2,6 +2,7 @@ import { cachedUserProfile, getUserProfile } from "../../utils/profile-api";
 import { applyPageAppearance } from "../../utils/appearance-page";
 import { roomArtwork, itemArtwork } from "../../utils/ui";
 import { callItemsApi, errorMessage } from "../../utils/api";
+import { normalizeQuantityFields, quantitySlotText } from "../../utils/quantity";
 import { attachVoiceEntry, type VoiceEntryHandle } from "../../utils/voice-entry";
 import type {
   ItemSummary,
@@ -79,6 +80,13 @@ type DisplayItem = ItemSummary & {
   evidenceUrl?: string;
   /** 有视频才携带；只来自 user_confirmed 行，不含临时 URL/box/confidence */
   videoHint?: VideoPlaybackBadge;
+  /**
+   * 数量槽文案(issue #102 Q1,Q0-CONTRACT §10.1):已确认「×N单位」(0 也如实)、
+   * 未确认「待核对」(无数字,绝不显示误导性的 ×1件)。仅来自 itemsApi 投影的
+   * 行(query/recent)携带;locations.list 投影的行(容器内物品/未归类)无数量
+   * 数据,不携带、不渲染(不猜测)。
+   */
+  qtyText?: string;
 };
 
 /** 容器视图栈的一层(点格子逐层压入;返回胶囊逐层弹出) */
@@ -88,7 +96,19 @@ interface ViewLayer {
 }
 
 function toDisplayItems(items: ItemSummary[]): DisplayItem[] {
-  return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at), artwork: itemArtwork(item.name), artworkDark: itemArtwork(item.name, true) }));
+  return items.map((item) => {
+    const q = normalizeQuantityFields(item as unknown as Record<string, unknown>);
+    return {
+      ...item,
+      quantity: q.quantity,
+      unit: q.unit,
+      quantity_confirmed_at: q.quantity_confirmed_at,
+      updated_at_short: shortDate(item.updated_at),
+      artwork: itemArtwork(item.name),
+      artworkDark: itemArtwork(item.name, true),
+      qtyText: quantitySlotText(q.quantity, q.unit),
+    };
+  });
 }
 
 /** 记录更新日期短文案(如 10-08;updated_at 不代表位置确认时间);非法时间如实返回空串 */
@@ -1069,6 +1089,9 @@ Page<
   },
 
   openItem(item: DisplayItem, spacePath: string[] = [], videoHint?: VideoPlaybackBadge | null) {
+    // 数量(issue #102 Q1):itemsApi 投影来源的行有数量,locations 投影来源的行
+    // 没有(undefined → null 未确认);详情页随后 get 会以权威投影刷新
+    const q = normalizeQuantityFields(item as unknown as Record<string, unknown>);
     const summary: ItemSummary = {
       item_id: item.item_id,
       name: item.name,
@@ -1076,6 +1099,9 @@ Page<
       note: item.note,
       version: item.version,
       updated_at: item.updated_at,
+      quantity: q.quantity,
+      unit: q.unit,
+      quantity_confirmed_at: q.quantity_confirmed_at,
     };
     const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
     if (spacePath.length > 0) {

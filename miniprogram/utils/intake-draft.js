@@ -15,7 +15,12 @@
  * - 全部函数纯:入参不被改动,变更返回新对象;draftId/operationId 全程稳定
  *   (锁定、应用、计数一律按 draftId,绝不按行号——行号会因删行重排漂移);
  * - 「已确认记住」(done)是终态:done 行不可再勾选/取消勾选;
- * - 数量只是备注文本(一条记录=一件可查找的物品),绝不引入库存语义;
+ * - 数量(issue #102 Q1 起,Q0-CONTRACT §4.3):qty 是「数量预填提示 → 用户确认值」,
+ *   保存时随 photoCommit 的 quantity/unit 字段落库,不再拼进 note;VL qty_note 的
+ *   文字部分(suffix)永不解析成 unit(unit 只来自选择器,默认「件」);行上
+ *   「待核对」标记直到用户触碰步进器/单位选择器(qtyTouched);
+ * - 入列工厂建的新行恒带 unit;**unit 缺席 = pre-Q1 会话恢复的行**,保存层按
+ *   冻结载荷旧形态重放(note=×N 拼法、不注入 quantity/unit,E13/B9);
  * - 语音应用绝不改勾选(保留)状态,0 勾选字段不执行。
  */
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -25,6 +30,7 @@ exports.makeAiRow = makeAiRow;
 exports.makeVoiceAddedRow = makeVoiceAddedRow;
 exports.makeCircleRow = makeCircleRow;
 exports.makeManualRow = makeManualRow;
+exports.mergeRowsIntoOne = mergeRowsIntoOne;
 exports.rowStateOf = rowStateOf;
 exports.rowStateLabel = rowStateLabel;
 exports.boxTagPrefix = boxTagPrefix;
@@ -33,6 +39,7 @@ exports.quickVerifyRows = quickVerifyRows;
 exports.toggleRowChecked = toggleRowChecked;
 exports.setRowsChecked = setRowsChecked;
 exports.stepRowQty = stepRowQty;
+exports.setRowUnit = setRowUnit;
 exports.markRowSaved = markRowSaved;
 exports.markRowFailed = markRowFailed;
 exports.applyDraftEdits = applyDraftEdits;
@@ -40,6 +47,7 @@ exports.intakeCounts = intakeCounts;
 exports.intakeCountView = intakeCountView;
 exports.deriveSaveConfirm = deriveSaveConfirm;
 const api_1 = require("./api");
+const quantity_1 = require("./quantity");
 /** 数量域:1-99(抽不到数字按 1,IMPLEMENTATION.md §4.1 ②) */
 const QTY_MIN = 1;
 const QTY_MAX = 99;
@@ -96,6 +104,8 @@ function makeAiRow(item, genId) {
         name: item.name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "ai",
         confidence: item.confidence,
@@ -118,6 +128,8 @@ function makeVoiceAddedRow(name, qtyNote, genId) {
         name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "voice",
         confidence: "low",
@@ -140,6 +152,8 @@ function makeCircleRow(item, circledBox, genId) {
         name: item.name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "circle",
         confidence: item.confidence,
@@ -162,6 +176,8 @@ function makeManualRow(name, qtyNote, genId) {
         name,
         qty,
         suffix,
+        unit: quantity_1.DEFAULT_UNIT,
+        qtyTouched: false,
         exc: null,
         src: "manual",
         confidence: "low",
@@ -171,6 +187,77 @@ function makeManualRow(name, qtyNote, genId) {
         failMsg: "",
         operationId: idOf(genId),
     };
+}
+// ---------- 同帧多框合成(issue #102 Q3,Q0-CONTRACT §8) ----------
+/**
+ * 把用户选中的多行候选合成一行 ×N(用户显式动作,默认绝不发生):
+ * - 门:≥2 行;不含 done 终态行;不含 pre-Q1 会话恢复行(unit 缺席 = 冻结
+ *   载荷旧行,E13 纪律不注入不改造);单位全一致(L3:不同单位绝不默默叠加);
+ * - 合成行(Q0-CONTRACT §8 规则 1/3/4):
+ *   · box=null **整照关联**——绝不把其中任何一个框冒充「N 件」的全部位置;
+ *   · qty = 来源行步进值之和的**预填提示**(钳 1-99;合计超 99 时调用方须以
+ *     返回的 qtySum 显式提示截断,绝不静默),qtyTouched=false 行上
+ *     标「数量待核对」——合成总数必须由用户在步进器/最终确认弹层过目
+ *     (L1:quantity 是用户确认值,永不由候选框数/VL 置信推断);
+ *   · src:任一来源为圈选 → "circle",否则保留首行来源(§8 规则 4:凡含
+ *     用户圈选即用户确认痕迹,photoCommit source 归并口径);
+ *   · draftId/operationId/name/suffix/exc/remind 沿用首选中行(幂等键稳定:
+ *     同键改内容由服务端 OPERATION_CONFLICT 如实暴露,绝不静默吞);
+ *   · mergedFrom:全部来源候选(含再合并时既有合成行的来源)累积保留,
+ *     只进会话内存供展开查验,绝不进提交载荷;
+ * - 未选中的行原样保留;合成行落在首选中行的位置。
+ */
+function mergeRowsIntoOne(rows, draftIds) {
+    const wanted = draftIds.filter((id) => typeof id === "string" && id !== "");
+    const picked = [];
+    for (const r of rows) {
+        if (wanted.indexOf(r.draftId) !== -1)
+            picked.push(r);
+    }
+    if (picked.length !== wanted.length) {
+        return { ok: false, reason: "not-found", message: "要合并的候选行不存在,请刷新后重试" };
+    }
+    if (picked.length < 2) {
+        return { ok: false, reason: "single", message: "至少选择两行候选才能合成一条" };
+    }
+    if (picked.some((r) => r.done)) {
+        return { ok: false, reason: "done", message: "已入库的行不能再合并" };
+    }
+    if (picked.some((r) => typeof r.unit !== "string")) {
+        return { ok: false, reason: "legacy-row", message: "旧会话恢复的行不支持合并,请单独保存" };
+    }
+    const unit = picked[0].unit;
+    if (picked.some((r) => r.unit !== unit)) {
+        return { ok: false, reason: "unit-mismatch", message: "所选行单位不同,先统一单位再合并" };
+    }
+    const first = picked[0];
+    const qtySum = picked.reduce((acc, r) => acc + (typeof r.qty === "number" ? r.qty : 1), 0);
+    const mergedFrom = [];
+    for (const r of picked) {
+        if (Array.isArray(r.mergedFrom)) {
+            for (const src of r.mergedFrom)
+                mergedFrom.push({ ...src });
+        }
+        else {
+            mergedFrom.push({ draftId: r.draftId, name: r.name, box: r.box === undefined ? null : r.box });
+        }
+    }
+    const anyCircle = picked.some((r) => r.src === "circle");
+    const merged = {
+        ...first,
+        qty: clampQty(qtySum),
+        qtyTouched: false,
+        box: null,
+        src: anyCircle ? "circle" : first.src,
+        checked: true,
+        done: false,
+        failMsg: "",
+        mergedFrom,
+    };
+    const firstIndex = rows.findIndex((r) => r.draftId === first.draftId);
+    const out = rows.filter((r) => wanted.indexOf(r.draftId) === -1);
+    out.splice(Math.max(0, firstIndex), 0, merged);
+    return { ok: true, rows: out, qtySum };
 }
 // ---------- 三态流转(原型 toggleRow / updateCounts / syncTag) ----------
 /** 行的归一化状态:candidate=候选(未勾)keep=保留(勾选)done=已确认记住 */
@@ -216,14 +303,26 @@ function setRowsChecked(rows, checked) {
 /**
  * 数量步进器(±1):下限 1(原型 step 的 Math.max(1,…)),上限夹 99(与
  * parseIntakeQtyNote 的 qty 域一致);不改勾选态、draftId、operationId。
- * 步进值落在域内不变时返回原引用(无变更)。
+ * 步进值落在域内不变时返回原引用(无变更)。用户触碰步进器 = 数量确认
+ * (issue #102 Q1):qtyTouched 置 true,行上「待核对」标记随之消失。
  */
 function stepRowQty(row, delta) {
     const next = clampQty(row.qty + delta);
-    if (next === row.qty) {
+    if (next === row.qty && row.qtyTouched === true) {
         return row;
     }
-    return { ...row, qty: next };
+    return { ...row, qty: next, qtyTouched: true };
+}
+/**
+ * 单位选择器切换(issue #102 Q1):unit 只来自用户的选择器选择(UNIT_SET 闭集,
+ * 默认「件」);闭集外值原样返回绝不写入(防御)。触碰选择器同样是数量确认
+ * (qtyTouched=true),行上「待核对」标记随之消失。
+ */
+function setRowUnit(row, unit) {
+    if (!(0, quantity_1.isUnit)(unit) || unit === row.unit) {
+        return row;
+    }
+    return { ...row, unit, qtyTouched: true };
 }
 /** photoCommit 该行成功 → 「已确认记住」(终态) */
 function markRowSaved(row) {
@@ -301,19 +400,21 @@ function intakeCounts(rows) {
     }
     return { total: rows.length, keep, done, unchecked };
 }
-/** 计数的展示形态(原型 updateCounts 的两条头部/按钮文案,含 0 勾选禁用) */
+/** 计数的展示形态(原型 updateCounts 的两条头部/按钮文案,含 0 勾选禁用)。
+ * 计数词一律「条」(记录条数,Q0-CONTRACT §10.1):「件」自 Q1 起是 UNIT_SET
+ * 真实单位,不再借用作计数词,避免与逐件行「×3包」同屏时误读为单位。 */
 function intakeCountView(rows) {
     const c = intakeCounts(rows);
     if (c.done > 0) {
         return {
-            headText: "已确认记住 " + c.done + " 件 · 本批完成",
+            headText: "已确认记住 " + c.done + " 条 · 本批完成",
             saveText: "✓ 已入库",
             saveDisabled: true,
         };
     }
     return {
         headText: "保留 " + c.keep + " / " + c.total + "(待核对)",
-        saveText: "存 " + c.keep + " 件",
+        saveText: "存 " + c.keep + " 条",
         saveDisabled: c.keep === 0,
     };
 }
@@ -350,6 +451,6 @@ function deriveSaveConfirm(rows, batchLocation) {
         exceptionText: exceptions.length > 0
             ? exceptionLines.join("\n")
             : "无例外,全部继承本批位置",
-        summaryText: "保留 " + c.keep + " 件写入 · 未勾选 " + c.unchecked + " 件不保存",
+        summaryText: "保留 " + c.keep + " 条写入 · 未勾选 " + c.unchecked + " 条不保存",
     };
 }

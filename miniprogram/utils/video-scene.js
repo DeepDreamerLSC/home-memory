@@ -5,6 +5,8 @@ exports.planSceneFrames = planSceneFrames;
 exports.scanSceneVideo = scanSceneVideo;
 exports.groupSceneObservations = groupSceneObservations;
 exports.newSceneDraft = newSceneDraft;
+exports.stepDraftQty = stepDraftQty;
+exports.setDraftUnit = setDraftUnit;
 exports.createDraftsFromObservations = createDraftsFromObservations;
 exports.mergeSceneDrafts = mergeSceneDrafts;
 exports.splitSceneDraft = splitSceneDraft;
@@ -15,6 +17,7 @@ exports.sceneConfidenceText = sceneConfidenceText;
 exports.sceneHighlightCount = sceneHighlightCount;
 const api_1 = require("./api");
 const item_match_1 = require("./item-match");
+const quantity_1 = require("./quantity");
 const video_target_1 = require("./video-target");
 exports.SCENE_ITEMS_MAX = 12;
 exports.SCENE_HIGHLIGHTS_MAX = 8;
@@ -165,6 +168,46 @@ function newSceneDraft(partial) {
         locationText: partial?.locationText || "",
         note: partial?.note || "",
         checked: partial?.checked !== false,
+        quantity: partial?.quantity,
+        unit: partial?.unit,
+    };
+}
+/**
+ * 草稿行数量步进(issue #102 Q3,Q0-CONTRACT §9.1):quantity 只来自用户触碰
+ * (±1 起步值 1,钳 1..9999),首触同时补默认单位「件」——quantity/unit 成组,
+ * 绝不发出 unit 单独在场的载荷。非整数步进无效返回原引用。步进值永不由
+ * observationIds/highlights 条数推导(6 条线索 ≠ 6 件)。
+ */
+function stepDraftQty(draft, delta) {
+    if (typeof delta !== "number" || Number.isInteger(delta) === false || delta === 0) {
+        return draft;
+    }
+    const base = typeof draft.quantity === "number" ? draft.quantity : 1;
+    const next = Math.min(9999, Math.max(1, base + delta));
+    if (next === draft.quantity && draft.unit !== undefined) {
+        return draft;
+    }
+    return {
+        ...draft,
+        quantity: next,
+        unit: draft.unit !== undefined ? draft.unit : "件",
+    };
+}
+/**
+ * 草稿行单位选择(issue #102 Q3):unit 只来自选择器(UNIT_SET 闭集),闭集外
+ * 值原样返回绝不写入;只选单位也把数量落成 1(成组,服务端永不收半对)。
+ */
+function setDraftUnit(draft, unit) {
+    if (typeof unit !== "string" || quantity_1.UNIT_SET.indexOf(unit) === -1) {
+        return draft;
+    }
+    if (unit === draft.unit && draft.quantity !== undefined) {
+        return draft;
+    }
+    return {
+        ...draft,
+        unit,
+        quantity: typeof draft.quantity === "number" ? draft.quantity : 1,
     };
 }
 /**
@@ -199,7 +242,12 @@ function createDraftsFromObservations(observations, selectedIds, options) {
         checked: true,
     }));
 }
-/** 用户显式合并多个草稿为一件；observation 不重复，仍保留各自 highlight。 */
+/**
+ * 用户显式合并多个草稿为一件；observation 不重复，仍保留各自 highlight。
+ * 数量纪律(issue #102 Q3):合并 = 新的物品身份,原草稿上用户确认过的数量
+ * 不求和、不取线索数——数量/单位一律重置为缺席,由用户在合成行上重新确认
+ * (L1:quantity 只来自用户确认;线索数永不赋值数量)。
+ */
 function mergeSceneDrafts(drafts, draftKeys) {
     const wanted = new Set(draftKeys);
     const picked = drafts.filter((d) => wanted.has(d.draftKey));
@@ -217,6 +265,7 @@ function mergeSceneDrafts(drafts, draftKeys) {
             manual.push({ ...h });
     }
     const first = picked[0];
+    // quantity/unit 刻意不透传:合成行数量必须重新确认(见函数头注释)
     return newSceneDraft({
         draftKey: first.draftKey,
         operationId: first.operationId,
@@ -231,6 +280,8 @@ function mergeSceneDrafts(drafts, draftKeys) {
 /**
  * 用户显式把一件拆成多件。每个 observation 一件；手动补的高亮也各自一件。
  * 同名是允许的，新 draft 拥有独立 operation_id，提交后是独立 item_id。
+ * 数量纪律(issue #102 Q3):原草稿的数量是对「这一组」的断言,拆开即失效——
+ * 拆分行一律不带数量(逐行重新确认);observationIds/高亮/时间窗各自保留。
  */
 function splitSceneDraft(draft) {
     if (draft.observationIds.length + draft.manualHighlights.length <= 1)
@@ -339,6 +390,8 @@ function buildSceneCommitItems(drafts, observations, durationMs) {
             if (existingSeen.has(draft.itemId))
                 return { ok: false, message: "同一件已有物品不能在一次提交中出现两次" };
             existingSeen.add(draft.itemId);
+            // 数量字段刻意不携带(E7 边界):existing 关联不碰数量,数量变更只走
+            // update/quantityAdjust 的 CAS 路径;即便草稿行残留数量也绝不进载荷
             items.push({
                 draft_key: draft.draftKey,
                 target: "existing",
@@ -353,7 +406,21 @@ function buildSceneCommitItems(drafts, observations, durationMs) {
                 return { ok: false, message: "请给每件新物品填写位置" };
             if (draft.operationId === "")
                 return { ok: false, message: "草稿参数异常，请重试" };
-            items.push({
+            // 数量/单位(issue #102 Q3,Q0-CONTRACT §4.4/§9.1):只透传用户在草稿行
+            // 显式确认的值;缺席 = 不带键(服务端缺省 1/件,签名与现行逐字节一致)。
+            // observationIds/highlights 条数永不赋值数量——形状门 fail-closed 整批拒绝。
+            if (draft.quantity !== undefined) {
+                if ((0, quantity_1.isValidCreateQuantity)(draft.quantity) === false) {
+                    return { ok: false, message: "「" + name + "」的数量需为 1-9999 的整数" };
+                }
+                if ((0, quantity_1.isUnit)(draft.unit) === false) {
+                    return { ok: false, message: "「" + name + "」的单位无效，请重新选择" };
+                }
+            }
+            else if (draft.unit !== undefined) {
+                return { ok: false, message: "「" + name + "」的数量还没确认，请先核对数量" };
+            }
+            const item = {
                 draft_key: draft.draftKey,
                 target: "new",
                 operation_id: draft.operationId,
@@ -361,7 +428,12 @@ function buildSceneCommitItems(drafts, observations, durationMs) {
                 location_text: location,
                 note: draft.note.trim(),
                 highlights,
-            });
+            };
+            if (draft.quantity !== undefined) {
+                item.quantity = draft.quantity;
+                item.unit = draft.unit;
+            }
+            items.push(item);
         }
     }
     return { ok: true, items };

@@ -1019,6 +1019,11 @@ function createVideoActions(h) {
         one.location_text = it.location_text;
         one.note = it.note;
         if (locationCtx && it.node_id !== undefined) one.node_id = it.node_id;
+        // 数量进 scene_payload_sig(Q0-CONTRACT §4.4):不携带时 canonical 输出
+        // 与现行逐字节相同(零感知,旧票据/旧载荷重试不受影响);携带后同票据
+        // 重试改数量/改单位 → 签名失配 → OPERATION_CONFLICT。
+        if (it.quantity !== undefined) one.quantity = it.quantity;
+        if (it.unit !== undefined) one.unit = it.unit;
       } else {
         one.item_id = it.item_id;
         if (locationCtx && it.move_to_node_id !== undefined) one.move_to_node_id = it.move_to_node_id;
@@ -1934,8 +1939,22 @@ function createVideoActions(h) {
         if (location === null) return "INVALID";
         var note = h.cleanOptional(it.note, h.NOTE_MAX);
         if (note === null) return "INVALID";
+        // 数量/单位(Q0-CONTRACT §4.4,Q1):规则同 create(缺省 1/件、unit 不得
+        // 单独在场、quantity 恒 ≥1);整批纯参数校验阶段拦截,detail.index 定位。
+        var quantityInput = h.parseQuantityInput(it.quantity, 1);
+        if (quantityInput.state === "INVALID") return { quantityInvalid: { reason: quantityInput.reason, index: i } };
+        if (quantityInput.state === "OK" && it.unit !== undefined && h.validUnit(it.unit) === false) {
+          return { quantityInvalid: { reason: "UNIT_UNSUPPORTED", index: i } };
+        }
+        if (quantityInput.state === "ABSENT" && it.unit !== undefined) {
+          return { quantityInvalid: { reason: "QUANTITY_UNIT_PAIR", index: i } };
+        }
         var newItemOut = { draft_key: it.draft_key, target: "new", operation_id: it.operation_id, name: name, location_text: location, note: note, highlights: highlights };
         if (hasNodeId) newItemOut.node_id = it.node_id;
+        if (quantityInput.state === "OK") {
+          newItemOut.quantity = quantityInput.value;
+          if (it.unit !== undefined) newItemOut.unit = it.unit;
+        }
         out.push(newItemOut);
       } else if (it.target === "existing") {
         if (hasNodeId) return "INVALID";
@@ -1943,6 +1962,12 @@ function createVideoActions(h) {
         if (h.validItemId(it.item_id) === false) return "INVALID";
         if (seenExisting[it.item_id] === true) return "INVALID";
         seenExisting[it.item_id] = true;
+        // E7 边界(Q0-CONTRACT §4.4):target:"existing" 禁止携带数量——既有物品
+        // 的数量变更只走 update/quantityAdjust(CAS 路径),绝不让证据关联成为
+        // 第二条绕过版本的数量写路径;携带即整批零写。
+        if (it.quantity !== undefined || it.unit !== undefined) {
+          return { quantityInvalid: { reason: "QUANTITY_ON_EXISTING_TARGET", index: i } };
+        }
         var existingItemOut = { draft_key: it.draft_key, target: "existing", item_id: it.item_id, highlights: highlights };
         if (hasMoveTo) {
           existingItemOut.move_to_node_id = it.move_to_node_id;
@@ -1969,6 +1994,9 @@ function createVideoActions(h) {
     if (event.consent_version !== CONSENT_VERSION) return fail("INVALID_INPUT");
     var prepared = parseSceneCommitItems(event.items);
     if (prepared === "INVALID") return fail("INVALID_INPUT");
+    if (Array.isArray(prepared) === false && prepared.quantityInvalid) {
+      return h.failQuantity(prepared.quantityInvalid.reason, { index: prepared.quantityInvalid.index });
+    }
     for (var hp = 0; hp < prepared.length; hp++) {
       if (highlightsWithinDuration(prepared[hp].highlights, event.duration_ms) === false) return fail("INVALID_INPUT");
     }
@@ -2057,7 +2085,11 @@ function createVideoActions(h) {
           operation_id: p.operation_id,
           name: p.name,
           location_text: p.location_text,
-          note: p.note
+          note: p.note,
+          // 数量/单位透传(Q0-CONTRACT §4.4):缺省 1/件与幂等由 createItem 白拿;
+          // observation/frame/highlights 条数永不赋值 quantity(§9.1)
+          quantity: p.quantity,
+          unit: p.unit
         }, deps);
         if (createRes === null || createRes === undefined || createRes.ok !== true) {
           failedKeys.push(p.draft_key);

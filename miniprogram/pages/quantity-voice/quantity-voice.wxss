@@ -1,0 +1,232 @@
+/* 语音数量确认页(issue #102 Q2):只做核对与确认,几何全部由 rpx/百分比承担,无 JS 算 px。 */
+
+.page {
+  padding: 24rpx;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: #f7f7f5;
+}
+
+.quote-card {
+  background: #ffffff;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.quote-label {
+  font-size: 24rpx;
+  color: #8a8a8a;
+  margin-bottom: 8rpx;
+}
+
+.quote-text {
+  font-size: 30rpx;
+  color: #333333;
+  line-height: 1.5;
+}
+
+.section {
+  background: #ffffff;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+}
+
+.section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333333;
+  margin-bottom: 16rpx;
+}
+
+.empty-tip {
+  font-size: 26rpx;
+  color: #8a8a8a;
+  line-height: 1.6;
+}
+
+.cand-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f0ee;
+}
+
+.cand-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.cand-name {
+  font-size: 30rpx;
+  color: #333333;
+}
+
+.cand-loc {
+  font-size: 24rpx;
+  color: #8a8a8a;
+  margin-top: 6rpx;
+}
+
+.cand-qty {
+  font-size: 28rpx;
+  color: #4a7c59;
+  margin-left: 16rpx;
+}
+
+.target-card {
+  background: #ffffff;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+}
+
+.target-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.target-name {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #333333;
+}
+
+.target-qty {
+  font-size: 28rpx;
+  color: #4a7c59;
+}
+
+.target-loc {
+  font-size: 24rpx;
+  color: #8a8a8a;
+  margin-top: 10rpx;
+}
+
+.mode-row {
+  display: flex;
+  flex-direction: row;
+  margin-bottom: 20rpx;
+}
+
+.mode-item {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 26rpx;
+  color: #666666;
+  background: #f4f4f2;
+  border-radius: 12rpx;
+  margin-right: 12rpx;
+}
+
+.mode-item:last-child {
+  margin-right: 0;
+}
+
+.mode-active {
+  background: #e8f1ea;
+  color: #3c6b4a;
+  font-weight: 600;
+}
+
+.amount-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.amount-input {
+  flex: 1;
+  background: #f4f4f2;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  font-size: 30rpx;
+}
+
+.unit-picker {
+  margin-left: 16rpx;
+}
+
+.unit-text {
+  font-size: 28rpx;
+  color: #333333;
+  padding: 16rpx 20rpx;
+  background: #f4f4f2;
+  border-radius: 12rpx;
+  margin-left: 16rpx;
+}
+
+.preview-row {
+  margin-top: 20rpx;
+}
+
+.preview-text {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #3c6b4a;
+}
+
+.block-row {
+  margin-top: 16rpx;
+}
+
+.block-text {
+  font-size: 26rpx;
+  color: #b4552d;
+  line-height: 1.5;
+}
+
+.hint-row {
+  margin-top: 16rpx;
+}
+
+.hint-text {
+  font-size: 24rpx;
+  color: #8a8a8a;
+  line-height: 1.5;
+}
+
+.conflict-text {
+  font-size: 28rpx;
+  color: #333333;
+  line-height: 1.6;
+}
+
+.footer {
+  display: flex;
+  flex-direction: row;
+  margin-top: auto;
+  padding-top: 20rpx;
+}
+
+.btn-ghost {
+  flex: 1;
+  background: #ffffff;
+  color: #666666;
+  font-size: 28rpx;
+  border-radius: 16rpx;
+  margin-right: 16rpx;
+}
+
+.btn-main {
+  flex: 2;
+  background: #3c6b4a;
+  color: #ffffff;
+  font-size: 28rpx;
+  border-radius: 16rpx;
+}
+
+.btn-disabled {
+  opacity: 0.5;
+}

@@ -146,13 +146,54 @@
         </view>
         <view class="meta">{{ item.metaText }}</view>
         <view wx:if="{{ item.failMsg }}" class="failmsg">{{ item.failMsg }} · 点「{{ saveText }}」重试</view>
+        <view wx:if="{{ !item.done }}" class="rowtools">
+          <view
+            class="mrg-chip {{ item.mergeSelected ? 'on' : '' }}"
+            hover-class="qk-hover"
+            hover-stay-time="60"
+            data-index="{{ index }}"
+            catchtap="onRowMergeSelectTap"
+          >{{ item.mergeSelected ? '取消合并' : '同类合成一条' }}</view>
+          <view
+            wx:if="{{ item.mergedCount > 0 }}"
+            class="mrg-chip src"
+            hover-class="qk-hover"
+            hover-stay-time="60"
+            data-index="{{ index }}"
+            catchtap="onMergedSourcesTap"
+          >{{ item.sourcesOpen ? '收起来源' : '来源 ' + item.mergedCount + ' 框' }}</view>
+        </view>
+        <view wx:if="{{ item.sourcesOpen }}" class="srcpanel">
+          <view wx:for="{{ item.sourceViews }}" wx:for-item="src" wx:key="draftId" class="src-line">{{ src.name }} · {{ src.boxText }}</view>
+          <view class="src-note">合成一条绑整张照片;来源框只在此查验,不落库。</view>
+        </view>
       </view>
-      <view class="step" data-index="{{ index }}" catchtap="noop">
-        <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onStepTap">−</view>
-        <text class="stepNum">{{ item.qty }}</text>
-        <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onStepTap">+</view>
+      <view class="qtywrap" data-index="{{ index }}" catchtap="noop">
+        <view wx:if="{{ item.qtyPending }}" class="qty-pending">数量待核对</view>
+        <view class="step" data-index="{{ index }}" catchtap="noop">
+          <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" catchtap="onStepTap">−</view>
+          <text class="stepNum">{{ item.qty }}</text>
+          <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" catchtap="onStepTap">+</view>
+        </view>
+        <picker
+          wx:if="{{ item.unit }}"
+          class="step-unit"
+          range="{{ unitOptions }}"
+          value="{{ item.unitIndex }}"
+          data-index="{{ index }}"
+          bindchange="onRowUnitChange"
+        >
+          <view class="step-unit-btn">{{ item.unit }} ▾</view>
+        </picker>
       </view>
     </view>
+    <view
+      wx:if="{{ mergeIds.length >= 2 }}"
+      class="mrgbar"
+      hover-class="row-hover"
+      hover-stay-time="60"
+      bindtap="onMergeSelectedTap"
+    >把所选 {{ mergeIds.length }} 行合成 1 条(整照关联,数量待核对)</view>
     <view class="addmanual" hover-class="row-hover" hover-stay-time="60" bindtap="onManualAddTap">＋ 手动添加物品</view>
   </view>
 </view>
@@ -360,6 +401,12 @@
         <view wx:for="{{ saveSheet.exceptionLines }}" wx:key="*this" class="excline">{{ item }}</view>
       </view>
       <view wx:else class="excline dim2">{{ saveSheet.exceptionText }}</view>
+    </view>
+    <view class="card">
+      <view class="ct">逐件数量(issue #102:点确认即按此数量记住)</view>
+      <view class="exclist">
+        <view wx:for="{{ saveSheet.qtyLines }}" wx:key="*this" class="excline">{{ item }}</view>
+      </view>
     </view>
     <view class="card card-mb">
       <view class="ct">最终保存</view>

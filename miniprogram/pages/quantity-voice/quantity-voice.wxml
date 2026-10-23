@@ -1,0 +1,110 @@
+<view class="page">
+  <!-- 原话(PR #103 决定 4:切换模式后原话仍保留供核对;零写依据,仅展示) -->
+  <view class="quote-card">
+    <text class="quote-label">原话</text>
+    <text class="quote-text" user-select>{{quote}}</text>
+  </view>
+
+  <!-- 阶段一:选目标(词表未唯一命中/歧义/编造;不默认选中,点选才算) -->
+  <block wx:if="{{phase === 'pick'}}">
+    <view class="section">
+      <view class="section-title">要改哪一件?{{itemQuery ? '(' + itemQuery + ')' : ''}}</view>
+      <view wx:if="{{candidates.length === 0}}" class="empty-tip">
+        没找到可能是目标的物品,请确认名称后重试,或到物品详情页直接修改数量。
+      </view>
+      <view
+        class="cand-row"
+        wx:for="{{candidates}}"
+        wx:key="item_id"
+        data-index="{{index}}"
+        bindtap="onCandidateTap"
+      >
+        <view class="cand-main">
+          <text class="cand-name">{{item.name}}</text>
+          <text class="cand-loc">{{item.locationText}}</text>
+        </view>
+        <text class="cand-qty">{{item.quantityText}}</text>
+      </view>
+    </view>
+    <view class="footer">
+      <button class="btn-ghost" bindtap="onCancelTap">取消</button>
+    </view>
+  </block>
+
+  <!-- 阶段二:核对确认(原数量 → 变化 → 结果 + 位置/单位;任何写入前可取消) -->
+  <block wx:if="{{phase === 'confirm'}}">
+    <view class="target-card">
+      <view class="target-row">
+        <text class="target-name">{{targetName}}</text>
+        <text class="target-qty">{{currentLabel}}</text>
+      </view>
+      <text class="target-loc">位置:{{targetLocation}}</text>
+    </view>
+
+    <view class="section">
+      <view class="section-title">怎么改</view>
+      <view class="mode-row">
+        <view
+          class="mode-item {{modeIndex === index ? 'mode-active' : ''}}"
+          wx:for="{{modeOptions}}"
+          wx:key="*this"
+          data-index="{{index}}"
+          bindtap="onModeTap"
+        >
+          <text>{{item}}</text>
+        </view>
+      </view>
+      <view class="amount-row">
+        <input
+          class="amount-input"
+          type="number"
+          value="{{amountText}}"
+          placeholder="{{modeIndex === 2 ? '核对后的总数(可为 0)' : '数量'}}"
+          bindinput="onAmountInput"
+        />
+        <picker
+          wx:if="{{unitPickVisible}}"
+          class="unit-picker"
+          range="{{unitOptions}}"
+          value="{{unitIndex}}"
+          bindchange="onUnitChange"
+        >
+          <text class="unit-text">{{unit ? unit : '选单位'}}</text>
+        </picker>
+        <text wx:else class="unit-text">{{unit}}</text>
+      </view>
+      <view wx:if="{{previewLabel !== ''}}" class="preview-row">
+        <text class="preview-text">{{previewLabel}}</text>
+      </view>
+      <view wx:if="{{blockReason !== ''}}" class="block-row">
+        <text class="block-text">{{blockReason}}</text>
+      </view>
+      <view wx:if="{{modeIndex === 2}}" class="hint-row">
+        <text class="hint-text">「设为」会保留物品、位置、提醒和照片,只是记下现在的总数。</text>
+      </view>
+    </view>
+
+    <view class="footer">
+      <button class="btn-ghost" bindtap="onCancelTap">取消</button>
+      <button
+        class="btn-main {{blockReason !== '' ? 'btn-disabled' : ''}}"
+        disabled="{{saving}}"
+        bindtap="onConfirmTap"
+      >
+        确认修改
+      </button>
+    </view>
+  </block>
+
+  <!-- 阶段三:版本冲突——先展示家人最新值,显式重核对后才可再发,绝不自动套旧变化 -->
+  <block wx:if="{{phase === 'conflict'}}">
+    <view class="section">
+      <view class="section-title">内容刚被家人修改</view>
+      <text class="conflict-text">{{conflictLabel}}</text>
+    </view>
+    <view class="footer">
+      <button class="btn-ghost" bindtap="onCancelTap">取消</button>
+      <button class="btn-main" bindtap="onConflictReconfirmTap">查看最新并重新核对</button>
+    </view>
+  </block>
+</view>

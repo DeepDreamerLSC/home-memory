@@ -15,7 +15,9 @@ import {
   mergeSceneDrafts,
   newSceneDraft,
   scanSceneVideo,
+  setDraftUnit,
   splitSceneDraft,
+  stepDraftQty,
   type SceneDraftItem,
   type SceneObservation,
 } from "../../utils/video-scene";
@@ -33,6 +35,7 @@ import { createVideoFrameSession, type VideoFrameSession } from "../../utils/vid
 import { recognizeWithVl, type PhotoVlPrepared } from "../../utils/photo-vl";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { householdScopeId } from "../../utils/household-scope";
+import { UNIT_SET } from "../../utils/quantity";
 import type {
   VideoEvidenceHighlightInput,
   VideoSceneCommitItem,
@@ -70,6 +73,14 @@ interface DraftView {
   isManual: boolean;
   startSecText: string;
   endSecText: string;
+  /** (Q3)数量步进显示值(未确认=1 起步口径;线索数绝不预填) */
+  qty: number;
+  /** (Q3)单位显示值(未确认=「件」缺省口径) */
+  unit: string;
+  /** (Q3)单位选择器索引(wxml 无 indexOf,预计算) */
+  unitIndex: number;
+  /** (Q3)用户已在行上确认过数量(quantity 在场) */
+  quantitySet: boolean;
 }
 
 interface PendingUpload {
@@ -122,6 +133,8 @@ interface PageData {
   observationGroups: SceneGroupView[];
   sceneStats: SceneGroupStats;
   draftViews: DraftView[];
+  /** (Q3)单位选择器选项(UNIT_SET 冻结顺序 = 展示序,与拍照页同一闭集) */
+  unitOptions: string[];
   frozenItems: VideoSceneCommitItem[];
   pendingUpload: PendingUpload | null;
   busy: boolean;
@@ -240,6 +253,8 @@ Page({
     observationGroups: [] as SceneGroupView[],
     sceneStats: groupStats([], []) as SceneGroupStats,
     draftViews: [] as DraftView[],
+    /** (Q3)单位选择器选项(UNIT_SET 冻结顺序 = 展示序,与拍照页同一闭集) */
+    unitOptions: UNIT_SET as string[],
     frozenItems: [] as VideoSceneCommitItem[],
     pendingUpload: null as PendingUpload | null,
     busy: false,
@@ -314,6 +329,9 @@ Page({
     const views = this.data.drafts.map((d) => {
       const highlights = d.observationIds.length + d.manualHighlights.length;
       const first = d.manualHighlights.length > 0 ? d.manualHighlights[0] : null;
+      // (Q3)数量视图:未确认行显示缺省口径 1/件(quantitySet=false 提示
+      // 「不填按 1 件 · 线索数不代表件数」);线索数绝不预填数量
+      const unit = d.unit !== undefined && UNIT_SET.indexOf(d.unit) !== -1 ? d.unit : "件";
       return {
         draftKey: d.draftKey,
         name: d.name,
@@ -331,6 +349,10 @@ Page({
         isManual: d.observationIds.length === 0 && d.manualHighlights.length > 0,
         startSecText: first === null ? "" : (first.start_ms / 1000).toFixed(1),
         endSecText: first === null ? "" : (first.end_ms / 1000).toFixed(1),
+        qty: typeof d.quantity === "number" ? d.quantity : 1,
+        unit,
+        unitIndex: Math.max(0, UNIT_SET.indexOf(unit)),
+        quantitySet: typeof d.quantity === "number",
       };
     });
     this.setData({ draftViews: views });
@@ -639,6 +661,49 @@ Page({
     const drafts = this.data.drafts.slice();
     drafts[index] = { ...drafts[index], note: value };
     this.setData({ drafts }, () => this.renderDrafts());
+  },
+
+  /* ---------------- 数量输入(issue #102 Q3,Q0-CONTRACT §9.1) ---------------- */
+
+  /**
+   * 草稿行数量步进(±1):quantity 只来自用户触碰(1 起步,钳 1..9999,首触补
+   * 默认单位「件」成组);existing 行不提供数量输入(关联不碰数量,E7 边界)。
+   * 步进值与 observationIds/highlights 条数完全解耦——6 条线索未触碰 = 无数量。
+   */
+  onDraftQtyStep(e: WechatMiniprogram.CustomEvent) {
+    const index = Number(e.currentTarget.dataset.index);
+    const delta = Number(e.currentTarget.dataset.d);
+    if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
+    const draft = this.data.drafts[index];
+    if (draft.target !== "new") {
+      wx.showToast({ title: "关联已有物品不改数量,请到物品详情修改", icon: "none" });
+      return;
+    }
+    const drafts = this.data.drafts.slice();
+    drafts[index] = stepDraftQty(draft, delta);
+    this.setData({ drafts }, () => {
+      this.renderDrafts();
+      this.saveSession();
+    });
+  },
+
+  /** 草稿行单位选择(UNIT_SET picker);只选单位也把数量落成 1(成组确认) */
+  onDraftUnitChange(e: WechatMiniprogram.CustomEvent) {
+    const index = Number(e.currentTarget.dataset.index);
+    const idx = Number(isRecord(e.detail) ? e.detail.value : -1);
+    if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
+    if (Number.isInteger(idx) === false || idx < 0 || idx >= UNIT_SET.length) return;
+    const draft = this.data.drafts[index];
+    if (draft.target !== "new") {
+      wx.showToast({ title: "关联已有物品不改数量,请到物品详情修改", icon: "none" });
+      return;
+    }
+    const drafts = this.data.drafts.slice();
+    drafts[index] = setDraftUnit(draft, UNIT_SET[idx]);
+    this.setData({ drafts }, () => {
+      this.renderDrafts();
+      this.saveSession();
+    });
   },
 
   onDraftManualTimeInput(e: WechatMiniprogram.CustomEvent) {

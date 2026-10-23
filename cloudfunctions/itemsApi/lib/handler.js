@@ -39,6 +39,12 @@ var REMIND_QUOTE_MAX = 200;
 // 周期再生的天数护栏:0-3650(10 年),防误传巨值生成荒谬日期
 var REMIND_PERIOD_MAX = 3650;
 var REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// ---------- 数量管理(issue #102 Q1,docs/design/quantity/Q0-CONTRACT.md) ----------
+// 上限冻结常量(L4):新建 1..9999、已有 0..9999;0=用户确认「目前没有」(L2)。
+var QUANTITY_MAX = 9999;
+// unit 冻结闭集(L5,§2.2):只增不减;客户端 miniprogram/utils/quantity.ts 持
+// 逐字一致副本,由测试锁定(同 REMIND_KINDS 的冻结词表做法)。
+var UNIT_SET = ["件", "个", "包", "盒", "瓶", "袋", "支", "双", "套", "卷", "张", "本", "罐", "只"];
 
 var ERROR_MESSAGES = {
   INVALID_INPUT: "输入不合法,请检查后重试",
@@ -68,14 +74,97 @@ function fail(error) {
   return { ok: false, error: error, message: ERROR_MESSAGES[error] };
 }
 
+/**
+ * 数量相关 INVALID_INPUT(Q0-CONTRACT §6):顶层错误码仍是 INVALID_INPUT,
+ * detail 携带冻结 reason 枚举(+ 批量入口的 index 等),沿用 locations/D1
+ * 的结构化 detail 先例。reason 枚举 11 值公共冻结,Q1 落地其中 6 个:
+ * PARAM_SHAPE(既有参数形状错,不带 detail)/ QUANTITY_NOT_INTEGER /
+ * QUANTITY_OUT_OF_RANGE / QUANTITY_UNIT_PAIR / UNIT_UNSUPPORTED /
+ * QUANTITY_ON_EXISTING_TARGET(video)。
+ */
+function failQuantity(reason, extra) {
+  var detail = { reason: reason };
+  if (extra) {
+    var keys = Object.keys(extra);
+    for (var i = 0; i < keys.length; i++) {
+      detail[keys[i]] = extra[keys[i]];
+    }
+  }
+  return { ok: false, error: "INVALID_INPUT", message: ERROR_MESSAGES.INVALID_INPUT, detail: detail };
+}
+
+/**
+ * quantity 输入校验(§2.3 冻结纯函数,全入口共用):
+ * ABSENT(键缺席,合法,由调用方决定缺省)/ INVALID(+reason)/ OK(+value)。
+ * 宽松清洗一律不做:不 parseInt、不取整;typeof 非 number(含显式 null、
+ * 字符串、NaN/Infinity 经 Number.isInteger 拦截)一律 QUANTITY_NOT_INTEGER。
+ */
+function parseQuantityInput(v, min) {
+  if (v === undefined) {
+    return { state: "ABSENT" };
+  }
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    return { state: "INVALID", reason: "QUANTITY_NOT_INTEGER" };
+  }
+  if (v < min || v > QUANTITY_MAX) {
+    return { state: "INVALID", reason: "QUANTITY_OUT_OF_RANGE" };
+  }
+  return { state: "OK", value: v };
+}
+
+/** unit 闭集校验(§2.2):必须逐字等于某一成员,无 trim 无近义映射 */
+function validUnit(v) {
+  return isString(v) && UNIT_SET.indexOf(v) !== -1;
+}
+
+/**
+ * 读侧防御性解析(§2.4):quantity/unit 合法成组才返回已确认;任何存储异常
+ * (半态/越界/闭集外单位)一律按未确认读 null,绝不伪造已确认值。
+ * I1 放宽分支:quantity/unit 合法而 quantity_confirmed_at 缺失/非 string →
+ * 已确认读 + confirmedAt:null(展示退化为无时间,不丢用户确认过的数量)。
+ */
+function readQuantity(doc) {
+  if (
+    typeof doc.quantity === "number" &&
+    Number.isInteger(doc.quantity) &&
+    doc.quantity >= 0 &&
+    doc.quantity <= QUANTITY_MAX &&
+    validUnit(doc.unit)
+  ) {
+    return {
+      quantity: doc.quantity,
+      unit: doc.unit,
+      confirmedAt: typeof doc.quantity_confirmed_at === "string" ? doc.quantity_confirmed_at : null
+    };
+  }
+  return null;
+}
+
 /** 同 operation_id 重放时的内容比对(创建幂等只对「同键同内容」成立) */
-function sameCreateContent(doc, name, locationText, note) {
+function sameCreateContent(doc, name, locationText, note, eventQuantity, eventUnit) {
   var noteNorm = note === undefined ? "" : note;
   return (
     doc.name === name &&
     doc.location_text === locationText &&
-    (doc.note || "") === noteNorm
+    (doc.note || "") === noteNorm &&
+    sameQuantityContent(doc, eventQuantity, eventUnit)
   );
+}
+
+/**
+ * 数量维度的幂等内容比对(Q0-CONTRACT §4.1,L10②):
+ * - 请求未带数量(旧客户端/没说数量):命中 pre-Q1 无字段文档(未确认)或
+ *   post-Q1 缺省建出的 (1,件) 文档都视为同内容(跨部署重放窗口);
+ * - 请求带数量:逐值比对(文档未确认或值不同 → 异内容 → OPERATION_CONFLICT)。
+ * 绝不比对 quantity_confirmed_at(I4:它是元数据,duplicated 分支原样返回既有文档)。
+ */
+function sameQuantityContent(doc, eventQuantity, eventUnit) {
+  var docQ = readQuantity(doc);
+  if (eventQuantity === undefined) {
+    return docQ === null || (docQ.quantity === 1 && docQ.unit === "件");
+  }
+  var effU = eventUnit === undefined ? "件" : eventUnit;
+  return docQ !== null && docQ.quantity === eventQuantity && docQ.unit === effU;
 }
 
 /** 提醒三元组逐字段比对(due_date/kind/quote;quote 缺省按空串归一) */
@@ -223,15 +312,23 @@ function collection(deps) {
   return deps.db.collection(COLLECTION);
 }
 
-/** query/list 返回的用户可见投影,绝不包含内部字段 */
+/**
+ * query/list 返回的用户可见投影,绝不包含内部字段。
+ * 数量三字段(§2.4):readQuantity 防御性解析,null ⇢ 三字段全 null
+ * (双 null ⇔ 数量未确认;legacy 存量行无字段即未确认,绝不显示误导性的 1/件)。
+ */
 function project(doc) {
+  var q = readQuantity(doc);
   return {
     item_id: doc._id,
     name: doc.name,
     location_text: doc.location_text,
     note: doc.note,
     version: doc.version,
-    updated_at: doc.updated_at
+    updated_at: doc.updated_at,
+    quantity: q === null ? null : q.quantity,
+    unit: q === null ? null : q.unit,
+    quantity_confirmed_at: q === null ? null : q.confirmedAt
   };
 }
 
@@ -928,6 +1025,20 @@ async function createItem(event, deps) {
   }
   // 模糊时间表述标记(Fix 4):宽松校验,与 reminder 互斥,只为详情展示而存
   var vagueQuote = parseVagueQuoteInput(event, reminder);
+  // 数量/单位(§4.1,Q1):纯参数校验先于任何查询/写入;显式 null/非法值一律
+  // INVALID_INPUT(新建的物品必然被用户确认存在,不存在「新建且未确认数量」);
+  // unit 单独在场(quantity 缺席)→ QUANTITY_UNIT_PAIR(§4.1-4)。
+  // quantity_confirmed_at 由服务端写入,客户端请求里的该键一律忽略(§2.6)。
+  var quantityInput = parseQuantityInput(event.quantity, 1);
+  if (quantityInput.state === "INVALID") {
+    return failQuantity(quantityInput.reason);
+  }
+  if (quantityInput.state === "OK" && event.unit !== undefined && !validUnit(event.unit)) {
+    return failQuantity("UNIT_UNSUPPORTED");
+  }
+  if (quantityInput.state === "ABSENT" && event.unit !== undefined) {
+    return failQuantity("QUANTITY_UNIT_PAIR");
+  }
 
   // 幂等只对「同键同内容」成立:命中未删除的同键记录时,
   // 内容一致 → duplicated:true 稳定返回;内容不同 → OPERATION_CONFLICT(绝不静默吞掉用户的修改)。
@@ -936,7 +1047,7 @@ async function createItem(event, deps) {
     .get();
   if (existing.data && existing.data.length > 0) {
     var doc = existing.data[0];
-    if (sameCreateContent(doc, name, locationText, note)) {
+    if (sameCreateContent(doc, name, locationText, note, event.quantity, event.unit)) {
       // 提醒对账(PR #52 Low-1 + 二轮 N3):物品内容一致还要提醒一致才算幂等
       // 重放——原键重试但提醒改过/清过 → 显式冲突指向详情页,绝不静默吞掉
       // 变更;无 active 且无 create 欠账时拒绝猜测(STALE),绝不自动复活
@@ -961,6 +1072,10 @@ async function createItem(event, deps) {
   }
 
   var now = deps.now();
+  // 数量缺省 = 1/件(§5 冻结的唯一落点:仅 create 类插入路径且请求 quantity 键
+  // 缺席;新建本身就是一次数量确认,quantity_confirmed_at 与 created_at 同刻)。
+  var effQ = quantityInput.state === "OK" ? quantityInput.value : 1;
+  var effU = event.unit === undefined ? "件" : event.unit;
   var item = {
     _id: "it_" + deps.genId(),
     household_id: deps.householdId,
@@ -973,6 +1088,9 @@ async function createItem(event, deps) {
     operation_id: operationId,
     // 「说了时间但没换算」的原话子串(Fix 4):仅供详情页展示,不产生任何提醒
     remind_vague_quote: vagueQuote,
+    quantity: effQ,
+    unit: effU,
+    quantity_confirmed_at: now,
     created_at: now,
     updated_at: now
   };
@@ -989,7 +1107,7 @@ async function createItem(event, deps) {
       .get();
     if (after.data && after.data.length > 0) {
       var raced = after.data[0];
-      if (!raced.deleted && sameCreateContent(raced, name, locationText, note)) {
+      if (!raced.deleted && sameCreateContent(raced, name, locationText, note, event.quantity, event.unit)) {
         // 提醒对账同 duplicated 分支(Low-1 + 二轮 N3):并发孪生同样区分
         // 重放/变更/拒绝猜测
         var racedVerdict = await reconcileDuplicateReminder(deps, raced._id, reminder);
@@ -1106,15 +1224,40 @@ async function updateItem(event, deps) {
     }
     changes.note = note;
   }
+  // 数量/单位(§4.2,Q1「设为当前总数」):同携同缺(半对 → QUANTITY_UNIT_PAIR,
+  // 杜绝半态 I1);已有记录 0..9999(0=确认目前没有,L2);允许显式改单位——
+  // 改单位=一次数量确认(用户携同重核后的总数,数值可与旧值相同,不做换算)。
+  var updateHasQuantity = event.quantity !== undefined;
+  var updateHasUnit = event.unit !== undefined;
+  if (updateHasQuantity !== updateHasUnit) {
+    return failQuantity("QUANTITY_UNIT_PAIR");
+  }
+  if (updateHasQuantity) {
+    var quantityInput = parseQuantityInput(event.quantity, 0);
+    if (quantityInput.state === "INVALID") {
+      return failQuantity(quantityInput.reason);
+    }
+    if (!validUnit(event.unit)) {
+      return failQuantity("UNIT_UNSUPPORTED");
+    }
+    changes.quantity = quantityInput.value;
+    changes.unit = event.unit;
+  }
   if (Object.keys(changes).length === 0) {
     return fail("INVALID_INPUT");
   }
 
-  // 指纹只覆盖用户内容字段(在注入 version/updated_at/last_update_* 元数据之前计算)
+  // 指纹只覆盖用户内容字段(在注入 version/updated_at/last_update_* 元数据之前
+  // 计算)。数量进入 changes 自动进指纹;quantity_confirmed_at 是元数据(I4),
+  // 绝不进指纹——注入在指纹之后,否则响应丢失重试时新时间戳会让指纹永远失配。
   var fingerprint = changesFingerprint(changes);
 
+  var writeNow = deps.now();
+  if (updateHasQuantity) {
+    changes.quantity_confirmed_at = writeNow; // 与本次写入的 updated_at 同刻(§2.6)
+  }
   changes.version = expectedVersion + 1;
-  changes.updated_at = deps.now();
+  changes.updated_at = writeNow;
   if (updateId !== undefined) {
     changes.last_update_id = updateId;
     changes.last_update_fingerprint = fingerprint;
@@ -1152,7 +1295,158 @@ async function updateItem(event, deps) {
     ) {
       return { ok: true, item: project(current), replayed: true };
     }
-    return fail("VERSION_CONFLICT");
+    // VERSION_CONFLICT 增补 current(§4.2,PR #103 对齐):冲突分支本就重读了
+    // 文档,随响应回传最新完整投影(含 version/quantity/unit/
+    // quantity_confirmed_at)——客户端一次往返即可展示「家人已更新为 X」,
+    // 用户显式重确认后才可再发;旧客户端忽略该键沿用 get 刷新,零回归。
+    return {
+      ok: false,
+      error: "VERSION_CONFLICT",
+      message: ERROR_MESSAGES.VERSION_CONFLICT,
+      current: project(current)
+    };
+  }
+  return fail("NOT_FOUND");
+}
+
+/**
+ * quantityAdjust(Q2,issue #102 / Q0-CONTRACT §7):统一 mode action
+ * { item_id, expected_version, update_id(必填), mode:"add"|"subtract"|"set",
+ *   amount, unit?, F2 双 marker }——语音/快捷数量操作的唯一写路径。
+ * - add 是数量调整,不是新建 item;amount 恒为正整数(mode 值域:add/subtract
+ *   1..9999,set 0..9999;0 只在 set 合法 = 确认目前没有,L2 保留一切绝不删);
+ * - 范围验证在写前执行(§7.2-4):任一校验失败零写入;失败关闭矩阵 §7.7;
+ * - 版本 CAS:条件更新 version===expected_version,version+1;QA 指纹
+ *   changesFingerprint({mode, amount, unit:effU}) 只覆盖请求内容,不含计算
+ *   结果 newQ 与 quantity_confirmed_at(I4)——重试可重算(effU 恒稳定:
+ *   quantityAdjust 永不改 unit),含 newQ 会让响应丢失重试的指纹永远失配;
+ * - 重放(§7.5):命中 0 条回查,version/last_update_id/指纹三重全中 →
+ *   replayed:true(最多生效一次);同 update_id 异内容/他人已推进 →
+ *   VERSION_CONFLICT 携带 current 最新投影(客户端先展示最新值,用户显式
+ *   重确认后才可再发,绝不自动套旧 delta);目标查无/跨家庭/已删统一 NOT_FOUND。
+ */
+var QA_MODES = ["add", "subtract", "set"];
+
+async function quantityAdjustItem(event, deps) {
+  // 1. 纯参数形状(reason 映射复审冻结:item_id/expected_version/update_id/mode
+  //    的形状或闭集错误 → PARAM_SHAPE;amount 先类型(QUANTITY_NOT_INTEGER)
+  //    后值域(QUANTITY_OUT_OF_RANGE,含 amount>9999),判定顺序不二义)
+  if (!validItemId(event.item_id)) {
+    return failQuantity("PARAM_SHAPE");
+  }
+  var expectedVersion = event.expected_version;
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    return failQuantity("PARAM_SHAPE");
+  }
+  var updateId = event.update_id;
+  if (!validUpdateId(updateId)) {
+    // update_id 在本 action 必填(每次数量操作都必须可重放识别,§7.1)
+    return failQuantity("PARAM_SHAPE");
+  }
+  var mode = event.mode;
+  if (QA_MODES.indexOf(mode) === -1) {
+    return failQuantity("PARAM_SHAPE");
+  }
+  var amount = event.amount;
+  if (typeof amount !== "number" || !Number.isInteger(amount)) {
+    return failQuantity("QUANTITY_NOT_INTEGER");
+  }
+  var minAmount = mode === "set" ? 0 : 1;
+  if (amount < minAmount || amount > QUANTITY_MAX) {
+    return failQuantity("QUANTITY_OUT_OF_RANGE");
+  }
+  // unit 可选校验参数(§7.1):携带时必须逐字等于目标当前 unit(§7.2-3)
+  if (event.unit !== undefined && !validUnit(event.unit)) {
+    return failQuantity("UNIT_UNSUPPORTED");
+  }
+
+  // 2. 读取目标(household 服务端派生;查无含跨家庭/已删统一 NOT_FOUND,零写)
+  var found = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (!found.data || found.data.length === 0) {
+    return fail("NOT_FOUND");
+  }
+  var doc = found.data[0];
+  var docQ = readQuantity(doc);
+
+  // 3. 未确认行与单位门:add/subtract 须已确认;set 于未确认行须携 unit(首次确认)
+  if (mode !== "set" && docQ === null) {
+    return failQuantity("QUANTITY_UNCONFIRMED", { current_quantity: null });
+  }
+  var effU;
+  if (docQ === null) {
+    if (event.unit === undefined) {
+      return failQuantity("UNIT_REQUIRED");
+    }
+    effU = event.unit;
+  } else {
+    if (event.unit !== undefined && event.unit !== docQ.unit) {
+      return failQuantity("UNIT_MISMATCH", { current_unit: docQ.unit });
+    }
+    effU = docQ.unit; // set 永不改 unit(改单位走详情表单 update,§7.3)
+  }
+
+  // 4. 计算与范围验证(写前执行):newQ < 0 库存不足;> 9999 越上限
+  var current = docQ === null ? null : docQ.quantity;
+  var newQ = mode === "add" ? current + amount : mode === "subtract" ? current - amount : amount;
+  if (newQ < 0) {
+    return failQuantity("QUANTITY_BELOW_ZERO", { current_quantity: current });
+  }
+  if (newQ > QUANTITY_MAX) {
+    return failQuantity("QUANTITY_OVER_MAX", { current_quantity: current });
+  }
+
+  var qaFp = changesFingerprint({ mode: mode, amount: amount, unit: effU });
+  var writeNow = deps.now();
+
+  var res = await collection(deps)
+    .where({
+      _id: event.item_id,
+      household_id: deps.householdId,
+      deleted: false,
+      version: expectedVersion
+    })
+    .update({
+      data: {
+        quantity: newQ,
+        unit: effU,
+        quantity_confirmed_at: writeNow,
+        version: expectedVersion + 1,
+        updated_at: writeNow,
+        last_update_id: updateId,
+        last_update_fingerprint: qaFp
+      }
+    });
+  var updated = (res && res.stats && res.stats.updated) || 0;
+  if (updated >= 1) {
+    var after = await collection(deps)
+      .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+      .get();
+    return { ok: true, item: project(after.data[0]) };
+  }
+
+  // 命中 0 条:同一 _id 与 household 且未删仍存在 → 重放识别或版本冲突
+  var still = await collection(deps)
+    .where({ _id: event.item_id, household_id: deps.householdId, deleted: false })
+    .get();
+  if (still.data && still.data.length > 0) {
+    var latest = still.data[0];
+    // 三重全中 = 自己刚写入但响应丢失 → replayed(最多生效一次);依赖
+    // last_update_* 的「最后一笔」语义,不承诺识别任意交错之后的历史操作(§7.5)
+    if (
+      latest.version === expectedVersion + 1 &&
+      latest.last_update_id === updateId &&
+      latest.last_update_fingerprint === qaFp
+    ) {
+      return { ok: true, item: project(latest), replayed: true };
+    }
+    return {
+      ok: false,
+      error: "VERSION_CONFLICT",
+      message: ERROR_MESSAGES.VERSION_CONFLICT,
+      current: project(latest)
+    };
   }
   return fail("NOT_FOUND");
 }
@@ -2288,6 +2582,19 @@ async function photoCommitItem(event, deps) {
     if (reminder === "INVALID") {
       return fail("INVALID_INPUT");
     }
+    // 数量/单位(§4.3,Q1):规则与 create 完全一致(缺省 1/件、unit 不得单独
+    // 在场、quantity 恒 ≥1),整批纯参数校验阶段拦截——任一件非法整批零写入,
+    // detail.index 定位该件在 items 内的 0-based 下标。
+    var quantityInput = parseQuantityInput(it.quantity, 1);
+    if (quantityInput.state === "INVALID") {
+      return failQuantity(quantityInput.reason, { index: i });
+    }
+    if (quantityInput.state === "OK" && it.unit !== undefined && !validUnit(it.unit)) {
+      return failQuantity("UNIT_UNSUPPORTED", { index: i });
+    }
+    if (quantityInput.state === "ABSENT" && it.unit !== undefined) {
+      return failQuantity("QUANTITY_UNIT_PAIR", { index: i });
+    }
     var photo = parsePhotoInput(it.photo);
     if (photo === "INVALID") {
       return fail("INVALID_INPUT");
@@ -2310,7 +2617,9 @@ async function photoCommitItem(event, deps) {
       locationText: locationText,
       note: note,
       reminder: reminder,
-      photo: photo
+      photo: photo,
+      quantity: quantityInput.state === "OK" ? quantityInput.value : undefined,
+      unit: quantityInput.state === "OK" ? (it.unit === undefined ? undefined : it.unit) : undefined
     });
   }
 
@@ -2325,7 +2634,11 @@ async function photoCommitItem(event, deps) {
         name: p.name,
         location_text: p.locationText,
         note: p.note,
-        reminder: p.reminder === null ? undefined : p.reminder
+        reminder: p.reminder === null ? undefined : p.reminder,
+        // 数量/单位透传(§4.3):逐件执行复用 createItem,数量幂等/缺省
+        // (1/件)/E11000 回查收敛全部白拿;undefined = 请求未携带(缺省 1/件)
+        quantity: p.quantity,
+        unit: p.unit
       },
       deps
     );
@@ -2583,8 +2896,11 @@ async function photoEvidenceGetItem(event, deps) {
 var videoActions = createVideoActions({
   isString: isString,
   fail: fail,
+  failQuantity: failQuantity,
   parseBoxInput: parseBoxInput,
   parseReminderInput: parseReminderInput,
+  parseQuantityInput: parseQuantityInput,
+  validUnit: validUnit,
   cleanRequired: cleanRequired,
   cleanOptional: cleanOptional,
   validItemId: validItemId,
@@ -2615,6 +2931,8 @@ var ACTIONS = {
   remindClear: remindClearItem,
   remindSet: remindSetItem,
   photoCommit: photoCommitItem,
+  // Q2 语音数量操作(issue #102,§7):mode action,唯一数量 CAS 写路径
+  quantityAdjust: quantityAdjustItem,
   photoEvidenceGet: photoEvidenceGetItem,
   photoEvidenceRetry: photoEvidenceRetryItem,
   videoUploadBegin: videoActions.videoUploadBegin,
@@ -2655,6 +2973,9 @@ var WRITE_ACTIONS = {
   create: true,
   update: true,
   delete: true,
+  // Q2 语音数量操作(§7.1/L9):写类 action 同走共享家庭双 marker 硬门,
+  // 客户端 utils/api.ts 的 ITEMS_MUTATING_ACTIONS 清单同步增补
+  quantityAdjust: true,
   remindComplete: true,
   remindClear: true,
   remindSet: true,
@@ -2752,5 +3073,11 @@ async function handler(event, deps) {
 
 module.exports = {
   handler: handler,
-  ERROR_MESSAGES: ERROR_MESSAGES
+  ERROR_MESSAGES: ERROR_MESSAGES,
+  // 数量合同(Q0-CONTRACT §2):闭集与校验纯函数供测试锁定双端一致
+  UNIT_SET: UNIT_SET,
+  QUANTITY_MAX: QUANTITY_MAX,
+  parseQuantityInput: parseQuantityInput,
+  validUnit: validUnit,
+  readQuantity: readQuantity
 };

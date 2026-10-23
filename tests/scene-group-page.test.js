@@ -926,7 +926,9 @@ test("SGP-NONCHANGE:首页不接组卡;保留页面及个性化入口;location-s
     assert.equal(src.indexOf("上次清点"), -1, "首页不展示清点摘要");
   }
   const app = JSON.parse(fs.readFileSync(path.join(ROOT, "miniprogram/app.json"), "utf8"));
-  assert.deepEqual(app.pages, [
+  // R0 基线页面必须全部仍在注册(超集断言,允许其它线如 #102 Q2 的 quantity-voice、
+  // #107 个人资料页合法新增);R0 自身不新增页面 → 不得出现任何 R0 语义命名的页面。
+  const r0Baseline = [
     "pages/index/index",
     "pages/confirm/confirm",
     "pages/photo/photo",
@@ -939,12 +941,11 @@ test("SGP-NONCHANGE:首页不接组卡;保留页面及个性化入口;location-s
     "pages/join-family/join-family",
     "pages/reminders/reminders",
     "pages/diag-subscribe/diag-subscribe",
-    // 个性化设置独立新增四页；R0 仍复用原有两个视频入口。
-    "pages/me/me",
-    "pages/profile/profile",
-    "pages/appearance/appearance",
-    "pages/home-display/home-display",
-  ], "保留原有页面和个性化四页,R0 不新增视频路由");
+  ];
+  for (const pg of r0Baseline) assert.ok(app.pages.includes(pg), "R0 基线页面仍注册:" + pg);
+  for (const pg of app.pages) {
+    assert.ok(!/scene-group|observation|group-card/i.test(pg), "R0 不新增页面:" + pg);
+  }
   // D2 清点历史客户端原语面不变(零语义变化)
   assert.equal(typeof locationScanUtil.buildLocationScanCommitItems, "function");
   assert.equal(typeof locationScanUtil.locationScanSessionKey, "function");

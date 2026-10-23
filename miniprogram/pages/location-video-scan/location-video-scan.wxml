@@ -124,6 +124,18 @@
             <view class="item-location">{{ item.targetText }}</view>
             <view wx:if="{{ item.moveText }}" class="warn-line">{{ item.moveText }}</view>
           </view>
+          <view wx:if="{{ item.target === 'new' }}" class="qtyrow">
+            <view class="qty-label">数量</view>
+            <view class="step">
+              <view class="stepBtn" data-index="{{ index }}" data-d="{{ -1 }}" bindtap="onDraftQtyStep">−</view>
+              <view class="stepNum">{{ item.qty }}</view>
+              <view class="stepBtn" data-index="{{ index }}" data-d="{{ 1 }}" bindtap="onDraftQtyStep">+</view>
+            </view>
+            <picker class="step-unit" range="{{ unitOptions }}" value="{{ item.unitIndex }}" data-index="{{ index }}" bindchange="onDraftUnitChange">
+              <view class="step-unit-btn">{{ item.unit }} ▾</view>
+            </picker>
+            <view wx:if="{{ !item.quantitySet }}" class="qty-pending">不填按 1 {{ item.unit }} · 线索数不代表件数</view>
+          </view>
           <view wx:if="{{ item.highlightWarning }}" class="warn-line">{{ item.highlightWarning }}</view>
           <view class="row-actions">
             <view class="link-text" data-index="{{ index }}" bindtap="onDraftMatchTap">找已有物品</view>

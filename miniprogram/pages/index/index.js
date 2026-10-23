@@ -4,6 +4,7 @@ const profile_api_1 = require("../../utils/profile-api");
 const appearance_page_1 = require("../../utils/appearance-page");
 const ui_1 = require("../../utils/ui");
 const api_1 = require("../../utils/api");
+const quantity_1 = require("../../utils/quantity");
 const voice_entry_1 = require("../../utils/voice-entry");
 const draft_session_1 = require("../../utils/draft-session");
 const photo_session_1 = require("../../utils/photo-session");
@@ -28,7 +29,19 @@ function toUnmountedRows(rows) {
     }));
 }
 function toDisplayItems(items) {
-    return items.map((item) => ({ ...item, updated_at_short: shortDate(item.updated_at), artwork: (0, ui_1.itemArtwork)(item.name), artworkDark: (0, ui_1.itemArtwork)(item.name, true) }));
+    return items.map((item) => {
+        const q = (0, quantity_1.normalizeQuantityFields)(item);
+        return {
+            ...item,
+            quantity: q.quantity,
+            unit: q.unit,
+            quantity_confirmed_at: q.quantity_confirmed_at,
+            updated_at_short: shortDate(item.updated_at),
+            artwork: (0, ui_1.itemArtwork)(item.name),
+            artworkDark: (0, ui_1.itemArtwork)(item.name, true),
+            qtyText: (0, quantity_1.quantitySlotText)(q.quantity, q.unit),
+        };
+    });
 }
 /** 记录更新日期短文案(如 10-08;updated_at 不代表位置确认时间);非法时间如实返回空串 */
 function shortDate(iso) {
@@ -786,6 +799,9 @@ Page({
         }
     },
     openItem(item, spacePath = [], videoHint) {
+        // 数量(issue #102 Q1):itemsApi 投影来源的行有数量,locations 投影来源的行
+        // 没有(undefined → null 未确认);详情页随后 get 会以权威投影刷新
+        const q = (0, quantity_1.normalizeQuantityFields)(item);
         const summary = {
             item_id: item.item_id,
             name: item.name,
@@ -793,6 +809,9 @@ Page({
             note: item.note,
             version: item.version,
             updated_at: item.updated_at,
+            quantity: q.quantity,
+            unit: q.unit,
+            quantity_confirmed_at: q.quantity_confirmed_at,
         };
         const params = ["data=" + encodeURIComponent(JSON.stringify(summary))];
         if (spacePath.length > 0) {

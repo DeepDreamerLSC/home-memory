@@ -6,6 +6,7 @@ exports.callItemsApi = callItemsApi;
 exports.callExtractDraft = callExtractDraft;
 exports.callDraftEditParse = callDraftEditParse;
 exports.callLocationSplit = callLocationSplit;
+exports.callQuantityIntentParse = callQuantityIntentParse;
 exports.callVideoTargetRecognize = callVideoTargetRecognize;
 exports.uuid = uuid;
 exports.formatDateTime = formatDateTime;
@@ -14,6 +15,7 @@ const locations_cache_1 = require("./locations-cache");
 const household_scope_1 = require("./household-scope");
 const households_api_1 = require("./households-api");
 const batch_save_1 = require("./batch-save");
+const quantity_1 = require("./quantity");
 const ITEMS_API_FUNCTION = "itemsApi";
 const EXTRACT_DRAFT_FUNCTION = "extractDraft";
 /** itemsApi 为薄适配层,正常应在数秒内返回 */
@@ -30,13 +32,15 @@ exports.CLIENT_NETWORK = "CLIENT_NETWORK";
 exports.CLIENT_BAD_RESPONSE = "CLIENT_BAD_RESPONSE";
 /** 携带错误码的异常,message 为可直接展示的中文文案 */
 class ApiError extends Error {
-    constructor(code, message, existing, cleared, superseded) {
+    constructor(code, message, existing, cleared, superseded, current, detail) {
         super(message);
         this.name = "ApiError";
         this.code = code;
         this.existing = existing;
         this.cleared = cleared;
         this.superseded = superseded;
+        this.current = current;
+        this.detail = detail;
     }
 }
 exports.ApiError = ApiError;
@@ -76,6 +80,35 @@ const REMIND_KIND_VALUES = ["有效期", "开封后", "下次维护"];
 /** 服务端规范化的提醒日期形态(客户端只透传,绝不自行解析/推算日期) */
 const REMIND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
+ * 解析单件草稿的数量候选三项(issue #102 Q1,Q0-CONTRACT §4.6 客户端半边):
+ * 三项同现同缺才有效;残缺/形状非法(半态、quantity 非正整数或超 1..9999、
+ * unit 不在闭集、quote 空或超 200)整体置 null——与服务端硬门同口径:不带数量
+ * (确认页预填 1/件 + 待确认)、不废件。客户端绝不信模型推算值。
+ */
+function parseQuantityTriple(d) {
+    const q = d.quantity;
+    const u = d.unit;
+    const quote = d.quantity_quote;
+    const qEmpty = q === null || q === undefined;
+    const uEmpty = u === null || u === undefined;
+    const quoteEmpty = quote === null || quote === undefined;
+    if (qEmpty && uEmpty && quoteEmpty) {
+        return { quantity: null, unit: null, quantity_quote: null };
+    }
+    if (typeof q === "number" &&
+        Number.isInteger(q) &&
+        q >= 1 &&
+        q <= 9999 &&
+        typeof u === "string" &&
+        quantity_1.UNIT_SET.indexOf(u) !== -1 &&
+        typeof quote === "string" &&
+        quote.length > 0 &&
+        quote.length <= 200) {
+        return { quantity: q, unit: u, quantity_quote: quote };
+    }
+    return { quantity: null, unit: null, quantity_quote: null };
+}
+/**
  * 解析单件草稿的提醒候选三项(#36 日期纪律的客户端半边):
  * 三项同现同缺才有效;残缺/形状非法(半态、非 YYYY-MM-DD、词表外、空 quote)整体置
  * null——与服务端硬门同口径:不带提醒、不废件。客户端绝不从模糊表述补算日期。
@@ -107,15 +140,18 @@ const NEEDS_SPLIT_DEFAULT_MESSAGE = "一次只记一件物品,请分开说";
 function isRecord(v) {
     return typeof v === "object" && v !== null && !Array.isArray(v);
 }
-/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared / superseded 附加数据 */
-function toServerError(code, message, fallbacks, existing, cleared, superseded) {
+/** 把服务端 ok:false 体转换为 ApiError;优先使用服务端中文 message,保留 existing / cleared / superseded / current / detail 附加数据 */
+function toServerError(code, message, fallbacks, existing, cleared, superseded, current, detail) {
     const codeText = typeof code === "string" && code.length > 0 ? code : exports.CLIENT_BAD_RESPONSE;
     const fallback = fallbacks[codeText];
     const serverMessage = typeof message === "string" && message.trim().length > 0 ? message : "";
     const existingSummary = isRecord(existing)
         ? existing
         : undefined;
-    return new ApiError(codeText, serverMessage || fallback || DEFAULT_ERROR_MESSAGE, existingSummary, cleared === true, superseded === true);
+    const currentSummary = isRecord(current)
+        ? current
+        : undefined;
+    return new ApiError(codeText, serverMessage || fallback || DEFAULT_ERROR_MESSAGE, existingSummary, cleared === true, superseded === true, currentSummary, isRecord(detail) ? detail : undefined);
 }
 /** 调用云函数,带客户端超时;不静默吞错,失败一律 reject ApiError */
 function callCloudFunction(name, data, timeoutMs) {
@@ -213,6 +249,13 @@ function validateItemsOkResponse(action, r) {
             break;
         case "update":
             if (!isRecord(r.item)) {
+                throw bad();
+            }
+            break;
+        case "quantityAdjust":
+            // Q2 语音数量操作(§7.6):item 投影必带;replayed 可缺省(首次写入)
+            if (!isRecord(r.item) ||
+                (r.replayed !== undefined && typeof r.replayed !== "boolean")) {
                 throw bad();
             }
             break;
@@ -431,6 +474,8 @@ function validateItemsOkResponse(action, r) {
 const ITEMS_MUTATING_ACTIONS = new Set([
     "create",
     "update",
+    // Q2 语音数量操作(issue #102,§7.1/L9):服务端 WRITE_ACTIONS 同族,双 marker 硬门
+    "quantityAdjust",
     "delete",
     "remindComplete",
     "remindClear",
@@ -471,7 +516,7 @@ async function callItemsApi(event) {
         throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
     }
     if (result.ok === false) {
-        const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing, result.cleared, result.superseded);
+        const err = toServerError(result.error, result.message, ITEMS_API_MESSAGES, result.existing, result.cleared, result.superseded, result.current, result.detail);
         (0, households_api_1.notifyFamilyScopeDrift)(err);
         throw err;
     }
@@ -560,6 +605,9 @@ async function callExtractDraft(text, opts) {
                     const preview = (0, batch_save_1.draftMountPathPreview)(d);
                     return preview.length > 0 ? preview : null;
                 })(),
+                // 数量候选三项(issue #102 Q1):只透传服务端锚定成功的值,
+                // 残缺/推算值整体置 null(确认页预填 1/件 + 待确认)
+                ...parseQuantityTriple(d),
             })),
             original_text: result.original_text,
             truncated: result.truncated === true,
@@ -734,6 +782,97 @@ async function callLocationSplit(text) {
         path: result.path.map((seg) => seg),
         fallback: result.fallback === true,
     };
+}
+/** quantityIntentParse 响应的 intent 闭集(§7.8,与服务端硬门同源) */
+const QUANTITY_INTENT_VALUES = [
+    "add",
+    "subtract",
+    "set",
+    "unknown",
+    "other",
+];
+const QUANTITY_INTENT_AMBIGUITY_VALUES = [
+    "maybe_total",
+    "location_unclear",
+    "unit_unclear",
+];
+/**
+ * 语音数量意图提议(issue #102 Q2,extractDraft.quantityIntentParse,§7.8):
+ * 零写库——服务端只产出提议 {intent,item_query,delta|value,unit,source_quote,
+ * match,needs_pick,ambiguity},目标 item_id 由确认页用户从候选点选,绝不模型
+ * 直填。客户端只做形状门(残缺响应整体抛 CLIENT_BAD_RESPONSE,绝不半带);
+ * 数字锚定/词表硬门/编造候选丢弃均由服务端裁定。超时与 callExtractDraft 同款。
+ */
+async function callQuantityIntentParse(event) {
+    const result = await callCloudFunction(EXTRACT_DRAFT_FUNCTION, event, EXTRACT_DRAFT_TIMEOUT_MS);
+    if (!isRecord(result)) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    if (result.ok === false) {
+        throw toServerError(result.error, result.message, EXTRACT_DRAFT_MESSAGES);
+    }
+    if (result.ok !== true) {
+        throw new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    }
+    const bad = () => new ApiError(exports.CLIENT_BAD_RESPONSE, BAD_RESPONSE_MESSAGE);
+    const intent = result.intent;
+    if (typeof intent !== "string" ||
+        QUANTITY_INTENT_VALUES.indexOf(intent) === -1 ||
+        typeof result.needs_pick !== "boolean" ||
+        typeof result.item_query !== "string") {
+        throw bad();
+    }
+    if (result.delta !== undefined && Number.isInteger(result.delta) === false)
+        throw bad();
+    if (result.value !== undefined && Number.isInteger(result.value) === false)
+        throw bad();
+    if (result.unit !== undefined &&
+        (typeof result.unit !== "string" || quantity_1.UNIT_SET.indexOf(result.unit) === -1)) {
+        throw bad();
+    }
+    if (result.source_quote !== undefined && typeof result.source_quote !== "string")
+        throw bad();
+    if (result.ambiguity !== undefined) {
+        if (typeof result.ambiguity !== "string" ||
+            QUANTITY_INTENT_AMBIGUITY_VALUES.indexOf(result.ambiguity) === -1) {
+            throw bad();
+        }
+    }
+    let match;
+    if (result.match !== undefined) {
+        const m = result.match;
+        if (!isRecord(m) ||
+            Number.isInteger(m.candidate_index) === false ||
+            m.candidate_index < 0 ||
+            typeof m.matched_word !== "string") {
+            throw bad();
+        }
+        match = {
+            candidate_index: m.candidate_index,
+            matched_word: m.matched_word,
+        };
+    }
+    const out = {
+        ok: true,
+        engine: typeof result.engine === "string" ? result.engine : "",
+        intent: intent,
+        needs_pick: result.needs_pick,
+        item_query: result.item_query,
+    };
+    if (result.delta !== undefined)
+        out.delta = result.delta;
+    if (result.value !== undefined)
+        out.value = result.value;
+    if (result.unit !== undefined)
+        out.unit = result.unit;
+    if (result.source_quote !== undefined)
+        out.source_quote = result.source_quote;
+    if (result.ambiguity !== undefined) {
+        out.ambiguity = result.ambiguity;
+    }
+    if (match !== undefined)
+        out.match = match;
+    return out;
 }
 /**
  * 单件视频「AI 找这件物品」单帧识别(extractDraft.videoTargetRecognize):
