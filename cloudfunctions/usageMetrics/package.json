@@ -1,0 +1,10 @@
+{
+  "name": "usageMetrics",
+  "version": "1.0.0",
+  "description": "home-memory 视频确认流零隐私使用埋点:匿名纯计数 append,不读身份字段",
+  "main": "index.js",
+  "cloudfunction": true,
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
