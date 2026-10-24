@@ -126,7 +126,7 @@
     <view class="empty-title">已保存</view>
     <view class="empty-sub">{{resultText}}</view>
     <view class="privacy-note">视频默认不在详情页自动播放；需要你点开才播放。</view>
-    <view class="primary-btn" bindtap="onDoneBackTap">返回</view>
+    <view class="primary-btn done-back" bindtap="onDoneBackTap">返回</view>
   </view>
 
   <view wx:if="{{phase === 'failed'}}" class="card center-card">
