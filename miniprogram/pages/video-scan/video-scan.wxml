@@ -5,6 +5,17 @@
     <view class="hero-sub">抽屉/柜子录一段视频，AI 给线索；你逐件勾选、改名、拆分或补件后才保存。同名不代表同一件，原视频确认前不上传。</view>
   </view>
 
+  <!-- L2 断点续扫:识别中断(有已落盘进度且未到总帧数)时给续扫入口 + 重新扫描次选 -->
+  <view
+    wx:if="{{!busy && (phase === 'idle' || phase === 'review' || phase === 'failed') && scannedFrameIndexes.length > 0 && scannedFrameIndexes.length < framesTotal}}"
+    class="card"
+  >
+    <view class="section-title">上次识别中断</view>
+    <view class="hint">已识别 {{scannedFrameIndexes.length}} 帧，继续识别剩余 {{framesTotal - scannedFrameIndexes.length}} 帧</view>
+    <view class="primary-btn" bindtap="onResumeScanTap">继续识别剩余 {{framesTotal - scannedFrameIndexes.length}} 帧</view>
+    <view class="secondary-btn" bindtap="onRescanTap">重新扫描</view>
+  </view>
+
   <view wx:if="{{phase === 'idle'}}" class="card center-card">
     <view class="empty-face">📦</view>
     <view class="empty-title">录一段抽屉或柜子</view>

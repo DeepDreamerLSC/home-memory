@@ -822,7 +822,8 @@ test("SGP-SESSION-RESTORE:B 页恢复 R0 前格式会话;组/观察/归属找回
   const stored = storage[VIDEO_SESSION_KEY];
   assert.ok(stored, "saveSession 应写回会话");
   assert.equal(stored.version, 1);
-  assert.deepEqual(Object.keys(stored).sort(), VIDEO_SESSION_FIELDS, "会话对象字段集与旧版完全一致,无新键");
+  assert.deepEqual(Object.keys(stored).sort(), VIDEO_SESSION_FIELDS.concat(["scannedFrameIndexes"]).sort(),
+    "会话字段集=旧版集合+L2 授权新增 scannedFrameIndexes(2026-10-24 断点续扫,真机反馈);除此之外无新键");
 });
 
 test("SGP-SESSION-RESTORE-D1:D1 页恢复同格式会话;字段集不变(§6)", async () => {
@@ -872,7 +873,8 @@ test("SGP-SESSION-RESTORE-D1:D1 页恢复同格式会话;字段集不变(§6)", 
   const stored = storage[sessionKey];
   assert.ok(stored);
   assert.equal(stored.version, 1);
-  assert.deepEqual(Object.keys(stored).sort(), LOC_SESSION_FIELDS, "D1 会话字段集与旧版完全一致,无新键");
+  assert.deepEqual(Object.keys(stored).sort(), LOC_SESSION_FIELDS.concat(["scannedFrameIndexes"]).sort(),
+    "D1 会话字段集=旧版集合+L2 授权新增 scannedFrameIndexes(2026-10-24 断点续扫);除此之外无新键");
 });
 
 /* ---------------- C-9 文案口径(三数分立/保存计数/禁混称) ---------------- */

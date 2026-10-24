@@ -15,12 +15,14 @@ import {
   mergeSceneDrafts,
   newSceneDraft,
   scanSceneVideo,
+  sceneFrameTotal,
   setDraftUnit,
   splitSceneDraft,
   stepDraftQty,
   type SceneDraftItem,
   type SceneObservation,
 } from "../../utils/video-scene";
+import { setScanKeepScreenOn } from "../../utils/keep-screen";
 import {
   buildSceneGroupViews,
   claimGuard,
@@ -122,6 +124,12 @@ interface StoredSceneSession {
   height: number;
   batchLocation: string;
   observations: SceneObservation[];
+  /**
+   * L2 断点续扫(真机反馈 2026-10-24):已识别完成的帧号集(含零候选帧;失败帧
+   * 不算完成待重试)。存量会话无此字段 = 无进度,行为与旧版一致(全量重扫),
+   * 零迁移。完成标记与 observations 存在性解耦:零候选帧合法且不重复识别。
+   */
+  scannedFrameIndexes: number[];
   drafts: SceneDraftItem[];
   pendingUpload: PendingUpload | null;
   frozenItems: VideoSceneCommitItem[];
@@ -141,6 +149,10 @@ interface PageData {
   errorText: string;
   resultText: string;
   observations: SceneObservation[];
+  /** L2 断点续扫:已识别完成帧号集(会话持久化,每帧完成追加一次) */
+  scannedFrameIndexes: number[];
+  /** L2 断点续扫:本视频总帧数(帧计划确定性,恢复判定单一来源) */
+  framesTotal: number;
   drafts: SceneDraftItem[];
   mergeSelectedKeys: string[];
   observationGroups: SceneGroupView[];
@@ -211,6 +223,7 @@ function makeSession(
     height: data.videoHeight,
     batchLocation: data.batchLocation,
     observations: data.observations,
+    scannedFrameIndexes: data.scannedFrameIndexes,
     drafts: data.drafts,
     pendingUpload,
     frozenItems: data.frozenItems,
@@ -227,6 +240,10 @@ function parseStoredSession(raw: unknown): StoredSceneSession | null {
     ? raw.pendingUpload as unknown as PendingUpload
     : null;
   const frozen = Array.isArray(raw.frozenItems) ? raw.frozenItems as unknown as VideoSceneCommitItem[] : [];
+  // L2 兼容:存量会话无 scannedFrameIndexes → 空集 = 无进度,与旧版全量重扫一致
+  const scannedFrameIndexes = Array.isArray(raw.scannedFrameIndexes)
+    ? (raw.scannedFrameIndexes as unknown[]).filter((n): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0)
+    : [];
   return {
     version: 1,
     createdAt: raw.createdAt,
@@ -239,6 +256,7 @@ function parseStoredSession(raw: unknown): StoredSceneSession | null {
     height: typeof raw.height === "number" ? raw.height : 0,
     batchLocation: typeof raw.batchLocation === "string" ? raw.batchLocation : "",
     observations: raw.observations as unknown as SceneObservation[],
+    scannedFrameIndexes,
     drafts: raw.drafts as unknown as SceneDraftItem[],
     pendingUpload: pending,
     frozenItems: frozen,
@@ -261,6 +279,8 @@ Page({
     errorText: "",
     resultText: "",
     observations: [] as SceneObservation[],
+    scannedFrameIndexes: [] as number[],
+    framesTotal: 0,
     drafts: [] as SceneDraftItem[],
     mergeSelectedKeys: [] as string[],
     observationGroups: [] as SceneGroupView[],
@@ -296,6 +316,8 @@ Page({
       videoAspect: stored.width > 0 && stored.height > 0 ? stored.width + " / " + stored.height : "16 / 9",
       batchLocation: stored.batchLocation,
       observations: stored.observations,
+      scannedFrameIndexes: stored.scannedFrameIndexes,
+      framesTotal: sceneFrameTotal(stored.durationMs),
       drafts: stored.drafts,
       frozenItems: stored.frozenItems,
       pendingUpload: stored.pendingUpload,
@@ -322,6 +344,9 @@ Page({
         drafts: this.data.drafts.length,
       }, Date.now()));
     }
+    // L1:退后台/离开页面必恢复熄屏(幂等;漏恢复=常亮耗电事故)
+    setScanKeepScreenOn(false);
+    // 仍保留取消抽帧会话(防僵尸):变化只是逐帧进度已落盘,onShow 后可续扫
     const session = (this as unknown as { scanSession?: VideoFrameSession }).scanSession;
     if (session !== undefined) {
       void session.cancel();
@@ -330,7 +355,8 @@ Page({
     if (this.data.phase === "scanning") {
       this.setData({ phase: "review" });
     }
-    if (this.data.observations.length > 0 || this.data.drafts.length > 0 || this.data.pendingUpload !== null) {
+    if (this.data.observations.length > 0 || this.data.drafts.length > 0 || this.data.pendingUpload !== null
+      || this.data.scannedFrameIndexes.length > 0) {
       this.saveSession();
     }
   },
@@ -340,7 +366,8 @@ Page({
   },
 
   saveSession() {
-    if (this.data.observations.length === 0 && this.data.drafts.length === 0 && this.data.pendingUpload === null) return;
+    if (this.data.observations.length === 0 && this.data.drafts.length === 0 && this.data.pendingUpload === null
+      && this.data.scannedFrameIndexes.length === 0) return;
     storageSet(scopeKey(SESSION_PREFIX), makeSession(this.data as unknown as PageData, this.data.pendingUpload));
   },
 
@@ -432,8 +459,14 @@ Page({
     await this.startSceneScan(file);
   },
 
-  async startSceneScan(file: PickedVideoFile) {
-    const sceneId = uuid();
+  /**
+   * 识别主循环。options.skipFrameIndexes 非空 = L2 续扫:跳过已完成帧的 VL 调用,
+   * 保留已持久化的 observations/drafts/sceneId(同一视频、同一 scene_id);
+   * 缺省 = 全新识别(重扫/首次),从零开始。
+   */
+  async startSceneScan(file: PickedVideoFile, options?: { skipFrameIndexes?: number[] }) {
+    const resume = options !== undefined && Array.isArray(options.skipFrameIndexes) && options.skipFrameIndexes.length > 0;
+    const sceneId = resume ? this.data.sceneId : uuid();
     const epoch = ((this as unknown as { scanEpoch?: number }).scanEpoch || 0) + 1;
     (this as unknown as { scanEpoch?: number }).scanEpoch = epoch;
     let session: VideoFrameSession;
@@ -444,8 +477,12 @@ Page({
       return;
     }
     (this as unknown as { scanSession?: VideoFrameSession }).scanSession = session;
-    // 新一次清点 = 新一次计量:归零计数、重置会话起点
-    resetUsageSession(this.usage, Date.now());
+    if (resume !== true) {
+      // 新一次清点 = 新一次计量:归零计数、重置会话起点(续扫是同一次清点的延续,不重置)
+      resetUsageSession(this.usage, Date.now());
+    }
+    // L1:识别期间防熄屏;循环结束(完成/失败/取消)与 onHide/onUnload 全路径恢复
+    setScanKeepScreenOn(true);
     this.setData({
       phase: "scanning",
       sceneId,
@@ -454,15 +491,17 @@ Page({
       videoWidth: file.width,
       videoHeight: file.height,
       videoAspect: file.width > 0 && file.height > 0 ? file.width + " / " + file.height : "16 / 9",
-      observations: [],
-      drafts: [],
+      observations: resume === true ? this.data.observations : [],
+      scannedFrameIndexes: resume === true ? this.data.scannedFrameIndexes : [],
+      framesTotal: sceneFrameTotal(file.durationMs),
+      drafts: resume === true ? this.data.drafts : [],
       mergeSelectedKeys: [],
       frozenItems: [],
       pendingUpload: null,
       errorText: "",
       failureText: "",
       resultText: "",
-      progressText: "正在抽取第 1/8 帧…",
+      progressText: resume === true ? "正在续扫剩余帧…" : "正在抽取第 1/8 帧…",
       busy: true,
     });
     this.renderObservations();
@@ -472,6 +511,7 @@ Page({
       source: { path: file.path, durationMs: file.durationMs },
       durationMs: file.durationMs,
       session,
+      skipFrameIndexes: options !== undefined ? options.skipFrameIndexes : undefined,
       callRecognize: async (input) => {
         const prepared: PhotoVlPrepared = {
           ok: true,
@@ -493,18 +533,34 @@ Page({
           progressText: "已分析 " + done + "/" + total + " 帧" + (failures > 0 ? "，" + failures + " 帧失败" : ""),
         });
       },
+      // L2:每帧识别处理完(含零候选)追加完成标记并落盘一次(每帧一次,不更高频);
+      // 失败帧不算完成,续扫时自动重试
+      onFrameDone: (frame) => {
+        if (((this as unknown as { scanEpoch?: number }).scanEpoch || 0) !== epoch) return;
+        const observations = this.data.observations
+          .filter((o) => o.frameIndex !== frame.frameIndex)
+          .concat(frame.observations);
+        const scannedFrameIndexes = frame.ok && this.data.scannedFrameIndexes.indexOf(frame.frameIndex) === -1
+          ? this.data.scannedFrameIndexes.concat([frame.frameIndex])
+          : this.data.scannedFrameIndexes;
+        this.setData({ observations, scannedFrameIndexes }, () => {
+          this.saveSession();
+        });
+      },
     });
 
+    // L1:识别循环结束(完成/失败/取消)一律恢复熄屏;放在 epoch 判定之前,任何收尾路径都不漏
+    setScanKeepScreenOn(false);
     if (((this as unknown as { scanEpoch?: number }).scanEpoch || 0) !== epoch) return;
     if (outcome.ok === false) {
       if (outcome.kind === "cancelled") {
         this.setData({ phase: "idle", busy: false, progressText: "" });
         return;
       }
+      // observations 已按帧增量累计(含续扫前的已持久化观察),不用本轮结果覆盖
       this.setData({
-        phase: outcome.observations.length > 0 ? "review" : "failed",
+        phase: this.data.observations.length > 0 ? "review" : "failed",
         busy: false,
-        observations: outcome.observations,
         errorText: outcome.message,
       });
       this.renderObservations();
@@ -520,17 +576,16 @@ Page({
     this.setData({
       phase: "review",
       busy: false,
-      observations: outcome.observations,
       failureText: [failureText, truncatedText].filter((s) => s !== "").join(" "),
-      resultText: outcome.observations.length === 0
+      resultText: this.data.observations.length === 0
         ? "AI 暂未给出物品线索，可手动补一件；原视频仍只在最终确认后上传。"
-        : "已发现 " + outcome.observations.length + " 条线索；同名线索只是提示，不会被自动合并。",
+        : "已发现 " + this.data.observations.length + " 条线索；同名线索只是提示，不会被自动合并。",
       progressText: "",
     });
     this.renderObservations();
     this.renderDrafts();
     this.saveSession();
-    if (outcome.manualFallback) {
+    if (outcome.manualFallback && this.data.observations.length === 0) {
       wx.showToast({ title: "未识别到线索，可手动补件", icon: "none" });
     }
   },
@@ -540,12 +595,62 @@ Page({
     const session = (this as unknown as { scanSession?: VideoFrameSession }).scanSession;
     if (session !== undefined) await session.cancel();
     (this as unknown as { scanSession?: VideoFrameSession }).scanSession = undefined;
+    // L1:用户取消路径恢复熄屏(循环返回 cancelled 时还会再恢复一次,幂等无害)
+    setScanKeepScreenOn(false);
   },
 
   async onCancelScanTap() {
     await this.cancelScan();
-    this.setData({ phase: "idle", busy: false, observations: [], drafts: [], progressText: "", errorText: "" });
+    if (this.data.scannedFrameIndexes.length > 0) {
+      // L2:已有落盘进度时,取消只停本轮识别,进度保留——横幅仍可「继续识别剩余帧」
+      this.setData({ phase: "review", busy: false, progressText: "", errorText: "" });
+      this.saveSession();
+      return;
+    }
+    this.setData({ phase: "idle", busy: false, observations: [], drafts: [], scannedFrameIndexes: [], progressText: "", errorText: "" });
     this.clearSession();
+  },
+
+  /** L2:继续识别剩余帧——重跑 scanSceneVideo(帧计划确定性重建),跳过已完成帧的 VL 调用 */
+  async onResumeScanTap() {
+    if (this.data.busy) return;
+    if (this.data.videoPath === "" || this.data.videoDurationMs <= 0) return;
+    const available = await this.localVideoAvailable();
+    if (available === false) {
+      wx.showToast({ title: "本地视频临时文件已失效，请重拍", icon: "none" });
+      return;
+    }
+    await this.startSceneScan(
+      {
+        path: this.data.videoPath,
+        durationMs: this.data.videoDurationMs,
+        width: this.data.videoWidth,
+        height: this.data.videoHeight,
+        size: 0,
+      },
+      { skipFrameIndexes: this.data.scannedFrameIndexes.slice() },
+    );
+  },
+
+  /** L2:重新扫描——清空本会话进度从头来(不发 abandon:仍在 scanning 语义内) */
+  async onRescanTap() {
+    if (this.data.busy) return;
+    if (this.data.videoPath === "" || this.data.videoDurationMs <= 0) return;
+    const available = await this.localVideoAvailable();
+    if (available === false) {
+      wx.showToast({ title: "本地视频临时文件已失效，请重拍", icon: "none" });
+      return;
+    }
+    this.clearSession();
+    await this.startSceneScan(
+      {
+        path: this.data.videoPath,
+        durationMs: this.data.videoDurationMs,
+        width: this.data.videoWidth,
+        height: this.data.videoHeight,
+        size: 0,
+      },
+    );
   },
 
   /** 点缩略图放大预览(组件事件 e.detail.obsId):current=该观察帧,urls=组内全部 framePath */
@@ -909,6 +1014,8 @@ Page({
           errorText: "",
           resultText: "",
           observations: [],
+          scannedFrameIndexes: [],
+          framesTotal: 0,
           drafts: [],
           mergeSelectedKeys: [],
           frozenItems: [],

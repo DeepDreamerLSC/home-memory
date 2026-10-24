@@ -62,6 +62,17 @@
       <view wx:if="{{ errorText }}" class="error-text">{{ errorText }}</view>
     </view>
 
+    <!-- L2 断点续扫:识别中断(有已落盘进度且未到总帧数)时给续扫入口 + 重新扫描次选 -->
+    <view
+      wx:if="{{ !busy && (phase === 'idle' || phase === 'review' || phase === 'failed') && scannedFrameIndexes.length > 0 && scannedFrameIndexes.length < framesTotal }}"
+      class="card"
+    >
+      <view class="card-title">上次识别中断</view>
+      <view class="hint">已识别 {{ scannedFrameIndexes.length }} 帧,继续识别剩余 {{ framesTotal - scannedFrameIndexes.length }} 帧</view>
+      <button class="btn block primary" bindtap="onResumeScanTap"><view class="btn-face">继续识别剩余 {{ framesTotal - scannedFrameIndexes.length }} 帧</view></button>
+      <button class="btn block" bindtap="onRescanTap"><view class="btn-face">重新扫描</view></button>
+    </view>
+
     <!-- 线索与草稿(review):组卡收拢(R0 #101),与 B 页同一组件 -->
     <block wx:if="{{ phase === 'review' || phase === 'uploading' || phase === 'committing' || phase === 'partial' }}">
       <view class="card">
