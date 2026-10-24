@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SCENE_HIGHLIGHT_WINDOW_MS = exports.SCENE_HIGHLIGHTS_MAX = exports.SCENE_ITEMS_MAX = void 0;
 exports.planSceneFrames = planSceneFrames;
+exports.sceneFrameTotal = sceneFrameTotal;
 exports.scanSceneVideo = scanSceneVideo;
 exports.groupSceneObservations = groupSceneObservations;
 exports.newSceneDraft = newSceneDraft;
@@ -24,6 +25,10 @@ exports.SCENE_HIGHLIGHTS_MAX = 8;
 exports.SCENE_HIGHLIGHT_WINDOW_MS = 1500;
 function planSceneFrames(durationMs) {
     return (0, video_target_1.buildFramePlan)(durationMs, { supplemental: true }).slice(0, 8);
+}
+/** L2 断点续扫:同一视频的帧计划确定性生成,总帧数单一来源(恢复判定用) */
+function sceneFrameTotal(durationMs) {
+    return planSceneFrames(durationMs).length;
 }
 function sceneError(error) {
     if ((0, video_target_1.isVideoTargetError)(error))
@@ -67,11 +72,19 @@ async function scanSceneVideo(options) {
         return { ok: false, kind, message: sceneError(e), observations, failures };
     }
     let scanned = 0;
+    const skip = new Set(options.skipFrameIndexes ? options.skipFrameIndexes : []);
     for (let i = 0; i < plans.length; i++) {
         if (session.cancelled) {
             return { ok: false, kind: "cancelled", message: "场景识别已取消", observations, failures };
         }
         const plan = plans[i];
+        if (skip.has(plan.frameIndex)) {
+            // L2 断点续扫:已完成帧(含零候选)不再抽帧、不再调 VL,只计入进度
+            scanned += 1;
+            if (options.onProgress)
+                options.onProgress(scanned, plans.length, failures.length);
+            continue;
+        }
         try {
             const frame = await session.captureAt(plan.timeMs, plan.frameIndex);
             if (session.cancelled) {
@@ -85,10 +98,13 @@ async function scanSceneVideo(options) {
             scanned += 1;
             if (result.ok !== true) {
                 failures.push({ frameIndex: plan.frameIndex, timeMs: plan.timeMs, message: result.message || result.error || "AI 识别暂不可用" });
+                if (options.onFrameDone)
+                    options.onFrameDone({ frameIndex: plan.frameIndex, ok: false, truncated: false, observations: [] });
             }
             else {
                 if (result.truncated === true)
                     truncatedFrames.push(plan.frameIndex);
+                const frameObservations = [];
                 for (const item of result.items) {
                     const name = typeof item.name === "string" ? item.name.trim() : "";
                     if (name === "")
@@ -108,8 +124,18 @@ async function scanSceneVideo(options) {
                         box: normalizeBox(item.box),
                     };
                     observations.push(observation);
+                    frameObservations.push(observation);
                     if (options.onObservation)
                         options.onObservation(observation);
+                }
+                // 零候选帧也回调 ok=true(完成标记与观察存在性解耦,见 SceneFrameDone)
+                if (options.onFrameDone) {
+                    options.onFrameDone({
+                        frameIndex: plan.frameIndex,
+                        ok: true,
+                        truncated: result.truncated === true,
+                        observations: frameObservations,
+                    });
                 }
             }
         }
@@ -118,6 +144,8 @@ async function scanSceneVideo(options) {
                 return { ok: false, kind: "cancelled", message: "场景识别已取消", observations, failures };
             }
             failures.push({ frameIndex: plan.frameIndex, timeMs: plan.timeMs, message: sceneError(e) });
+            if (options.onFrameDone)
+                options.onFrameDone({ frameIndex: plan.frameIndex, ok: false, truncated: false, observations: [] });
         }
         if (options.onProgress)
             options.onProgress(scanned, plans.length, failures.length);

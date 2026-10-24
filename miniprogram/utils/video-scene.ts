@@ -84,6 +84,20 @@ export type SceneScanOutcome =
       failures: SceneFrameFailure[];
     };
 
+/**
+ * L2 断点续扫:每帧识别处理完(该帧 callRecognize 返回并处理完,含零候选)回调
+ * 一次。ok=true 表示拿到确定结果(零候选也是完成——不能用「有无 observations」
+ * 判断,零候选帧会被重复识别);ok=false 表示该帧识别失败(抽帧异常或 VL 返回
+ * 失败),不算完成,续扫时自动重试。
+ */
+export interface SceneFrameDone {
+  frameIndex: number;
+  ok: boolean;
+  truncated: boolean;
+  /** 本帧新产出的观察;失败帧与零候选帧为空数组 */
+  observations: SceneObservation[];
+}
+
 export interface SceneScanOptions {
   source: VideoFrameSource;
   durationMs: number;
@@ -91,10 +105,19 @@ export interface SceneScanOptions {
   callRecognize: (input: SceneRecognizeFrameInput) => Promise<SceneRecognizeFrameResult>;
   onProgress?: (done: number, total: number, failures: number) => void;
   onObservation?: (observation: SceneObservation) => void;
+  /** L2 断点续扫:这些帧此前已完成识别(含零候选),本轮跳过其 VL 调用 */
+  skipFrameIndexes?: number[];
+  /** L2 断点续扫:每帧识别处理完回调一次(含零候选与失败帧),页面据此落盘进度 */
+  onFrameDone?: (frame: SceneFrameDone) => void;
 }
 
 export function planSceneFrames(durationMs: number): SceneFramePlan[] {
   return buildFramePlan(durationMs, { supplemental: true }).slice(0, 8);
+}
+
+/** L2 断点续扫:同一视频的帧计划确定性生成,总帧数单一来源(恢复判定用) */
+export function sceneFrameTotal(durationMs: number): number {
+  return planSceneFrames(durationMs).length;
 }
 
 function sceneError(error: unknown): string {
@@ -137,11 +160,18 @@ export async function scanSceneVideo(options: SceneScanOptions): Promise<SceneSc
   }
 
   let scanned = 0;
+  const skip = new Set(options.skipFrameIndexes ? options.skipFrameIndexes : []);
   for (let i = 0; i < plans.length; i++) {
     if (session.cancelled) {
       return { ok: false, kind: "cancelled", message: "场景识别已取消", observations, failures };
     }
     const plan = plans[i];
+    if (skip.has(plan.frameIndex)) {
+      // L2 断点续扫:已完成帧(含零候选)不再抽帧、不再调 VL,只计入进度
+      scanned += 1;
+      if (options.onProgress) options.onProgress(scanned, plans.length, failures.length);
+      continue;
+    }
     try {
       const frame = await session.captureAt(plan.timeMs, plan.frameIndex);
       if (session.cancelled) {
@@ -155,8 +185,10 @@ export async function scanSceneVideo(options: SceneScanOptions): Promise<SceneSc
       scanned += 1;
       if (result.ok !== true) {
         failures.push({ frameIndex: plan.frameIndex, timeMs: plan.timeMs, message: result.message || result.error || "AI 识别暂不可用" });
+        if (options.onFrameDone) options.onFrameDone({ frameIndex: plan.frameIndex, ok: false, truncated: false, observations: [] });
       } else {
         if (result.truncated === true) truncatedFrames.push(plan.frameIndex);
+        const frameObservations: SceneObservation[] = [];
         for (const item of result.items) {
           const name = typeof item.name === "string" ? item.name.trim() : "";
           if (name === "") continue;
@@ -175,7 +207,17 @@ export async function scanSceneVideo(options: SceneScanOptions): Promise<SceneSc
             box: normalizeBox(item.box),
           };
           observations.push(observation);
+          frameObservations.push(observation);
           if (options.onObservation) options.onObservation(observation);
+        }
+        // 零候选帧也回调 ok=true(完成标记与观察存在性解耦,见 SceneFrameDone)
+        if (options.onFrameDone) {
+          options.onFrameDone({
+            frameIndex: plan.frameIndex,
+            ok: true,
+            truncated: result.truncated === true,
+            observations: frameObservations,
+          });
         }
       }
     } catch (e) {
@@ -183,6 +225,7 @@ export async function scanSceneVideo(options: SceneScanOptions): Promise<SceneSc
         return { ok: false, kind: "cancelled", message: "场景识别已取消", observations, failures };
       }
       failures.push({ frameIndex: plan.frameIndex, timeMs: plan.timeMs, message: sceneError(e) });
+      if (options.onFrameDone) options.onFrameDone({ frameIndex: plan.frameIndex, ok: false, truncated: false, observations: [] });
     }
     if (options.onProgress) options.onProgress(scanned, plans.length, failures.length);
   }
