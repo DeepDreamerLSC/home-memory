@@ -36,6 +36,19 @@ import { recognizeWithVl, type PhotoVlPrepared } from "../../utils/photo-vl";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { householdScopeId } from "../../utils/household-scope";
 import { UNIT_SET } from "../../utils/quantity";
+import {
+  buildVideoConfirmUsagePing,
+  bumpUsageCount,
+  createUsageSession,
+  detectUsagePlatform,
+  markUsageAbandoned,
+  markUsageSaved,
+  markUsageSessionStart,
+  resetUsageSession,
+  sendUsagePing,
+  shouldReportUsageAbandon,
+  type UsageSessionState,
+} from "../../utils/usage-metrics";
 import type {
   VideoEvidenceHighlightInput,
   VideoSceneCommitItem,
@@ -260,9 +273,18 @@ Page({
     busy: false,
   },
 
+  /**
+   * 零隐私使用埋点会话计数器(#85/#76 降本阶梯第 2 级):纯内存、不入 storage
+   * (会话存储字段集保持旧版不变);计数/门/构建逻辑在 utils/usage-metrics,
+   * 与 D1 页共用同一实现,页面只调用。
+   */
+  usage: createUsageSession(),
+
   onLoad() {
     const stored = parseStoredSession(storageGet(scopeKey(SESSION_PREFIX)));
     if (stored === null) return;
+    // 恢复会话:补埋点起点(只补一次,不清计数——计数是本次页面会话的交互量)
+    markUsageSessionStart(this.usage, Date.now());
     const phase: ScenePhase = stored.pendingUpload !== null ? "partial" : "review";
     this.setData({
       phase,
@@ -290,6 +312,16 @@ Page({
   },
 
   onHide() {
+    // 零隐私使用埋点:有扫描结果但未保存就离开 → abandon ping(best-effort,至多一次;
+    // uploading/committing 不报——提交仍在后台收敛,done 已由 save ping 收口)
+    if (shouldReportUsageAbandon(this.usage, this.data.phase, this.data.observations.length)) {
+      markUsageAbandoned(this.usage);
+      sendUsagePing(buildVideoConfirmUsagePing(this.usage, "video_confirm_abandon", detectUsagePlatform(), {
+        observations: this.data.observations.length,
+        groups: buildSceneGroupViews(this.data.observations, this.data.drafts).length,
+        drafts: this.data.drafts.length,
+      }, Date.now()));
+    }
     const session = (this as unknown as { scanSession?: VideoFrameSession }).scanSession;
     if (session !== undefined) {
       void session.cancel();
@@ -412,6 +444,8 @@ Page({
       return;
     }
     (this as unknown as { scanSession?: VideoFrameSession }).scanSession = session;
+    // 新一次清点 = 新一次计量:归零计数、重置会话起点
+    resetUsageSession(this.usage, Date.now());
     this.setData({
       phase: "scanning",
       sceneId,
@@ -738,6 +772,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index);
     if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
     const removed = this.data.drafts[index];
+    bumpUsageCount(this.usage, "removes");
     const drafts = this.data.drafts.filter((_, i) => i !== index);
     const keys = this.data.mergeSelectedKeys.filter((k) => k !== removed.draftKey);
     this.setData({ drafts, mergeSelectedKeys: keys }, () => {
@@ -756,6 +791,7 @@ Page({
       wx.showToast({ title: "这件只有一条高亮，无需拆分", icon: "none" });
       return;
     }
+    bumpUsageCount(this.usage, "splits");
     const drafts = this.data.drafts.slice();
     drafts.splice(index, 1, ...split);
     this.setData({ drafts }, () => {
@@ -772,6 +808,7 @@ Page({
       wx.showToast({ title: "请选择至少两件新建物品草稿", icon: "none" });
       return;
     }
+    bumpUsageCount(this.usage, "merges");
     const keys = new Set(this.data.mergeSelectedKeys);
     const firstIndex = this.data.drafts.findIndex((d) => keys.has(d.draftKey));
     const drafts = this.data.drafts.filter((d) => keys.has(d.draftKey) === false);
@@ -786,6 +823,7 @@ Page({
   onAddManualDraftTap() {
     const duration = Math.max(1, this.data.videoDurationMs);
     const end = Math.min(duration, 1500);
+    bumpUsageCount(this.usage, "manualAdds");
     const draft = newSceneDraft({
       locationText: this.data.batchLocation,
       manualHighlights: [{
@@ -1038,6 +1076,14 @@ Page({
         this.clearSession();
         this.renderDrafts();
       });
+      // 零隐私使用埋点(#85/#76):保存成功一次 save ping(fire-and-forget,失败全吞;
+      // 先置 savedSent,离开时不再补 abandon)
+      markUsageSaved(this.usage);
+      sendUsagePing(buildVideoConfirmUsagePing(this.usage, "video_confirm_save", detectUsagePlatform(), {
+        observations: this.data.observations.length,
+        groups: buildSceneGroupViews(this.data.observations, this.data.drafts).length,
+        drafts: successCount,
+      }, Date.now()));
       const session = (this as unknown as { scanSession?: VideoFrameSession }).scanSession;
       if (session !== undefined) {
         await session.cancel();

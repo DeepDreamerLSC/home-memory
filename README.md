@@ -10,7 +10,7 @@
 
 - **小程序端**:微信原生小程序,TypeScript(`miniprogram/tsconfig.json` 为 strict 模式)。**采用预编译**:修改 `.ts` 后运行 `npm run build:mp`(即 `tsc -p miniprogram`)在源码旁产出 `.js`,开发者工具与 CLI preview/upload 直接使用编译产物。不使用 `useCompilerPlugins`(实测部分版本在 CLI/preview 构建路径上不产出 JS,导致「未找到 pages/xxx.js」);类型检查用 `npm run typecheck`。
 - **服务端**:微信云开发 Node.js 云函数(JavaScript CommonJS,除 `wx-server-sdk` 外零 npm 依赖),小程序通过 `wx.cloud.callFunction` 调用。
-- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets`、`video_item_locks` 与 `location_scans` 九个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写)。
+- **数据库**:CloudBase 文档数据库,`items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets`、`video_item_locks`、`location_scans` 与 `usage_metrics` 十个集合(issue #18 起位置沉淀为可浏览的空间树;item_location_history 是只追加的位置变更历史预留层,best-effort 写入、不承诺完整审计,仅 locations 云函数写入,无需人工维护;reminders 为 issue #36 独立提醒实体,仅 itemsApi 写入;remind_subscriptions 为 #36 V1.5 到期微信提醒的订阅记录,仅 remindNotify 云函数读写;usage_metrics 为零隐私使用埋点纯计数,仅 usageMetrics 云函数 append,见 ⑪)。
 - **AI**:DeepSeek Chat Completions(model `deepseek-flash`,显式禁用思考模式),**仅服务端调用**,API key 只走云函数环境变量。
 - 不引入 Redis、向量库、FastAPI、自研队列。
 
@@ -113,7 +113,7 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 4. 创建集合、唯一索引与权限(必做,缺一不可)
 
-云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets` 与 `video_item_locks`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;视频留证三个集合见 ⑧)。随后完成配置:
+云开发控制台 → 数据库 → 分别创建集合 `items`、`locations`、`item_location_history`、`reminders`、`remind_subscriptions`、`video_evidence`、`video_upload_tickets`、`video_item_locks`、`location_scans` 与 `usage_metrics`(locations 为 issue #18 空间树;item_location_history 为位置变更历史预留层,见 ④;reminders 为 issue #36 提醒实体,见 ⑥;remind_subscriptions 为 #36 V1.5 到期微信提醒订阅记录,见 ⑦;视频留证三个集合见 ⑧;usage_metrics 为零隐私使用埋点纯计数,见 ⑪)。随后完成配置:
 
 **① items 组合唯一索引**:
 
@@ -189,6 +189,12 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 >
 > 用途:全局个人资料(昵称 1–20 码点 + 头像,`version` CAS 并发互斥;头像走 10 分钟一次性上传凭据 `avatars/{摘要}/{nonce}.jpg`,云函数读文件校验 JPEG/PNG 头与 2MiB 上限,nonce 用后即焚)。仅 `userProfile` 云函数读写本人行;`households` 的成员列表在已鉴权家庭范围内读取各成员的展示字段,**集合缺失或查询异常时回退旧成员资料,不影响家庭功能**(旧部署兼容)。注意:更换头像后旧头像文件不自动删除(已知小额存储债务,后续视量再收口)。
 
+**⑪ usage_metrics(视频确认流零隐私使用埋点,#85/#76 降本阶梯第 2 级;先建集合,再部署 usageMetrics)**:
+
+> 创建 `usage_metrics` 集合,权限并入 ③(「所有用户不可读不可写」)。**无需建任何索引**——纯 append 计数行,聚合分析时按需临时导出,不做在线查询。
+
+> 用途:视频清点确认流(两页视频扫描)的 Owner 自用计数积累。小程序端在「保存成功」「有扫描结果但未保存离开」时经 `usageMetrics` 云函数匿名插一行 `{kind, platform, counts, ms, created_at}`。**纯计数无 PII**:载荷只有数值计数(线索/组/草稿/合并/拆分/移除/手动补件七个冻结键,0..100000 整数)、毫秒时长(0..3600000)、platform/kind 枚举与服务端时间戳;云函数不取任何身份上下文、不读任何身份字段,绝不含 openid/昵称/物品名/位置文本/任何用户输入内容/任何文件 id(由 `tests/usage-metrics.test.js` 静态扫描与形状门测试锁定)。不做更新不做查询,只 append;不建此集合时上报静默失败(fire-and-forget 全吞),不影响任何主流程。
+
 ### 5. 为 extractDraft 与 locations 配置 DEEPSEEK_API_KEY
 
 云开发控制台 → 云函数 → extractDraft → 配置 → 环境变量,添加 `DEEPSEEK_API_KEY`,值为你在 DeepSeek 开放平台(https://platform.deepseek.com)创建的 API Key。**locations 云函数需要配置同名同值的环境变量**(空间树的位置解析要用同一个 Key)。
@@ -199,9 +205,9 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 ### 6. 部署云函数
 
-在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify`、`cloudfunctions/videoCleanup` 与 `cloudfunctions/userProfile` →「**上传并部署:云端安装依赖**」。七个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。**`userProfile` 首次部署出现 Creating 状态属正常,约 50 秒后重试**;它不持有家庭解析副本(不进「四函数必须一起部署」约束),但 `households` 若更新到读 `user_profiles` 的版本需重部署(读失败自动回退旧资料)。
+在微信开发者工具的资源管理器中,分别右键 `cloudfunctions/itemsApi`、`cloudfunctions/extractDraft`、`cloudfunctions/locations`、`cloudfunctions/households`、`cloudfunctions/remindNotify`、`cloudfunctions/videoCleanup`、`cloudfunctions/userProfile` 与 `cloudfunctions/usageMetrics` →「**上传并部署:云端安装依赖**」。八个云函数除 `wx-server-sdk` 外没有其他 npm 依赖,部署很快。**`userProfile` 首次部署出现 Creating 状态属正常,约 50 秒后重试**;它不持有家庭解析副本(不进「四函数必须一起部署」约束),但 `households` 若更新到读 `user_profiles` 的版本需重部署(读失败自动回退旧资料)。
 
-部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20),**userProfile 建议 10 秒**(头像校验要云下载 ≤2MiB 文件,默认 3 秒在冷启动下可能不够;`config.json` 仅声明权限,超时须控制台设置)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
+部署后在控制台调整**函数超时**(默认 3 秒不够用):云开发控制台 → 云函数 → 各自进入「函数配置」→ 编辑 → 超时时间:**extractDraft 改 30 秒**(要等 DeepSeek 推理),**itemsApi 建议 10 秒**(避免冷启动偶发超时),**locations 必须改 60 秒**(整户扫描最坏 ~50 秒:三块并行解析 + 一次近义比对;代码内 `config.json` 已写 60,以控制台为准),**households 建议 10 秒**(普通数据库操作,`config.json` 已写 10),**remindNotify 建议 20 秒**(每日扫描 + 逐订阅发送,`config.json` 已写 20),**videoCleanup 建议 20 秒**(`config.json` 已写 20),**userProfile 建议 10 秒**(头像校验要云下载 ≤2MiB 文件,默认 3 秒在冷启动下可能不够;`config.json` 仅声明权限,超时须控制台设置),**usageMetrics 默认 3 秒即可**(单条插入,`config.json` 已写 3,无需调整)。也可用 CLI 部署:`cli cloud functions deploy --env <环境ID> --names itemsApi extractDraft locations households remindNotify videoCleanup usageMetrics --project <项目根> -r`;注意 CLI 部署**不会**应用 `config.json` 的超时设置,超时只能在控制台调。
 
 **timer 触发器**:
 - remindNotify:`dailyExpiryNotify`(cron `0 0 8 * * * *`,每天 08:00,北京时间);

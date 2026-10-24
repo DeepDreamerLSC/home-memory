@@ -26,6 +26,7 @@ const households_api_1 = require("../../utils/households-api");
 const household_scope_1 = require("../../utils/household-scope");
 const item_match_1 = require("../../utils/item-match");
 const quantity_1 = require("../../utils/quantity");
+const usage_metrics_1 = require("../../utils/usage-metrics");
 const location_scan_1 = require("../../utils/location-scan");
 function isRecord(v) {
     return typeof v === "object" && v !== null && Array.isArray(v) === false;
@@ -123,6 +124,12 @@ Page({
     pathsByNodeId: {},
     scanSession: undefined,
     scanEpoch: 0,
+    /**
+     * 零隐私使用埋点会话计数器(#85/#76 降本阶梯第 2 级):纯内存、不入 storage
+     * (会话存储字段集保持旧版不变);计数/门/构建逻辑在 utils/usage-metrics,
+     * 与 B 页共用同一实现,页面只调用。
+     */
+    usage: (0, usage_metrics_1.createUsageSession)(),
     onLoad(options) {
         const mode = options.mode === "last" ? "last" : "scan";
         let nodeId = "";
@@ -141,6 +148,16 @@ Page({
         this.restoreSession(nodeId);
     },
     onHide() {
+        // 零隐私使用埋点:有扫描结果但未保存就离开 → abandon ping(best-effort,至多一次;
+        // uploading/committing 不报——提交仍在后台收敛,done 已由 save ping 收口)
+        if ((0, usage_metrics_1.shouldReportUsageAbandon)(this.usage, this.data.phase, this.data.observations.length)) {
+            (0, usage_metrics_1.markUsageAbandoned)(this.usage);
+            (0, usage_metrics_1.sendUsagePing)((0, usage_metrics_1.buildVideoConfirmUsagePing)(this.usage, "video_confirm_abandon", (0, usage_metrics_1.detectUsagePlatform)(), {
+                observations: this.data.observations.length,
+                groups: (0, scene_groups_1.buildSceneGroupViews)(this.data.observations, this.data.drafts).length,
+                drafts: this.data.drafts.length,
+            }, Date.now()));
+        }
         if (this.scanSession !== undefined) {
             void this.scanSession.cancel();
             this.scanSession = undefined;
@@ -197,6 +214,8 @@ Page({
             return;
         if (Array.isArray(raw.observations) === false || Array.isArray(raw.drafts) === false)
             return;
+        // 恢复会话:补埋点起点(只补一次,不清计数——计数是本次页面会话的交互量)
+        (0, usage_metrics_1.markUsageSessionStart)(this.usage, Date.now());
         const pending = isRecord(raw.pendingUpload) && typeof raw.pendingUpload.fileId === "string"
             ? raw.pendingUpload
             : null;
@@ -381,6 +400,8 @@ Page({
             return;
         }
         this.scanSession = session;
+        // 新一次清点 = 新一次计量:归零计数、重置会话起点
+        (0, usage_metrics_1.resetUsageSession)(this.usage, Date.now());
         this.setData({
             phase: "scanning",
             scanId,
@@ -699,6 +720,7 @@ Page({
         if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
             return;
         const removed = this.data.drafts[index];
+        (0, usage_metrics_1.bumpUsageCount)(this.usage, "removes");
         const drafts = this.data.drafts.filter((_, i) => i !== index);
         const keys = this.data.mergeSelectedKeys.filter((k) => k !== removed.draftKey);
         this.setData({ drafts, mergeSelectedKeys: keys }, () => {
@@ -717,6 +739,7 @@ Page({
             wx.showToast({ title: "这件只有一条高亮,无需拆分", icon: "none" });
             return;
         }
+        (0, usage_metrics_1.bumpUsageCount)(this.usage, "splits");
         const drafts = this.data.drafts.slice();
         drafts.splice(index, 1, ...(split.map((d) => ({ ...d, nodeId: draft.nodeId }))));
         this.setData({ drafts }, () => {
@@ -734,6 +757,7 @@ Page({
             wx.showToast({ title: merged.message, icon: "none" });
             return;
         }
+        (0, usage_metrics_1.bumpUsageCount)(this.usage, "merges");
         const keys = new Set(this.data.mergeSelectedKeys);
         const firstIndex = this.data.drafts.findIndex((d) => keys.has(d.draftKey));
         const drafts = this.data.drafts.filter((d) => keys.has(d.draftKey) === false);
@@ -747,6 +771,7 @@ Page({
     onAddManualDraftTap() {
         const duration = Math.max(1, this.data.videoDurationMs);
         const end = Math.min(duration, 1500);
+        (0, usage_metrics_1.bumpUsageCount)(this.usage, "manualAdds");
         const draft = (0, video_scene_1.newSceneDraft)({
             locationText: this.data.locationPathText,
             manualHighlights: [{
@@ -1085,6 +1110,14 @@ Page({
                 this.clearSession();
                 this.renderDrafts();
             });
+            // 零隐私使用埋点(#85/#76):保存成功一次 save ping(fire-and-forget,失败全吞;
+            // 先置 savedSent,离开时不再补 abandon)
+            (0, usage_metrics_1.markUsageSaved)(this.usage);
+            (0, usage_metrics_1.sendUsagePing)((0, usage_metrics_1.buildVideoConfirmUsagePing)(this.usage, "video_confirm_save", (0, usage_metrics_1.detectUsagePlatform)(), {
+                observations: this.data.observations.length,
+                groups: (0, scene_groups_1.buildSceneGroupViews)(this.data.observations, this.data.drafts).length,
+                drafts: successCount,
+            }, Date.now()));
             if (this.scanSession !== undefined) {
                 await this.scanSession.cancel();
                 this.scanSession = undefined;
