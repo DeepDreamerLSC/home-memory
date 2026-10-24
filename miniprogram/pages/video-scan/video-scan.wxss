@@ -37,6 +37,7 @@
   box-shadow: 0 6rpx 0 var(--vb-cta-shadow, #b78c16);
 }
 .primary-btn.disabled { opacity: 0.55; box-shadow: none; }
+.primary-btn.done-back { padding: 30rpx 18rpx; font-size: 34rpx; border-radius: 20rpx; }
 .secondary-btn {
   margin-top: 14rpx;
   padding: 20rpx 18rpx;
