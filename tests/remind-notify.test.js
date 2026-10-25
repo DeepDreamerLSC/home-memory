@@ -498,10 +498,37 @@ test("RN-SCAN-4:send 失败(43101 未订阅/额度不足等)——同样盖章�
   assert.equal(res.ok, true, "发送失败绝不把异常抛出扫描");
   assert.equal(res.sent, 1, "成功一条(妻子)");
   assert.equal(res.failed, 1, "失败一条(owner)");
+  assert.equal(res.sendErr, 43101, "失败必须带数字错误码(裸 43101 消息形态)");
   var subs = await rawDocs(db, "remind_subscriptions");
   for (var i = 0; i < subs.length; i++) {
     assert.equal(subs[i].last_sent_date, "2026-10-14", "成败都盖章:当天不再重复打扰");
   }
+});
+
+test("RN-ERRCODE:发送失败错误码穿透(errCode 数字形态;全部成功时 sendErr=null)", async function () {
+  var db = makeDb();
+  var hid = await seedSharedHousehold(db, "hh_f_errcode", ["o-owner"]);
+  await seedItem(db, hid, "it_e1", "酱油", "厨房");
+  await seedReminder(db, hid, "it_e1", "2026-10-14");
+  await seedSubscription(db, hid, "o-owner");
+  var deps = scanDeps(db, {
+    send: function () { return Promise.reject({ errCode: 47001, errMsg: "subscribeMessage.send:fail invalid argument" }); }
+  });
+  var res = await handler({}, deps);
+  assert.equal(res.failed, 1);
+  assert.equal(res.sendErr, 47001, "errCode 数字直取(参数类错误可辨)");
+
+  var db2 = makeDb();
+  var hid2 = await seedSharedHousehold(db2, "hh_f_errcode2", ["o-owner"]);
+  await seedItem(db2, hid2, "it_e2", "酱油", "厨房");
+  await seedReminder(db2, hid2, "it_e2", "2026-10-14");
+  await seedSubscription(db2, hid2, "o-owner");
+  var deps2 = scanDeps(db2, {
+    send: function () { return Promise.resolve({ errCode: 0 }); }
+  });
+  var res2 = await handler({}, deps2);
+  assert.equal(res2.sent, 1);
+  assert.equal(res2.sendErr, null, "全部成功不带错误码");
 });
 
 test("RN-SCAN-5:悬挂提醒行(物品已删/跨家庭)读侧容忍跳过,不进聚合计数", async function () {
