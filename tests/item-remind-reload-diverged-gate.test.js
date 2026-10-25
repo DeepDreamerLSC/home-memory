@@ -210,6 +210,33 @@ function settlePromises() {
   });
 }
 
+/**
+ * 本地今天往后 days 天的 picker 可用日期,并避开 avoid(远端值/已确认基准的
+ * 固定日):picker 提交校验拒绝过去的日子(remind-ui.pickerDateProblem,
+ * "选今天或往后的日子"),写死的「未来日」会随现实时间推进过期——2026-10-25
+ * 在 2026-10-26 起即被拒,用例随日期整体失效;撞上 avoid 则候选与远端/基准
+ * 同值,基准一致用例还会因 value === remindOriginal 提前返回(零 remindSet)。
+ */
+function pickFutureDate(days, avoid) {
+  function iso(d) {
+    return (
+      d.getFullYear() +
+      "-" +
+      (d.getMonth() < 9 ? "0" : "") +
+      (d.getMonth() + 1) +
+      "-" +
+      (d.getDate() < 10 ? "0" : "") +
+      d.getDate()
+    );
+  }
+  var d = new Date();
+  d.setDate(d.getDate() + days);
+  while (avoid.indexOf(iso(d)) !== -1) {
+    d.setDate(d.getDate() + 1);
+  }
+  return iso(d);
+}
+
 /** 断言冲突面板里有提醒条目(远端值 vs 本地候选,未选边) */
 function assertRemindPanel(page, expectedLocal, expectedRemote) {
   var entry = page.data.conflicts.filter(function (c) {
@@ -248,7 +275,8 @@ test("F4-B4-红-改期:补拉撞见不同远端,remindSet 不得发出,候选保
   };
   serverItem = summaryItem({ version: 4 });
 
-  await pageConfig.onRemindDateChange.call(page, { detail: { value: "2026-10-25" } });
+  var pick = pickFutureDate(9, ["2026-11-01"]);
+  await pageConfig.onRemindDateChange.call(page, { detail: { value: pick } });
   await settlePromises();
 
   assert.equal(
@@ -258,8 +286,8 @@ test("F4-B4-红-改期:补拉撞见不同远端,remindSet 不得发出,候选保
     0,
     "补拉撞见不同远端:不得直接 remindSet 覆盖用户从未看过的远端值",
   );
-  assert.equal(page.data.remindAt, "2026-10-25", "本地候选保留在表单");
-  assertRemindPanel(page, "2026-10-25", "2026-11-01");
+  assert.equal(page.data.remindAt, pick, "本地候选保留在表单");
+  assertRemindPanel(page, pick, "2026-11-01");
   assert.equal(page.data.remindGeneration, 5, "轮次已对齐远端最新(选边后按它提交)");
   assert.ok(
     toasts.some(function (t) {
@@ -453,7 +481,8 @@ test("F4-B4-选边闭环:冲突面板选「保留我的修改」后保存,才按
   };
   serverItem = summaryItem({ version: 4 });
 
-  await pageConfig.onRemindDateChange.call(page, { detail: { value: "2026-10-25" } });
+  var pick = pickFutureDate(9, ["2026-11-01"]);
+  await pageConfig.onRemindDateChange.call(page, { detail: { value: pick } });
   await settlePromises();
   assert.equal(remindWriteCalls().length, 0, "选边前零提醒写");
 
@@ -466,7 +495,7 @@ test("F4-B4-选边闭环:冲突面板选「保留我的修改」后保存,才按
     return c.data.action === "remindSet";
   });
   assert.equal(sets.length, 1, "选边保存后一次补写");
-  assert.equal(sets[0].data.due_date, "2026-10-25", "写的是用户显式保留的候选");
+  assert.equal(sets[0].data.due_date, pick, "写的是用户显式保留的候选");
   assert.equal(sets[0].data.expected_generation, 5, "以刷新后的最新轮次提交(既有 CAS 口径)");
 });
 
@@ -484,7 +513,9 @@ test("F4-B4-对照-无提醒补录:补拉确认远端无提醒,改期照常补�
 
   remindListMode = "row";
   serverRow = null; // 远端确认无提醒
-  await pageConfig.onRemindDateChange.call(page, { detail: { value: "2026-10-25" } });
+  await pageConfig.onRemindDateChange.call(page, {
+    detail: { value: pickFutureDate(9, []) },
+  });
   await settlePromises();
 
   var sets = remindWriteCalls().filter(function (c) {
@@ -513,7 +544,9 @@ test("F4-B4-对照-基准一致:补拉远端与用户已确认基准一致,改�
     kind: "有效期",
     generation: 5,
   };
-  await pageConfig.onRemindDateChange.call(page, { detail: { value: "2026-12-05" } });
+  await pageConfig.onRemindDateChange.call(page, {
+    detail: { value: pickFutureDate(30, ["2026-11-01"]) },
+  });
   await settlePromises();
 
   var sets = remindWriteCalls().filter(function (c) {
