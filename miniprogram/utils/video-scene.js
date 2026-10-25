@@ -15,6 +15,7 @@ exports.observationHighlight = observationHighlight;
 exports.buildDraftHighlights = buildDraftHighlights;
 exports.buildSceneCommitItems = buildSceneCommitItems;
 exports.sceneConfidenceText = sceneConfidenceText;
+exports.sceneDoneText = sceneDoneText;
 exports.sceneHighlightCount = sceneHighlightCount;
 const api_1 = require("./api");
 const item_match_1 = require("./item-match");
@@ -198,6 +199,7 @@ function newSceneDraft(partial) {
         checked: partial?.checked !== false,
         quantity: partial?.quantity,
         unit: partial?.unit,
+        nodeId: partial?.nodeId,
     };
 }
 /**
@@ -396,7 +398,7 @@ function buildDraftHighlights(draft, observations, durationMs) {
     out.sort((a, b) => (a.start_ms !== b.start_ms ? a.start_ms - b.start_ms : a.end_ms - b.end_ms));
     return out;
 }
-function buildSceneCommitItems(drafts, observations, durationMs) {
+function buildSceneCommitItems(drafts, observations, durationMs, nodePaths) {
     const picked = drafts.filter((d) => d.checked);
     if (picked.length < 1)
         return { ok: false, message: "请至少勾选一件物品" };
@@ -457,6 +459,16 @@ function buildSceneCommitItems(drafts, observations, durationMs) {
                 note: draft.note.trim(),
                 highlights,
             };
+            // B 页「归到」(#116 PR A):显式选定节点 → 携带 node_id(显式携带才进服务端
+            // 签名)。有路径缓存时校验 location_text 与节点路径逐字一致(客户端第一道
+            // 门,D1 页同款);缓存缺失(会话恢复)照常透传,服务端权威校验兜底。
+            if (draft.nodeId !== undefined && draft.nodeId !== "") {
+                const path = nodePaths !== undefined ? nodePaths[draft.nodeId] : undefined;
+                if (path !== undefined && location !== path.join(" / ")) {
+                    return { ok: false, message: "「" + name + "」的位置记录与所选位置不一致,请重选或清除后再改文字" };
+                }
+                item.node_id = draft.nodeId;
+            }
             if (draft.quantity !== undefined) {
                 item.quantity = draft.quantity;
                 item.unit = draft.unit;
@@ -473,6 +485,20 @@ function sceneConfidenceText(confidence) {
     if (confidence === "mid")
         return "可能";
     return "不确定";
+}
+/**
+ * B 页保存完成文案(#116 PR A,D0-CONTRACT v2 §1 窗口二):凡有「已保存、
+ * 未挂载」(ok:true 且 mounted:false,挂载被并发删节点/CAS 失败降级)的行,
+ * 完成页文案必须如实区分,不得显示完整成功;全部挂载成功(或未携带挂载)时
+ * 与现状文案逐字一致(零感知)。
+ */
+function sceneDoneText(results) {
+    const saved = results.filter((r) => r.ok === true).length;
+    const unmounted = results.filter((r) => r.ok === true && r.mounted === false).length;
+    if (unmounted > 0) {
+        return "已为 " + saved + " 件物品保存同一段视频证据;其中 " + unmounted + " 件已保存、未挂载(所选位置刚有变化),稍后可在位置页整理。";
+    }
+    return "已为 " + saved + " 件物品保存同一段视频证据,每件高亮彼此独立。";
 }
 function sceneHighlightCount(draft, observations, durationMs) {
     return buildDraftHighlights(draft, observations, durationMs).length;

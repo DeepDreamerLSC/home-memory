@@ -97,3 +97,45 @@
 .stepNum { min-width: 64rpx; text-align: center; font-size: 28rpx; font-weight: 800; }
 .step-unit-btn { padding: 8rpx 14rpx; border-radius: 10rpx; background: rgba(0,0,0,.06); font-size: 22rpx; }
 .qty-pending { font-size: 20rpx; color: var(--text-2, #999); }
+
+/* ---------- 「归到」逐层选择器(#116 PR A):遮罩 + 底部面板(D1 页同款形态) ---------- */
+.layer-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+}
+.layer {
+  width: 100%;
+  max-height: 72vh;
+  background: var(--card, #fffdf7);
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 24rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+.layer-scroll { max-height: 46vh; margin: 12rpx 0; }
+.crumb-line { margin-top: 10rpx; padding: 12rpx 14rpx; border-radius: 12rpx; background: var(--card-inset, #f7f2e7); font-size: 23rpx; color: var(--text-2); font-weight: 700; }
+.option-row {
+  padding: 16rpx;
+  border-radius: 12rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.option-row:active { background: var(--card-inset, #f7f2e7); }
+.option-current { background: var(--card-inset, #efe8d8); }
+.item-main { flex: 1; min-width: 0; }
+.item-name { font-size: 27rpx; font-weight: 800; }
+.item-location { margin-top: 4rpx; font-size: 21rpx; color: var(--text-3); }
+.pick-check { flex: 0 0 auto; padding: 8rpx 16rpx; border-radius: 999rpx; border: 2rpx solid var(--line, rgba(29, 28, 24, 0.2)); font-size: 22rpx; font-weight: 800; }
+.pick-check.drill { border-style: dashed; color: var(--text-2); font-weight: 700; }
+.layer-btns { display: flex; gap: 12rpx; }
+.layer-btns .secondary-btn { margin-top: 14rpx; flex: 1; }
+.layer-btns .primary-btn { margin-top: 14rpx; flex: 1; }
+/* 「归到」行与既有 target-row 同款底色,仅字重区分 */
+.node-row { font-weight: 700; color: var(--text-2, #5f5437); }

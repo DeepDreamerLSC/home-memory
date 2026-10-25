@@ -8,6 +8,7 @@ import { applyPageAppearance } from "../../utils/appearance-page";
  * - 不自动合并同名、不自动入库、不自动播放。
  */
 import { callItemsApi, errorMessage, uuid } from "../../utils/api";
+import { callLocationsApi } from "../../utils/locations-api";
 import { videoExtOf, type PickedVideoFile } from "../../utils/video-attach";
 import {
   buildSceneCommitItems,
@@ -15,11 +16,13 @@ import {
   mergeSceneDrafts,
   newSceneDraft,
   scanSceneVideo,
+  sceneDoneText,
   sceneFrameTotal,
   setDraftUnit,
   splitSceneDraft,
   stepDraftQty,
   type SceneDraftItem,
+  type SceneNodePaths,
   type SceneObservation,
 } from "../../utils/video-scene";
 import { setScanKeepScreenOn } from "../../utils/keep-screen";
@@ -96,6 +99,25 @@ interface DraftView {
   unitIndex: number;
   /** (Q3)用户已在行上确认过数量(quantity 在场) */
   quantitySet: boolean;
+  /** 「归到」显示文本(#116 PR A):已选节点 = 节点路径文本;未选 = 空串(行内回退文案) */
+  nodeText: string;
+}
+
+/** 「归到」逐层选择器的一层展示行(数据来自既有 locations list,零新读侧 action) */
+interface NodeOptionView {
+  locationId: string;
+  name: string;
+  path: string[];
+  pathText: string;
+  hasChildren: boolean;
+  itemCount: number;
+}
+
+/** 选择器导航栈:顶层 { locationId:"", name:"家", path:[] } = home 根层(不可挂,仅浏览) */
+interface NodeStackFrame {
+  locationId: string;
+  name: string;
+  path: string[];
 }
 
 interface PendingUpload {
@@ -163,6 +185,18 @@ interface PageData {
   frozenItems: VideoSceneCommitItem[];
   pendingUpload: PendingUpload | null;
   busy: boolean;
+  /** 「归到」逐层选择器(#116 PR A):可见性/目标行/导航栈/当前层选项/加载态 */
+  nodeSelectorVisible: boolean;
+  nodeSelectorFor: number;
+  nodeSelectorStack: NodeStackFrame[];
+  nodeSelectorOptions: NodeOptionView[];
+  nodeSelectorLoading: boolean;
+  nodeSelectorError: string;
+  /** 派生渲染字段(随 stack 一起 setData):面包屑/当前层可否选中/可否返回 */
+  nodeSelectorPathText: string;
+  nodeSelectorCanPick: boolean;
+  nodeSelectorCanBack: boolean;
+  nodeSelectorCurrentName: string;
 }
 
 function scopeKey(prefix: string): string {
@@ -291,6 +325,16 @@ Page({
     frozenItems: [] as VideoSceneCommitItem[],
     pendingUpload: null as PendingUpload | null,
     busy: false,
+    nodeSelectorVisible: false,
+    nodeSelectorFor: -1,
+    nodeSelectorStack: [] as NodeStackFrame[],
+    nodeSelectorOptions: [] as NodeOptionView[],
+    nodeSelectorLoading: false,
+    nodeSelectorError: "",
+    nodeSelectorPathText: "",
+    nodeSelectorCanPick: false,
+    nodeSelectorCanBack: false,
+    nodeSelectorCurrentName: "",
   },
 
   /**
@@ -299,6 +343,13 @@ Page({
    * 与 D1 页共用同一实现,页面只调用。
    */
   usage: createUsageSession(),
+
+  /**
+   * 「归到」路径缓存(#116 PR A):node_id → 节点路径段(页面内存态,选择器
+   * 选定时记下)。build 时在场做客户端第一道一致性校验;会话恢复后缓存缺失
+   * 则照常透传,服务端权威校验(location_text === 节点路径)兜底。
+   */
+  nodePaths: {} as SceneNodePaths,
 
   onLoad() {
     const stored = parseStoredSession(storageGet(scopeKey(SESSION_PREFIX)));
@@ -412,6 +463,7 @@ Page({
         unit,
         unitIndex: Math.max(0, UNIT_SET.indexOf(unit)),
         quantitySet: typeof d.quantity === "number",
+        nodeText: d.nodeId !== undefined && d.nodeId !== "" ? d.locationText : "",
       };
     });
     this.setData({ draftViews: views });
@@ -985,12 +1037,140 @@ Page({
       });
       if (picked === null || options[picked] === undefined) return;
       const drafts = this.data.drafts.slice();
-      drafts[index] = { ...drafts[index], target: "existing", itemId: options[picked].item_id };
+      drafts[index] = { ...drafts[index], target: "existing", itemId: options[picked].item_id, nodeId: undefined };
       this.setData({ drafts }, () => this.renderDrafts());
     } catch (err) {
       wx.showModal({ title: "读取物品失败", content: errorMessage(err), showCancel: false });
     }
   },
+
+  /* ---------------- 「归到」逐层选择器(#116 PR A,B 页显式挂载) ----------------
+   * 复用 D1 既有「弹层 + 缩进选项列表」模式;B 页无位置上下文,从 home 根下
+   * 第一层开始用既有 locations list 逐层下钻(零新读侧 action)。home 根不可
+   * 挂(服务端 isHomeRoot 统一判定硬门),选择器只允许选中具体层。
+   */
+
+  /** 派生渲染字段:面包屑文本/当前层可否选中(家根不可)/可否返回上一层 */
+  renderNodeSelector(stack: NodeStackFrame[]) {
+    const top = stack[stack.length - 1];
+    this.setData({
+      nodeSelectorPathText: stack.length <= 1 ? "家" : top.path.join(" / "),
+      nodeSelectorCurrentName: top.name,
+      nodeSelectorCanPick: stack.length > 1,
+      nodeSelectorCanBack: stack.length > 1,
+    });
+  },
+
+  /** 拉当前层 children(既有 locations list;顶层 = home 根下第一层) */
+  async loadNodeSelectorLayer() {
+    const stack = this.data.nodeSelectorStack;
+    const top = stack[stack.length - 1];
+    if (top === undefined) return;
+    this.setData({ nodeSelectorLoading: true, nodeSelectorError: "" });
+    try {
+      const res = top.locationId === ""
+        ? await callLocationsApi({ action: "list" })
+        : await callLocationsApi({ action: "list", parent_id: top.locationId });
+      const options: NodeOptionView[] = (res.children || []).map((c) => ({
+        locationId: c.location_id,
+        name: c.name,
+        path: c.path.slice(),
+        pathText: c.path.join(" / "),
+        hasChildren: c.child_count > 0,
+        itemCount: c.item_count,
+      }));
+      this.setData({ nodeSelectorOptions: options, nodeSelectorLoading: false });
+    } catch (e) {
+      this.setData({ nodeSelectorLoading: false, nodeSelectorError: errorMessage(e) });
+    }
+  },
+
+  async onDraftNodeTap(e: WechatMiniprogram.CustomEvent) {
+    const index = Number(e.currentTarget.dataset.index);
+    if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
+    if (this.data.drafts[index].target !== "new") return;
+    const stack = this.data.nodeSelectorStack.length > 0
+      ? this.data.nodeSelectorStack
+      : [{ locationId: "", name: "家", path: [] } as NodeStackFrame];
+    this.setData({ nodeSelectorVisible: true, nodeSelectorFor: index, nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+      this.renderNodeSelector(stack);
+    });
+    await this.loadNodeSelectorLayer();
+  },
+
+  onNodeSelectorCloseTap() {
+    this.setData({ nodeSelectorVisible: false, nodeSelectorFor: -1 });
+  },
+
+  /** 选中某节点(行主体点击):写 nodeId + 权威路径文本,关闭选择器 */
+  applyNodePick(node: { locationId: string; path: string[] }) {
+    const index = this.data.nodeSelectorFor;
+    if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
+    const drafts = this.data.drafts.slice();
+    drafts[index] = { ...drafts[index], nodeId: node.locationId, locationText: node.path.join(" / ") };
+    this.nodePaths[node.locationId] = node.path.slice();
+    this.setData({ drafts, nodeSelectorVisible: false, nodeSelectorFor: -1 }, () => {
+      this.renderDrafts();
+      this.saveSession();
+    });
+  },
+
+  /** 选中当前浏览层(「就归这里」;家根不可选,由 nodeSelectorCanPick 挡住) */
+  onNodePickCurrentTap() {
+    if (this.data.nodeSelectorCanPick !== true) {
+      wx.showToast({ title: "家里第一层不能直接挂,请进入具体位置", icon: "none" });
+      return;
+    }
+    const stack = this.data.nodeSelectorStack;
+    const top = stack[stack.length - 1];
+    this.applyNodePick({ locationId: top.locationId, path: top.path });
+  },
+
+  /** 选中列表中某个子节点(行主体) */
+  onNodeOptionTap(e: WechatMiniprogram.CustomEvent) {
+    const nodeId = String(e.currentTarget.dataset.nodeId || "");
+    const option = this.data.nodeSelectorOptions.find((o) => o.locationId === nodeId);
+    if (option === undefined) return;
+    this.applyNodePick({ locationId: option.locationId, path: option.path });
+  },
+
+  /** 下钻(catchtap 阻断行选中):进入该子节点层 */
+  async onNodeDrillTap(e: WechatMiniprogram.CustomEvent) {
+    const nodeId = String(e.currentTarget.dataset.nodeId || "");
+    const option = this.data.nodeSelectorOptions.find((o) => o.locationId === nodeId);
+    if (option === undefined) return;
+    const stack = this.data.nodeSelectorStack.concat([
+      { locationId: option.locationId, name: option.name, path: option.path },
+    ]);
+    this.setData({ nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+      this.renderNodeSelector(stack);
+    });
+    await this.loadNodeSelectorLayer();
+  },
+
+  async onNodeSelectorBackTap() {
+    if (this.data.nodeSelectorStack.length <= 1) return;
+    const stack = this.data.nodeSelectorStack.slice(0, -1);
+    this.setData({ nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+      this.renderNodeSelector(stack);
+    });
+    await this.loadNodeSelectorLayer();
+  },
+
+  /** 清除选择:回到纯文本(不挂位置),位置文字保留可编辑 */
+  onNodeSelectorClearTap() {
+    const index = this.data.nodeSelectorFor;
+    if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length) return;
+    const drafts = this.data.drafts.slice();
+    drafts[index] = { ...drafts[index], nodeId: undefined };
+    this.setData({ drafts, nodeSelectorVisible: false, nodeSelectorFor: -1 }, () => {
+      this.renderDrafts();
+      this.saveSession();
+    });
+  },
+
+  /** 弹层防冒泡占位(点面板不吃掉遮罩关闭;D1 页同款) */
+  noop() {},
 
   onRestartTap() {
     wx.showModal({
@@ -1001,6 +1181,7 @@ Page({
         if (r.confirm !== true) return;
         void this.cancelScan();
         this.clearSession();
+        this.nodePaths = {};
         this.setData({
           phase: "idle",
           sceneId: "",
@@ -1021,6 +1202,10 @@ Page({
           frozenItems: [],
           pendingUpload: null,
           busy: false,
+          nodeSelectorVisible: false,
+          nodeSelectorFor: -1,
+          nodeSelectorStack: [],
+          nodeSelectorOptions: [],
         }, () => {
           this.renderObservations();
           this.renderDrafts();
@@ -1031,7 +1216,7 @@ Page({
 
   async onSaveTap() {
     if (this.data.busy) return;
-    const built = buildSceneCommitItems(this.data.drafts, this.data.observations, this.data.videoDurationMs);
+    const built = buildSceneCommitItems(this.data.drafts, this.data.observations, this.data.videoDurationMs, this.nodePaths);
     if (built.ok === false) {
       wx.showModal({ title: "还不能保存", content: built.message, showCancel: false });
       return;
@@ -1162,11 +1347,14 @@ Page({
       });
       const failed = res.evidence_failed ? res.evidence_failed.length : 0;
       const successCount = res.results.filter((r) => r.ok === true).length;
+      // #116 PR A 窗口二:ok:true 但 mounted:false 的行 = 已保存、未挂载,如实计数
+      const unmountedCount = res.results.filter((r) => r.ok === true && r.mounted === false).length;
       if (res.ticket_state === "partial" || failed > 0) {
         this.setData({
           phase: "partial",
           busy: false,
-          errorText: "已保存 " + successCount + " 件，仍有 " + failed + " 件未完成。",
+          errorText: "已保存 " + successCount + " 件，仍有 " + failed + " 件未完成"
+            + (unmountedCount > 0 ? "；另有 " + unmountedCount + " 件已保存、未挂载" : ""),
           resultText: "可用同一份确认内容重试剩余件；已成功件不会重复创建。",
           pendingUpload: pending,
         }, () => this.saveSession());
@@ -1176,7 +1364,9 @@ Page({
         phase: "done",
         busy: false,
         errorText: "",
-        resultText: "已为 " + successCount + " 件物品保存同一段视频证据，每件高亮彼此独立。",
+        // 完成文案(sceneDoneText):有「已保存、未挂载」行时如实区分,不显完整成功;
+        // 全部成功(或未携带挂载)时与现状文案逐字一致。
+        resultText: sceneDoneText(res.results),
         pendingUpload: null,
         frozenItems: pending.frozenItems,
       }, () => {

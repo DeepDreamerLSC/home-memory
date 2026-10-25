@@ -1001,8 +1001,10 @@ function createVideoActions(h) {
    * canonical 输入(D1 增量):location 存在时逐件追加 node_id[]/move_to_node_id[],
    * 并把位置上下文 { location_id, scan_id, path_snapshot } 并入签名输入——同一票据
    * 先无位置后有位置(或反之)→ 签名失配 → OPERATION_CONFLICT,杜绝混合模式重试。
-   * location 缺省时输出与 B 逐字节相同(零感知硬保证,由回归测试锁定)。
-   * expected_version 不进签名:客户端刷新物品版本后同载荷重试必须过签名门。
+   * #116 PR A:B 页(location 缺省)显式携带的 node_id 同样进签名(携带即承诺,
+   * 同票据重放换 node_id → 失配);不携带时输出与 B 逐字节相同(零感知硬保证,
+   * 由回归测试锁定)。expected_version 不进签名:客户端刷新物品版本后同载荷
+   * 重试必须过签名门。
    */
   function canonicalSceneItems(items, locationCtx) {
     var out = [];
@@ -1018,7 +1020,7 @@ function createVideoActions(h) {
         one.name = it.name;
         one.location_text = it.location_text;
         one.note = it.note;
-        if (locationCtx && it.node_id !== undefined) one.node_id = it.node_id;
+        if (it.node_id !== undefined) one.node_id = it.node_id;
         // 数量进 scene_payload_sig(Q0-CONTRACT §4.4):不携带时 canonical 输出
         // 与现行逐字节相同(零感知,旧票据/旧载荷重试不受影响);携带后同票据
         // 重试改数量/改单位 → 签名失配 → OPERATION_CONFLICT。
@@ -1173,6 +1175,18 @@ function createVideoActions(h) {
   // ---------------------------------------------------------------------------
 
   function scanCol(deps) { return deps.db.collection(LS); }
+
+  /**
+   * home 根判定(#116 PR A §2 统一收口,单一判定点):结构化判根——parent_id 为
+   * 空串的唯一节点(ensureHomeRoot 保证),不读 type。itemsApi 与 locations 是两个
+   * 独立部署包,不能 require 对方,此处是与 locations/lib/handler.js isHomeRoot
+   * 互指的包内副本,两处需同步演进(等价性由 tests/root-mount-audit.test.js
+   * W1-W6 行为级钉住)。凡物品挂载路径(D1 清点 / B 页场景扫描)一律经此判定
+   * 拒绝挂根。
+   */
+  function isHomeRoot(node) {
+    return node.parent_id === "";
+  }
 
   // ---------------------------------------------------------------------------
   // D2 §1 视频引用矩阵(issue #96):「审计行存在」与「云文件仍被引用」分开。
@@ -1358,7 +1372,7 @@ function createVideoActions(h) {
   /**
    * location_id 归属与子树校验(读 DB,仍在票据 CAS 之前,非法输入零写):
    * - 按 { _id, household_id } 查 locations:跨家庭/不存在 → NOT_FOUND(findNodeById 同语义);
-   * - home 根拒绝(清点入口只在非根层,物品不允许挂根);
+   * - home 根拒绝(isHomeRoot 统一判定;清点入口只在非根层,物品不允许挂根);
    * - 逐件校验 node_id/move_to_node_id ∈ subtree(location_id)(含自身),越界 →
    *   INVALID_INPUT + detail.out_of_subtree,整批零写;
    * - target:"new" 的 location_text 必须逐字 === 目标节点 path.join(" / ")
@@ -1370,7 +1384,7 @@ function createVideoActions(h) {
       .get();
     var node = got && got.data && got.data.length > 0 ? got.data[0] : null;
     if (node === null) return { ok: false, error: "NOT_FOUND" };
-    if (node.parent_id === "") return { ok: false, error: "INVALID_INPUT" };
+    if (isHomeRoot(node)) return { ok: false, error: "INVALID_INPUT" };
     var nodes = await fetchHouseholdLocationNodes(deps);
     var subtree = subtreeNodesById(nodes, locationCtx.location_id);
     if (subtree === null) return { ok: false, error: "NOT_FOUND" };
@@ -1397,6 +1411,45 @@ function createVideoActions(h) {
       return { ok: false, error: "INVALID_INPUT", detail: { out_of_subtree: outOfSubtree } };
     }
     return { ok: true, node: node, subtree: subtree, targets: targets };
+  }
+
+  /**
+   * B 页显式挂载校验(#116 PR A,D0-CONTRACT v2 §1 窗口一;读 DB,仍在票据 CAS
+   * 之前,非法输入零写,与 resolveLocationContext 同段位):videoSceneCommit 无
+   * location 上下文时,items[i] 可显式携带 node_id(仅 target:"new")。逐件校验:
+   * - 节点不存在 / 跨家庭(household 过滤天然跨家庭)→ NOT_FOUND;
+   * - 目标是 home 根 → INVALID_INPUT(isHomeRoot 统一判定,B 页出生即走统一判定);
+   * - location_text 必须逐字 === 目标节点 path.join(" / ")(服务端权威,与 D1 同款
+   *   消除双份真相);不一致 → INVALID_INPUT + detail.location_text_mismatch;
+   * - 任一件非法 → 整批零写。批内任一件携带即全部校验;不携带的件零增量行为。
+   * B 页不施加 D1 子树约束(可挂全家庭任意非根节点,已裁定)。
+   */
+  async function resolveBPageMountTargets(deps, prepared) {
+    var wanted = [];
+    for (var i = 0; i < prepared.length; i++) {
+      if (prepared[i].target === "new" && prepared[i].node_id !== undefined) wanted.push(prepared[i]);
+    }
+    if (wanted.length === 0) return { ok: true, targets: null };
+    var nodes = await fetchHouseholdLocationNodes(deps);
+    var byId = Object.create(null);
+    for (var n = 0; n < nodes.length; n++) byId[nodes[n]._id] = nodes[n];
+    var targets = Object.create(null);
+    var mismatch = [];
+    for (var w = 0; w < wanted.length; w++) {
+      var p = wanted[w];
+      var node = byId[p.node_id];
+      if (node === undefined) return { ok: false, error: "NOT_FOUND" };
+      if (isHomeRoot(node)) return { ok: false, error: "INVALID_INPUT" };
+      if (p.location_text !== node.path.join(LOCATION_PATH_SEPARATOR)) {
+        mismatch.push(p.draft_key);
+        continue;
+      }
+      targets[p.draft_key] = { node_id: p.node_id, path_text: node.path.join(LOCATION_PATH_SEPARATOR) };
+    }
+    if (mismatch.length > 0) {
+      return { ok: false, error: "INVALID_INPUT", detail: { location_text_mismatch: mismatch } };
+    }
+    return { ok: true, targets: targets };
   }
 
   /** 修改内容指纹(键排序 JSON,itemsApi changesFingerprint 同款算法) */
@@ -1856,7 +1909,7 @@ function createVideoActions(h) {
       .get();
     var node = got && got.data && got.data.length > 0 ? got.data[0] : null;
     if (node === null) return fail("NOT_FOUND");
-    if (node.parent_id === "") return fail("INVALID_INPUT");
+    if (isHomeRoot(node)) return fail("INVALID_INPUT");
     var nodes = await fetchHouseholdLocationNodes(deps);
     var subtree = subtreeNodesById(nodes, event.location_id);
     if (subtree === null) return fail("NOT_FOUND");
@@ -2046,6 +2099,26 @@ function createVideoActions(h) {
       }
     }
 
+    // B 页显式挂载窗口一(#116 PR A,D0-CONTRACT v2 §1):无 location 上下文时
+    // items[i] 可显式携带 node_id。静态校验(不存在/跨家庭/home 根/location_text
+    // 失配)在同一零写段位,非法 → 整批拒绝,零业务写入。
+    var bPageTargets = null;
+    if (locationCtx === null) {
+      var bResolved = await resolveBPageMountTargets(deps, prepared);
+      if (bResolved.ok !== true) {
+        if (bResolved.detail) {
+          return {
+            ok: false,
+            error: bResolved.error,
+            message: h.ERROR_MESSAGES.INVALID_INPUT,
+            detail: bResolved.detail
+          };
+        }
+        return fail(bResolved.error);
+      }
+      bPageTargets = bResolved.targets;
+    }
+
     var gotTicket = await ticketCol(deps).doc(event.upload_ticket).get();
     var ticket = gotTicket && gotTicket.data;
     if (ticket === null || ticket === undefined) return fail("VIDEO_TICKET_EXPIRED");
@@ -2209,6 +2282,28 @@ function createVideoActions(h) {
           resultRow.mounted = mountRes.mounted === true;
           if (mountRes.mounted !== true) {
             resultRow.mount_error = mountRes.mount_error || "VERSION_CONFLICT";
+          }
+        } else if (bPageTargets !== null && rr.p.target === "new" && rr.p.node_id !== undefined) {
+          // B 页窗口二(#116 PR A,D0 v2 §1):建档/证据之后挂载,如实降级不回滚。
+          // 挂载前重验节点仍在——窗口一之后节点可能被并发删除,绝不把新挂载写向
+          // 已删节点(悬挂);不在 → mounted:false + NOT_FOUND。CAS 失败(物品被
+          // 并发编辑)→ applyScanMount 既有 VERSION_CONFLICT 降级。两条路径都
+          // 保留物品与证据,mounted:false + mount_error 如实上报,绝不删物品。
+          var bTarget = bPageTargets[rr.p.draft_key];
+          resultRow.node_id = bTarget.node_id;
+          var bNodeGot = await deps.db.collection(LOCATIONS_COLLECTION)
+            .where({ _id: bTarget.node_id, household_id: deps.householdId })
+            .get();
+          var bNodeRow = bNodeGot && bNodeGot.data && bNodeGot.data.length > 0 ? bNodeGot.data[0] : null;
+          if (bNodeRow === null) {
+            resultRow.mounted = false;
+            resultRow.mount_error = "NOT_FOUND";
+          } else {
+            var bMountRes = await applyScanMount(deps, itemId, bTarget.node_id, event.scene_id);
+            resultRow.mounted = bMountRes.mounted === true;
+            if (bMountRes.mounted !== true) {
+              resultRow.mount_error = bMountRes.mount_error || "VERSION_CONFLICT";
+            }
           }
         }
         results.push(resultRow);

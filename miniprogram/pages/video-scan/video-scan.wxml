@@ -77,6 +77,7 @@
           <view class="tiny-danger" data-index="{{idx}}" bindtap="onDraftRemoveTap">移除</view>
         </view>
         <view class="target-row" data-index="{{idx}}" bindtap="onDraftTargetTap">{{d.targetText}} ›</view>
+        <view wx:if="{{d.target === 'new'}}" class="target-row node-row" data-index="{{idx}}" bindtap="onDraftNodeTap">归到：{{d.nodeText || '不选，只按文字记录'}} ›</view>
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.locationText}}" placeholder="这件放在哪里" data-index="{{idx}}" bindinput="onDraftLocationInput" />
         <input wx:if="{{d.target === 'new'}}" class="text-input" value="{{d.note}}" placeholder="备注（可选）" data-index="{{idx}}" bindinput="onDraftNoteInput" />
         <view wx:if="{{d.target === 'new'}}" class="qtyrow">
@@ -134,6 +135,47 @@
     <view class="empty-title">这次没有完成</view>
     <view class="empty-sub">{{errorText}}</view>
     <view class="primary-btn" bindtap="onRestartTap">重新选择视频</view>
+  </view>
+
+  <!-- 「归到」逐层选择器(#116 PR A):复用 D1 弹层模式;从家第一层起逐层下钻,
+       家根本身不可挂(nodeSelectorCanPick 控制),既有 locations list 零新读侧 action -->
+  <view wx:if="{{nodeSelectorVisible}}" class="layer-mask" bindtap="onNodeSelectorCloseTap">
+    <view class="layer" catchtap="noop">
+      <view class="card-title">归到哪个位置</view>
+      <view class="hint">从家里的第一层开始逐层选；不选就只按文字记录，不会挂到位置树。</view>
+      <view class="crumb-line">{{nodeSelectorPathText}}</view>
+      <scroll-view scroll-y class="layer-scroll">
+        <view wx:if="{{nodeSelectorCanPick}}" class="option-row option-current" bindtap="onNodePickCurrentTap">
+          <view class="item-main">
+            <view class="item-name">就归「{{nodeSelectorCurrentName}}」</view>
+            <view class="item-location">{{nodeSelectorPathText}}</view>
+          </view>
+          <view class="pick-check">选</view>
+        </view>
+        <view
+          wx:for="{{nodeSelectorOptions}}"
+          wx:key="locationId"
+          class="option-row"
+          data-node-id="{{item.locationId}}"
+          bindtap="onNodeOptionTap"
+        >
+          <view class="item-main">
+            <view class="item-name">{{item.name}}（{{item.itemCount}} 件）</view>
+            <view class="item-location">{{item.pathText}}</view>
+          </view>
+          <view wx:if="{{item.hasChildren}}" class="pick-check drill" data-node-id="{{item.locationId}}" catchtap="onNodeDrillTap">下级 ›</view>
+          <view class="pick-check">选</view>
+        </view>
+        <view wx:if="{{!nodeSelectorLoading && nodeSelectorOptions.length === 0}}" class="empty-small">这一层下面没有更细的位置。</view>
+        <view wx:if="{{nodeSelectorLoading}}" class="empty-small">正在加载…</view>
+        <view wx:if="{{nodeSelectorError}}" class="notice danger">{{nodeSelectorError}}</view>
+      </scroll-view>
+      <view class="layer-btns">
+        <view wx:if="{{nodeSelectorCanBack}}" class="secondary-btn" bindtap="onNodeSelectorBackTap">上一层</view>
+        <view wx:if="{{nodeSelectorFor >= 0}}" class="secondary-btn" bindtap="onNodeSelectorClearTap">不挂，只记文字</view>
+        <view class="primary-btn" bindtap="onNodeSelectorCloseTap">取消</view>
+      </view>
+    </view>
   </view>
 </view>
 
