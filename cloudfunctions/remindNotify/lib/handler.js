@@ -175,7 +175,16 @@ function templateData(card) {
 }
 
 async function runDailyScan(deps) {
-  var stats = { scanned: 0, due: 0, households: 0, sent: 0, failed: 0, skipped: 0 };
+  var stats = { scanned: 0, due: 0, households: 0, sent: 0, failed: 0, skipped: 0, sendErr: null };
+  // 发送失败的微信错误码(纯数字,首次失败记录;43101=额度/拒收,47001/40003=参数等;
+  // 不含任何身份/内容,符合「只落计数与布尔」的日志纪律延伸)
+  function errCodeOf(e) {
+    if (e && typeof e.errCode === "number") return e.errCode;
+    var text = String((e && (e.errMsg || e.message)) || "");
+    var m = /(?:errcode["\s:=]+|fail\s*)(\d{4,6})/i.exec(text);
+    if (m === null) m = /\b(\d{4,6})\b/.exec(text); // 裸 "43101 xxx" 形态
+    return m ? Number(m[1]) : -1;
+  }
   var today = aggregate.shanghaiYmd(deps.now());
 
   // 1) 全部 active 提醒(分页拉全量;slot/done 行与 active 查询天然隔离)
@@ -254,6 +263,7 @@ async function runDailyScan(deps) {
       } catch (e) {
         // 43101 用户未订阅/额度不足等:如实计数,绝不抛出、绝不打断下一条
         sentOk = false;
+        if (stats.sendErr === null) stats.sendErr = errCodeOf(e);
       }
       // 发送成败都盖章今天已处理(当天不再重试打扰;明日窗口重新判定)
       await deps.db
@@ -269,6 +279,7 @@ async function runDailyScan(deps) {
   }
   return {
     ok: true,
+    sendErr: stats.sendErr,
     scanned: stats.scanned,
     due: stats.due,
     households: stats.households,
@@ -335,6 +346,7 @@ async function handler(event, deps) {
     entry.sent = result.sent;
     entry.failed = result.failed;
     entry.skipped = result.skipped;
+    if (result.sendErr !== null && result.sendErr !== undefined) entry.sendErr = result.sendErr;
   }
   logResult(deps, label, entry, startedAt);
   return result;
