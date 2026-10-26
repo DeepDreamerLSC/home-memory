@@ -35,6 +35,7 @@ import {
   localTodayYmd,
   monthDayText,
   pickerDateProblem,
+  pickerStartYmd,
 } from "../../utils/remind-ui";
 import {
   buildUpdateChanges,
@@ -328,7 +329,8 @@ Page<
      */
     remindGeneration: number;
     /** 今天(YYYY-MM-DD):编辑提醒的日期选择器下限 */
-    today: string;
+    /** 提醒日期滚轮起点(8 点后=明天;remind-ui.pickerStartYmd) */
+    pickerStart: string;
     /** 提醒操作执行中(已处理/改日期/清除;防并发重复提交) **/
     remindBusy: boolean;
     /**
@@ -607,7 +609,7 @@ Page<
     } | null,
     remindAt: "",
     remindGeneration: -1,
-    today: localTodayYmd(),
+    pickerStart: pickerStartYmd(),
     remindBusy: false,
     notifyAccepted: false,
     diagEntryVisible: false,
