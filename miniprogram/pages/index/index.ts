@@ -1,5 +1,6 @@
 import { cachedUserProfile, getUserProfile } from "../../utils/profile-api";
 import { applyPageAppearance } from "../../utils/appearance-page";
+import { disableHomeExitGuard, enableHomeExitGuard } from "../../utils/exit-guard";
 import { roomArtwork, itemArtwork } from "../../utils/ui";
 import { callItemsApi, errorMessage } from "../../utils/api";
 import { normalizeQuantityFields, quantitySlotText } from "../../utils/quantity";
@@ -374,6 +375,7 @@ Page<
   currentNodePath: [] as string[],
 
   onLoad(options) {
+    enableHomeExitGuard();
     // Page options 会被浅拷贝共享,实例字段按本页实例重建(locations 页同款防护)
     this.requestSeq = createRequestSeq();
     this.renderedCurrentView = false;
@@ -428,6 +430,7 @@ Page<
   },
 
   onUnload() {
+    disableHomeExitGuard();
     this.profileRequest++;
     this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
