@@ -744,3 +744,7 @@ button.detail-update { flex: 0 0 176rpx; min-width: 176rpx; max-width: 176rpx; }
 .note-fold-row { display: flex; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 20rpx 0; margin: 0 44rpx; border-bottom: 1rpx solid var(--line); font-size: 24rpx; color: var(--text-2); }
 .note-fold-row .note-fold-chev { color: var(--text); }
 .note-fold-body { margin: 0 44rpx; padding: 20rpx 0; font-size: 26rpx; line-height: 1.8; color: var(--text); border-bottom: 1rpx solid var(--line); white-space: pre-wrap; word-break: break-all; }
+
+/* 提醒设置行(2026-10-26 上移主界面):picker 按钮与 ✕ 清除横向排布 */
+.remind-set-row { display: flex; align-items: center; gap: 16rpx; margin: 14rpx 24rpx 0; }
+.remind-set-row picker { flex: 1; }

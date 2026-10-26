@@ -1,8 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PERIOD_DAYS_MAX = void 0;
+exports.DAILY_SCAN_HOUR = exports.PERIOD_DAYS_MAX = void 0;
 exports.localTodayYmd = localTodayYmd;
 exports.daysUntilLocal = daysUntilLocal;
+exports.dailyScanPassed = dailyScanPassed;
+exports.pickerStartYmd = pickerStartYmd;
 exports.pickerDateProblem = pickerDateProblem;
 exports.duePill = duePill;
 exports.monthDayText = monthDayText;
@@ -26,15 +28,36 @@ function daysUntilLocal(due, now = new Date()) {
     const today = localTodayYmd(now);
     return Math.round((Date.parse(due + "T00:00:00Z") - Date.parse(today + "T00:00:00Z")) / DAY_MS);
 }
+/** 每日到期推送扫描的本地小时(remindNotify 定时器 0 0 8 * * * *,Asia/Shanghai) */
+exports.DAILY_SCAN_HOUR = 8;
+/** 本地「今天 8 点的推送扫描是否已跑过」(2026-10-24 真机教训:08:49 设当天到期永不推送) */
+function dailyScanPassed(now = new Date()) {
+    return now.getHours() >= exports.DAILY_SCAN_HOUR;
+}
 /**
- * item 页改期 picker 的提交前校验(与 picker start=今天 的可选范围两端一致):
- * 今天可设(到期分组里「今天到期」本就存在),过去的日子与超 10 年的拒绝。
- * 返回可展示的问题文案,空串=可提交。
+ * 提醒日期 picker 的可选起点(真机反馈 2026-10-26):当天 8 点前=今天(今晨扫描
+ * 还会扫到它);8 点后=明天——今天的扫描已跑完、明天的窗口又不含今天,
+ * 此时设「今天」的提醒永远发不出去,滚轮直接从明天起,把这个坑挡在 UI 外。
+ */
+function pickerStartYmd(now = new Date()) {
+    if (!dailyScanPassed(now))
+        return localTodayYmd(now);
+    const t = new Date(now.getTime());
+    t.setDate(t.getDate() + 1);
+    return localTodayYmd(t);
+}
+/**
+ * 改期 picker 的提交前校验(与 pickerStartYmd 的可选范围两端一致):
+ * 8 点前今天可设(到期分组里「今天到期」本就存在);8 点后今天拒绝(推送已过);
+ * 过去的日子与超 10 年的拒绝。返回可展示的问题文案,空串=可提交。
  */
 function pickerDateProblem(value, now = new Date()) {
     const days = daysUntilLocal(value, now);
     if (days < 0) {
         return "选今天或往后的日子";
+    }
+    if (days === 0 && dailyScanPassed(now)) {
+        return "今天 8 点的提醒已经发过了,选明天或往后";
     }
     if (days > exports.PERIOD_DAYS_MAX) {
         return "最多记十年内";

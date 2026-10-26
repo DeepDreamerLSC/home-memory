@@ -100,7 +100,8 @@
           <view class="v {{ rows[0].remindAt ? '' : 'muted' }}">{{ rows[0].remindAt ? rows[0].remindAt + ' 到期' : '不提醒' }}</view>
           <picker
             mode="date"
-            value="{{ rows[0].remindAt || today }}"
+            value="{{ rows[0].remindAt || pickerStart }}"
+            start="{{ pickerStart }}"
             disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}"
             bindchange="onRemindDateChange"
           >
