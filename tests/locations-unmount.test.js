@@ -767,6 +767,238 @@ test("OLD-DELETE-FORCE:旧 delete(含 force)作用于 deleting 根或子树内�
   assert.equal(nodes.filter(function (n) { return n.deleting !== undefined; }).length, 1);
 });
 
+test("OLD-DELETE-FORCE-ANCESTOR:后代根带 pending 检查点时,祖先侧 delete(force) 整支硬删 = 吞检查点 ⇒ INVALID_INPUT({reason:deleting});终检只核对自己清单,清单内悬挂件与 active scan 的恢复凭据绝不允许随后代根文档一起消失", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var x = await createItem(t.deps, "op-dp-x", "字典", "书房的书柜");
+  await linkItem(t.deps, x, ids.layerId, 1, "u-dp-x");
+  var y = await createItem(t.deps, "op-dp-y", "台灯", "书房的书柜");
+  await seedScan(t.db, "scan-dp", ids.layerId);
+  // unmount(书柜):删 第一层 前注入「部署窗口期物品挂入」,nodes→compensate 推进处中断
+  var trapDeps = Object.assign({}, t.deps, { db: faultDb(t.db, [
+    { collection: "locations", op: "docRemove", at: 1, noThrow: true,
+      action: function () {
+        return t.db.collection("items").doc(y).update({
+          data: { location_node_id: ids.layerId, version: 2 }
+        });
+      } },
+    { collection: "locations", op: "whereUpdate", patchHas: "deleting", at: 2 } // #1=立点,#2=nodes→compensate
+  ]) });
+  var r1 = await unmount(trapDeps, ids.shelfId);
+  assert.equal(r1.error, "UNMOUNT_INCOMPLETE", JSON.stringify(r1));
+  var nodesMid = await rawDocs(t.db, "locations");
+  var shelfDoc = nodesMid.find(function (n) { return n._id === ids.shelfId; });
+  assert.ok(shelfDoc && shelfDoc.deleting && shelfDoc.deleting.phase === "nodes", "前置:书柜带 pending 检查点");
+  assert.equal(nodesMid.some(function (n) { return n._id === ids.layerId; }), false, "前置:第一层已硬删");
+  var yMid = (await rawDocs(t.db, "items")).find(function (d) { return d._id === y; });
+  assert.equal(yMid.location_node_id, ids.layerId, "前置:Y 悬挂在已删 第一层 上(仅检查点清单知道它)");
+
+  // 祖先侧 delete(force 书房):自身与祖先均无 deleting、子树也无物品——空判本会满足
+  var r2 = await locHandler({ action: "delete", node_id: ids.studyId, force: true }, t.deps);
+  assert.equal(r2.ok, false, JSON.stringify(r2));
+  assert.equal(r2.error, "INVALID_INPUT");
+  assert.deepEqual(r2.detail, { reason: "deleting" }, "两个删除域交叉:后代域清单必须整支保全");
+  var nodesAfter = await rawDocs(t.db, "locations");
+  assert.equal(nodesAfter.filter(function (n) { return n.deleting !== undefined; }).length, 1, "检查点不丢");
+  assert.equal(nodesAfter.some(function (n) { return n._id === ids.studyId; }), true, "书房 不被吞");
+  var yAfter = (await rawDocs(t.db, "items")).find(function (d) { return d._id === y; });
+  assert.equal(yAfter.location_node_id, ids.layerId, "悬挂件证据保全(等续跑补偿)");
+  assert.equal((await rawDocs(t.db, "location_scans"))[0].status, "active", "scan 不被祖先域顺手终结");
+
+  // 收敛路径先续跑后代域,再删祖先:门随检查点消失而解除
+  var resume = await unmount(t.deps, ids.shelfId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  assert.equal(resume.compensated, 1, "窗口期悬挂件 Y 由后代域补偿");
+  var delAnc = await locHandler({ action: "delete", node_id: ids.studyId, force: true }, t.deps);
+  assert.equal(delAnc.ok, true, JSON.stringify(delAnc));
+  assert.equal(delAnc.deleted_nodes, 1, "收敛后书房 子树仅剩自身");
+  void x;
+});
+
+test("NESTED-UNMOUNT-ANCESTOR:后代根带 pending 检查点时,祖先 unmount 同为删除域交叉 ⇒ INVALID_INPUT({reason:deleting}) 零写,不吞后代清单", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var x = await createItem(t.deps, "op-na-x", "字典", "书房的书柜");
+  await linkItem(t.deps, x, ids.layerId, 1, "u-na-x");
+  var y = await createItem(t.deps, "op-na-y", "台灯", "书房的书柜");
+  await seedScan(t.db, "scan-na", ids.layerId);
+  var trapDeps = Object.assign({}, t.deps, { db: faultDb(t.db, [
+    { collection: "locations", op: "docRemove", at: 1, noThrow: true,
+      action: function () {
+        return t.db.collection("items").doc(y).update({
+          data: { location_node_id: ids.layerId, version: 2 }
+        });
+      } },
+    { collection: "locations", op: "whereUpdate", patchHas: "deleting", at: 2 }
+  ]) });
+  var r1 = await unmount(trapDeps, ids.shelfId);
+  assert.equal(r1.error, "UNMOUNT_INCOMPLETE");
+  var r2 = await unmount(t.deps, ids.studyId);
+  assert.equal(r2.ok, false, JSON.stringify(r2));
+  assert.equal(r2.error, "INVALID_INPUT");
+  assert.deepEqual(r2.detail, { reason: "deleting" });
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.filter(function (n) { return n.deleting !== undefined; }).length, 1, "不立第二检查点");
+  assert.equal(nodes.some(function (n) { return n._id === ids.studyId; }), true);
+  var yDoc = (await rawDocs(t.db, "items")).find(function (d) { return d._id === y; });
+  assert.equal(yDoc.location_node_id, ids.layerId, "悬挂件不动,等后代域续跑");
+  // 后代域续跑收敛;收敛后祖先 unmount 放行
+  var resume = await unmount(t.deps, ids.shelfId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  var anc = await unmount(t.deps, ids.studyId);
+  assert.equal(anc.ok, true, JSON.stringify(anc));
+  void x;
+});
+
+test("DESCENDANT-PENDING-MIGRATE-PURGE:pending 检查点在目标的后代上时,deleteLocation migrate/purge 同走冻结门 INVALID_INPUT({reason:deleting}),检查点保全;子树外 migrate 不误伤", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var drawer = await ensurePath(t.deps, ["书房", "书柜", "第一层", "抽屉"]);
+  var drawerId = drawer.nodes[drawer.nodes.length - 1].location_id;
+  var a = await createItem(t.deps, "op-mp-a", "字典", "书房的书柜");
+  await linkItem(t.deps, a, drawerId, 1, "u-mp-a");
+  // 第一层 带 pending 检查点(立点后首删即断,phase=nodes)
+  var trapDeps = Object.assign({}, t.deps, { db: faultDb(t.db, [
+    { collection: "locations", op: "docRemove", at: 1 }
+  ]) });
+  var r1 = await unmount(trapDeps, ids.layerId);
+  assert.equal(r1.error, "UNMOUNT_INCOMPLETE", JSON.stringify(r1));
+  var layerDoc = (await rawDocs(t.db, "locations")).find(function (n) { return n._id === ids.layerId; });
+  assert.ok(layerDoc && layerDoc.deleting, "前置:第一层 带 pending 检查点");
+  var expectFrozen = async function (res, label) {
+    assert.equal(res.ok, false, label);
+    assert.equal(res.error, "INVALID_INPUT", label);
+    assert.deepEqual(res.detail, { reason: "deleting" }, label);
+  };
+  await expectFrozen(
+    await locHandler({ action: "deleteLocation", node_id: ids.shelfId, mode: "migrate" }, t.deps), "migrate 祖先");
+  await expectFrozen(
+    await locHandler({ action: "deleteLocation", node_id: ids.shelfId, mode: "purge" }, t.deps), "purge 祖先");
+  await expectFrozen(
+    await locHandler({ action: "deleteLocation", node_id: ids.studyId, mode: "purge" }, t.deps), "purge 隔代祖先");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 6, "零删除(根+书房+书柜+第一层+抽屉+厨房)");
+  assert.equal(nodes.filter(function (n) { return n.deleting !== undefined; }).length, 1, "检查点保全");
+  // 后代域收敛后,migrate/purge 恢复既有语义(REGRESS 交叉钩子)
+  var resume = await unmount(t.deps, ids.layerId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  var mig = await locHandler({ action: "deleteLocation", node_id: ids.shelfId, mode: "migrate" }, t.deps);
+  assert.equal(mig.ok, true, JSON.stringify(mig));
+  var docA = (await rawDocs(t.db, "items")).find(function (d) { return d._id === a; });
+  assert.equal(docA.location_node_id, null, "unmount 已解挂,migrate 无件可迁");
+});
+
+test("PHASE-ADVANCE-INTERLEAVE:并发续跑者已把 phase 推进到 scans,陈旧续跑者(读到 nodes)的条件推进必须失配不写——phase 单调不回退,以库内最新态续,全程收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var a = await createItem(t.deps, "op-ia-a", "字典", "书房的书柜");
+  await linkItem(t.deps, a, ids.layerId, 1, "u-ia-a");
+  await seedScan(t.db, "scan-ia", ids.layerId);
+  // 首跑:立点后首删即断 → phase=nodes、后代未删
+  var r1 = await unmount(
+    Object.assign({}, t.deps, { db: faultDb(t.db, [{ collection: "locations", op: "docRemove", at: 1 }]) }),
+    ids.studyId
+  );
+  assert.equal(r1.error, "UNMOUNT_INCOMPLETE");
+  assert.equal(r1.pending.phase, "nodes");
+
+  // 续跑者 A 读到 phase=nodes;A 首删后代时,竞争者 B 已把检查点条件推进到 scans
+  // (直接改库代表 B 的条件写先成功);记录 A 此后所有 deleting 写入的 phase,
+  // 任何回退写(compensate/nodes)都违反「单调 nodes→compensate→scans→final」
+  var writtenPhases = [];
+  var innerDb = faultDb(t.db, [
+    { collection: "locations", op: "docRemove", at: 1, noThrow: true,
+      action: function () {
+        // 竞争者 B:整份检查点推进到 scans(updated_at 一并前移,A 的陈旧 CAS 必失配)
+        return t.db.collection("locations").doc(ids.studyId).get().then(function (got) {
+          var cp = Object.assign({}, got.data.deleting, { phase: "scans" });
+          return t.db.collection("locations").doc(ids.studyId).update({
+            data: { deleting: cp, updated_at: "2099-01-01T00:00:00.000Z" }
+          });
+        });
+      } }
+  ]);
+  var recordDb = {
+    collection: function (name) {
+      var col = innerDb.collection(name);
+      if (name !== "locations") return col;
+      return {
+        where: function (cond) {
+          var q = col.where(cond);
+          return {
+            get: function (o) { return q.get(o); },
+            skip: function (n) { return q.skip(n); },
+            limit: function (n) { return q.limit(n); },
+            remove: function () { return q.remove(); },
+            update: function (options) {
+              var d = options && options.data;
+              if (d && d.deleting !== undefined && d.deleting && d.deleting.phase) {
+                writtenPhases.push(d.deleting.phase);
+              }
+              return q.update(options);
+            }
+          };
+        },
+        doc: col.doc.bind(col),
+        add: function (o) { return col.add(o); }
+      };
+    }
+  };
+  var r2 = await unmount(Object.assign({}, t.deps, { db: recordDb }), ids.studyId);
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.deepEqual(
+    writtenPhases,
+    ["final"],
+    "A 的 nodes→compensate 推进必须失配不写(库内已是 scans);唯一的合法推进是 scans→final,实测写入序列:" + JSON.stringify(writtenPhases)
+  );
+  await assertConverged(t, ids, [a]);
+});
+
+test("CHECKPOINT-WRITE-THROWS:立点条件写抛错(wx-server-sdk 文档超上限表现为异常而非 0 命中)⇒ 失败关闭零删除、按 UNMOUNT_INCOMPLETE 返回,不裸抛 INTERNAL;重入重新立点收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var a = await createItem(t.deps, "op-cwt-a", "字典", "书房的书柜");
+  await linkItem(t.deps, a, ids.layerId, 1, "u-cwt-a");
+  var throwPointDb = {
+    collection: function (name) {
+      var col = t.db.collection(name);
+      if (name !== "locations") return col;
+      return {
+        where: function (cond) {
+          var q = col.where(cond);
+          return {
+            get: function (o) { return q.get(o); },
+            skip: function (n) { return q.skip(n); },
+            limit: function (n) { return q.limit(n); },
+            remove: function () { return q.remove(); },
+            update: function (options) {
+              if (options && options.data && options.data.deleting !== undefined) {
+                return Promise.reject(new Error("document size exceeds limit"));
+              }
+              return q.update(options);
+            }
+          };
+        },
+        doc: function (id) { return col.doc(id); },
+        add: function (o) { return col.add(o); }
+      };
+    }
+  };
+  var res = await unmount(Object.assign({}, t.deps, { db: throwPointDb }), ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "UNMOUNT_INCOMPLETE", "置点抛错=失败关闭,绝不裸抛 INTERNAL");
+  assert.ok(res.pending && res.pending.phase === "nodes", "如实附 pending 摘要");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 5, "零删除");
+  assert.equal(nodes.filter(function (n) { return n.deleting !== undefined; }).length, 0, "未立点");
+  var docA = (await rawDocs(t.db, "items")).find(function (d) { return d._id === a; });
+  assert.equal(docA.location_node_id, null, "阶段一成果保留");
+  // 重入:节点未动、清单重算一致,重新立点后完成
+  var ok = await unmount(t.deps, ids.studyId);
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  await assertConverged(t, ids, [a]);
+});
+
 /* ================= deleting 子树冻结门:逐入口反例(目标自身无标记、祖先在删) ================= */
 
 test("FREEZE-GATE:linkItem/ensureAndLink/ensurePath/applyScan/rename/move/merge/deleteLocation(migrate·purge) 逐入口拒绝,零写入;子树外放行;unlinkItem 放行", async () => {

@@ -506,6 +506,27 @@ function failDeletingFrozen() {
 }
 
 /**
+ * 破坏性入口(delete(含 force)/deleteLocation migrate·purge/嵌套 unmount)的
+ * 后代向冻结判定(§3.1 入口清单 + 嵌套拒绝理由):目标子树内任一节点冻结
+ * (自身/祖先 deleting 或 ∈ 检查点清单)⇒ 拒绝。只查「目标或祖先 deleting」
+ * 不足以覆盖祖先侧破坏性操作——两个删除域交叉会使冻结清单互不包含:祖先域把
+ * 带 pending 检查点的后代根整支硬删,检查点(恢复凭据)随根文档消失,清单内
+ * 悬挂件与 active scan 永久失去恢复依据,终态收敛承诺无法兑现;且祖先域终检
+ * 只核对自己清单,返回 ok:true 属假报成功。故除「对 deleting 根自身重入续跑」
+ * 外,子树内含 pending 检查点的目标必须先续跑收敛后代域,再发起祖先侧删除。
+ */
+function subtreeTouchesFrozen(nodes, rootId) {
+  var frozen = buildFrozenIdSet(nodes);
+  var sub = tree.collectSubtree(nodes, rootId);
+  for (var i = 0; i < sub.ids.length; i++) {
+    if (frozen[sub.ids[i]] === true) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 路径是否进入 deleting 冻结子树(ensurePath/applyScan/ensureAndLink 的路径型
  * 入口判定;纯内存解析既有节点,不建任何节点):沿既有节点逐段下钻,任一段命中
  * 冻结节点——复用其子节点或在其下新建都拒(挂载与建节点两个动作都冻,§3.1)。
@@ -1004,8 +1025,9 @@ async function deleteAction(event, deps) {
   }
   var nodes = await fetchHouseholdNodes(deps);
   // deleting 冻结门(D0 v4 终审 P0-2 点名的绕过点):阶段一摘空物品后 delete(force)
-  // 恰满足其空判,可把带 deleting 检查点的根整支硬删、检查点随之消失——必须关死
-  if (buildFrozenIdSet(nodes)[node._id] === true) {
+  // 恰满足其空判,可把带 deleting 检查点的根整支硬删、检查点随之消失——必须关死;
+  // 后代向同理:目标子树内含 pending 检查点 ⇒ 祖先侧整支硬删同样吞检查点(subtreeTouchesFrozen)
+  if (subtreeTouchesFrozen(nodes, node._id)) {
     return failDeletingFrozen();
   }
   var sub = tree.collectSubtree(nodes, node._id);
@@ -1516,11 +1538,14 @@ function validCheckpoint(cp, rootId, deps) {
 
 /**
  * 检查点读改写(条件更新,§3.1「检查点并发约束」):重读根文档取最新 updated_at,
- * 条件写整份检查点(updated_at CAS,防交错);失配 ⇒ 重读最新态返回(op_id+phase
- * 匹配才前进的语义由调用方保证,后写者失配重读再续,phase 单调不回退)。
- * 返回 {cp} / {corrupt:true} / null(根或检查点已消失,调用方终检兜底)。
+ * 条件写整份检查点(updated_at CAS,防交错)。expectPhase 为「phase 条件推进」的
+ * 条件一半:重读到的最新 phase 必须恰为本轮已完成阶段才允许写(op_id 匹配由
+ * validCheckpoint 对 node_id 的确定性派生校验承担)——失配(并发续跑者已推进,
+ * 调用方读到的 phase 陈旧)⇒ 不写、以库内最新态返回,phase 单调不回退由「不写」
+ * 保证;后写者失配重读再续。返回 {cp} / {corrupt:true} / null(根或检查点已
+ * 消失,调用方终检兜底)。
  */
-async function writeCheckpointStep(deps, cp, patch) {
+async function writeCheckpointStep(deps, cp, patch, expectPhase) {
   var fresh = await findNodeById(deps, cp.node_id);
   if (!fresh || fresh.deleting === undefined) {
     return null;
@@ -1528,6 +1553,9 @@ async function writeCheckpointStep(deps, cp, patch) {
   var latest = validCheckpoint(fresh.deleting, cp.node_id, deps);
   if (latest === null) {
     return { corrupt: true };
+  }
+  if (expectPhase !== undefined && latest.phase !== expectPhase) {
+    return { cp: latest }; // 条件失配:并发已推进,陈旧推进不落笔,以库内最新态续
   }
   var updated = Object.assign({}, latest, patch);
   var res = await locCol(deps)
@@ -1548,18 +1576,24 @@ async function writeCheckpointStep(deps, cp, patch) {
 }
 
 /**
- * phase 条件推进(§3.1):仅当读到的 phase 恰为本轮已完成阶段才前进一位
- * (单调不回退;并发已推进 ⇒ 以读到的为准,各阶段幂等保证收敛)。
+ * phase 条件推进(§3.1):仅当重读到的最新 phase 恰为本轮已完成阶段才前进一位
+ * (单调不回退;调用方读到的 phase 可能已陈旧——并发续跑者已推进 ⇒ 条件失配
+ * 不写、以库内最新态续,各阶段幂等保证收敛)。
  */
 async function advanceCheckpointPhase(deps, cp, completedPhase, counts) {
   if (phaseIndexOf(cp.phase) !== phaseIndexOf(completedPhase)) {
     return cp;
   }
-  var r = await writeCheckpointStep(deps, cp, {
-    phase: DELETING_PHASES[phaseIndexOf(completedPhase) + 1],
-    counts: counts,
-    status: "pending"
-  });
+  var r = await writeCheckpointStep(
+    deps,
+    cp,
+    {
+      phase: DELETING_PHASES[phaseIndexOf(completedPhase) + 1],
+      counts: counts,
+      status: "pending"
+    },
+    completedPhase
+  );
   if (r === null) {
     return cp;
   }
@@ -1813,8 +1847,10 @@ async function unmountLocationAction(deps, node, nodes) {
     }
     return unmountRunPhases(deps, existing); // 恢复路径(§3.1):用户显式触发,绝不自动
   }
-  if (buildFrozenIdSet(nodes)[rootId] === true) {
-    return failDeletingFrozen(); // 嵌套 unmount:祖先在删(自身无标记)
+  if (subtreeTouchesFrozen(nodes, rootId)) {
+    // 嵌套 unmount(两个删除域交叉,§3.1):祖先在删(自身无标记)/ 后代根带
+    // pending 检查点(祖先域会把后代清单连同根文档一起吞掉)——均拒绝,不立第二检查点
+    return failDeletingFrozen();
   }
   // —— 阶段一:逐件 CAS 解挂(枚举子树未删物品;摘挂值恒 null)
   var sub = tree.collectSubtree(nodes, rootId);
@@ -1837,7 +1873,13 @@ async function unmountLocationAction(deps, node, nodes) {
     };
   }
   // —— 阶段二·步①:于待删根文档置 deleting 检查点(先立点、后删除;冻结清单
-  // 以立点时的最新树为准,创建后不变)
+  // 以立点时的最新树为准,创建后不变)。条件写口径:合同表述为「仅在根文档当前
+  // 不存在 deleting 字段时成功(防双开)」,本仓库内以 updated_at CAS 等价实现——
+  // deleting 的唯一写者是本代码,且每次写 deleting 恒同时 bump updated_at
+  // (deps.now() 毫秒 ISO 单调),故「deleting 已存在」⇒「updated_at 已变」⇒ CAS
+  // 必失配;反方向(仅 bump updated_at 未写 deleting,如并发 rename)同样走失败
+  // 关闭分支,不误判双开(胜/败两支由 CHECKPOINT-CONDITIONAL-WRITE /
+  // CHECKPOINT-SAME-ROOT-REPLAY 锁定)。
   var nodesFresh = await fetchHouseholdNodes(deps);
   var subFresh = tree.collectSubtree(nodesFresh, rootId);
   if (subFresh.nodes.length === 0) {
@@ -1852,9 +1894,16 @@ async function unmountLocationAction(deps, node, nodes) {
     created_at: deps.now(),
     status: "pending"
   };
-  var wrote = await locCol(deps)
-    .where({ _id: rootId, household_id: deps.householdId, updated_at: fresh.updated_at })
-    .update({ data: { deleting: checkpoint, updated_at: deps.now() } });
+  var wrote = null;
+  try {
+    wrote = await locCol(deps)
+      .where({ _id: rootId, household_id: deps.householdId, updated_at: fresh.updated_at })
+      .update({ data: { deleting: checkpoint, updated_at: deps.now() } });
+  } catch (pointErr) {
+    // 置点抛错(文档超上限/字段校验失败在 wx-server-sdk 表现为异常而非 0 命中):
+    // 与 0 命中同路失败关闭——零删除、按 UNMOUNT_INCOMPLETE 返回(§3.1 生命周期)
+    wrote = null;
+  }
   if (!wrote || !wrote.stats || wrote.stats.updated < 1) {
     var again = await findNodeById(deps, rootId);
     if (again && again.deleting !== undefined) {
@@ -2021,8 +2070,8 @@ async function deleteLocationAction(event, deps) {
   if (event.mode === "unmount") {
     return unmountLocationAction(deps, node, nodes);
   }
-  if (buildFrozenIdSet(nodes)[node._id] === true) {
-    return failDeletingFrozen(); // migrate/purge 不得作用于 deleting 子树(含根)
+  if (subtreeTouchesFrozen(nodes, node._id)) {
+    return failDeletingFrozen(); // migrate/purge 不得作用于 deleting 子树(含根与后代向交叉域)
   }
   var sub = tree.collectSubtree(nodes, node._id);
   var subtreeIds = subtreeIdSet(sub.ids);
