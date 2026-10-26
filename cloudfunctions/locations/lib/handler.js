@@ -190,7 +190,8 @@ async function ensureHomeRoot(deps) {
     path: [],
     created_from: "bootstrap",
     created_at: now,
-    updated_at: now
+    updated_at: now,
+    cp_rev: 0
   };
   try {
     await locCol(deps).add({ data: doc });
@@ -238,7 +239,10 @@ async function createNode(deps, parentId, name, path, type, createdFrom) {
     path: path,
     created_from: createdFrom,
     created_at: now,
-    updated_at: now
+    updated_at: now,
+    // 检查点单调版本号(评审 5654328065 P0-1):出生即 0,unmount 检查点写入
+    // 以 cp_rev 条件更新互斥(毫秒无关);投影白名单不含本字段,绝不外泄
+    cp_rev: 0
   };
   try {
     await locCol(deps).add({ data: doc });
@@ -1537,13 +1541,17 @@ function validCheckpoint(cp, rootId, deps) {
 }
 
 /**
- * 检查点读改写(条件更新,§3.1「检查点并发约束」):重读根文档取最新 updated_at,
- * 条件写整份检查点(updated_at CAS,防交错)。expectPhase 为「phase 条件推进」的
- * 条件一半:重读到的最新 phase 必须恰为本轮已完成阶段才允许写(op_id 匹配由
- * validCheckpoint 对 node_id 的确定性派生校验承担)——失配(并发续跑者已推进,
- * 调用方读到的 phase 陈旧)⇒ 不写、以库内最新态返回,phase 单调不回退由「不写」
- * 保证;后写者失配重读再续。返回 {cp} / {corrupt:true} / null(根或检查点已
- * 消失,调用方终检兜底)。
+ * 检查点读改写(条件更新,§3.1「检查点并发约束」;评审 5654328065 P0-1):重读根文档,
+ * 条件写整份检查点。**互斥谓词=cp_rev 单调条件写**(根文档整数字段,检查点每写一笔
+ * 恒 +1,毫秒无关——同毫秒两个写入者的谓词值必不同:先者落笔即把 cp_rev 推高,后者
+ * 谓词失配 0 命中,绝不双写/回写);updated_at 仅作并存的保守谓词保留(并发无关写
+ * 如 rename 仍令检查点写失败关闭,既有失败关闭语义不变),**不再单独承担互斥**——
+ * 其毫秒精度缺陷正是本修复取消其互斥职责的原因。expectPhase 为「phase 条件推进」
+ * 的条件一半:重读到的最新 phase 必须恰为本轮已完成阶段才允许写——失配(并发续跑者
+ * 已推进,调用方读到的 phase 陈旧)⇒ 不写、以库内最新态返回,phase 单调不回退由
+ * 「不写」保证;后写者失配重读再续。cp_rev 非整数(仅在 cp_rev 诞生前手工造出的
+ * 检查点上可能,本 PR 未部署无存量)⇒ 退回无 cp_rev 谓词的旧式写,如实保守。
+ * 返回 {cp} / {corrupt:true} / null(根或检查点已消失,调用方终检兜底)。
  */
 async function writeCheckpointStep(deps, cp, patch, expectPhase) {
   var fresh = await findNodeById(deps, cp.node_id);
@@ -1558,9 +1566,13 @@ async function writeCheckpointStep(deps, cp, patch, expectPhase) {
     return { cp: latest }; // 条件失配:并发已推进,陈旧推进不落笔,以库内最新态续
   }
   var updated = Object.assign({}, latest, patch);
-  var res = await locCol(deps)
-    .where({ _id: cp.node_id, household_id: deps.householdId, updated_at: fresh.updated_at })
-    .update({ data: { deleting: updated, updated_at: deps.now() } });
+  var cond = { _id: cp.node_id, household_id: deps.householdId, updated_at: fresh.updated_at };
+  var data = { deleting: updated, updated_at: deps.now() };
+  if (Number.isInteger(fresh.cp_rev)) {
+    cond.cp_rev = fresh.cp_rev; // 互斥谓词:先者已推高则本写必失配
+    data.cp_rev = fresh.cp_rev + 1;
+  }
+  var res = await locCol(deps).where(cond).update({ data: data });
   if (res && res.stats && res.stats.updated >= 1) {
     return { cp: updated };
   }
@@ -1873,13 +1885,16 @@ async function unmountLocationAction(deps, node, nodes) {
     };
   }
   // —— 阶段二·步①:于待删根文档置 deleting 检查点(先立点、后删除;冻结清单
-  // 以立点时的最新树为准,创建后不变)。条件写口径:合同表述为「仅在根文档当前
-  // 不存在 deleting 字段时成功(防双开)」,本仓库内以 updated_at CAS 等价实现——
-  // deleting 的唯一写者是本代码,且每次写 deleting 恒同时 bump updated_at
-  // (deps.now() 毫秒 ISO 单调),故「deleting 已存在」⇒「updated_at 已变」⇒ CAS
-  // 必失配;反方向(仅 bump updated_at 未写 deleting,如并发 rename)同样走失败
-  // 关闭分支,不误判双开(胜/败两支由 CHECKPOINT-CONDITIONAL-WRITE /
-  // CHECKPOINT-SAME-ROOT-REPLAY 锁定)。
+  // 以立点时的最新树为准,创建后不变)。条件写口径(评审 5654328065 P0-1 修订):
+  // **互斥由 cp_rev 单调条件写承担**——根文档整数字段 cp_rev(建节点出生即 0,缺省
+  // 视 0),立点=条件更新 where{_id, cp_rev: 预期值} set cp_rev+1 与 deleting 同笔;
+  // 同毫秒并发的两个立点者谓词值相同(都读到 cp_rev=N),但先者落笔即把 cp_rev 推到
+  // N+1,后者谓词必失配 0 命中 ⇒ 恰好一个立点成功,败者读得现存 deleting(op_id
+  // 确定性同值)转同根重放续跑——毫秒精度不再参与互斥。updated_at 仅作并存保守谓词
+  // 保留(并发无关写如 rename 仍走失败关闭分支,既有语义不变)。存量根文档无 cp_rev
+  // (本 PR 未部署,理论形状)⇒ 该笔同时引导 cp_rev:1(一次性引导,此后永走整数
+  // 路径;其谓词仍含 updated_at,同毫秒双引导的残余窗口由 writeCheckpointStep 重读
+  // + 终态收敛检查兜底,如实记录)。
   var nodesFresh = await fetchHouseholdNodes(deps);
   var subFresh = tree.collectSubtree(nodesFresh, rootId);
   if (subFresh.nodes.length === 0) {
@@ -1894,11 +1909,17 @@ async function unmountLocationAction(deps, node, nodes) {
     created_at: deps.now(),
     status: "pending"
   };
+  var pointCond = { _id: rootId, household_id: deps.householdId, updated_at: fresh.updated_at };
+  var pointData = { deleting: checkpoint, updated_at: deps.now() };
+  if (Number.isInteger(fresh.cp_rev)) {
+    pointCond.cp_rev = fresh.cp_rev; // 互斥谓词:同毫秒双立点仅一个成功
+    pointData.cp_rev = fresh.cp_rev + 1;
+  } else {
+    pointData.cp_rev = 1; // 存量引导:与立点同笔,此后恒走整数谓词路径
+  }
   var wrote = null;
   try {
-    wrote = await locCol(deps)
-      .where({ _id: rootId, household_id: deps.householdId, updated_at: fresh.updated_at })
-      .update({ data: { deleting: checkpoint, updated_at: deps.now() } });
+    wrote = await locCol(deps).where(pointCond).update({ data: pointData });
   } catch (pointErr) {
     // 置点抛错(文档超上限/字段校验失败在 wx-server-sdk 表现为异常而非 0 命中):
     // 与 0 命中同路失败关闭——零删除、按 UNMOUNT_INCOMPLETE 返回(§3.1 生命周期)

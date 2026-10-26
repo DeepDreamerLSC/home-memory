@@ -730,6 +730,129 @@ test("CHECKPOINT-SAME-ROOT-REPLAY:并发双开同根 → 败者识别现存检�
   await assertConverged(t, ids, [a]);
 });
 
+/* ---------- P0-1(评审 5654328065):cp_rev 互斥,同毫秒不失效 ---------- */
+
+/** 全链 where 包装(get/skip/limit 直通,update 交 onUpdate 观测) */
+function observingWhereDb(db, onUpdate) {
+  return {
+    collection: function (name) {
+      var col = db.collection(name);
+      return {
+        where: function (cond) {
+          var q = col.where(cond);
+          function wrap(qq) {
+            return {
+              get: function (o) { return qq.get(o); },
+              skip: function (n) { return wrap(qq.skip(n)); },
+              limit: function (n) { return wrap(qq.limit(n)); },
+              remove: function () { return qq.remove(); },
+              update: function (options) { return onUpdate(cond, options, qq); }
+            };
+          }
+          return wrap(q);
+        },
+        doc: function (id) { return col.doc(id); },
+        add: function (o) { return col.add(o); }
+      };
+    }
+  };
+}
+
+/**
+ * 同毫秒双立点门闩:两个写入者的立点条件写(where 带 cp_rev:0 且 patch 带
+ * deleting+cp_rev:1)都到齐后才放行执行——保证双方都完成了「读 fresh(cp_rev=0)」
+ * 再落笔,updated_at 全程同值(恒定 now 注入),互斥只能由 cp_rev 承担。
+ */
+function sameMsEstablishGateDb(db, stats) {
+  var arrivals = 0;
+  var release;
+  var gate = new Promise(function (res) { release = res; });
+  return observingWhereDb(db, function (cond, options, q) {
+    var d = options && options.data;
+    var isEstablish = !!(d && d.deleting !== undefined && d.cp_rev === 1 && cond.cp_rev === 0);
+    if (!isEstablish) {
+      return q.update(options);
+    }
+    stats.attempts += 1;
+    arrivals += 1;
+    if (arrivals === 2) release();
+    return gate.then(function () {
+      return q.update(options).then(function (res) {
+        if (res && res.stats && res.stats.updated >= 1) stats.wins += 1;
+        return res;
+      });
+    });
+  });
+}
+
+test("CP-REV-SAME-MS-DOUBLE-ESTABLISH:同毫秒(恒定 now 注入,updated_at 全程同值)双立点 → cp_rev 条件写恰一个成功,败者读得现存 deleting 转同根重放续跑,终态收敛零残留", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var stats = { attempts: 0, wins: 0 };
+  var gateDb = sameMsEstablishGateDb(t.db, stats);
+  var fixedNow = function () { return "2099-01-01T00:00:00.000Z"; };
+  var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+  var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+
+  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+
+  assert.equal(stats.attempts, 2, "两个写入者都发起了立点条件写");
+  assert.equal(stats.wins, 1, "同毫秒双立点:cp_rev 谓词只允许恰好一个成功(updated_at 同值,不再参与互斥)");
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 败者同根重放续跑,双双收敛");
+  }
+  await assertConverged(t, ids, []);
+});
+
+test("CP-REV-ADVANCE-SAME-MS:同毫秒并发续跑交错推进 → 每笔成功的检查点写 cp_rev 严格 +1、phase 严格单调(compensate→scans→final 各恰一笔),不回退不双写,终态收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var a = await createItem(t.deps, "op-msa-a", "字典", "书房的书柜");
+  await linkItem(t.deps, a, ids.layerId, 1, "u-msa-a");
+  await seedScan(t.db, "scan-msa", ids.layerId);
+  // 前置:立点(cp_rev 0→1)后首删即断 → phase=nodes 检查点悬置
+  var r1 = await unmount(
+    Object.assign({}, t.deps, { db: faultDb(t.db, [{ collection: "locations", op: "docRemove", at: 1 }]) }),
+    ids.studyId
+  );
+  assert.equal(r1.error, "UNMOUNT_INCOMPLETE");
+  assert.equal(r1.pending.phase, "nodes");
+
+  var written = [];
+  var recordDb = observingWhereDb(t.db, function (cond, options, q) {
+    var d = options && options.data;
+    if (!(d && d.deleting !== undefined && d.deleting.phase)) {
+      return q.update(options);
+    }
+    return q.update(options).then(function (res) {
+      if (res && res.stats && res.stats.updated >= 1) {
+        written.push({ phase: d.deleting.phase, cp_rev: d.cp_rev });
+      }
+      return res;
+    });
+  });
+  var fixedNow = function () { return "2099-01-02T00:00:00.000Z"; };
+  var depsC = Object.assign({}, t.deps, { db: recordDb, now: fixedNow });
+  var depsD = Object.assign({}, t.deps, { db: recordDb, now: fixedNow });
+
+  var results = await Promise.all([unmount(depsC, ids.studyId), unmount(depsD, ids.studyId)]);
+
+  assert.deepEqual(
+    written.map(function (w) { return w.phase; }),
+    ["compensate", "scans", "final"],
+    "同毫秒交错下每个 phase 迁移恰一笔成功推进(实测:" + JSON.stringify(written) + ")"
+  );
+  assert.deepEqual(
+    written.map(function (w) { return w.cp_rev; }),
+    [2, 3, 4],
+    "成功检查点写 cp_rev 严格 +1 单调(立点=1,此后 2/3/4)"
+  );
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]));
+  }
+  await assertConverged(t, ids, [a]);
+});
+
 /* ================= 嵌套 unmount 与旧入口关死 ================= */
 
 test("NESTED-UNMOUNT:祖先带 deleting 时对后代发起 unmount → INVALID_INPUT({reason:deleting});对 deleting 根重入 → 续跑(唯一例外)", async () => {
