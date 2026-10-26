@@ -17,6 +17,7 @@ import {
   type BatchRow,
 } from "../../utils/batch-save";
 import { DEFAULT_UNIT, QUANTITY_MAX, UNIT_SET, parseQuantityText } from "../../utils/quantity";
+import { pickerDateProblem, pickerStartYmd } from "../../utils/remind-ui";
 import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
   clearDraftSession,
@@ -145,6 +146,8 @@ Page<
     editingLocation: boolean;
     /** 今天(YYYY-MM-DD):提醒行日期选择器无值时的起点 */
     today: string;
+    /** 提醒滚轮起点(8 点后=明天) */
+    pickerStart: string;
     /** 手动单表单数量输入(issue #102 Q1,E2):""=不填 → 服务端缺省 1/件 */
     manualQuantity: string;
     /** 手动单表单单位选择器索引(UNIT_SET 序,缺省 0=「件」) */
@@ -209,6 +212,8 @@ Page<
     editingName: false,
     editingLocation: false,
     today: todayYmd(),
+    /** 提醒滚轮起点(8 点后=明天;与 item 页同源 remind-ui.pickerStartYmd) */
+    pickerStart: pickerStartYmd(),
     manualQuantity: "",
     manualUnitIndex: 0,
     unitOptions: UNIT_SET as string[],
@@ -660,6 +665,12 @@ Page<
     }
     const value = e.detail && typeof e.detail.value === "string" ? e.detail.value : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return;
+    }
+    // 滚轮起点(8 点后=明天)与提交校验同源;低版本 picker 无 start 钳制时也拦得住
+    const problem = pickerDateProblem(value);
+    if (problem !== "") {
+      wx.showToast({ title: problem, icon: "none" });
       return;
     }
     this.setData({
