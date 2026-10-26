@@ -1468,6 +1468,11 @@ function createVideoActions(h) {
    * location 上下文时,items[i] 可显式携带 node_id(仅 target:"new")。逐件校验:
    * - 节点不存在 / 跨家庭(household 过滤天然跨家庭)→ NOT_FOUND;
    * - 目标是 home 根 → INVALID_INPUT(isHomeRoot 统一判定,B 页出生即走统一判定);
+   * - **deleting 子树冻结门(issue #116,D0 v4 §3.1,归 PR B 实现;与 D1 路径的
+   *   resolveLocationContext 同款祖先链+检查点清单包含判定,包内副本
+   *   frozenLocationIds)**:任一件 node_id 自身或任意祖先处于 deleting(或 ∈
+   *   检查点 subtree_node_ids)→ INVALID_INPUT + detail:{reason:"deleting"}
+   *   整批零写——先于存在性/home 根/路径文本校验的 P0 硬门;
    * - location_text 必须逐字 === 目标节点 path.join(" / ")(服务端权威,与 D1 同款
    *   消除双份真相);不一致 → INVALID_INPUT + detail.location_text_mismatch;
    * - 任一件非法 → 整批零写。批内任一件携带即全部校验;不携带的件零增量行为。
@@ -1480,6 +1485,15 @@ function createVideoActions(h) {
     }
     if (wanted.length === 0) return { ok: true, targets: null };
     var nodes = await fetchHouseholdLocationNodes(deps);
+    // deleting 冻结门(P0 硬门,先于存在性/根/路径文本校验):祖先链上溯 + 检查点
+    // 清单包含,与 D1 路径同一 frozenLocationIds 判定,两包等价性由
+    // tests/location-scan-deleting-gate.test.js 锁住
+    var frozen = frozenLocationIds(nodes);
+    for (var g = 0; g < wanted.length; g++) {
+      if (frozen[wanted[g].node_id] === true) {
+        return { ok: false, error: "INVALID_INPUT", detail: { reason: "deleting" } };
+      }
+    }
     var byId = Object.create(null);
     for (var n = 0; n < nodes.length; n++) byId[nodes[n]._id] = nodes[n];
     var targets = Object.create(null);

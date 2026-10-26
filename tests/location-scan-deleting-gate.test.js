@@ -2,7 +2,9 @@
 // PR-B(issue #116,D0-CONTRACT.md v4 §3.1 入口清单 itemsApi 半边):
 // D1 videoSceneCommit 挂载(node_id 与 move_to_node_id,经 resolveLocationContext)
 // 上溯祖先链 deleting 校验——目标自身无标记、祖先在删(终审 P0-1 场景)也拒绝;
-// 整批零写;子树外照常;B 页(无 location 上下文)在 main 无挂载代码,随 PR-A 合并后补。
+// 整批零写;子树外照常;B 页(无 location 上下文,PR-A #118 合并后)经
+// resolveBPageMountTargets 增补同款祖先链+检查点清单包含判定(归 PR B 实现,
+// §3.1 部署顺序①「两侧门最终都到位,窗口闭合」),反例见文件尾部。
 var test = require("node:test");
 var assert = require("node:assert/strict");
 var crypto = require("node:crypto");
@@ -248,4 +250,96 @@ test("D1-DELETING-GATE-CONTAINMENT:链断裂(父已删)的后代凭检查点清�
   assert.equal(res.error, "INVALID_INPUT");
   assert.deepEqual(res.detail, { reason: "deleting" }, "链上溯断在已删父——清单包含关系兜住");
   assert.equal((await rawDocs(db, "items")).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// B 页(无 location 上下文,resolveBPageMountTargets,复审 F3 补口)
+// ---------------------------------------------------------------------------
+
+test("B-DELETING-GATE-NODE:书房在删、B 页显式 node_id=第一层(自身无标记)→ INVALID_INPUT({reason:deleting}) 整批零写;混合批同拒", async () => {
+  const db = freshDb();
+  await seedTree(db, HH_A);
+  await markDeleting(db, "lc_study", ["lc_study", "lc_shelf", "lc_layer"]);
+  const deps = makeDeps(db);
+  const ticket = await sceneTicket(deps, "scan-b-gate-node");
+  // 混合批:一件指向冻结子树后代、一件完全在冻结域外(厨房)——任一件命中即整批零写
+  const ev = commitEvent(ticket, [
+    {
+      draft_key: "b-gate", target: "new", operation_id: "op-b-gate",
+      name: "螺丝刀", location_text: "书房 / 书柜 / 第一层", node_id: "lc_layer",
+      highlights: [hl(0, 1200)],
+    },
+    {
+      draft_key: "b-outside", target: "new", operation_id: "op-b-gate-out",
+      name: "汤勺", location_text: "厨房", node_id: "lc_kitchen",
+      highlights: [hl(2000, 3000)],
+    },
+  ]);
+  const res = await handler(ev, deps);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "INVALID_INPUT");
+  assert.deepEqual(res.detail, { reason: "deleting" }, "B 页门与 D1/locations 侧同码同义");
+  assert.equal((await rawDocs(db, "items")).length, 0, "零物品写入");
+  assert.equal((await rawDocs(db, "video_evidence")).length, 0, "零证据写入");
+  assert.equal((await rawDocs(db, "location_scans")).length, 0, "零 scan 写入");
+  const signed = (await rawDocs(db, "video_upload_tickets")).filter((t) => t.scene_payload_sig !== "");
+  assert.equal(signed.length, 0, "票据不落签名(校验先于票据 CAS)");
+});
+
+test("B-DELETING-GATE-ROOT:node_id 恰为 deleting 根自身(书柜)→ 拒绝;链断裂后代凭清单包含同拒", async () => {
+  const db = freshDb();
+  await seedTree(db, HH_A);
+  await db.collection("locations").doc("lc_shelf").remove(); // 阶段二半途:父已删
+  await markDeleting(db, "lc_study", ["lc_study", "lc_layer"]);
+  const deps = makeDeps(db);
+  const t1 = await sceneTicket(deps, "scan-b-gate-root");
+  const r1 = await handler(commitEvent(t1, [
+    {
+      draft_key: "b-root", target: "new", operation_id: "op-b-gate-root",
+      name: "钳子", location_text: "书房 / 书柜", node_id: "lc_shelf",
+      highlights: [hl(0, 900)],
+    },
+  ]), deps);
+  assert.equal(r1.ok, false, JSON.stringify(r1));
+  assert.equal(r1.error, "NOT_FOUND", "已删节点走既有 NOT_FOUND 语义(不是冻结门)");
+
+  const t2 = await sceneTicket(deps, "scan-b-gate-orphan");
+  const r2 = await handler(commitEvent(t2, [
+    {
+      draft_key: "b-orphan", target: "new", operation_id: "op-b-gate-orphan",
+      name: "螺丝刀", location_text: "书房 / 第一层", node_id: "lc_layer",
+      highlights: [hl(0, 900)],
+    },
+  ]), deps);
+  assert.equal(r2.ok, false, JSON.stringify(r2));
+  assert.equal(r2.error, "INVALID_INPUT");
+  assert.deepEqual(r2.detail, { reason: "deleting" }, "链断在已删父——检查点清单包含兜住");
+  assert.equal((await rawDocs(db, "items")).length, 0);
+});
+
+test("B-DELETING-GATE-OUTSIDE-OK:冻结子树外的厨房 照常显式挂载——门不误伤;未携带 node_id 的件零增量", async () => {
+  const db = freshDb();
+  await seedTree(db, HH_A);
+  await markDeleting(db, "lc_study", ["lc_study", "lc_shelf", "lc_layer"]);
+  const deps = makeDeps(db);
+  const ticket = await sceneTicket(deps, "scan-b-gate-ok");
+  const res = await handler(commitEvent(ticket, [
+    {
+      draft_key: "b-ok", target: "new", operation_id: "op-b-gate-ok",
+      name: "汤勺", location_text: "厨房", node_id: "lc_kitchen",
+      highlights: [hl(0, 900)],
+    },
+    {
+      draft_key: "b-plain", target: "new", operation_id: "op-b-gate-plain",
+      name: "胶带", location_text: "厨房的抽屉",
+      highlights: [hl(2000, 3000)],
+    },
+  ]), deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const items = await rawDocs(db, "items");
+  const mounted = items.find((d) => d.name === "汤勺");
+  const plain = items.find((d) => d.name === "胶带");
+  assert.equal(mounted.location_node_id, "lc_kitchen", "冻结域外显式挂载照常");
+  assert.ok(plain.location_node_id === null || plain.location_node_id === undefined, "未携带件零增量(不挂载)");
+  assert.equal(res.scan, undefined, "B 页不落 scan(既有语义)");
 });
