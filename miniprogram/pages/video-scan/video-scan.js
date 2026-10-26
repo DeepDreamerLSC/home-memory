@@ -11,6 +11,7 @@ const appearance_page_1 = require("../../utils/appearance-page");
  */
 const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
+const locations_cache_1 = require("../../utils/locations-cache");
 const video_attach_1 = require("../../utils/video-attach");
 const video_scene_1 = require("../../utils/video-scene");
 const keep_screen_1 = require("../../utils/keep-screen");
@@ -171,6 +172,14 @@ Page({
      * 则照常透传,服务端权威校验(location_text === 节点路径)兜底。
      */
     nodePaths: {},
+    /**
+     * 「归到」选择器请求代次守卫(评审 5649433998 修补 1):复用 D1 locations 页
+     * 同款 createRequestSeq。每次打开层级/下钻/返回(经 loadNodeSelectorLayer 取号)
+     * 与关闭/清除/选中/重置(显式取号推进)都使旧请求作废;层级请求发起时捕获
+     * 当次代次,响应回来(成功或失败)时代次不匹配则整个丢弃——不 setData,
+     * 杜绝「快速返回再进另一层」时较慢的旧层级响应后到覆盖当前列表/面包屑。
+     */
+    nodeSelectorSeq: (0, locations_cache_1.createRequestSeq)(),
     onLoad() {
         const stored = parseStoredSession(storageGet(scopeKey(SESSION_PREFIX)));
         if (stored === null)
@@ -876,17 +885,22 @@ Page({
             nodeSelectorCanBack: stack.length > 1,
         });
     },
-    /** 拉当前层 children(既有 locations list;顶层 = home 根下第一层) */
+    /** 拉当前层 children(既有 locations list;顶层 = home 根下第一层)。
+     * 代次守卫(评审 5649433998 修补 1):发起前取号,响应回来(成功或失败)
+     * 代次不匹配则整个丢弃——不 setData,旧层级响应绝不覆盖当前层。 */
     async loadNodeSelectorLayer() {
         const stack = this.data.nodeSelectorStack;
         const top = stack[stack.length - 1];
         if (top === undefined)
             return;
+        const seq = this.nodeSelectorSeq.next();
         this.setData({ nodeSelectorLoading: true, nodeSelectorError: "" });
         try {
             const res = top.locationId === ""
                 ? await (0, locations_api_1.callLocationsApi)({ action: "list" })
                 : await (0, locations_api_1.callLocationsApi)({ action: "list", parent_id: top.locationId });
+            if (this.nodeSelectorSeq.isCurrent(seq) !== true)
+                return;
             const options = (res.children || []).map((c) => ({
                 locationId: c.location_id,
                 name: c.name,
@@ -898,6 +912,8 @@ Page({
             this.setData({ nodeSelectorOptions: options, nodeSelectorLoading: false });
         }
         catch (e) {
+            if (this.nodeSelectorSeq.isCurrent(seq) !== true)
+                return;
             this.setData({ nodeSelectorLoading: false, nodeSelectorError: (0, api_1.errorMessage)(e) });
         }
     },
@@ -916,10 +932,14 @@ Page({
         await this.loadNodeSelectorLayer();
     },
     onNodeSelectorCloseTap() {
+        // 关闭弹层推进代次:在途层级响应作废,迟到也不复活弹层/不写选项(评审 5649433998)
+        this.nodeSelectorSeq.next();
         this.setData({ nodeSelectorVisible: false, nodeSelectorFor: -1 });
     },
     /** 选中某节点(行主体点击):写 nodeId + 权威路径文本,关闭选择器 */
     applyNodePick(node) {
+        // 选中即关闭:同关闭推进代次,在途层级响应作废(评审 5649433998)
+        this.nodeSelectorSeq.next();
         const index = this.data.nodeSelectorFor;
         if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
             return;
@@ -974,6 +994,8 @@ Page({
     },
     /** 清除选择:回到纯文本(不挂位置),位置文字保留可编辑 */
     onNodeSelectorClearTap() {
+        // 清除即关闭:同关闭推进代次,在途层级响应作废(评审 5649433998)
+        this.nodeSelectorSeq.next();
         const index = this.data.nodeSelectorFor;
         if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
             return;
@@ -997,6 +1019,8 @@ Page({
                 void this.cancelScan();
                 this.clearSession();
                 this.nodePaths = {};
+                // 重置选择器状态:推进代次,在途层级响应作废(评审 5649433998)
+                this.nodeSelectorSeq.next();
                 this.setData({
                     phase: "idle",
                     sceneId: "",
