@@ -1201,6 +1201,90 @@ test("ORPHAN-IDS-CORRUPT:检查点 orphan_ids 形状非法(非数组)→ UNMOUNT
   assert.equal(nodes.length, 5, "零删除零续跑");
 });
 
+/** 删根后复扫描失败注入:根 doc 移除后的下一次 locations 全量读抛错 */
+function postRescanFailDb(db, rootId) {
+  var rootRemoved = false;
+  var fired = false;
+  return {
+    collection: function (name) {
+      var col = db.collection(name);
+      if (name !== "locations") return col;
+      return {
+        where: function (cond) {
+          var q = col.where(cond);
+          function wrap(qq) {
+            return {
+              get: function () {
+                var isFullFetch = cond && Object.keys(cond).length === 1 && cond.household_id !== undefined;
+                if (rootRemoved && !fired && isFullFetch) {
+                  fired = true;
+                  return Promise.reject(new Error("fault:post-root-rescan"));
+                }
+                return qq.get();
+              },
+              skip: function (n) { return wrap(qq.skip(n)); },
+              limit: function (n) { return wrap(qq.limit(n)); },
+              remove: function () { return qq.remove(); },
+              update: function (options) { return qq.update(options); }
+            };
+          }
+          return wrap(q);
+        },
+        doc: function (id) {
+          var d = col.doc(id);
+          return {
+            get: d.get.bind(d),
+            update: function (o) { return d.update(o); },
+            remove: function () {
+              return d.remove().then(function (r) {
+                if (id === rootId) rootRemoved = true;
+                return r;
+              });
+            }
+          };
+        },
+        add: function (o) { return col.add(o); }
+      };
+    }
+  };
+}
+
+test("POST-ROOT-RESCAN-NO-FALSE-SUCCESS:终检通过→删根瞬间并发建子节点(写入时保护窗口)→ 删根后轻量复扫发现新孤儿 ⇒ 绝不假报完整成功(ok:false 带残留清单与处置建议,检查点已随根删除不造 pending)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var lateChildId = "lc-post-root-late";
+  var trapDeps = Object.assign({}, t.deps, { db: faultDb(t.db, [
+    { collection: "locations", op: "docRemove", id: ids.studyId, at: 1, noThrow: true,
+      action: function () { return addOrphanNode(t.db, lateChildId, ids.studyId, "删根瞬间新节点"); } }
+  ]) });
+  var res = await unmount(trapDeps, ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res), "删根后复扫发现新孤儿 ⇒ 不得假报 ok:true");
+  assert.equal(res.error, "UNMOUNT_INCOMPLETE");
+  assert.equal(res.pending, null, "检查点已随根删除:如实置 null,不造恢复凭据");
+  assert.deepEqual(res.detail.post_root_orphans, [lateChildId], "残留孤儿 id 清单如实随响应返回");
+  assert.equal(res.detail.rescan_failed, false);
+  assert.equal(typeof res.detail.advice, "string", "附处置建议");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.some(function (n) { return n._id === ids.studyId; }), false, "根确已删");
+  assert.equal(nodes.some(function (n) { return n._id === lateChildId; }), true, "残留孤儿如实保留(不无凭据硬删)");
+  assert.equal(nodes.length, 3, "home 根 + 厨房 + 残留孤儿");
+});
+
+test("POST-ROOT-RESCAN-FAILED:删根后复扫读失败 ⇒ 无法证实零残留 ⇒ ok:false 如实返回(不假报成功)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var res = await unmount(
+    Object.assign({}, t.deps, { db: postRescanFailDb(t.db, ids.studyId) }),
+    ids.studyId
+  );
+  assert.equal(res.ok, false, JSON.stringify(res), "复扫失败同样绝不假报成功");
+  assert.equal(res.error, "UNMOUNT_INCOMPLETE");
+  assert.equal(res.pending, null);
+  assert.equal(res.detail.rescan_failed, true);
+  assert.equal(res.detail.post_root_orphans, null);
+  await assertConverged(t, ids, []);
+});
+
 test("WRITE-GUARD-LAST-MOMENT:ensurePath 入口门通过后、建节点写入前立点 → createNode 写入前最后一刻复查冻结集拦下,零新节点;入口门(非竞态)行为不变", async () => {
   var t = fresh();
   var ids = await setupTree(t);

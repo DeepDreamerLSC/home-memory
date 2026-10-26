@@ -1980,7 +1980,8 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
  * doc remove 幂等)→ ③悬挂补偿(重扫冻结清单,冲突不再容忍跳过)→ ④scan 标记
  * (active→location_deleted 条件迁移幂等)→ ⑤终态收敛检查(清单内残留回补 +
  * 清单外孤儿扫描:先持久并入 deleting.orphan_ids、后物理删除,评审 5655357130
- * 修 2;失败/超轮不收敛 ⇒ status:"conflict" 如实报告)→ ⑥删根(检查点随之消失)。
+ * 修 2;失败/超轮不收敛 ⇒ status:"conflict" 如实报告)→ ⑥删根(检查点随之消失)
+ * → ⑥'删根后轻量复扫(修 3:终检-删根交错窗口的新孤儿 ⇒ 绝不假报完整成功)。
  * 各阶段幂等,续跑从 checkpoint.phase 对应阶段起执行;任意步中断 ⇒ {ok:false,
  * error:"UNMOUNT_INCOMPLETE", pending},绝不假报成功。
  */
@@ -2077,17 +2078,63 @@ async function unmountRunPhases(deps, cp) {
     }
     counts.compensated = converge.compensated;
     scansMarked += converge.scansMarked;
-    var deletedTotal =
-      cp.subtree_node_ids.length +
-      (Array.isArray(converge.orphanIds) ? converge.orphanIds.length : 0); // 清单 + 已持久化并入删除的孤儿
+    var orphanIds = Array.isArray(converge.orphanIds) ? converge.orphanIds : [];
+    var deletedTotal = cp.subtree_node_ids.length + orphanIds.length; // 清单 + 已持久化并入删除的孤儿
     await locCol(deps).doc(rootId).remove();
+    // ⑥'(评审 5655357130 修 3)删根后轻量复扫:终检⑤通过到⑥删根之间(乃至删根
+    // 瞬间)的并发建节点若穿过写入时保护(窗口缩小非消除),根删后即成新孤儿——
+    // 删根笔无法携带「无新增子节点」谓词(remove 不支持跨文档条件),故删根后补一次
+    // 复扫:发现新孤儿 ⇒ **绝不假报完整成功**,ok:false 如实报告残留清单与处置建议
+    // (检查点已随根删除,无恢复凭据,pending 如实置 null,不猜造);复扫自身失败
+    // 同样无法证实零残留 ⇒ 一律不假报。残余窗口(复扫之后落库的并发写入)如实
+    // 记录于合同 §3.1,窗口缩小而非消除的既有声明不变。
+    var postOrphans = null; // null=复扫失败(无法证实零残留)
+    try {
+      var postNodes = await fetchHouseholdNodes(deps);
+      var postById = tree.indexById(postNodes);
+      var finalDeletedSet = subtreeIdSet(cp.subtree_node_ids);
+      for (var fo = 0; fo < orphanIds.length; fo++) {
+        finalDeletedSet[orphanIds[fo]] = true;
+      }
+      postOrphans = [];
+      for (var pn = 0; pn < postNodes.length; pn++) {
+        if (
+          finalDeletedSet[postNodes[pn]._id] !== true &&
+          isOrphanOfDeletedSet(postNodes[pn], postById, finalDeletedSet)
+        ) {
+          postOrphans.push(postNodes[pn]._id);
+        }
+      }
+    } catch (postErr) {
+      postOrphans = null;
+    }
+    if (postOrphans !== null && postOrphans.length === 0) {
+      return {
+        ok: true,
+        deleted_nodes: deletedTotal,
+        remounted: 0,
+        unmounted: counts.unmounted,
+        compensated: counts.compensated,
+        scans_marked: scansMarked
+      };
+    }
+    // 不假报:删除后新并发写入产生残留孤儿(或复扫失败无法证实零残留)
     return {
-      ok: true,
-      deleted_nodes: deletedTotal,
+      ok: false,
+      error: "UNMOUNT_INCOMPLETE",
+      message: "位置删除已执行,但检测到删除期间的新增写入产生了残留的孤立位置,请重新对该位置发起删除或人工核对处理",
+      deleted_nodes: deletedTotal, // 如实报告已删除部分
       remounted: 0,
       unmounted: counts.unmounted,
       compensated: counts.compensated,
-      scans_marked: scansMarked
+      scans_marked: scansMarked,
+      pending: null, // 检查点已随根删除:如实置 null,不造恢复凭据
+      detail: {
+        post_root_orphans: postOrphans, // null ⇒ 复扫失败
+        rescan_failed: postOrphans === null,
+        advice:
+          "删除后检测到新并发写入:残留孤儿节点 id 已随响应列出,检查点已随根位置删除、无自动恢复凭据;建议对残留位置重新发起删除或人工核对处理"
+      }
     };
   } catch (err) {
     // 任意步中断:重读检查点如实报告 UNMOUNT_INCOMPLETE;损坏 ⇒ CORRUPT,零猜测
