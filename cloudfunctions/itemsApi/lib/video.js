@@ -1549,6 +1549,43 @@ function createVideoActions(h) {
   }
 
   /**
+   * B 页挂载补偿摘挂(评审 5649433998 修补 2,收敛链第②步):挂载 CAS 成功后
+   * 写后校验发现节点已被删(节点删除发生在重验读取与 CAS 之间)→ 尽力把刚写的
+   * 挂载摘回 null。复用本 PR 挂载机器(applyScanMount/conditionalMountUpdate)的
+   * 版本条件 CAS 语义:先读当前物品,条件 { version, 仍指向刚挂节点 } 命中才写
+   * { location_node_id: null, version+1, updated_at, 派生 update_id, 内容指纹 };
+   * update_id = "bmount-rb:"+sha256Hex(scene_id+":"+item_id),确定性,重放可识别。
+   * 0 命中(物品又被并发改过)不重试不升级——悬挂挂载维持:仓库既有容忍态,
+   * locations list 读侧按未挂载处理(物品落「尚未归类」,dangling_mounts 如实
+   * 单独统计),后续任意位置流程可再收敛;响应恒 mounted:false,绝不假报。
+   */
+  async function applyBPageMountRollback(deps, itemId, targetNodeId, scanId) {
+    var got = await h.collection(deps)
+      .where({ _id: itemId, household_id: deps.householdId, deleted: false })
+      .get();
+    var item = got && got.data && got.data.length > 0 ? got.data[0] : null;
+    if (item === null) return { ok: false };
+    var updateId = "bmount-rb:" + sha256Hex(deps, scanId + ":" + itemId);
+    var fingerprint = scanChangesFingerprint({ location_node_id: null });
+    var res = await h.collection(deps).where({
+      _id: itemId,
+      household_id: deps.householdId,
+      deleted: false,
+      version: item.version,
+      location_node_id: targetNodeId
+    }).update({
+      data: {
+        location_node_id: null,
+        version: item.version + 1,
+        updated_at: deps.now(),
+        last_update_id: updateId,
+        last_update_fingerprint: fingerprint
+      }
+    });
+    return { ok: ((res && res.stats && res.stats.updated) || 0) >= 1 };
+  }
+
+  /**
    * location_scans 落库(锁内、逐件循环之后,§2.2 第 4 条):(household_id, scan_id)
    * 为幂等键。无 → add(_id="ls_"+genId(),E11000 并发 → 回查走下一分支);已有且
    * file_id/asset_id/location_id 一致 → 以活证据自愈式更新:confirmed_item_ids 由
@@ -2300,9 +2337,27 @@ function createVideoActions(h) {
             resultRow.mount_error = "NOT_FOUND";
           } else {
             var bMountRes = await applyScanMount(deps, itemId, bTarget.node_id, event.scene_id);
-            resultRow.mounted = bMountRes.mounted === true;
             if (bMountRes.mounted !== true) {
+              resultRow.mounted = false;
               resultRow.mount_error = bMountRes.mount_error || "VERSION_CONFLICT";
+            } else {
+              // 写后校验(评审 5649433998 修补 2):重验读取与 CAS 非原子——节点
+              // 可能在二者之间被删。CAS 成功后再读一次节点:仍在 → 正常
+              // mounted:true;已不在 → 尽力补偿摘挂(applyBPageMountRollback,
+              // 复用挂载机器 CAS 语义),响应恒 mounted:false + NOT_FOUND(节点
+              // 已被删除);补偿失败(极罕见)维持悬挂挂载——仓库既有容忍态:
+              // list 读侧按未挂载处理、物品落「尚未归类」,兜底语义如实记录。
+              var bAfterGot = await deps.db.collection(LOCATIONS_COLLECTION)
+                .where({ _id: bTarget.node_id, household_id: deps.householdId })
+                .get();
+              var bAfterRow = bAfterGot && bAfterGot.data && bAfterGot.data.length > 0 ? bAfterGot.data[0] : null;
+              if (bAfterRow !== null) {
+                resultRow.mounted = true;
+              } else {
+                await applyBPageMountRollback(deps, itemId, bTarget.node_id, event.scene_id);
+                resultRow.mounted = false;
+                resultRow.mount_error = "NOT_FOUND";
+              }
             }
           }
         }

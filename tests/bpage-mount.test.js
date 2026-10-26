@@ -12,6 +12,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const handler = require("../cloudfunctions/itemsApi/lib/handler").handler;
+const locHandler = require("../cloudfunctions/locations/lib/handler").handler;
 const createMemoryDb = require("./helpers/memoryDb").createMemoryDb;
 
 const HH_A = "hh_11111111111111111111111111111111";
@@ -379,6 +380,129 @@ test("B-MOUNT-WIN2-CAS:挂载 CAS 失败(物品版本已被并发推进)→ moun
   assert.equal(items[0].version, 3, "CAS 失败不写物品(版本不动)");
   assert.equal(items[0].location_node_id, undefined);
   assert.equal((await rawDocs(db, "video_evidence")).length, 1, "证据保留");
+});
+
+// ---------------------------------------------------------------------------
+// 窗口二修补(评审 5649433998):删除发生在重验之后、CAS 挂载之前 →
+// 收敛链冻结 = 挂载 CAS 成功后写后校验再读节点 + 尽力补偿摘挂 + 悬挂容忍
+// ---------------------------------------------------------------------------
+
+/** locations 只读 list 的最小 deps(读侧未挂载/悬挂口径断言用) */
+function locDeps(db) {
+  let seq = 0;
+  let clock = 1760000000000;
+  return {
+    db,
+    householdId: HH_A,
+    now: () => { clock += 1000; return new Date(clock).toISOString(); },
+    genId: () => { seq += 1; return "ln" + seq; },
+    digest: (s) => crypto.createHash("sha256").update(String(s), "utf8").digest("hex").slice(0, 16),
+    logger: { log: () => {} },
+  };
+}
+
+/**
+ * items 集合拦截器:
+ * - onDeleteAtMount:d1mount: CAS 落笔前删除目标节点(注入「重验已过、CAS 在即」的竞态窗口);
+ * - failRollback:bmount-rb: 补偿摘挂 CAS 强制 0 命中(注入补偿失败)。
+ * 返回 restore():提交后还原原始 db(读侧断言用完整的 skip/limit 分页语义)。
+ */
+function interceptItems(db, opts) {
+  const origCollection = db.collection.bind(db);
+  db.collection = (name) => {
+    const col = origCollection(name);
+    if (name !== "items") return col;
+    return {
+      add: (options) => col.add(options),
+      where: (cond) => ({
+        get: () => col.where(cond).get(),
+        update: async (options) => {
+          const uid = options && options.data && options.data.last_update_id;
+          if (typeof uid === "string" && uid.indexOf("d1mount:") === 0 && opts.onDeleteAtMount) {
+            await opts.onDeleteAtMount();
+          }
+          if (typeof uid === "string" && uid.indexOf("bmount-rb:") === 0 && opts.failRollback) {
+            return { stats: { updated: 0 } };
+          }
+          return col.where(cond).update(options);
+        },
+      }),
+    };
+  };
+  return () => { db.collection = origCollection; };
+}
+
+test("B-MOUNT-WIN2-RACE:删除发生在重验之后、挂载之前 → 写后校验+补偿摘挂,DB 摘回 null,响应 mounted:false+NOT_FOUND", async () => {
+  const db = freshDb();
+  await seedTree(db, HH_A);
+  const deps = makeDeps(db);
+  const restoreDb = interceptItems(db, {
+    onDeleteAtMount: async () => {
+      // 挂载 CAS(d1mount:)落笔前一刻删除目标节点:重验读取已过、CAS 在即
+      await db.collection("locations").where({ _id: "lc_layer", household_id: HH_A }).remove();
+    },
+  });
+  const sceneId = "scene-bmount-race-01";
+  const ticket = await sceneTicket(deps, sceneId);
+  const res = await handler(commitEvent(ticket, [
+    newItem("d-race", "op-win2-race", "螺丝刀", [hl(0, 1200, 0)], "lc_layer", "书房 / 书柜 / 第一层"),
+  ]), deps);
+  assert.equal(res.ok, true, JSON.stringify(res), "顶层仍逐件语义");
+  const row = res.results[0];
+  assert.equal(row.ok, true);
+  assert.equal(row.evidence_saved, true, "证据保留");
+  assert.equal(row.mounted, false, "节点在挂载后复查发现已删 → 不假报 mounted:true");
+  assert.equal(row.mount_error, "NOT_FOUND");
+  restoreDb();
+
+  const items = await rawDocs(db, "items");
+  assert.equal(items.length, 1, "物品保留,绝不因挂载失败删除");
+  assert.equal(items[0].location_node_id, null, "补偿摘挂成功:不遗留悬挂挂载");
+  assert.equal(items[0].version, 3, "建档 v1 → 挂载 v2 → 补偿摘挂 v3");
+  assert.equal(items[0].last_update_id, "bmount-rb:" + sha256(sceneId + ":" + items[0]._id), "补偿摘挂确定性派生标识");
+  assert.equal(items[0].last_update_fingerprint, '{"location_node_id":null}');
+  assert.equal((await rawDocs(db, "video_evidence")).length, 1, "证据保留");
+
+  // 读侧收敛:补偿成功 → 未挂载口径计入且不算悬挂(物品落「尚未归类」)
+  const locList = await locHandler({ action: "list" }, locDeps(db));
+  assert.equal(locList.ok, true, JSON.stringify(locList));
+  assert.equal(locList.unmounted_count, 1, "按未挂载处理");
+  assert.equal(locList.dangling_mounts, 0, "补偿成功 → 无悬挂");
+});
+
+test("B-MOUNT-WIN2-RB-FAIL:补偿摘挂 CAS 失败 → 悬挂挂载被容忍(读侧按未挂载处理),响应仍 mounted:false 不假报", async () => {
+  const db = freshDb();
+  await seedTree(db, HH_A);
+  const deps = makeDeps(db);
+  const restoreDb = interceptItems(db, {
+    onDeleteAtMount: async () => {
+      await db.collection("locations").where({ _id: "lc_layer", household_id: HH_A }).remove();
+    },
+    failRollback: true,
+  });
+  const ticket = await sceneTicket(deps, "scene-bmount-rb-fail-01");
+  const res = await handler(commitEvent(ticket, [
+    newItem("d-rbf", "op-win2-rbf", "钳子", [hl(0, 1200, 0)], "lc_layer", "书房 / 书柜 / 第一层"),
+  ]), deps);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  const row = res.results[0];
+  assert.equal(row.ok, true);
+  assert.equal(row.evidence_saved, true);
+  assert.equal(row.mounted, false, "补偿失败也不假报 mounted:true");
+  assert.equal(row.mount_error, "NOT_FOUND");
+  restoreDb();
+
+  const items = await rawDocs(db, "items");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].location_node_id, "lc_layer", "极罕见补偿失败:悬挂挂载维持(不重试不升级)");
+  assert.equal(items[0].version, 2, "只有挂载一笔写(补偿 0 命中)");
+  assert.equal((await rawDocs(db, "video_evidence")).length, 1, "证据保留");
+
+  // 读侧容忍:悬挂按未挂载处理(物品落「尚未归类」),悬挂数如实单独统计
+  const locList = await locHandler({ action: "list" }, locDeps(db));
+  assert.equal(locList.ok, true, JSON.stringify(locList));
+  assert.equal(locList.unmounted_count, 1, "悬挂件按未挂载口径计入(读侧容忍语义)");
+  assert.equal(locList.dangling_mounts, 1, "悬挂如实单独统计");
 });
 
 // ---------------------------------------------------------------------------
