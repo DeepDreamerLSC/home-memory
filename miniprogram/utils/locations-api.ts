@@ -84,6 +84,10 @@ const LOCATIONS_API_MESSAGES: Record<string, string> = {
   FAMILY_SWITCHED: "家庭已切换,本次操作未保存,请确认当前家庭后重试",
   FAMILY_STALE_SCOPE: "家庭刚发生成员或作用域变化,本次操作未保存,请刷新后重试",
   HOUSEHOLD_UNAVAILABLE: "暂时无法确认当前家庭,请稍后重试",
+  // issue #116 unmount(D0 v4 §3.1):三个新错误码的兜底文案
+  UNMOUNT_CONFLICT: "有物品刚在别处被修改,请核对后重新预览再删除",
+  UNMOUNT_INCOMPLETE: "上次的「转为未归类」还没完成,可以继续清理",
+  UNMOUNT_CHECKPOINT_CORRUPT: "清理记录异常,需要人工核对,请勿重复操作",
 };
 
 const BAD_RESPONSE_MESSAGE = "服务返回异常,请稍后重试";

@@ -217,6 +217,8 @@ npm run samples:live # 真实样例试运行,见下文「真实样例试运行�
 
 issue #34 P1-A 起,`itemsApi`、`locations`、`households` 与 `remindNotify` 四个函数持有逐字节同源的家庭解析副本,**升级时四者必须一起部署**(避免「items 写共享域、locations 写私人域」的 split-brain);extractDraft/transcribe 不涉及家庭解析,无此约束。
 
+**issue #116(位置树一期「转为未归类」)部署注记**:`locations.deleteLocation(mode:"unmount")` 在待删根节点文档写入 `deleting` 检查点(复用 `locations` 集合,**零新集合、零新索引、零权限变更**);`itemsApi` 的 D1 挂载(videoSceneCommit 的 node_id/move_to_node_id)与 `locations` 各结构动作持有同款「目标本身或任意祖先 deleting 即拒绝」冻结门(两个包内副本,行为等价性由 `tests/location-scan-deleting-gate.test.js` 与 `tests/locations-unmount.test.js` 锁住)。**启用 unmount 前,`itemsApi` 与 `locations` 必须同批部署**(优先 itemsApi 读门先行;若存在部署间隙,窗口内挂入 deleting 子树的物品不会丢失——由 unmount 终态收敛检查在续跑时兜住:补偿转「尚未归类」或登记 conflict 如实返回)。
+
 ### 7. 小程序里验证
 
 编译运行小程序(工具内即可):首页输入「降压药放在厨房第二个抽屉」→ 点击提取 → 确认页应出现 AI 草稿 → 保存 → 首页「找东西」输入「降压药」应查到位置。空间树:首页「我的家」→ 进入生成向导把已录入物品的位置整理成「房间 → 家具 → 抽屉」的树,确认入库后即可在「我的家」里逐层浏览物品。自动化端到端:`node tests/e2e/smoke.js`、`node tests/e2e/full-loop.js`、`node tests/e2e/locations.js`(需先开自动化端口,见各文件头注释);其中 locations.js 覆盖「录入 → 生成向导 → 确认入库 → 逐层下钻到物品」的完整闭环——未配置 DEEPSEEK_API_KEY 或超时仍为默认 3 秒时,向导扫描会如实报「AI 暂时不可用」,两项控制台配置(上文步骤 5、6)完成后重跑 `node tests/e2e/locations.js` 即可补全向导全流程验证。

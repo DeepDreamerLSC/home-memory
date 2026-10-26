@@ -1356,9 +1356,48 @@ function createVideoActions(h) {
   }
 
   /**
+   * deleting 子树冻结门(issue #116 unmount,D0-CONTRACT v4 §3.1;itemsApi 包内
+   * 副本,与 cloudfunctions/locations/lib/handler.js 的 buildFrozenIdSet 判定互指,
+   * 两包独立部署、行为等价性由 tests/location-scan-deleting-gate.test.js 锁住):
+   * 「目标节点本身或任意祖先处于 deleting ⇒ 一切新增/迁入/重挂物品的写操作一律
+   * 拒绝」。两条等价实现路径合用:① 沿 parent 链上溯;② 目标 id ∈ 某 deleting 根
+   * 检查点(deleting.subtree_node_ids)的包含关系——阶段二半途父链已断的孤儿后代
+   * 由此兜住。deleting 字段仅 locations 云函数读写,本函数只读。
+   */
+  function frozenLocationIds(nodes) {
+    var frozen = Object.create(null);
+    var byId = Object.create(null);
+    for (var i = 0; i < nodes.length; i++) byId[nodes[i]._id] = nodes[i];
+    for (var j = 0; j < nodes.length; j++) {
+      var cur = nodes[j];
+      var hit = cur.deleting !== undefined;
+      var walk = cur;
+      while (hit === false && walk.parent_id !== "") {
+        var parent = byId[walk.parent_id];
+        if (parent === undefined) break; // 链断:由检查点清单兜底
+        if (parent.deleting !== undefined) hit = true;
+        walk = parent;
+      }
+      if (hit === true) frozen[cur._id] = true;
+      var cp = cur.deleting;
+      if (cp !== null && typeof cp === "object" && Array.isArray(cp.subtree_node_ids)) {
+        for (var k = 0; k < cp.subtree_node_ids.length; k++) {
+          frozen[cp.subtree_node_ids[k]] = true;
+        }
+      }
+    }
+    return frozen;
+  }
+
+  /**
    * location_id 归属与子树校验(读 DB,仍在票据 CAS 之前,非法输入零写):
    * - 按 { _id, household_id } 查 locations:跨家庭/不存在 → NOT_FOUND(findNodeById 同语义);
    * - home 根拒绝(清点入口只在非根层,物品不允许挂根);
+   * - **deleting 子树冻结门(issue #116,D0 v4 §3.1:先于子树/路径文本校验的 P0
+   *   硬门)**:逐件校验挂载目标(target:"new" 的 node_id,缺省=location_id 自身;
+   *   target:"existing" 的 move_to_node_id)——目标自身或任意祖先 deleting(或
+   *   ∈ 检查点 subtree_node_ids)⇒ INVALID_INPUT + detail:{reason:"deleting"},
+   *   整批零写,与 locations 侧冻结门同码同义(跨部署包,包内副本互指);
    * - 逐件校验 node_id/move_to_node_id ∈ subtree(location_id)(含自身),越界 →
    *   INVALID_INPUT + detail.out_of_subtree,整批零写;
    * - target:"new" 的 location_text 必须逐字 === 目标节点 path.join(" / ")
@@ -1374,6 +1413,16 @@ function createVideoActions(h) {
     var nodes = await fetchHouseholdLocationNodes(deps);
     var subtree = subtreeNodesById(nodes, locationCtx.location_id);
     if (subtree === null) return { ok: false, error: "NOT_FOUND" };
+    var frozen = frozenLocationIds(nodes);
+    for (var f = 0; f < prepared.length; f++) {
+      var pf = prepared[f];
+      var frozenTarget = pf.target === "new"
+        ? (pf.node_id !== undefined ? pf.node_id : locationCtx.location_id)
+        : pf.move_to_node_id;
+      if (frozenTarget !== undefined && frozen[frozenTarget] === true) {
+        return { ok: false, error: "INVALID_INPUT", detail: { reason: "deleting" } };
+      }
+    }
     var outOfSubtree = [];
     var targets = Object.create(null);
     for (var i = 0; i < prepared.length; i++) {

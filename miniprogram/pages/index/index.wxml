@@ -47,7 +47,7 @@
   <block wx:elif="{{ mapError }}"><view class="fail-view"><view class="fail-title">暂时连不上</view><view class="fail-sub">已保存的记录不受影响</view><view class="text-action" bindtap="onRetryTap">重试 ›</view></view></block>
   <block wx:elif="{{ unmountedView }}">
     <view class="result-card"><view wx:for="{{ unmountedItems }}" wx:key="item_id" class="result-row" data-index="{{ index }}" bindtap="onUnmountedRowTap"><view class="item-icon neutral-icon">{{ item.initial }}</view><view class="item-main"><view class="item-name">{{ item.name }}</view><view class="item-location">{{ item.locationText || '位置待补充' }}</view></view><view class="unverified-tag">位置待核实</view></view></view>
-    <view wx:if="{{ unmountedCount > unmountedItems.length }}" class="tiny-center">最近 {{ unmountedItems.length }} 件</view>
+    <view wx:if="{{ unmountedCount > unmountedItems.length }}" class="tiny-center">仅显示最近 {{ unmountedItems.length }} 件,共 {{ unmountedCount }} 件;更早的可在上方搜索或物品列表找到,也可在「管理位置」用生成向导整批整理</view>
   </block>
   <block wx:elif="{{ firstUse }}">
     <view class="empty-home">

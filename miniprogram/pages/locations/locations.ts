@@ -21,6 +21,7 @@ import type {
   ItemSummary,
   ListLocationsResponse,
   LocationNodeSummary,
+  PendingUnmountSummary,
 } from "../../types";
 
 /** 选择模式回传给发起页的节点(仓库内全部监听方只消费 location_id) */
@@ -40,7 +41,7 @@ type DisplayNode = LocationNodeSummary & {
 /** 用于渲染的物品条目(附格式化后的更新时间) */
 type DisplayItem = ItemSummary & { updated_at_text: string };
 
-/** D1(#94)删除位置三按钮弹层:影响面文案来自 deletePreview(只读计数) */
+/** D1(#94)+#116 四选删除弹层:影响面文案来自 deletePreview(只读计数) */
 interface DeleteLayerState {
   visible: boolean;
   nodeId: string;
@@ -49,6 +50,8 @@ interface DeleteLayerState {
   scanCount: number;
   migrateAvailable: boolean;
   busy: boolean;
+  /** issue #116(D0 §3.1 发现点一):上次「转为未归类」未完成的续跑摘要;null=无 */
+  pendingUnmount: PendingUnmountSummary | null;
 }
 
 /** D2(#96)历史列表行视图:时间 / 候选 N · 确认 M / 回看 / 删,含逐行视频降级态 */
@@ -208,10 +211,13 @@ Page<
     onScanDeleteLayerCancel(): void;
     onScanDeleteConfirmTap(): Promise<void>;
     refreshAfterScanDelete(): void;
-    /** D1(#94)删除位置三按钮:preview 影响面 → 弹层三选(取消/迁移/全部删除) */
+    /** D1(#94)删除位置三按钮 + #116 四选:preview 影响面 → 弹层(取消/迁移/转未归类/全部删除) */
     deleteNodeWithPreview(node: DisplayNode): Promise<void>;
     onDeleteLayerCancel(): void;
     onMigrateTap(): void;
+    /** issue #116:「转为未归类」→ deleteLocation(mode:unmount);对带检查点根重入即续跑 */
+    onUnmountTap(): void;
+    doUnmountDelete(): Promise<void>;
     onPurgeTap(): void;
     doMigrateDelete(): Promise<void>;
     doPurgeDelete(): Promise<void>;
@@ -282,6 +288,7 @@ Page<
       scanCount: 0,
       migrateAvailable: false,
       busy: false,
+      pendingUnmount: null,
     },
   },
 
@@ -712,7 +719,7 @@ Page<
     void this.loadScanSummary(this.data.currentNodeId);
   },
 
-  /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因 */
+  /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因;deleting 置灰标注(#116) */
   decorate(children) {
     const pickMode = this.data.mode === "pick";
     return children.map((c) => {
@@ -732,7 +739,12 @@ Page<
         // 不再按 type 过滤(issue #30 PR A):跨层级选择交给服务端结构规则裁决
         // (叶子跨层允许、带子树跨深度拒绝),选择器不做类型预筛。
       }
+      const deleting = c.deleting === true;
       const parts: string[] = [];
+      // issue #116(D0 §3.1 发现点二):deleting 节点置灰并标注续跑入口
+      if (deleting) {
+        parts.push("清理中·转为未归类未完成");
+      }
       if (c.item_count > 0) {
         parts.push(c.item_count + " 件");
       }
@@ -741,6 +753,7 @@ Page<
       }
       return {
         ...c,
+        deleting,
         countText: parts.length > 0 ? parts.join(" · ") : "空",
         disabled,
         disabledReason,
@@ -1111,7 +1124,7 @@ Page<
    * 服务端 deletePreview/deleteLocation 再拦一层(双重防删)。
    * ------------------------------------------------------------------ */
 
-  /** 「⋯ → 删除」新流程:先拉影响面计数,再开三按钮弹层(纯读) */
+  /** 「⋯ → 删除」流程:先拉影响面计数,再开四选弹层(纯读) */
   async deleteNodeWithPreview(node) {
     if (this.data.acting) {
       return;
@@ -1133,6 +1146,9 @@ Page<
           scanCount: preview.scan_count,
           migrateAvailable: preview.migrate_available,
           busy: false,
+          // issue #116(D0 §3.1 发现点一):上次「转为未归类」未完成 ⇒ 附续跑摘要,
+          // 只提示不自动发起(恢复=用户显式触发)
+          pendingUnmount: preview.pending_unmount || null,
         },
       });
     } catch (e) {
@@ -1198,6 +1214,75 @@ Page<
       return;
     }
     void this.doPurgeDelete();
+  },
+
+  /* ------------------------------------------------------------------
+   * issue #116「转为未归类」(D0 v4 §3 四选弹层):deleteLocation(mode:
+   * "unmount")——子树物品逐件解挂进「尚未归类」(location_text 保留原记录),
+   * 节点随 B1 检查点六步终结。对带 deleting 检查点的根重入即续跑(恢复路径,
+   * 用户显式触发);UNMOUNT_CONFLICT=已解挂 N 件、M 件需先核对(弹层保留,
+   * 核对后重新预览);UNMOUNT_INCOMPLETE=未完成如实提示可继续,绝不假报成功。
+   * ------------------------------------------------------------------ */
+
+  onUnmountTap() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy || this.data.acting) {
+      return;
+    }
+    void this.doUnmountDelete();
+  },
+
+  async doUnmountDelete() {
+    const layer = this.data.deleteLayer;
+    if (!layer.visible || layer.busy) {
+      return;
+    }
+    this.deleteLayerBusy(true);
+    try {
+      const res = await callLocationsApi({
+        action: "deleteLocation",
+        node_id: layer.nodeId,
+        mode: "unmount",
+      });
+      const unmounted = Number(res.unmounted) || 0;
+      this.setData({
+        deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+      });
+      // 完成提示展示转未归类总数(合同 §3「N 件已转未归类」)
+      wx.showToast({
+        title: unmounted > 0 ? "已删除;" + unmounted + " 件物品已转未归类" : "已删除",
+        icon: unmounted > 0 ? "none" : "success",
+        duration: unmounted > 0 ? 3000 : 1500,
+      });
+      await this.loadNode();
+    } catch (e) {
+      this.deleteLayerBusy(false);
+      if (isLocationsApiErrorWithCode(e, "UNMOUNT_CONFLICT")) {
+        const d = (e.detail || {}) as { unmounted?: unknown; conflicts?: unknown };
+        const done = Number(d.unmounted) || 0;
+        const pending = Array.isArray(d.conflicts) ? d.conflicts.length : 0;
+        wx.showModal({
+          title: "有物品需要先核对",
+          content:
+            "已解挂 " + done + " 件、" + pending + " 件因他处修改需先核对。请到这些物品的详情页确认最新位置后,重新删除。",
+          showCancel: false,
+        });
+        return;
+      }
+      if (isLocationsApiErrorWithCode(e, "UNMOUNT_INCOMPLETE")) {
+        wx.showModal({
+          title: "清理未完成",
+          content: "上次的「转为未归类」还没完成,物品都在;再点一次「转为未归类」即可继续清理。",
+          showCancel: false,
+        });
+        return;
+      }
+      if (isLocationsApiErrorWithCode(e, "UNMOUNT_CHECKPOINT_CORRUPT")) {
+        wx.showModal({ title: "清理记录异常", content: errorMessage(e), showCancel: false });
+        return;
+      }
+      wx.showModal({ title: "删除失败", content: errorMessage(e), showCancel: false });
+    }
   },
 
   /**

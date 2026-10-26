@@ -81,7 +81,7 @@
       <view
         wx:for="{{ children }}"
         wx:key="location_id"
-        class="item-row {{ item.disabled ? 'row-disabled' : '' }}"
+        class="item-row {{ item.disabled || item.deleting ? 'row-disabled' : '' }}"
         data-index="{{ index }}"
         bindtap="onChildTap"
       >
@@ -90,6 +90,7 @@
           <view class="item-name">{{ item.name }}</view>
           <view class="item-location">{{ item.countText }}</view>
         </view>
+        <view wx:if="{{ item.deleting }}" class="row-note">清理中</view>
         <view wx:if="{{ mode === 'pick' && item.disabled }}" class="row-note">{{ item.disabledReason }}</view>
         <view wx:if="{{ mode === 'pick' && !item.disabled }}" class="row-actions">
           <view class="pick-check" catchtap="onPickTap" data-index="{{ index }}">选这个</view>
@@ -135,13 +136,17 @@
   </block>
 </view>
 
-<!-- D1(#94)删除位置三按钮弹层:影响面文案 + 取消/迁移/全部删除 -->
+<!-- D1(#94)+#116 删除位置四选弹层:影响面文案 + 取消/迁移/转为未归类/全部删除(全部删除保留独立二次确认) -->
 <view wx:if="{{ deleteLayer.visible }}" class="layer-mask" bindtap="onDeleteLayerCancel">
   <view class="delete-layer" catchtap="noop">
     <view class="card-title">删除「{{ deleteLayer.name }}」</view>
     <view class="hint">{{ deleteLayer.countsText }}</view>
     <view wx:if="{{ deleteLayer.scanCount > 0 }}" class="hint">
       含 {{ deleteLayer.scanCount }} 次视频清点记录
+    </view>
+    <!-- #116(D0 §3.1 发现点一):上次「转为未归类」未完成 ⇒ 如实提示续跑(用户显式触发,绝不自动) -->
+    <view wx:if="{{ deleteLayer.pendingUnmount }}" class="hint">
+      上次「转为未归类」未完成({{ deleteLayer.pendingUnmount.status === 'conflict' ? '有物品待核对' : '清理中途停止' }}),点「转为未归类」可继续清理
     </view>
     <button class="btn block" disabled="{{ deleteLayer.busy }}" bindtap="onDeleteLayerCancel">
       <view class="btn-face">取消</view>
@@ -154,8 +159,12 @@
       <view class="btn-face">删位置并迁移物品</view>
     </button>
     <view wx:if="{{ !deleteLayer.migrateAvailable }}" class="hint">
-      顶层房间不能迁移(物品不能直接挂「我的家」),可移动物品后重试或改用全部删除
+      顶层房间不能迁移(物品不能直接挂「我的家」),可移动物品后重试、改用转为未归类或全部删除
     </view>
+    <button class="btn block" disabled="{{ deleteLayer.busy }}" bindtap="onUnmountTap">
+      <view class="btn-face">转为未归类</view>
+    </button>
+    <view class="hint">物品解除挂载回到首页「尚未归类」,原始位置文本保留;位置和清点记录删除</view>
     <button class="btn block danger" disabled="{{ deleteLayer.busy }}" bindtap="onPurgeTap">
       <view class="btn-face">全部删除</view>
     </button>
