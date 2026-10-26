@@ -1057,6 +1057,80 @@ test("ORPHAN-SWEEP-SCAN-FAILED:终检孤儿扫描的节点全量读失败 → co
   await assertConverged(t, ids, []);
 });
 
+/* ---------- 评审 5655357130 快速复审三项收尾:存量 cp_rev 引导 / 孤儿先持久后删 / 删根后复扫 ---------- */
+
+/** 存量形状:移除全部 location 文档的 cp_rev(模拟本合同落地前出生的节点) */
+async function stripCpRev(db) {
+  var docs = (await db.collection("locations").where({}).get()).data;
+  for (var i = 0; i < docs.length; i++) {
+    await db.collection("locations").doc(docs[i]._id).remove();
+    var legacy = Object.assign({}, docs[i]);
+    delete legacy.cp_rev;
+    await db.collection("locations").add({ data: legacy });
+  }
+}
+
+/**
+ * 存量根同毫秒双立点门闩:两个写入者的立点笔(patch 带 deleting)都到齐后才放行,
+ * 恒定 now 注入(updated_at 全程同值)——互斥只能由整数谓词承担。
+ * stats:{ attempts(立点笔次数), wins(其中落库成功数), withRevPredicate(带 cp_rev 谓词的笔数) }
+ */
+function stockEstablishGateDb(db, stats) {
+  var arrivals = 0;
+  var release;
+  var gate = new Promise(function (res) { release = res; });
+  return observingWhereDb(db, function (cond, options, q) {
+    var d = options && options.data;
+    // 立点笔特征:patch 带 deleting 且为 cp_rev 0→1 的整数 CAS(存量引导完成后的
+    // 首笔;phase 推进笔 cp_rev≥2 不计,初始化笔不带 deleting 不计)
+    var isEstablish = !!(d && d.deleting !== undefined && d.cp_rev === 1 && cond.cp_rev === 0);
+    if (!isEstablish) {
+      return q.update(options);
+    }
+    stats.attempts += 1;
+    if (cond.cp_rev !== undefined) stats.withRevPredicate += 1;
+    arrivals += 1;
+    if (arrivals === 2) release();
+    return gate.then(function () {
+      return q.update(options).then(function (res) {
+        if (res && res.stats && res.stats.updated >= 1) stats.wins += 1;
+        return res;
+      });
+    });
+  });
+}
+
+test("STOCK-CP-REV-BOOTSTRAP:存量根(无 cp_rev)单次 unmount → 原子初始化笔(cp_rev:0,不写 deleting)+ 整数 CAS 立点,收敛零残留", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  var res = await unmount(t.deps, ids.studyId);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.deleted_nodes, 3, "存量引导不改变删除计数");
+  await assertConverged(t, ids, []);
+});
+
+test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根(无 cp_rev)同毫秒双立点 → 初始化笔幂等 + cp_rev 0→1 整数 CAS 恰一个成功,败者读得现存 deleting 转同根重放续跑,双双收敛零残留", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  var stats = { attempts: 0, wins: 0, withRevPredicate: 0 };
+  var gateDb = stockEstablishGateDb(t.db, stats);
+  var fixedNow = function () { return "2099-01-03T00:00:00.000Z"; };
+  var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+  var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+
+  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+
+  assert.equal(stats.attempts, 2, "两个写入者都发起了立点笔");
+  assert.equal(stats.withRevPredicate, 2, "立点笔全部带 cp_rev 整数谓词(初始化笔引导完成),绝不留无谓词窗口");
+  assert.equal(stats.wins, 1, "同毫秒双立点恰一个成功(存量引导由 CAS 收敛,updated_at 等值不再参与互斥)");
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 败者同根重放续跑,双双收敛");
+  }
+  await assertConverged(t, ids, []);
+});
+
 test("WRITE-GUARD-LAST-MOMENT:ensurePath 入口门通过后、建节点写入前立点 → createNode 写入前最后一刻复查冻结集拦下,零新节点;入口门(非竞态)行为不变", async () => {
   var t = fresh();
   var ids = await setupTree(t);

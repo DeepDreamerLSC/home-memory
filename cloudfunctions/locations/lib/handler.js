@@ -2039,15 +2039,19 @@ async function unmountLocationAction(deps, node, nodes) {
   }
   // —— 阶段二·步①:于待删根文档置 deleting 检查点(先立点、后删除;冻结清单
   // 以立点时的最新树为准,创建后不变)。条件写口径(评审 5654328065 P0-1 修订):
-  // **互斥由 cp_rev 单调条件写承担**——根文档整数字段 cp_rev(建节点出生即 0,缺省
-  // 视 0),立点=条件更新 where{_id, cp_rev: 预期值} set cp_rev+1 与 deleting 同笔;
+  // **互斥由 cp_rev 单调条件写承担**——根文档整数字段 cp_rev(建节点出生即 0),
+  // 立点=条件更新 where{_id, cp_rev: 预期值} set cp_rev+1 与 deleting 同笔;
   // 同毫秒并发的两个立点者谓词值相同(都读到 cp_rev=N),但先者落笔即把 cp_rev 推到
   // N+1,后者谓词必失配 0 命中 ⇒ 恰好一个立点成功,败者读得现存 deleting(op_id
   // 确定性同值)转同根重放续跑——毫秒精度不再参与互斥。updated_at 仅作并存保守谓词
-  // 保留(并发无关写如 rename 仍走失败关闭分支,既有语义不变)。存量根文档无 cp_rev
-  // (本 PR 未部署,理论形状)⇒ 该笔同时引导 cp_rev:1(一次性引导,此后永走整数
-  // 路径;其谓词仍含 updated_at,同毫秒双引导的残余窗口由 writeCheckpointStep 重读
-  // + 终态收敛检查兜底,如实记录)。
+  // 保留(并发无关写如 rename 仍走失败关闭分支,既有语义不变)。
+  // 存量引导(评审 5655357130 修 1):存量根文档无 cp_rev——**先做原子初始化笔**
+  // (条件更新 where{_id, updated_at 未被并发改动} set cp_rev:0,不写 deleting,
+  // 幂等:并发多笔同值初始化互不冲突),成功者重读再走 cp_rev 0→1 整数 CAS 立点。
+  // 绝不采用「where cp_rev:0 命中缺失字段」的合一谓词:memoryDb 与真实库的等值
+  // 匹配都不命中缺失字段的文档,该谓词对存量根恒 0 命中(死路);两笔方案在两种
+  // 库语义下都成立且可测——同毫秒双请求要么都完成同值初始化(幂等),要么一方
+  // 失配重读续走,随后的整数 CAS 恒恰一个成功。
   var nodesFresh = await fetchHouseholdNodes(deps);
   var subFresh = tree.collectSubtree(nodesFresh, rootId);
   if (subFresh.nodes.length === 0) {
@@ -2062,14 +2066,52 @@ async function unmountLocationAction(deps, node, nodes) {
     created_at: deps.now(),
     status: "pending"
   };
-  var pointCond = { _id: rootId, household_id: deps.householdId, updated_at: fresh.updated_at };
-  var pointData = { deleting: checkpoint, updated_at: deps.now() };
-  if (Number.isInteger(fresh.cp_rev)) {
-    pointCond.cp_rev = fresh.cp_rev; // 互斥谓词:同毫秒双立点仅一个成功
-    pointData.cp_rev = fresh.cp_rev + 1;
-  } else {
-    pointData.cp_rev = 1; // 存量引导:与立点同笔,此后恒走整数谓词路径
+  var pointFresh = fresh;
+  if (!Number.isInteger(fresh.cp_rev)) {
+    // 存量引导:原子初始化笔(cp_rev:0)。抛错(文档超上限等)与 0 命中同路
+    // 失败关闭——重读后无整数 cp_rev 且无并发立点 ⇒ 零删除返回。
+    try {
+      await locCol(deps).where({
+        _id: rootId,
+        household_id: deps.householdId,
+        updated_at: fresh.updated_at
+      }).update({ data: { cp_rev: 0, updated_at: deps.now() } });
+    } catch (initErr) {
+      // 初始化笔失败:与下方立点失败同语义,走重读分流
+    }
+    var afterInit = await findNodeById(deps, rootId);
+    if (!afterInit) {
+      return fail("NOT_FOUND");
+    }
+    if (afterInit.deleting !== undefined) {
+      // 并发者已完成立点:同根重放转续跑(互斥由对方的 CAS 已承担)
+      var initCp = validCheckpoint(afterInit.deleting, rootId, deps);
+      if (initCp === null) {
+        return fail("UNMOUNT_CHECKPOINT_CORRUPT");
+      }
+      return unmountRunPhases(deps, initCp);
+    }
+    if (!Number.isInteger(afterInit.cp_rev)) {
+      // 初始化笔未生效且无并发立点 ⇒ 并发无关写(如 rename)占用了 updated_at:
+      // 失败关闭(既有保守语义),零删除,重入重新发起
+      return {
+        ok: false,
+        error: "UNMOUNT_INCOMPLETE",
+        message: ERROR_MESSAGES.UNMOUNT_INCOMPLETE,
+        pending: projectCheckpoint(checkpoint),
+        detail: { pending: projectCheckpoint(checkpoint) }
+      };
+    }
+    pointFresh = afterInit;
   }
+  var pointCond = {
+    _id: rootId,
+    household_id: deps.householdId,
+    updated_at: pointFresh.updated_at,
+    cp_rev: pointFresh.cp_rev // 互斥谓词:同毫秒双立点(含存量引导后)仅一个成功
+  };
+  var pointData = { deleting: checkpoint, updated_at: deps.now() };
+  pointData.cp_rev = pointFresh.cp_rev + 1;
   var wrote = null;
   try {
     wrote = await locCol(deps).where(pointCond).update({ data: pointData });
