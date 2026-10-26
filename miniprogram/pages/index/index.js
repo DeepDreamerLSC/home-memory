@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const profile_api_1 = require("../../utils/profile-api");
 const appearance_page_1 = require("../../utils/appearance-page");
+const exit_guard_1 = require("../../utils/exit-guard");
 const ui_1 = require("../../utils/ui");
 const api_1 = require("../../utils/api");
 const quantity_1 = require("../../utils/quantity");
@@ -120,6 +121,7 @@ Page({
     currentNodeId: "",
     currentNodePath: [],
     onLoad(options) {
+        (0, exit_guard_1.enableHomeExitGuard)();
         // Page options 会被浅拷贝共享,实例字段按本页实例重建(locations 页同款防护)
         this.requestSeq = (0, locations_cache_1.createRequestSeq)();
         this.renderedCurrentView = false;
@@ -172,6 +174,7 @@ Page({
         }
     },
     onUnload() {
+        (0, exit_guard_1.disableHomeExitGuard)();
         this.profileRequest++;
         this.recentRequestSeq += 1;
         if (this.voiceEntry !== null) {

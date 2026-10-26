@@ -114,3 +114,29 @@ test("REMIND-ENTRY-UX:提醒设置上移 item 主界面(编辑表单不再含提
   const confirmJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/confirm/confirm.js"), "utf8");
   assert.ok(confirmJs.indexOf("pickerDateProblem") !== -1, "确认页提交校验同源(低版本无 start 钳制也拦得住)");
 });
+
+test("EXIT-GUARD:首页退出确认接线(enableAlertBeforeUnload 低版本静默降级)", function () {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const ROOT = path.join(__dirname, "..");
+  // 工具:API 存在时调用;缺失时静默
+  const calls = [];
+  const wx0 = globalThis.wx;
+  globalThis.wx = {
+    enableAlertBeforeUnload: function (o) { calls.push(["on", o.message]); },
+    disableAlertBeforeUnload: function (o) { calls.push(["off"]); },
+  };
+  const guard = require(path.join(ROOT, "miniprogram/utils/exit-guard.js"));
+  guard.enableHomeExitGuard();
+  guard.disableHomeExitGuard();
+  delete globalThis.wx.enableAlertBeforeUnload;
+  delete globalThis.wx.disableAlertBeforeUnload;
+  let threw = false;
+  try { guard.enableHomeExitGuard(); } catch (e) { threw = true; }
+  globalThis.wx = wx0;
+  assert.deepEqual(calls, [["on", "确定要退出「我靠东西呢」吗?"], ["off"]], "API 存在时直通");
+  assert.equal(threw, false, "低版本无 API 静默降级不抛");
+  // 页面接线
+  const idx = fs.readFileSync(path.join(ROOT, "miniprogram/pages/index/index.js"), "utf8");
+  assert.ok(idx.indexOf("enableHomeExitGuard") !== -1 && idx.indexOf("disableHomeExitGuard") !== -1, "首页 onLoad/onUnload 接线");
+});
