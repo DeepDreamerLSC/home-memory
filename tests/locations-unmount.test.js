@@ -853,6 +853,270 @@ test("CP-REV-ADVANCE-SAME-MS:同毫秒并发续跑交错推进 → 每笔成功�
   await assertConverged(t, ids, [a]);
 });
 
+/* ---------- P0-2(评审 5654328065):写入时保护 + 终态孤儿扫描 ---------- */
+
+/** 原始形状检查点(绕过条件写直接落库,驱动「立点后」前置态) */
+async function rawCheckpoint(db, rootId, subtreeIds, extra) {
+  var cp = {
+    op_id: "unmount:" + digest16(rootId), node_id: rootId,
+    subtree_node_ids: subtreeIds,
+    phase: "nodes", counts: { unmounted: 0, compensated: 0, conflicts: 0 },
+    created_at: "2026-10-22T00:00:00.000Z", status: "pending"
+  };
+  Object.assign(cp, extra || {});
+  await db.collection("locations").doc(rootId).update({
+    data: { deleting: cp, updated_at: "2026-10-22T00:00:00.000Z" }
+  });
+  return cp;
+}
+
+/**
+ * 立点竞态注入:unmount 的立点条件写落库前,先执行 rival(模拟「校验/门已通过」
+ * 的并发写者趁隙写入)——冻结清单在此之前已按无孤儿树算好,新节点必在清单外。
+ */
+function rivalAtEstablishDb(db, rival) {
+  var fired = false;
+  return {
+    collection: function (name) {
+      var col = db.collection(name);
+      if (name !== "locations") return col;
+      return {
+        where: function (cond) {
+          var q = col.where(cond);
+          function wrap(qq) {
+            return {
+              get: function (o) { return qq.get(o); },
+              skip: function (n) { return wrap(qq.skip(n)); },
+              limit: function (n) { return wrap(qq.limit(n)); },
+              remove: function () { return qq.remove(); },
+              update: function (options) {
+                if (!fired && options && options.data && options.data.deleting !== undefined) {
+                  fired = true;
+                  return Promise.resolve().then(rival).then(function () { return qq.update(options); });
+                }
+                return qq.update(options);
+              }
+            };
+          }
+          return wrap(q);
+        },
+        doc: function (id) { return col.doc(id); },
+        add: function (o) { return col.add(o); }
+      };
+    }
+  };
+}
+
+/** 直接落一个清单外新节点(绕过全部服务端门,代表窗口期已过校验的建节点请求) */
+async function addOrphanNode(db, id, parentId, name) {
+  await db.collection("locations").add({ data: {
+    _id: id, household_id: HOUSEHOLD_A, parent_id: parentId,
+    name: name, name_norm: name, type: "container",
+    path: ["书房", "书柜", "第一层", name],
+    created_from: "manual",
+    created_at: "2026-10-22T00:00:00.000Z",
+    updated_at: "2026-10-22T00:00:00.000Z",
+    cp_rev: 0
+  } });
+  return id;
+}
+
+test("ORPHAN-SWEEP-PRECHECK-RACE:预检通过→立点→清单外新增子节点(含挂载物品与 active scan)→ 终检孤儿扫描发现并入本轮删除,补偿/标记随清单扩展,终态零残留", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var orphanItem = await createItem(t.deps, "op-orph-a", "窗口期挂入的物品", "书房");
+  var orphanId = "lc-orphan-race";
+  var trapDeps = Object.assign({}, t.deps, { db: rivalAtEstablishDb(t.db, function () {
+    // 立点条件写落库前:一个「校验已通过」的建节点请求写入(清单已算好,不含它)
+    return addOrphanNode(t.db, orphanId, ids.layerId, "窗口期新抽屉").then(function () {
+      return t.db.collection("items").doc(orphanItem).update({
+        data: { location_node_id: orphanId, last_update_id: "raced-writer" }
+      });
+    }).then(function () {
+      return seedScan(t.db, "scan-orph", orphanId);
+    });
+  }) });
+  await seedScan(t.db, "scan-orph-layer", ids.layerId);
+
+  var res = await unmount(trapDeps, ids.studyId);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.deleted_nodes, 4, "清单 3 节点 + 清单外孤儿 1 并入删除");
+  assert.equal(res.compensated, 1, "孤儿上的挂载物品由终检补偿(清单扩展后重扫)");
+  assert.equal(res.scans_marked, 2, "清单内 scan + 孤儿 scan 各 1");
+
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 2, "零残留:仅 home 根 + 厨房");
+  assert.equal(nodes.some(function (n) { return n._id === orphanId; }), false, "孤儿节点被并入删除");
+  var docItem = (await rawDocs(t.db, "items")).find(function (d) { return d._id === orphanItem; });
+  assert.ok(docItem.location_node_id === null, "孤儿上挂载的物品已解挂,绝不遗留无父孤儿挂载");
+  var scans = await rawDocs(t.db, "location_scans");
+  for (var s = 0; s < scans.length; s++) {
+    assert.equal(scans[s].status, "location_deleted", "孤儿 scan 一并标记:" + scans[s].scan_id);
+  }
+});
+
+test("ORPHAN-SWEEP-CHAIN:孤儿链(清单外子节点 + 其孙辈)同被终检抓全并入删除,孙辈断链经增长后的已删集合续判", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var childId = "lc-orphan-chain-1";
+  var grandId = "lc-orphan-chain-2";
+  var trapDeps = Object.assign({}, t.deps, { db: rivalAtEstablishDb(t.db, function () {
+    return addOrphanNode(t.db, childId, ids.layerId, "窗口期子节点").then(function () {
+      return addOrphanNode(t.db, grandId, childId, "窗口期孙节点");
+    });
+  }) });
+  var res = await unmount(trapDeps, ids.studyId);
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.deleted_nodes, 5, "清单 3 + 孤儿链 2");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 2, "零残留(孤儿链整条扫清)");
+  assert.equal(nodes.some(function (n) { return n._id === childId; }), false);
+  assert.equal(nodes.some(function (n) { return n._id === grandId; }), false);
+});
+
+test("ORPHAN-SWEEP-REMOVE-FAULT:孤儿删除持续失败(超轮无法收敛)→ status=conflict 如实报告绝不假报成功;重入续跑收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var orphanId = "lc-orphan-fault";
+  var trapDeps = Object.assign({}, t.deps, { db: faultDb(t.db, [
+    { collection: "locations", op: "whereUpdate", patchHas: "deleting", at: 1, noThrow: true,
+      action: function () { return addOrphanNode(t.db, orphanId, ids.layerId, "窗口期新抽屉"); } },
+    { collection: "locations", op: "docRemove", id: orphanId, at: 1 } // 孤儿 remove 恒抛
+  ]) });
+  var res = await unmount(trapDeps, ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "UNMOUNT_CONFLICT", "无法收敛 ⇒ conflict 语义,绝不假报成功");
+  assert.equal(res.pending.status, "conflict", "检查点如实置 conflict");
+  assert.equal(res.detail.reason, "sweep_failed");
+  var nodesMid = await rawDocs(t.db, "locations");
+  assert.equal(nodesMid.some(function (n) { return n._id === ids.studyId; }), true, "根保留(检查点在)");
+  assert.equal(nodesMid.some(function (n) { return n._id === orphanId; }), true, "孤儿暂存,等续跑");
+
+  var resume = await unmount(t.deps, ids.studyId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  assert.equal(resume.deleted_nodes, 4, "续跑扫清清单+孤儿");
+  assert.equal((await rawDocs(t.db, "locations")).length, 2, "零残留");
+});
+
+test("ORPHAN-SWEEP-SCAN-FAILED:终检孤儿扫描的节点全量读失败 → conflict 如实报告(不假报成功、不假报收敛);重入续跑收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  function scanFailDb(db) {
+    var armed = false;
+    var fired = false;
+    return {
+      collection: function (name) {
+        var col = db.collection(name);
+        if (name !== "locations") return col;
+        return {
+          where: function (cond) {
+            var q = col.where(cond);
+            function wrap(qq) {
+              return {
+                get: function () {
+                  var isFullFetch = cond && Object.keys(cond).length === 1 && cond.household_id !== undefined;
+                  if (armed && !fired && isFullFetch) {
+                    fired = true;
+                    return Promise.reject(new Error("fault:locations:fullScan"));
+                  }
+                  return qq.get();
+                },
+                skip: function (n) { return wrap(qq.skip(n)); },
+                limit: function (n) { return wrap(qq.limit(n)); },
+                remove: function () { return qq.remove(); },
+                update: function (options) {
+                  if (options && options.data && options.data.deleting !== undefined) {
+                    armed = true; // 立点之后,终检的全量扫描才算「孤儿扫描」
+                  }
+                  return qq.update(options);
+                }
+              };
+            }
+            return wrap(q);
+          },
+          doc: function (id) { return col.doc(id); },
+          add: function (o) { return col.add(o); }
+        };
+      }
+    };
+  }
+  var res = await unmount(
+    Object.assign({}, t.deps, { db: scanFailDb(t.db) }),
+    ids.studyId
+  );
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "UNMOUNT_CONFLICT", "扫描失败 ⇒ conflict 如实报告");
+  assert.equal(res.pending.status, "conflict");
+  assert.equal(res.detail.reason, "sweep_failed");
+  var nodesMid = await rawDocs(t.db, "locations");
+  assert.equal(nodesMid.some(function (n) { return n._id === ids.studyId; }), true, "根保留");
+  // 阶段②③④已完成:书柜/第一层 属清单内合法删除;保全的是 根+厨房——绝无清单外误删
+  assert.equal(nodesMid.length, 3, "home 根 + 书房(带检查点)+ 厨房,清单外零误删");
+  var resume = await unmount(t.deps, ids.studyId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  await assertConverged(t, ids, []);
+});
+
+test("WRITE-GUARD-LAST-MOMENT:ensurePath 入口门通过后、建节点写入前立点 → createNode 写入前最后一刻复查冻结集拦下,零新节点;入口门(非竞态)行为不变", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  function gateRaceDb(db, onGatePassed) {
+    var fired = false;
+    return {
+      collection: function (name) {
+        var col = db.collection(name);
+        if (name !== "locations") return col;
+        return {
+          where: function (cond) {
+            var q = col.where(cond);
+            function wrap(qq) {
+              return {
+                get: function () {
+                  var isFullFetch = cond && Object.keys(cond).length === 1 && cond.household_id !== undefined;
+                  if (!fired && isFullFetch) {
+                    fired = true;
+                    // 入口门快照先取到(不含检查点 ⇒ 门通过),放行前立点落库:
+                    // 此后 createNode 的最后一刻复查读到的即冻结态
+                    return qq.get().then(function (r) {
+                      return onGatePassed().then(function () { return r; });
+                    });
+                  }
+                  return qq.get();
+                },
+                skip: function (n) { return wrap(qq.skip(n)); },
+                limit: function (n) { return wrap(qq.limit(n)); },
+                remove: function () { return qq.remove(); },
+                update: function (options) { return qq.update(options); }
+              };
+            }
+            return wrap(q);
+          },
+          doc: function (id) { return col.doc(id); },
+          add: function (o) { return col.add(o); }
+        };
+      }
+    };
+  }
+  var raceDb = gateRaceDb(t.db, function () {
+    return rawCheckpoint(t.db, ids.studyId, [ids.studyId, ids.shelfId, ids.layerId]);
+  });
+  var res = await ensurePathRaw(Object.assign({}, t.deps, { db: raceDb }), ["书房", "新箱子"]);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "INVALID_INPUT");
+  assert.deepEqual(res.detail, { reason: "deleting" }, "写入时保护:最后一刻复查拦下");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 5, "零新节点(新箱子 未落库)");
+  assert.equal(nodes.filter(function (n) { return n.deleting !== undefined; }).length, 1, "检查点在");
+  // 非竞态路径:入口门自身照旧拦(既有 FREEZE-GATE 反例行为不变)
+  var again = await ensurePathRaw(t.deps, ["书房", "新箱子"]);
+  assert.deepEqual(again.detail, { reason: "deleting" }, "入口门照常生效");
+  // 续跑收敛后放行
+  var resume = await unmount(t.deps, ids.studyId);
+  assert.equal(resume.ok, true, JSON.stringify(resume));
+  var after = await ensurePathRaw(t.deps, ["书房", "新箱子"]);
+  assert.equal(after.ok, true, JSON.stringify(after), "检查点消失后恢复建节点");
+});
+
 /* ================= 嵌套 unmount 与旧入口关死 ================= */
 
 test("NESTED-UNMOUNT:祖先带 deleting 时对后代发起 unmount → INVALID_INPUT({reason:deleting});对 deleting 根重入 → 续跑(唯一例外)", async () => {

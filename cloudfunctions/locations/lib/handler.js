@@ -226,8 +226,18 @@ async function findNodeById(deps, nodeId) {
 
 /**
  * 创建节点(add + E11000 回查复用,绝不双建)。调用方保证 path/type 已算好。
+ * P0-2 写入时保护(评审 5654328065):**add 前最后一刻**重拉全家庭节点、从这份
+ * 重读的集合判定 parent 链是否落入 deleting 冻结子树,命中即抛冻结标记错。
+ * 如实注释:这是「读-判-写」非原子,窗口仍存在,定位是防御层(把入口门通过后、
+ * 立点前已在校验中的建节点请求在落笔前再拦一道,缩小而非消除窗口)——真正兜底
+ * 是阶段二终态收敛检查的孤儿扫描(门是防、终检是兜,既有哲学)。
  */
 async function createNode(deps, parentId, name, path, type, createdFrom) {
+  // 写入前最后一刻重查冻结集:parent 链自重读的节点集合判定(不信任入口快照)
+  var freshNodes = await fetchHouseholdNodes(deps);
+  if (buildFrozenIdSet(freshNodes)[parentId] === true) {
+    throw deletingFrozenError();
+  }
   var now = deps.now();
   var doc = {
     _id: "lc_" + deps.genId(),
@@ -510,6 +520,20 @@ function failDeletingFrozen() {
 }
 
 /**
+ * 冻结标记错误(P0-2 写入时保护,评审 5654328065):深层工具(createNode)无法
+ * 直接返回响应对象,以带标记的异常上抛,由 action 层统一转 failDeletingFrozen()。
+ */
+function deletingFrozenError() {
+  var err = new Error("location subtree is frozen (deleting)");
+  err.deletingFrozen = true;
+  return err;
+}
+
+function isDeletingFrozenError(e) {
+  return !!(e && e.deletingFrozen === true);
+}
+
+/**
  * 破坏性入口(delete(含 force)/deleteLocation migrate·purge/嵌套 unmount)的
  * 后代向冻结判定(§3.1 入口清单 + 嵌套拒绝理由):目标子树内任一节点冻结
  * (自身/祖先 deleting 或 ∈ 检查点清单)⇒ 拒绝。只查「目标或祖先 deleting」
@@ -699,12 +723,21 @@ async function ensurePathAction(event, deps) {
     return fail("INVALID_INPUT");
   }
   // deleting 冻结门(D0 §3.1 入口清单):子树冻结清单创建后不变、不含新节点,
-  // 向 deleting 子树建节点本身即违反冻结——纯读判定,零写入
+  // 向 deleting 子树建节点本身即违反冻结——纯读判定,零写入;
+  // 竞态窗口(门通过后、写入前立点)由 createNode 写入前最后一刻复查兜一道(P0-2)
   var freezeNodes = await fetchHouseholdNodes(deps);
   if (pathEntersFrozenSubtree(freezeNodes, segments)) {
     return failDeletingFrozen();
   }
-  var ensured = await ensurePathSegments(deps, segments, createdFrom);
+  var ensured;
+  try {
+    ensured = await ensurePathSegments(deps, segments, createdFrom);
+  } catch (e) {
+    if (isDeletingFrozenError(e)) {
+      return failDeletingFrozen();
+    }
+    throw e;
+  }
   var nodes = await fetchHouseholdNodes(deps);
   var items = await fetchActiveItems(deps);
   var stats = buildItemCountMap(nodes, items);
@@ -1245,48 +1278,65 @@ async function applyScanAction(event, deps) {
   }
 
   var branchResults = [];
-  for (var i = 0; i < branches.length; i++) {
-    var ensured = await ensurePathSegments(deps, branches[i], "scan");
-    branchResults.push({
-      path: branches[i],
-      created: ensured.created,
-      location_ids: ensured.nodes.map(function (n) {
-        return n._id;
-      })
-    });
+  try {
+    for (var i = 0; i < branches.length; i++) {
+      var ensured = await ensurePathSegments(deps, branches[i], "scan");
+      branchResults.push({
+        path: branches[i],
+        created: ensured.created,
+        location_ids: ensured.nodes.map(function (n) {
+          return n._id;
+        })
+      });
+    }
+  } catch (e) {
+    // P0-2:竞态窗口内某段建节点被写入时保护拦下 ⇒ 整批如实拒绝
+    // (早前分支可能已建普通节点——不在冻结子树内,无孤儿风险,保留不回滚)
+    if (isDeletingFrozenError(e)) {
+      return failDeletingFrozen();
+    }
+    throw e;
   }
 
   var mountResults = [];
-  for (var j = 0; j < mounts.length; j++) {
-    var one = mounts[j];
-    var pathEnsured = await ensurePathSegments(deps, one.path, "scan");
-    var targetId = pathEnsured.nodes[pathEnsured.nodes.length - 1]._id;
-    var updateId = "scan:" + deps.digest(event.operation_id + ":" + one.item_id);
-    // 扫描池只收未挂载物品,from_node_id 按 null 记(§5.9;item 构造体不带该字段)
-    var res = await conditionalMountUpdate(
-      deps,
-      { _id: one.item_id, version: one.expected_version },
-      targetId,
-      updateId,
-      "apply_scan"
-    );
-    if (res.updated >= 1) {
-      mountResults.push({ item_id: one.item_id, status: "mounted", version: one.expected_version + 1 });
-      continue;
+  try {
+    for (var j = 0; j < mounts.length; j++) {
+      var one = mounts[j];
+      var pathEnsured = await ensurePathSegments(deps, one.path, "scan");
+      var targetId = pathEnsured.nodes[pathEnsured.nodes.length - 1]._id;
+      var updateId = "scan:" + deps.digest(event.operation_id + ":" + one.item_id);
+      // 扫描池只收未挂载物品,from_node_id 按 null 记(§5.9;item 构造体不带该字段)
+      var res = await conditionalMountUpdate(
+        deps,
+        { _id: one.item_id, version: one.expected_version },
+        targetId,
+        updateId,
+        "apply_scan"
+      );
+      if (res.updated >= 1) {
+        mountResults.push({ item_id: one.item_id, status: "mounted", version: one.expected_version + 1 });
+        continue;
+      }
+      var cur = await itemsCol(deps)
+        .where({ _id: one.item_id, household_id: deps.householdId, deleted: false })
+        .get();
+      if (!cur.data || cur.data.length === 0) {
+        mountResults.push({ item_id: one.item_id, status: "not_found" });
+        continue;
+      }
+      var doc = cur.data[0];
+      if (isReplay(doc, one.expected_version, updateId, res.fingerprint) || doc.location_node_id === targetId) {
+        mountResults.push({ item_id: one.item_id, status: "already", version: doc.version });
+        continue;
+      }
+      mountResults.push({ item_id: one.item_id, status: "conflict", current_version: doc.version });
     }
-    var cur = await itemsCol(deps)
-      .where({ _id: one.item_id, household_id: deps.householdId, deleted: false })
-      .get();
-    if (!cur.data || cur.data.length === 0) {
-      mountResults.push({ item_id: one.item_id, status: "not_found" });
-      continue;
+  } catch (e) {
+    // P0-2:同上——竞态窗口内建节点被写入时保护拦下 ⇒ 如实拒绝
+    if (isDeletingFrozenError(e)) {
+      return failDeletingFrozen();
     }
-    var doc = cur.data[0];
-    if (isReplay(doc, one.expected_version, updateId, res.fingerprint) || doc.location_node_id === targetId) {
-      mountResults.push({ item_id: one.item_id, status: "already", version: doc.version });
-      continue;
-    }
-    mountResults.push({ item_id: one.item_id, status: "conflict", current_version: doc.version });
+    throw e;
   }
 
   return { ok: true, result: { branches: branchResults, mounts: mountResults } };
@@ -1339,8 +1389,17 @@ async function ensureAndLinkAction(event, deps) {
     return failDeletingFrozen();
   }
 
-  // 建缺失路径(用户已在确认卡确认过完整路径;并发 E11000 回查复用,绝不双建)
-  var ensured = await ensurePathSegments(deps, segments, createdFrom);
+  // 建缺失路径(用户已在确认卡确认过完整路径;并发 E11000 回查复用,绝不双建);
+  // P0-2:竞态窗口内建节点被写入时保护拦下 ⇒ 与入口门同语义拒绝,零挂载
+  var ensured;
+  try {
+    ensured = await ensurePathSegments(deps, segments, createdFrom);
+  } catch (e) {
+    if (isDeletingFrozenError(e)) {
+      return failDeletingFrozen();
+    }
+    throw e;
+  }
   var targetId = ensured.nodes[ensured.nodes.length - 1]._id;
   var base = {
     path: segments,
@@ -1462,6 +1521,10 @@ async function markSubtreeScans(deps, subtreeIds, fromStatus, toStatus, atField)
 // ---------------------------------------------------------------------------
 
 var DELETING_PHASES = ["nodes", "compensate", "scans", "final"];
+
+// 终态收敛回补轮上限(残留回补 + 孤儿扫描共用;树深 ≤6,三轮覆盖全链,
+// 超轮仍有残留=无法收敛 ⇒ status:"conflict" 如实报告,绝不假报成功)
+var FINAL_CONVERGE_ROUNDS = 3;
 
 function phaseIndexOf(name) {
   return DELETING_PHASES.indexOf(name);
@@ -1670,29 +1733,89 @@ async function unmountDetachItems(deps, rootId, frozenIds) {
 }
 
 /**
- * ⑤ 终态收敛检查(§3 P0-B):清单内除根外残留节点=0 / 挂在清单上的未删物品=0 /
- * 清单 location_id 的 active scan=0;违者回补对应阶段(节点→再删、物品→补偿、
- * scan→再标,均幂等有界)或转 conflict。终态断言仍违者抛错 → 调用方按
- * UNMOUNT_INCOMPLETE 如实返回,绝不假报成功删根。
+ * 终态收敛孤儿判定(纯函数):node 的 parent 链是否落入已删集合——链上任一
+ * parent_id ∈ deletedSet(无论该 parent 文档仍在或已随本轮删除),或链经现存
+ * 文档上溯到 ∈ deletedSet 的祖先 ⇒ 孤儿(语义上就在被删子树内)。链在不属于
+ * 已删集合的缺失 parent 处断开=既有悬挂,不属本轮,放行(读侧容忍)。
+ */
+function isOrphanOfDeletedSet(node, byId, deletedSet) {
+  var cur = node;
+  while (cur && cur.parent_id !== "") {
+    if (deletedSet[cur.parent_id] === true) {
+      return true;
+    }
+    var parent = byId[cur.parent_id];
+    if (!parent) {
+      return false; // 链断在已删集合外:与本轮无关的既有悬挂
+    }
+    cur = parent;
+  }
+  return false;
+}
+
+/**
+ * ⑤ 终态收敛检查(§3 P0-B;评审 5654328065 P0-2 扩):三件事——
+ * (a) 清单内残留回补:清单内除根外残留节点逐 doc remove(幂等,原有语义);
+ * (b) **清单外孤儿扫描并入删除**:「校验/门通过 → 立点 → 写子节点」竞态窗口写入
+ *     的新节点不在冻结清单 subtree_node_ids 内,阶段二删完即成无父孤儿——凡
+ *     parent 链落入已删集合(清单 ∪ 根)的节点=孤儿,并入本轮删除(逐轮至
+ *     不动点;已删集合随孤儿删除增长,孙辈断链同抓);孤儿 id 并入 frozenIds,
+ *     其上挂载物品与 active scan 随之补偿/标记;
+ * (c) **失败兜底**:扫描/删除抛错或超轮仍有无法收敛者 ⇒ 返回 orphanFail,
+ *     调用方置检查点 status:"conflict" 如实报告,绝不假报成功删根。
+ * 其后沿用原断言:挂在清单(∪孤儿)上的未删物品=0 / 清单 location_id 的
+ * active scan=0;违者回补或转 conflict;终态断言仍违者抛错 → 调用方按
+ * UNMOUNT_INCOMPLETE 如实返回。
  */
 async function unmountFinalConverge(deps, cp, frozenIds, counts) {
   var rootId = cp.node_id;
-  for (var round = 0; round < 3; round++) {
-    var nodes = await fetchHouseholdNodes(deps);
-    var byId = tree.indexById(nodes);
-    var leftover = [];
-    for (var i = 0; i < cp.subtree_node_ids.length; i++) {
-      var id = cp.subtree_node_ids[i];
-      if (id !== rootId && byId[id]) {
-        leftover.push(id);
+  var deletedSet = subtreeIdSet(cp.subtree_node_ids); // 含根;随孤儿删除增长
+  var orphanSwept = 0;
+  try {
+    for (var round = 0; round < FINAL_CONVERGE_ROUNDS; round++) {
+      var nodes = await fetchHouseholdNodes(deps);
+      var byId = tree.indexById(nodes);
+      var victims = [];
+      for (var i = 0; i < cp.subtree_node_ids.length; i++) {
+        var id = cp.subtree_node_ids[i];
+        if (id !== rootId && byId[id]) {
+          victims.push(id); // (a) 清单内残留
+        }
+      }
+      for (var n = 0; n < nodes.length; n++) {
+        if (deletedSet[nodes[n]._id] === true) {
+          continue;
+        }
+        if (isOrphanOfDeletedSet(nodes[n], byId, deletedSet)) {
+          victims.push(nodes[n]._id); // (b) 清单外孤儿
+        }
+      }
+      if (victims.length === 0) {
+        break;
+      }
+      for (var r = 0; r < victims.length; r++) {
+        await locCol(deps).doc(victims[r]).remove();
+        if (deletedSet[victims[r]] !== true) {
+          deletedSet[victims[r]] = true; // 孤儿并入已删集合:下一轮孙辈断链可续判
+          frozenIds[victims[r]] = true; // 孤儿上的挂载/scan 随之补偿/标记
+          orphanSwept += 1;
+        }
       }
     }
-    if (leftover.length === 0) {
-      break;
+    var nodesAfter = await fetchHouseholdNodes(deps);
+    var byIdAfter = tree.indexById(nodesAfter);
+    for (var v = 0; v < nodesAfter.length; v++) {
+      if (
+        deletedSet[nodesAfter[v]._id] !== true &&
+        isOrphanOfDeletedSet(nodesAfter[v], byIdAfter, deletedSet)
+      ) {
+        // (c) 超轮不收敛:如实转 conflict,绝不假报成功
+        return { orphanFail: "unconverged", orphanId: nodesAfter[v]._id };
+      }
     }
-    for (var r = 0; r < leftover.length; r++) {
-      await locCol(deps).doc(leftover[r]).remove();
-    }
+  } catch (sweepErr) {
+    // (c) 扫描/删除失败:如实转 conflict,绝不假报成功
+    return { orphanFail: "sweep_failed" };
   }
   var comp = await unmountDetachItems(deps, rootId, frozenIds);
   if (comp.conflicts.length > 0) {
@@ -1707,6 +1830,14 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
     var fid = cp.subtree_node_ids[n];
     if (fid !== rootId && byIdFinal[fid]) {
       throw new Error("unmount final check: node remains");
+    }
+  }
+  for (var o = 0; o < nodesFinal.length; o++) {
+    if (
+      deletedSet[nodesFinal[o]._id] !== true &&
+      isOrphanOfDeletedSet(nodesFinal[o], byIdFinal, deletedSet)
+    ) {
+      throw new Error("unmount final check: orphan remains");
     }
   }
   var items = await fetchActiveItems(deps);
@@ -1727,16 +1858,18 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
   return {
     compensated: counts.compensated + comp.detached,
     scansMarked: scansMarked,
-    conflicts: null
+    conflicts: null,
+    orphanSwept: orphanSwept
   };
 }
 
 /**
  * 阶段二六步序列(§3 P0-B/B1;①检查点由调用方先立):②硬删后代(根除外,
  * doc remove 幂等)→ ③悬挂补偿(重扫冻结清单,冲突不再容忍跳过)→ ④scan 标记
- * (active→location_deleted 条件迁移幂等)→ ⑤终态收敛检查 → ⑥删根(检查点随之
- * 消失)。各阶段幂等,续跑从 checkpoint.phase 对应阶段起执行;任意步中断 ⇒
- * {ok:false, error:"UNMOUNT_INCOMPLETE", pending},绝不假报成功。
+ * (active→location_deleted 条件迁移幂等)→ ⑤终态收敛检查(清单内残留回补 +
+ * 清单外孤儿扫描并入删除,P0-2;失败/超轮不收敛 ⇒ status:"conflict" 如实报告)
+ * → ⑥删根(检查点随之消失)。各阶段幂等,续跑从 checkpoint.phase 对应阶段起
+ * 执行;任意步中断 ⇒ {ok:false, error:"UNMOUNT_INCOMPLETE", pending},绝不假报成功。
  */
 async function unmountRunPhases(deps, cp) {
   var rootId = cp.node_id;
@@ -1786,6 +1919,26 @@ async function unmountRunPhases(deps, cp) {
       cp = await advanceCheckpointPhase(deps, cp, "scans", counts);
     }
     var converge = await unmountFinalConverge(deps, cp, frozenIds, counts);
+    if (converge.orphanFail) {
+      // P0-2 终检兜底:清单外孤儿扫描失败 / 超轮无法收敛 ⇒ 检查点置
+      // status:"conflict" 如实报告(零新增错误码,复用 UNMOUNT_CONFLICT),
+      // 根保留、绝不假报成功;用户重入续跑或人工核对
+      counts.conflicts = 0;
+      cp = await markCheckpointConflict(deps, cp, counts);
+      return {
+        ok: false,
+        error: "UNMOUNT_CONFLICT",
+        message: "清理未能完成收敛,已如实记录,请重试或重新进入清理",
+        unmounted: counts.unmounted,
+        conflicts: [],
+        pending: projectCheckpoint(cp),
+        detail: {
+          reason: converge.orphanFail,
+          orphan_id: converge.orphanId || null,
+          pending: projectCheckpoint(cp)
+        }
+      };
+    }
     if (converge.conflicts !== null) {
       counts.conflicts = converge.conflicts.length;
       cp = await markCheckpointConflict(deps, cp, counts);
@@ -1808,7 +1961,7 @@ async function unmountRunPhases(deps, cp) {
     await locCol(deps).doc(rootId).remove();
     return {
       ok: true,
-      deleted_nodes: cp.subtree_node_ids.length,
+      deleted_nodes: cp.subtree_node_ids.length + (converge.orphanSwept || 0), // 清单 + 并入删除的清单外孤儿
       remounted: 0,
       unmounted: counts.unmounted,
       compensated: counts.compensated,
