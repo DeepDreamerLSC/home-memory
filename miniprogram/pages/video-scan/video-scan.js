@@ -10,6 +10,8 @@ const appearance_page_1 = require("../../utils/appearance-page");
  * - 不自动合并同名、不自动入库、不自动播放。
  */
 const api_1 = require("../../utils/api");
+const locations_api_1 = require("../../utils/locations-api");
+const locations_cache_1 = require("../../utils/locations-cache");
 const video_attach_1 = require("../../utils/video-attach");
 const video_scene_1 = require("../../utils/video-scene");
 const keep_screen_1 = require("../../utils/keep-screen");
@@ -147,6 +149,16 @@ Page({
         frozenItems: [],
         pendingUpload: null,
         busy: false,
+        nodeSelectorVisible: false,
+        nodeSelectorFor: -1,
+        nodeSelectorStack: [],
+        nodeSelectorOptions: [],
+        nodeSelectorLoading: false,
+        nodeSelectorError: "",
+        nodeSelectorPathText: "",
+        nodeSelectorCanPick: false,
+        nodeSelectorCanBack: false,
+        nodeSelectorCurrentName: "",
     },
     /**
      * 零隐私使用埋点会话计数器(#85/#76 降本阶梯第 2 级):纯内存、不入 storage
@@ -154,6 +166,20 @@ Page({
      * 与 D1 页共用同一实现,页面只调用。
      */
     usage: (0, usage_metrics_1.createUsageSession)(),
+    /**
+     * 「归到」路径缓存(#116 PR A):node_id → 节点路径段(页面内存态,选择器
+     * 选定时记下)。build 时在场做客户端第一道一致性校验;会话恢复后缓存缺失
+     * 则照常透传,服务端权威校验(location_text === 节点路径)兜底。
+     */
+    nodePaths: {},
+    /**
+     * 「归到」选择器请求代次守卫(评审 5649433998 修补 1):复用 D1 locations 页
+     * 同款 createRequestSeq。每次打开层级/下钻/返回(经 loadNodeSelectorLayer 取号)
+     * 与关闭/清除/选中/重置(显式取号推进)都使旧请求作废;层级请求发起时捕获
+     * 当次代次,响应回来(成功或失败)时代次不匹配则整个丢弃——不 setData,
+     * 杜绝「快速返回再进另一层」时较慢的旧层级响应后到覆盖当前列表/面包屑。
+     */
+    nodeSelectorSeq: (0, locations_cache_1.createRequestSeq)(),
     onLoad() {
         const stored = parseStoredSession(storageGet(scopeKey(SESSION_PREFIX)));
         if (stored === null)
@@ -262,6 +288,7 @@ Page({
                 unit,
                 unitIndex: Math.max(0, quantity_1.UNIT_SET.indexOf(unit)),
                 quantitySet: typeof d.quantity === "number",
+                nodeText: d.nodeId !== undefined && d.nodeId !== "" ? d.locationText : "",
             };
         });
         this.setData({ draftViews: views });
@@ -836,13 +863,151 @@ Page({
             if (picked === null || options[picked] === undefined)
                 return;
             const drafts = this.data.drafts.slice();
-            drafts[index] = { ...drafts[index], target: "existing", itemId: options[picked].item_id };
+            drafts[index] = { ...drafts[index], target: "existing", itemId: options[picked].item_id, nodeId: undefined };
             this.setData({ drafts }, () => this.renderDrafts());
         }
         catch (err) {
             wx.showModal({ title: "读取物品失败", content: (0, api_1.errorMessage)(err), showCancel: false });
         }
     },
+    /* ---------------- 「归到」逐层选择器(#116 PR A,B 页显式挂载) ----------------
+     * 复用 D1 既有「弹层 + 缩进选项列表」模式;B 页无位置上下文,从 home 根下
+     * 第一层开始用既有 locations list 逐层下钻(零新读侧 action)。home 根不可
+     * 挂(服务端 isHomeRoot 统一判定硬门),选择器只允许选中具体层。
+     */
+    /** 派生渲染字段:面包屑文本/当前层可否选中(家根不可)/可否返回上一层 */
+    renderNodeSelector(stack) {
+        const top = stack[stack.length - 1];
+        this.setData({
+            nodeSelectorPathText: stack.length <= 1 ? "家" : top.path.join(" / "),
+            nodeSelectorCurrentName: top.name,
+            nodeSelectorCanPick: stack.length > 1,
+            nodeSelectorCanBack: stack.length > 1,
+        });
+    },
+    /** 拉当前层 children(既有 locations list;顶层 = home 根下第一层)。
+     * 代次守卫(评审 5649433998 修补 1):发起前取号,响应回来(成功或失败)
+     * 代次不匹配则整个丢弃——不 setData,旧层级响应绝不覆盖当前层。 */
+    async loadNodeSelectorLayer() {
+        const stack = this.data.nodeSelectorStack;
+        const top = stack[stack.length - 1];
+        if (top === undefined)
+            return;
+        const seq = this.nodeSelectorSeq.next();
+        this.setData({ nodeSelectorLoading: true, nodeSelectorError: "" });
+        try {
+            const res = top.locationId === ""
+                ? await (0, locations_api_1.callLocationsApi)({ action: "list" })
+                : await (0, locations_api_1.callLocationsApi)({ action: "list", parent_id: top.locationId });
+            if (this.nodeSelectorSeq.isCurrent(seq) !== true)
+                return;
+            const options = (res.children || []).map((c) => ({
+                locationId: c.location_id,
+                name: c.name,
+                path: c.path.slice(),
+                pathText: c.path.join(" / "),
+                hasChildren: c.child_count > 0,
+                itemCount: c.item_count,
+            }));
+            this.setData({ nodeSelectorOptions: options, nodeSelectorLoading: false });
+        }
+        catch (e) {
+            if (this.nodeSelectorSeq.isCurrent(seq) !== true)
+                return;
+            this.setData({ nodeSelectorLoading: false, nodeSelectorError: (0, api_1.errorMessage)(e) });
+        }
+    },
+    async onDraftNodeTap(e) {
+        const index = Number(e.currentTarget.dataset.index);
+        if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
+            return;
+        if (this.data.drafts[index].target !== "new")
+            return;
+        const stack = this.data.nodeSelectorStack.length > 0
+            ? this.data.nodeSelectorStack
+            : [{ locationId: "", name: "家", path: [] }];
+        this.setData({ nodeSelectorVisible: true, nodeSelectorFor: index, nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+            this.renderNodeSelector(stack);
+        });
+        await this.loadNodeSelectorLayer();
+    },
+    onNodeSelectorCloseTap() {
+        // 关闭弹层推进代次:在途层级响应作废,迟到也不复活弹层/不写选项(评审 5649433998)
+        this.nodeSelectorSeq.next();
+        this.setData({ nodeSelectorVisible: false, nodeSelectorFor: -1 });
+    },
+    /** 选中某节点(行主体点击):写 nodeId + 权威路径文本,关闭选择器 */
+    applyNodePick(node) {
+        // 选中即关闭:同关闭推进代次,在途层级响应作废(评审 5649433998)
+        this.nodeSelectorSeq.next();
+        const index = this.data.nodeSelectorFor;
+        if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
+            return;
+        const drafts = this.data.drafts.slice();
+        drafts[index] = { ...drafts[index], nodeId: node.locationId, locationText: node.path.join(" / ") };
+        this.nodePaths[node.locationId] = node.path.slice();
+        this.setData({ drafts, nodeSelectorVisible: false, nodeSelectorFor: -1 }, () => {
+            this.renderDrafts();
+            this.saveSession();
+        });
+    },
+    /** 选中当前浏览层(「就归这里」;家根不可选,由 nodeSelectorCanPick 挡住) */
+    onNodePickCurrentTap() {
+        if (this.data.nodeSelectorCanPick !== true) {
+            wx.showToast({ title: "家里第一层不能直接挂,请进入具体位置", icon: "none" });
+            return;
+        }
+        const stack = this.data.nodeSelectorStack;
+        const top = stack[stack.length - 1];
+        this.applyNodePick({ locationId: top.locationId, path: top.path });
+    },
+    /** 选中列表中某个子节点(行主体) */
+    onNodeOptionTap(e) {
+        const nodeId = String(e.currentTarget.dataset.nodeId || "");
+        const option = this.data.nodeSelectorOptions.find((o) => o.locationId === nodeId);
+        if (option === undefined)
+            return;
+        this.applyNodePick({ locationId: option.locationId, path: option.path });
+    },
+    /** 下钻(catchtap 阻断行选中):进入该子节点层 */
+    async onNodeDrillTap(e) {
+        const nodeId = String(e.currentTarget.dataset.nodeId || "");
+        const option = this.data.nodeSelectorOptions.find((o) => o.locationId === nodeId);
+        if (option === undefined)
+            return;
+        const stack = this.data.nodeSelectorStack.concat([
+            { locationId: option.locationId, name: option.name, path: option.path },
+        ]);
+        this.setData({ nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+            this.renderNodeSelector(stack);
+        });
+        await this.loadNodeSelectorLayer();
+    },
+    async onNodeSelectorBackTap() {
+        if (this.data.nodeSelectorStack.length <= 1)
+            return;
+        const stack = this.data.nodeSelectorStack.slice(0, -1);
+        this.setData({ nodeSelectorStack: stack, nodeSelectorOptions: [] }, () => {
+            this.renderNodeSelector(stack);
+        });
+        await this.loadNodeSelectorLayer();
+    },
+    /** 清除选择:回到纯文本(不挂位置),位置文字保留可编辑 */
+    onNodeSelectorClearTap() {
+        // 清除即关闭:同关闭推进代次,在途层级响应作废(评审 5649433998)
+        this.nodeSelectorSeq.next();
+        const index = this.data.nodeSelectorFor;
+        if (Number.isInteger(index) === false || index < 0 || index >= this.data.drafts.length)
+            return;
+        const drafts = this.data.drafts.slice();
+        drafts[index] = { ...drafts[index], nodeId: undefined };
+        this.setData({ drafts, nodeSelectorVisible: false, nodeSelectorFor: -1 }, () => {
+            this.renderDrafts();
+            this.saveSession();
+        });
+    },
+    /** 弹层防冒泡占位(点面板不吃掉遮罩关闭;D1 页同款) */
+    noop() { },
     onRestartTap() {
         wx.showModal({
             title: "重新拍摄",
@@ -853,6 +1018,9 @@ Page({
                     return;
                 void this.cancelScan();
                 this.clearSession();
+                this.nodePaths = {};
+                // 重置选择器状态:推进代次,在途层级响应作废(评审 5649433998)
+                this.nodeSelectorSeq.next();
                 this.setData({
                     phase: "idle",
                     sceneId: "",
@@ -873,6 +1041,10 @@ Page({
                     frozenItems: [],
                     pendingUpload: null,
                     busy: false,
+                    nodeSelectorVisible: false,
+                    nodeSelectorFor: -1,
+                    nodeSelectorStack: [],
+                    nodeSelectorOptions: [],
                 }, () => {
                     this.renderObservations();
                     this.renderDrafts();
@@ -883,7 +1055,7 @@ Page({
     async onSaveTap() {
         if (this.data.busy)
             return;
-        const built = (0, video_scene_1.buildSceneCommitItems)(this.data.drafts, this.data.observations, this.data.videoDurationMs);
+        const built = (0, video_scene_1.buildSceneCommitItems)(this.data.drafts, this.data.observations, this.data.videoDurationMs, this.nodePaths);
         if (built.ok === false) {
             wx.showModal({ title: "还不能保存", content: built.message, showCancel: false });
             return;
@@ -1017,11 +1189,14 @@ Page({
             });
             const failed = res.evidence_failed ? res.evidence_failed.length : 0;
             const successCount = res.results.filter((r) => r.ok === true).length;
+            // #116 PR A 窗口二:ok:true 但 mounted:false 的行 = 已保存、未挂载,如实计数
+            const unmountedCount = res.results.filter((r) => r.ok === true && r.mounted === false).length;
             if (res.ticket_state === "partial" || failed > 0) {
                 this.setData({
                     phase: "partial",
                     busy: false,
-                    errorText: "已保存 " + successCount + " 件，仍有 " + failed + " 件未完成。",
+                    errorText: "已保存 " + successCount + " 件，仍有 " + failed + " 件未完成"
+                        + (unmountedCount > 0 ? "；另有 " + unmountedCount + " 件已保存、未挂载" : ""),
                     resultText: "可用同一份确认内容重试剩余件；已成功件不会重复创建。",
                     pendingUpload: pending,
                 }, () => this.saveSession());
@@ -1031,7 +1206,9 @@ Page({
                 phase: "done",
                 busy: false,
                 errorText: "",
-                resultText: "已为 " + successCount + " 件物品保存同一段视频证据，每件高亮彼此独立。",
+                // 完成文案(sceneDoneText):有「已保存、未挂载」行时如实区分,不显完整成功;
+                // 全部成功(或未携带挂载)时与现状文案逐字一致。
+                resultText: (0, video_scene_1.sceneDoneText)(res.results),
                 pendingUpload: null,
                 frozenItems: pending.frozenItems,
             }, () => {

@@ -1343,9 +1343,11 @@ export interface VideoSceneCommitNewItem {
   note?: string;
   highlights: VideoEvidenceHighlightInput[];
   /**
-   * D1 位置清点可选(#94):新物品目标节点(须在 location 子树内);
-   * 缺省 = location.location_id。携带时 location_text 必须逐字等于目标节点
-   * 路径文本(服务端权威,消除双份真相)。不带 location 的 B 提交绝不携带。
+   * 显式挂载目标节点:D1 位置清点(#94,须在 location 子树内,缺省 =
+   * location.location_id)或 B 页「归到」(#116 PR A,须为全家庭任意非根节点)。
+   * 携带时 location_text 必须逐字等于目标节点路径文本(服务端权威,消除双份
+   * 真相),且**进 scene_payload_sig 签名**(同票据重放换 node_id → 失配)。
+   * 不携带 = 纯文本,签名与现行逐字节一致(B 页零感知)。
    */
   node_id?: string;
   /**
@@ -1416,9 +1418,9 @@ export interface VideoSceneCommitResultRow {
   evidence_duplicated?: boolean;
   error?: string;
   message?: string;
-  /** D1:新物品实际挂载的目标节点(响应增量,仅 location 存在时) */
+  /** 新物品实际挂载的目标节点(D1 或 B 页「归到」显式携带时;纯文本提交无此字段) */
   node_id?: string;
-  /** D1:新物品是否挂载成功;false 时物品与证据已在,仅挂载待用户后续手动处理 */
+  /** 新物品是否挂载成功;false 时物品与证据已在,仅挂载待用户后续手动处理(D1/B 页同款降级) */
   mounted?: boolean;
   mount_error?: string;
   /** D1:显式移动结果 moved=本次写入 / already=已在目标节点 / replayed=重放收敛 */

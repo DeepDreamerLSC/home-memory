@@ -173,3 +173,77 @@ test("SCENE-BUILD-VALIDATION:空名称/空位置/无高亮/超 12 件均本地�
   assert.equal(res.ok, false);
   assert.ok(res.message.indexOf("12") !== -1);
 });
+
+// ---------------------------------------------------------------------------
+// #116 PR A:B 页「归到」显式挂载(nodeId 透传/校验/降级文案)
+// ---------------------------------------------------------------------------
+
+test("B-NODE-BUILD:草稿带 nodeId 且路径一致 → item 携带 node_id;路径缓存缺失照常透传(服务端二道门)", () => {
+  const draft = scene.newSceneDraft({
+    name: "螺丝刀",
+    locationText: "书房 / 书柜 / 第一层",
+    nodeId: "lc_layer",
+    manualHighlights: [{ start_ms: 0, end_ms: 1000, box: null, frame_ms: 0 }],
+  });
+  // 有路径缓存且一致 → 透传 node_id
+  const ok = scene.buildSceneCommitItems([draft], [], 12000, { lc_layer: ["书房", "书柜", "第一层"] });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.equal(ok.items[0].node_id, "lc_layer");
+  assert.equal(ok.items[0].location_text, "书房 / 书柜 / 第一层");
+
+  // 会话恢复后路径缓存缺失 → 照常透传,不本地拦截(服务端权威校验是第二道门)
+  const pass = scene.buildSceneCommitItems([draft], [], 12000);
+  assert.equal(pass.ok, true, JSON.stringify(pass));
+  assert.equal(pass.items[0].node_id, "lc_layer");
+});
+
+test("B-NODE-BUILD-GUARD:nodeId 在场但位置文字被手改与所选路径不一致(有缓存)→ 本地拦截", () => {
+  const draft = scene.newSceneDraft({
+    name: "螺丝刀",
+    locationText: "随手写的地方",
+    nodeId: "lc_layer",
+    manualHighlights: [{ start_ms: 0, end_ms: 1000, box: null, frame_ms: 0 }],
+  });
+  const res = scene.buildSceneCommitItems([draft], [], 12000, { lc_layer: ["书房", "书柜", "第一层"] });
+  assert.equal(res.ok, false);
+  assert.ok(res.message.indexOf("不一致") !== -1, res.message);
+
+  // 不带 nodeId 的草稿零感知:字段不出现,行为与现状一致
+  const plain = scene.newSceneDraft({
+    name: "胶带",
+    locationText: "厨房",
+    manualHighlights: [{ start_ms: 0, end_ms: 1000, box: null, frame_ms: 0 }],
+  });
+  const plainRes = scene.buildSceneCommitItems([plain], [], 12000);
+  assert.equal(plainRes.ok, true);
+  assert.equal("node_id" in plainRes.items[0], false);
+});
+
+test("B-NODE-BUILD-EXISTING:existing 行绝不携带 node_id(E7 类边界)", () => {
+  const draft = scene.newSceneDraft({
+    name: "扳手",
+    target: "existing",
+    itemId: "it_1",
+    nodeId: "lc_layer", // 防御:即便残留也绝不进载荷
+    manualHighlights: [{ start_ms: 0, end_ms: 1000, box: null, frame_ms: 0 }],
+  });
+  const res = scene.buildSceneCommitItems([draft], [], 12000, { lc_layer: ["书房", "书柜", "第一层"] });
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal("node_id" in res.items[0], false);
+});
+
+test("B-NODE-DONE-TEXT:窗口二降级如实展示——mounted:false 行计数入文案,不显完整成功", () => {
+  const all = [
+    { ok: true, mounted: true },
+    { ok: true, mounted: true },
+  ];
+  const degraded = [
+    { ok: true, mounted: true },
+    { ok: true, mounted: false },
+    { ok: false },
+  ];
+  assert.ok(scene.sceneDoneText(all).indexOf("每件高亮彼此独立") !== -1, "无降级=现状文案");
+  const text = scene.sceneDoneText(degraded);
+  assert.ok(text.indexOf("已保存、未挂载") !== -1, text);
+  assert.ok(text.indexOf("2") !== -1 && text.indexOf("1") !== -1, "计数如实:2 件保存/1 件未挂载");
+});
