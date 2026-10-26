@@ -146,7 +146,7 @@ test("UNMOUNT-PENDING-PREVIEW:deletePreview 附 pending_unmount → 弹层提示
   assert.equal(writeCalls.length, 0, "预览绝不自动发起续跑(用户显式触发)");
 });
 
-test("UNMOUNT-SUCCESS:转为未归类 → deleteLocation(mode:unmount),完成提示展示转未归类总数", async () => {
+test("UNMOUNT-SUCCESS:转为未归类 → deleteLocation(mode:unmount),完成提示展示转未归类总数(unmounted+compensated)", async () => {
   resetStubs();
   var calls = [];
   locationsRouter(function (event) {
@@ -158,7 +158,8 @@ test("UNMOUNT-SUCCESS:转为未归类 → deleteLocation(mode:unmount),完成提
         children: [], items: [], unmounted_count: 2, dangling_mounts: 0,
       };
     }
-    return { ok: true, deleted_nodes: 3, remounted: 0, unmounted: 2, compensated: 0, scans_marked: 1 };
+    // 阶段一 2 件 + 阶段二补偿 1 件(窗口期悬挂件)——总数 3 件进「尚未归类」
+    return { ok: true, deleted_nodes: 3, remounted: 0, unmounted: 2, compensated: 1, scans_marked: 1 };
   });
   var page = makePage(locationsPage);
   page.requestSeq = { next: function () { return 1; }, isCurrent: function () { return true; } };
@@ -169,10 +170,10 @@ test("UNMOUNT-SUCCESS:转为未归类 → deleteLocation(mode:unmount),完成提
   assert.equal(del[0].mode, "unmount");
   assert.equal(page.data.deleteLayer.visible, false, "成功后关弹层");
   assert.equal(toasts.length, 1);
-  assert.equal(toasts[0].title, "已删除;2 件物品已转未归类", "unmount 完成提示展示总数(合同 §3)");
+  assert.equal(toasts[0].title, "已删除;3 件物品已转未归类", "完成提示展示总数(阶段一+阶段二补偿,合同 §3)");
 });
 
-test("UNMOUNT-CONFLICT-COPY:阶段一熔断 → 「已解挂 N 件、M 件需先核对」,弹层保留供重新预览", async () => {
+test("UNMOUNT-CONFLICT-COPY:阶段一熔断 → 「已解挂 N 件、M 件需先核对」,弹层随冲突关闭(旧预览计数作废,核对后重新预览→重新确认)", async () => {
   resetStubs();
   locationsRouter(function (event) {
     if (event.action === "deleteLocation") {
@@ -203,7 +204,13 @@ test("UNMOUNT-CONFLICT-COPY:阶段一熔断 → 「已解挂 N 件、M 件需先
     modalQueue[0].content.indexOf("2 件") !== -1,
     "冲突文案含需核对数:" + JSON.stringify(modalQueue[0].content),
   );
-  assert.equal(page.data.deleteLayer.busy, false, "弹层保留可重试");
+  assert.ok(
+    modalQueue[0].content.indexOf("重新") !== -1 && modalQueue[0].content.indexOf("预览") !== -1,
+    "文案引导重新预览→重新确认(P0-A):" + JSON.stringify(modalQueue[0].content),
+  );
+  assert.equal(page.data.deleteLayer.busy, false);
+  assert.equal(page.data.deleteLayer.visible, false, "弹层随冲突关闭:不得带着旧预览计数直接再点(复审 F9)");
+  assert.equal(page.data.deleteLayer.pendingUnmount, null, "旧预览态一并作废");
 });
 
 test("UNMOUNT-INCOMPLETE-COPY:未完成态如实提示可续跑,绝不假报成功", async () => {
@@ -229,8 +236,9 @@ test("UNMOUNT-INCOMPLETE-COPY:未完成态如实提示可续跑,绝不假报成�
   assert.equal(page.data.deleteLayer.busy, false);
 });
 
-test("UNMOUNT-RESUME-ENTRY:deleting 子节点在列表置灰并标注,入口走 ⋯→删除 的 pending 提示", async () => {
+test("UNMOUNT-RESUME-ENTRY:deleting 子节点在列表置灰并标注,入口走 ⋯→删除 的 pending 提示;选择模式下并入 disabled(「选这个」不渲染)", async () => {
   var page = makePage(locationsPage);
+  page.setData({ mode: "browse" });
   var decorated = page.decorate([
     { location_id: "lc_study", name: "书房", type: "room", path: ["书房"], item_count: 0, child_count: 1, deleting: true },
     { location_id: "lc_kitchen", name: "厨房", type: "room", path: ["厨房"], item_count: 0, child_count: 0 },
@@ -238,6 +246,18 @@ test("UNMOUNT-RESUME-ENTRY:deleting 子节点在列表置灰并标注,入口走 
   assert.equal(decorated[0].deleting, true, "deleting 布尔进 DisplayNode");
   assert.ok(decorated[0].countText.indexOf("清理中") !== -1, "置灰标注文案");
   assert.notEqual(decorated[1].deleting, true, "非 deleting 节点不受影响");
+  // 复审 F7:pick 模式下 deleting 并入 disabled——wxml 的「选这个」以 !disabled 渲染,
+  // disabled 后按钮不渲染、点行走 disabledReason 提示(服务端冻结门兜底不变)
+  page.setData({ mode: "pick" });
+  var pickDecorated = page.decorate([
+    { location_id: "lc_study", name: "书房", type: "room", path: ["书房"], item_count: 0, child_count: 0, deleting: true },
+    { location_id: "lc_kitchen", name: "厨房", type: "room", path: ["厨房"], item_count: 0, child_count: 0 },
+  ]);
+  assert.equal(pickDecorated[0].disabled, true, "pick 模式 deleting 节点 disabled");
+  assert.ok(pickDecorated[0].disabledReason.indexOf("清理中") !== -1, "disabledReason 指明清理中");
+  assert.notEqual(pickDecorated[1].disabled, true, "非 deleting 节点可选");
+  var wxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/locations/locations.wxml"), "utf8");
+  assert.ok(wxml.indexOf("mode === 'pick' && !item.disabled") !== -1, "「选这个」以 !disabled 为渲染条件");
 });
 
 test("UNMOUNTED-CAP-ANNOTATION:首页「尚未归类」50 上限固定标注「仅显示最近 50 件,共 M 件」+ 找回路径文案", () => {
@@ -246,4 +266,32 @@ test("UNMOUNTED-CAP-ANNOTATION:首页「尚未归类」50 上限固定标注「�
   assert.ok(wxml.indexOf("共 {{ unmountedCount }} 件") !== -1, "共 M 件(M=unmounted_count)");
   assert.ok(wxml.indexOf("搜索") !== -1, "找回路径:首页搜索");
   assert.ok(wxml.indexOf("生成向导") !== -1 || wxml.indexOf("向导") !== -1, "找回路径:生成向导");
+});
+
+test("DELETING-FROZEN-COPY:冻结门拒绝(INVALID_INPUT+detail.reason=deleting)的统一可读文案;其余错误返回 null 走 errorMessage 兜底(复审 F10)", () => {
+  var frozen = new locationsApi.LocationsApiError(
+    "INVALID_INPUT", "输入不合法,请检查后重试", { reason: "deleting" }
+  );
+  assert.equal(typeof locationsApi.deletingFrozenMessage, "function");
+  assert.equal(locationsApi.deletingFrozenMessage(frozen), "该位置正在清理中,请等清理完成后再操作");
+  // 非 deleting 的 INVALID_INPUT(如根禁挂)、其他错误码、detail 缺失:一律 null
+  assert.equal(
+    locationsApi.deletingFrozenMessage(new locationsApi.LocationsApiError("INVALID_INPUT", "输入不合法,请检查后重试")),
+    null
+  );
+  assert.equal(
+    locationsApi.deletingFrozenMessage(new locationsApi.LocationsApiError("INVALID_INPUT", "输入不合法", { reason: "quantity" })),
+    null
+  );
+  assert.equal(locationsApi.deletingFrozenMessage(new Error("x")), null);
+  // 接线核对:确认页 ensureAndLink 失败行、详情页整理位置、生成向导 applyScan、
+  // 位置页删除四入口的 .js 均引用 deletingFrozenMessage(build:mp 成对产出)
+  var confirmJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/confirm/confirm.js"), "utf8");
+  var itemJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/item/item.js"), "utf8");
+  var scanJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/locationScan/locationScan.js"), "utf8");
+  var locationsJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/locations/locations.js"), "utf8");
+  assert.ok(confirmJs.indexOf("deletingFrozenMessage") !== -1, "确认页 ensureAndLink 接线");
+  assert.ok(itemJs.indexOf("deletingFrozenMessage") !== -1, "详情页整理位置 linkItem 接线");
+  assert.ok(scanJs.indexOf("deletingFrozenMessage") !== -1, "生成向导 applyScan 接线");
+  assert.ok(locationsJs.indexOf("deletingFrozenMessage") !== -1, "位置页删除入口接线");
 });

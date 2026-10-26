@@ -406,3 +406,19 @@ export function isLocationsApiErrorWithCode(
 ): e is LocationsApiError {
   return e instanceof LocationsApiError && e.code === code;
 }
+
+/**
+ * deleting 子树冻结门拒绝(issue #116,D0 v4 §3.1:INVALID_INPUT +
+ * detail:{ reason:"deleting" })的统一可读文案;其余错误返回 null,调用方沿用
+ * errorMessage 兜底。服务端 message 是通用「输入不合法」,冻结门语义由客户端
+ * 单独翻译(确认页 ensureAndLink / 详情页整理位置 linkItem / 生成向导 applyScan)。
+ */
+export function deletingFrozenMessage(e: unknown): string | null {
+  if (e instanceof LocationsApiError && e.code === "INVALID_INPUT") {
+    const d = e.detail as { reason?: unknown } | undefined;
+    if (d && d.reason === "deleting") {
+      return "该位置正在清理中,请等清理完成后再操作";
+    }
+  }
+  return null;
+}

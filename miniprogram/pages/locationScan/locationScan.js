@@ -467,10 +467,11 @@ Page({
             this.renderResult(res.result, request.names);
         }
         catch (e) {
-            // 失败不放弃:pending 保留,回到确认页由用户重试(同 operation_id 收敛)
+            // 失败不放弃:pending 保留,回到确认页由用户重试(同 operation_id 收敛);
+            // #116 冻结门:分支/挂载路径进 deleting 子树被拒时单独翻译
             this.setData({
                 phase: "confirm",
-                submitError: (0, api_1.errorMessage)(e),
+                submitError: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e),
                 pendingRetry: true,
             });
         }

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LocationsApiError = void 0;
 exports.callLocationsApi = callLocationsApi;
 exports.isLocationsApiErrorWithCode = isLocationsApiErrorWithCode;
+exports.deletingFrozenMessage = deletingFrozenMessage;
 /**
  * locations 云函数调用封装(类型化,issue #18 空间树):
  * - 统一 wx.cloud.callFunction 调用与超时控制(超时严格大于服务端对应预算,
@@ -281,4 +282,19 @@ async function callLocationsApi(event) {
 /** locations 协议错误码判断(用于分支处理,如 AI_UNAVAILABLE 的手动兜底) */
 function isLocationsApiErrorWithCode(e, code) {
     return e instanceof LocationsApiError && e.code === code;
+}
+/**
+ * deleting 子树冻结门拒绝(issue #116,D0 v4 §3.1:INVALID_INPUT +
+ * detail:{ reason:"deleting" })的统一可读文案;其余错误返回 null,调用方沿用
+ * errorMessage 兜底。服务端 message 是通用「输入不合法」,冻结门语义由客户端
+ * 单独翻译(确认页 ensureAndLink / 详情页整理位置 linkItem / 生成向导 applyScan)。
+ */
+function deletingFrozenMessage(e) {
+    if (e instanceof LocationsApiError && e.code === "INVALID_INPUT") {
+        const d = e.detail;
+        if (d && d.reason === "deleting") {
+            return "该位置正在清理中,请等清理完成后再操作";
+        }
+    }
+    return null;
 }

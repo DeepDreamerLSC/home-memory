@@ -495,6 +495,7 @@ Page({
         return children.map((c) => {
             let disabled = false;
             let disabledReason = "";
+            const deleting = c.deleting === true;
             if (pickMode) {
                 if (this.pickExcludePath) {
                     const p = c.path.join("/");
@@ -506,8 +507,13 @@ Page({
                 }
                 // 不再按 type 过滤(issue #30 PR A):跨层级选择交给服务端结构规则裁决
                 // (叶子跨层允许、带子树跨深度拒绝),选择器不做类型预筛。
+                if (deleting) {
+                    // #116 冻结门客户端半边:deleting 并入 disabled——「选这个」不再渲染,
+                    // 点行提示原因;服务端仍以 INVALID_INPUT{reason:"deleting"} 硬门兜底
+                    disabled = true;
+                    disabledReason = "该位置正在清理中,稍后再选";
+                }
             }
-            const deleting = c.deleting === true;
             const parts = [];
             // issue #116(D0 §3.1 发现点二):deleting 节点置灰并标注续跑入口
             if (deleting) {
@@ -948,9 +954,10 @@ Page({
             await this.loadNode();
         }
         catch (e) {
-            // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试
+            // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试;
+            // deleting 冻结门(含后代向交叉域)单独翻译——通用「输入不合法」不知所云
             this.deleteLayerBusy(false);
-            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
         }
     },
     onPurgeTap() {
@@ -986,15 +993,16 @@ Page({
                 node_id: layer.nodeId,
                 mode: "unmount",
             });
-            const unmounted = Number(res.unmounted) || 0;
+            // 完成提示展示转未归类总数(合同 §3「N 件已转未归类」):阶段一 unmounted
+            // 与阶段二补偿 compensated(窗口期悬挂件)都进了「尚未归类」,总数取二者之和
+            const total = (Number(res.unmounted) || 0) + (Number(res.compensated) || 0);
             this.setData({
                 deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
             });
-            // 完成提示展示转未归类总数(合同 §3「N 件已转未归类」)
             wx.showToast({
-                title: unmounted > 0 ? "已删除;" + unmounted + " 件物品已转未归类" : "已删除",
-                icon: unmounted > 0 ? "none" : "success",
-                duration: unmounted > 0 ? 3000 : 1500,
+                title: total > 0 ? "已删除;" + total + " 件物品已转未归类" : "已删除",
+                icon: total > 0 ? "none" : "success",
+                duration: total > 0 ? 3000 : 1500,
             });
             await this.loadNode();
         }
@@ -1004,9 +1012,14 @@ Page({
                 const d = (e.detail || {});
                 const done = Number(d.unmounted) || 0;
                 const pending = Array.isArray(d.conflicts) ? d.conflicts.length : 0;
+                // 冲突熔断(P0-A):旧预览计数已过期,弹层随冲突关闭——核对后重新预览→
+                // 重新确认发起下一轮(新预览自然只含剩余物品),不得带着旧计数直接再点
+                this.setData({
+                    deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+                });
                 wx.showModal({
                     title: "有物品需要先核对",
-                    content: "已解挂 " + done + " 件、" + pending + " 件因他处修改需先核对。请到这些物品的详情页确认最新位置后,重新删除。",
+                    content: "已解挂 " + done + " 件、" + pending + " 件因他处修改需先核对。请到这些物品的详情页确认最新位置后,重新打开清理并预览,再确认下一轮。",
                     showCancel: false,
                 });
                 return;
@@ -1023,7 +1036,8 @@ Page({
                 wx.showModal({ title: "清理记录异常", content: (0, api_1.errorMessage)(e), showCancel: false });
                 return;
             }
-            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+            // deleting 冻结门(含后代向交叉域:子位置有未完成的清理)单独翻译
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
         }
     },
     /**
@@ -1117,7 +1131,8 @@ Page({
         }
         catch (e) {
             this.deleteLayerBusy(false);
-            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+            // deleting 冻结门(含后代向交叉域:子位置有未完成的清理)单独翻译
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
         }
     },
     /** 弹层防冒泡占位(点面板不吃掉遮罩关闭) */
