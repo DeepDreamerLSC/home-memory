@@ -1579,6 +1579,18 @@ function validCheckpoint(cp, rootId, deps) {
   if (!hasRoot) {
     return null;
   }
+  // orphan_ids(评审 5655357130 修 2):可选字段——终检孤儿扫描在物理删除孤儿**前**
+  // 并入检查点的持久清单;缺失(旧形状)= 空清单容忍,形状非法 ⇒ CORRUPT 失败关闭
+  if (cp.orphan_ids !== undefined) {
+    if (!Array.isArray(cp.orphan_ids)) {
+      return null;
+    }
+    for (var oi = 0; oi < cp.orphan_ids.length; oi++) {
+      if (!isString(cp.orphan_ids[oi])) {
+        return null;
+      }
+    }
+  }
   if (phaseIndexOf(cp.phase) === -1) {
     return null;
   }
@@ -1688,6 +1700,62 @@ async function markCheckpointConflict(deps, cp, counts) {
 }
 
 /**
+ * 孤儿 id 并入检查点(评审 5655357130 修 2):**物理删除孤儿之前**把其 id 持久追加
+ * 进 deleting.orphan_ids(cp_rev 条件写相容,追加式并集)。动机:删除孤儿成功而其
+ * 物品补偿/scan 标记前中断时,续跑若只能凭 subtree_node_ids 重建冻结集,该孤儿已
+ * 不在树上也不在清单里——其挂载物品/active scan 从此无恢复凭据地悬挂。持久化后,
+ * 续跑从 orphan_ids 恢复补偿与标记,终态零残留。
+ * 以库内最新 orphan_ids 为基做并集后条件写:并发续跑者已追加的 id 绝不丢;条件失配
+ * (对方抢先落笔)⇒ 以重读结果为基重试,有界轮次仍不成 ⇒ 交调用方按 conflict 收敛。
+ * 返回 {cp} / {fail:"gone"|"corrupt"|"contended"}。
+ */
+var ORPHAN_PERSIST_ATTEMPTS = 3;
+
+async function persistOrphanIds(deps, rootId, newIds) {
+  if (newIds.length === 0) {
+    return { cp: null };
+  }
+  for (var attempt = 0; attempt < ORPHAN_PERSIST_ATTEMPTS; attempt++) {
+    var fresh = await findNodeById(deps, rootId);
+    if (!fresh || fresh.deleting === undefined) {
+      return { fail: "gone" }; // 根/检查点已消失(并发完成者已删根):无凭据可写
+    }
+    var latest = validCheckpoint(fresh.deleting, rootId, deps);
+    if (latest === null) {
+      return { fail: "corrupt" };
+    }
+    var base = Array.isArray(latest.orphan_ids) ? latest.orphan_ids : [];
+    var merged = base.slice();
+    for (var i = 0; i < newIds.length; i++) {
+      if (merged.indexOf(newIds[i]) === -1) {
+        merged.push(newIds[i]);
+      }
+    }
+    if (merged.length === base.length) {
+      return { cp: latest }; // 全部已在库内:幂等,无需再写
+    }
+    var r = await writeCheckpointStep(deps, latest, { orphan_ids: merged });
+    if (r === null) {
+      return { fail: "gone" };
+    }
+    if (r.corrupt) {
+      return { fail: "corrupt" };
+    }
+    var done = Array.isArray(r.cp.orphan_ids);
+    for (var n = 0; done && n < newIds.length; n++) {
+      if (r.cp.orphan_ids.indexOf(newIds[n]) === -1) {
+        done = false;
+      }
+    }
+    if (done) {
+      return { cp: r.cp };
+    }
+    // 条件失配且并发者没写进这些 id:以其结果为基重试并集
+  }
+  return { fail: "contended" };
+}
+
+/**
  * unmount 逐件 CAS 解挂(阶段一与阶段二补偿共用,§3 P0-A):摘挂写值恒为 null,
  * update_id="lunmount:"+sha256(root_id+":"+item_id)(确定性,响应丢失重试可被
  * 三重重放识别),source="unmount"。0 命中三分支:同 update_id 重放(幂等,计入
@@ -1754,22 +1822,31 @@ function isOrphanOfDeletedSet(node, byId, deletedSet) {
 }
 
 /**
- * ⑤ 终态收敛检查(§3 P0-B;评审 5654328065 P0-2 扩):三件事——
- * (a) 清单内残留回补:清单内除根外残留节点逐 doc remove(幂等,原有语义);
+ * ⑤ 终态收敛检查(§3 P0-B;评审 5654328065 P0-2 扩;评审 5655357130 修 2)——四件事:
+ * (a) 清单内残留回补:清单内(含上轮已持久化的 orphan_ids)除根外残留节点逐 doc
+ *     remove(幂等,原有语义);
  * (b) **清单外孤儿扫描并入删除**:「校验/门通过 → 立点 → 写子节点」竞态窗口写入
  *     的新节点不在冻结清单 subtree_node_ids 内,阶段二删完即成无父孤儿——凡
- *     parent 链落入已删集合(清单 ∪ 根)的节点=孤儿,并入本轮删除(逐轮至
- *     不动点;已删集合随孤儿删除增长,孙辈断链同抓);孤儿 id 并入 frozenIds,
- *     其上挂载物品与 active scan 随之补偿/标记;
- * (c) **失败兜底**:扫描/删除抛错或超轮仍有无法收敛者 ⇒ 返回 orphanFail,
+ *     parent 链落入已删集合(清单 ∪ 根 ∪ 已持久化孤儿)的节点=孤儿,语义上就在被删子树内,并入
+ *     本轮删除(逐轮至不动点;已删集合随孤儿删除增长,孙辈断链同抓);孤儿 id **先持久
+ *     并入检查点 deleting.orphan_ids(条件写),后物理删除**——删除成功而补偿/标记
+ *     前中断时,续跑凭 orphan_ids 恢复,不悬挂;孤儿 id 并入 frozenIds,其上挂载
+ *     物品与 active scan 随之补偿/标记;
+ * (c) **失败兜底**:扫描/删除/孤儿持久化抛错或超轮仍有无法收敛者 ⇒ 返回 orphanFail,
  *     调用方置检查点 status:"conflict" 如实报告,绝不假报成功删根。
  * 其后沿用原断言:挂在清单(∪孤儿)上的未删物品=0 / 清单 location_id 的
  * active scan=0;违者回补或转 conflict;终态断言仍违者抛错 → 调用方按
- * UNMOUNT_INCOMPLETE 如实返回。
+ * UNMOUNT_INCOMPLETE 如实返回。返回 orphanIds=本轮终态持久孤儿全量清单
+ * (调用方据此计数与删根后复扫)。
  */
 async function unmountFinalConverge(deps, cp, frozenIds, counts) {
   var rootId = cp.node_id;
+  // 上轮已持久化的孤儿:恢复即入已删集合与清理对象(修 2;缺失=旧形状空清单)
+  var persistedOrphans = Array.isArray(cp.orphan_ids) ? cp.orphan_ids.slice() : [];
   var deletedSet = subtreeIdSet(cp.subtree_node_ids); // 含根;随孤儿删除增长
+  for (var p = 0; p < persistedOrphans.length; p++) {
+    deletedSet[persistedOrphans[p]] = true;
+  }
   var orphanSwept = 0;
   try {
     for (var round = 0; round < FINAL_CONVERGE_ROUNDS; round++) {
@@ -1782,24 +1859,47 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
           victims.push(id); // (a) 清单内残留
         }
       }
+      for (var q = 0; q < persistedOrphans.length; q++) {
+        if (byId[persistedOrphans[q]]) {
+          victims.push(persistedOrphans[q]); // (a') 已持久化但未删尽的孤儿
+        }
+      }
+      var newOrphans = [];
       for (var n = 0; n < nodes.length; n++) {
         if (deletedSet[nodes[n]._id] === true) {
           continue;
         }
         if (isOrphanOfDeletedSet(nodes[n], byId, deletedSet)) {
-          victims.push(nodes[n]._id); // (b) 清单外孤儿
+          newOrphans.push(nodes[n]._id); // (b) 清单外孤儿
+          victims.push(nodes[n]._id);
         }
       }
       if (victims.length === 0) {
         break;
       }
-      for (var r = 0; r < victims.length; r++) {
-        await locCol(deps).doc(victims[r]).remove();
-        if (deletedSet[victims[r]] !== true) {
-          deletedSet[victims[r]] = true; // 孤儿并入已删集合:下一轮孙辈断链可续判
-          frozenIds[victims[r]] = true; // 孤儿上的挂载/scan 随之补偿/标记
+      if (newOrphans.length > 0) {
+        // (b') 修 2:孤儿物理删除**前**并入检查点(orphan_ids 追加式并集,cp_rev
+        // 条件写相容);失败 ⇒ 如实转 conflict,绝不带着无凭据的删除往下走
+        var pr = await persistOrphanIds(deps, rootId, newOrphans);
+        if (pr.fail) {
+          return { orphanFail: "persist_" + pr.fail, orphanId: newOrphans[0] };
+        }
+        var mergedIds = Array.isArray(pr.cp.orphan_ids) ? pr.cp.orphan_ids : persistedOrphans;
+        for (var m = 0; m < newOrphans.length; m++) {
+          if (mergedIds.indexOf(newOrphans[m]) === -1) {
+            mergedIds.push(newOrphans[m]);
+          }
+        }
+        persistedOrphans = mergedIds;
+        for (var g = 0; g < newOrphans.length; g++) {
+          deletedSet[newOrphans[g]] = true; // 孤儿并入已删集合:下一轮孙辈断链可续判
+          frozenIds[newOrphans[g]] = true; // 孤儿上的挂载/scan 随之补偿/标记
           orphanSwept += 1;
         }
+      }
+      for (var r = 0; r < victims.length; r++) {
+        await locCol(deps).doc(victims[r]).remove();
+        frozenIds[victims[r]] = true; // 已持久化孤儿重删:补偿/标记覆盖不变
       }
     }
     var nodesAfter = await fetchHouseholdNodes(deps);
@@ -1813,8 +1913,14 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
         return { orphanFail: "unconverged", orphanId: nodesAfter[v]._id };
       }
     }
+    for (var w = 0; w < persistedOrphans.length; w++) {
+      if (byIdAfter[persistedOrphans[w]]) {
+        // (c) 已持久化孤儿仍删不净(超轮):如实转 conflict
+        return { orphanFail: "unconverged", orphanId: persistedOrphans[w] };
+      }
+    }
   } catch (sweepErr) {
-    // (c) 扫描/删除失败:如实转 conflict,绝不假报成功
+    // (c) 扫描/删除/持久化失败:如实转 conflict,绝不假报成功
     return { orphanFail: "sweep_failed" };
   }
   var comp = await unmountDetachItems(deps, rootId, frozenIds);
@@ -1830,6 +1936,11 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
     var fid = cp.subtree_node_ids[n];
     if (fid !== rootId && byIdFinal[fid]) {
       throw new Error("unmount final check: node remains");
+    }
+  }
+  for (var u = 0; u < persistedOrphans.length; u++) {
+    if (byIdFinal[persistedOrphans[u]]) {
+      throw new Error("unmount final check: persisted orphan remains");
     }
   }
   for (var o = 0; o < nodesFinal.length; o++) {
@@ -1859,7 +1970,8 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
     compensated: counts.compensated + comp.detached,
     scansMarked: scansMarked,
     conflicts: null,
-    orphanSwept: orphanSwept
+    orphanSwept: orphanSwept,
+    orphanIds: persistedOrphans
   };
 }
 
@@ -1867,13 +1979,20 @@ async function unmountFinalConverge(deps, cp, frozenIds, counts) {
  * 阶段二六步序列(§3 P0-B/B1;①检查点由调用方先立):②硬删后代(根除外,
  * doc remove 幂等)→ ③悬挂补偿(重扫冻结清单,冲突不再容忍跳过)→ ④scan 标记
  * (active→location_deleted 条件迁移幂等)→ ⑤终态收敛检查(清单内残留回补 +
- * 清单外孤儿扫描并入删除,P0-2;失败/超轮不收敛 ⇒ status:"conflict" 如实报告)
- * → ⑥删根(检查点随之消失)。各阶段幂等,续跑从 checkpoint.phase 对应阶段起
- * 执行;任意步中断 ⇒ {ok:false, error:"UNMOUNT_INCOMPLETE", pending},绝不假报成功。
+ * 清单外孤儿扫描:先持久并入 deleting.orphan_ids、后物理删除,评审 5655357130
+ * 修 2;失败/超轮不收敛 ⇒ status:"conflict" 如实报告)→ ⑥删根(检查点随之消失)。
+ * 各阶段幂等,续跑从 checkpoint.phase 对应阶段起执行;任意步中断 ⇒ {ok:false,
+ * error:"UNMOUNT_INCOMPLETE", pending},绝不假报成功。
  */
 async function unmountRunPhases(deps, cp) {
   var rootId = cp.node_id;
   var frozenIds = subtreeIdSet(cp.subtree_node_ids);
+  // 修 2(评审 5655357130):上轮持久化的孤儿 id 随检查点恢复进冻结集——其上
+  // 挂载物品的补偿与 scan 标记在续跑中由此覆盖(缺失=旧形状空清单)
+  var entryOrphans = Array.isArray(cp.orphan_ids) ? cp.orphan_ids : [];
+  for (var e = 0; e < entryOrphans.length; e++) {
+    frozenIds[entryOrphans[e]] = true;
+  }
   var counts = {
     unmounted: cp.counts.unmounted,
     compensated: cp.counts.compensated,
@@ -1958,10 +2077,13 @@ async function unmountRunPhases(deps, cp) {
     }
     counts.compensated = converge.compensated;
     scansMarked += converge.scansMarked;
+    var deletedTotal =
+      cp.subtree_node_ids.length +
+      (Array.isArray(converge.orphanIds) ? converge.orphanIds.length : 0); // 清单 + 已持久化并入删除的孤儿
     await locCol(deps).doc(rootId).remove();
     return {
       ok: true,
-      deleted_nodes: cp.subtree_node_ids.length + (converge.orphanSwept || 0), // 清单 + 并入删除的清单外孤儿
+      deleted_nodes: deletedTotal,
       remounted: 0,
       unmounted: counts.unmounted,
       compensated: counts.compensated,

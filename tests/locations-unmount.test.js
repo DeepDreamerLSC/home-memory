@@ -1131,6 +1131,76 @@ test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根(无 cp_rev)同毫秒双立
   await assertConverged(t, ids, []);
 });
 
+/** 组合注入:locations 走 rival 包装(立点竞态写入孤儿)、items 走 sabotage 包装(补偿 CAS 抛错) */
+function combineLocItemsDb(baseDb, locationsWrapper, itemsWrapper) {
+  return {
+    collection: function (name) {
+      if (name === "locations") return locationsWrapper.collection(name);
+      if (name === "items") return itemsWrapper.collection(name);
+      return baseDb.collection(name);
+    }
+  };
+}
+
+test("ORPHAN-PERSIST-BEFORE-DELETE:孤儿发现→orphan_ids 并入检查点持久化→删除孤儿→补偿前中断 → 续跑凭检查点完成补偿与 scan 标记,终态零残留", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var orphanItem = await createItem(t.deps, "op-persist-a", "孤儿上的物品", "书房");
+  var orphanId = "lc-orphan-persist";
+  var locationsSide = rivalAtEstablishDb(t.db, function () {
+    return addOrphanNode(t.db, orphanId, ids.layerId, "窗口期新抽屉").then(function () {
+      return t.db.collection("items").doc(orphanItem).update({
+        data: { location_node_id: orphanId, last_update_id: "raced-writer" }
+      });
+    }).then(function () {
+      return seedScan(t.db, "scan-persist", orphanId);
+    });
+  });
+  var itemsSide = sabotageMountDb(t.db, orphanItem, function () {
+    throw new Error("fault:compensate-orphan-item");
+  });
+  var trapDeps = Object.assign({}, t.deps, {
+    db: combineLocItemsDb(t.db, locationsSide, itemsSide)
+  });
+
+  var res = await unmount(trapDeps, ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "UNMOUNT_INCOMPLETE", "孤儿删除后、补偿前中断 ⇒ 如实报告未完成");
+  assert.equal(res.pending.phase, "final", "终检阶段中断,检查点在");
+
+  // 核心断言(修 2):孤儿 id 在物理删除**前**已持久并入检查点——即使本进程消亡,
+  // 续跑也能凭检查点找到该孤儿完成补偿/标记,而不是留下无凭据的悬挂
+  var rootDoc = (await rawDocs(t.db, "locations")).find(function (n) { return n._id === ids.studyId; });
+  assert.ok(rootDoc && rootDoc.deleting, "根与检查点保留");
+  assert.ok(Array.isArray(rootDoc.deleting.orphan_ids), "orphan_ids 已持久化:" + JSON.stringify(rootDoc.deleting));
+  assert.deepEqual(rootDoc.deleting.orphan_ids, [orphanId], "孤儿 id 恰在检查点删除清单");
+  var nodesMid = await rawDocs(t.db, "locations");
+  assert.equal(nodesMid.some(function (n) { return n._id === orphanId; }), false, "孤儿节点已物理删除(删除先于补偿)");
+  assert.equal(nodesMid.some(function (n) { return n._id === ids.layerId; }), false, "清单内后代已删");
+  var scanMid = (await rawDocs(t.db, "location_scans")).find(function (s) { return s.scan_id === "scan-persist"; });
+  assert.equal(scanMid.status, "active", "孤儿 scan 尚未标记(补偿/标记前中断)");
+  var itemMid = (await rawDocs(t.db, "items")).find(function (d) { return d._id === orphanItem; });
+  assert.equal(itemMid.location_node_id, orphanId, "孤儿物品尚未补偿(悬挂在已删孤儿上)");
+
+  var resume = await unmount(t.deps, ids.studyId);
+  assert.equal(resume.ok, true, JSON.stringify(resume), "续跑凭 orphan_ids 恢复补偿与标记");
+  assert.equal(resume.compensated, 1, "孤儿上的挂载物品被补偿置 null");
+  assert.equal(resume.scans_marked, 1, "孤儿 scan 被标记 location_deleted");
+  assert.equal(resume.deleted_nodes, 4, "清单 3 + 孤儿 1");
+  await assertConverged(t, ids, [orphanItem]);
+});
+
+test("ORPHAN-IDS-CORRUPT:检查点 orphan_ids 形状非法(非数组)→ UNMOUNT_CHECKPOINT_CORRUPT,零续跑零删除", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await rawCheckpoint(t.db, ids.studyId, [ids.studyId, ids.shelfId, ids.layerId], { orphan_ids: "bogus" });
+  var res = await unmount(t.deps, ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "UNMOUNT_CHECKPOINT_CORRUPT");
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 5, "零删除零续跑");
+});
+
 test("WRITE-GUARD-LAST-MOMENT:ensurePath 入口门通过后、建节点写入前立点 → createNode 写入前最后一刻复查冻结集拦下,零新节点;入口门(非竞态)行为不变", async () => {
   var t = fresh();
   var ids = await setupTree(t);
