@@ -1,8 +1,12 @@
 # 位置树一期·第一波 D0:合同收紧与反例冻结(issue #116)
 
+> **v4(2026-10-26)**:按第四轮架构终审(评审 5649434567,裁定 B1 主体 PASS / PR B HOLD 至合同补强)修订——**deleting 冻结门升级为子树冻结不变量**:「目标节点本身或任意祖先处于 deleting ⇒ 所有可能新增、迁入或重挂物品的写操作一律拒绝」,取代 v3「仅查目标节点自身字段」的口径(终审 P0-1 点名漏拦场景:删「书房」时仅书房带标记,向其后代「第二层抽屉」挂物品若只查抽屉自身字段即错误放行);**入口清单补全**(增旧 delete(含 force)、ensurePath 在子树下建节点;itemsApi D1/B 目标上溯祖先链,跨部署包);**检查点并发约束合同化**(立点=条件写防双开、嵌套 unmount 拒绝、op_id 只做重放识别不做互斥证明、phase 条件单调推进、超限/畸形失败关闭);**部署顺序如实披露**(门是防、终检是兜,两侧门可分批部署,优先 itemsApi 读门先行,不承诺零中间态);§4 增子树冻结与并发反例;§6 追加第四轮裁定。v3 其余内容不变。
+>
+> **v3(2026-10-26)**:按第三轮架构复审(评论 6400568173,裁定 PR A GO / PR B HOLD)修订——P0-B 阶段二恢复闭环:采纳 **B1 最薄操作检查点**(删除前于待删根节点文档持久化冻结清单与阶段状态,中断后可续跑收敛),B2(无检查点、纯故障注入证明)的证明负担与现存数据缺口如实记录;§3 新增「阶段二恢复机制」并**取代 v2「阶段二完全沿用 migrate 机器、不新增承诺」的表述**;补偿冲突不再容忍跳过;§4 增恢复反例;§6 追加第三轮裁定。v2 其余内容不变。
+>
 > **v2(2026-10-26)**:按第二轮架构复审(评论 6400474894)修订——方案 Z 与四个确认点全部裁定通过;新增 P0-A/B/C 三项阻断性约束的合同化(§3 两阶段 unmount、§1 B 页双窗口),摘挂值统一 null 并复用 conditionalMountUpdate 机器,修正 §0 现状表 D1 行表述。裁定明细见 §6。v1 全文已被本版取代。
 
-状态:**D0 v2,待架构复审放行 → PR A(B 页挂树+根禁挂收口)∥ PR B(unmount)两代理并行**。本文件只修合同与冻结反例,不改代码。
+状态:**D0 v4。PR A 已放行(第三轮 GO);PR B:第四轮终审判定 B1 主体 PASS、HOLD 至冻结门补强(5649434567)——本 v4 完成子树冻结不变量、入口补全、并发约束与部署顺序,申请复核后实施放行**。本文件只修合同与冻结反例,不改代码。
 
 ## 0. 现状修正(P0-1,经代码核实)
 
@@ -32,7 +36,7 @@
 
 单一判定 isHomeRoot(node) ⇒ 拒绝物品挂载(itemsApi/locations 各自包内副本互指),覆盖:D1(video.js)、deleteLocation migrate、ensureAndLink(空路径拒绝;路径至少一段天然非根,测试钉住)、向导 linkItem、merge、**B 页新增路径(出生即走统一判定)**。逐条反例见 §4。
 
-## 3. 删除第三去向 unmount(P0-A/P0-B 修订:两阶段 + 冲突熔断 + 恢复矩阵)
+## 3. 删除第三去向 unmount(P0-A/P0-B 修订:两阶段 + 冲突熔断 + 恢复矩阵 + B1 检查点)
 
 **命名与语义(已裁定)**:deleteLocation 新增 mode:"unmount";scan 行沿 location_deleted;不删物品、证据、提醒。**摘挂写值统一 null**(与既有 unlinkItem 完全一致,不引入 "" 新形态);逐件 CAS **复用 conditionalMountUpdate + resolveMountMiss**(update_id="lunmount:"+sha256(node_id+":"+item_id),source="unmount")。
 
@@ -40,14 +44,83 @@
 
 **冲突熔断(P0-A)**:**存在任何未解决冲突件 ⇒ 本轮不进入阶段二**,节点一个不删、scan 不动;响应 {ok:false, error:"UNMOUNT_CONFLICT", unmounted:N, conflicts:[{item_id,current_version,location_text}], nodes_deleted:0},客户端如实展示「已解挂 N 件、M 件因他处修改需先核对」;用户核对后**重新预览→重新确认**发起下一轮(新预览自然只含剩余物品)。
 
-**阶段二·节点终结(仅在阶段一全净后)**:硬删子树节点 → 悬挂挂载补偿扫描 → scan 置 location_deleted——**阶段序列与恢复语义完全沿用既有 migrate 机器,不新增承诺**。
+**阶段二·节点终结(仅在阶段一全净后;P0-B 闭环=B1 检查点,v3 取代 v2「沿用 migrate 机器」表述)**:固定六步序列——① 于待删**根节点文档**置 `deleting` 检查点(冻结子树清单与阶段状态,**先立点、后删除**;写失败=零删除)→ ② 硬删后代节点(根除外,逐 doc remove,幂等)→ ③ 悬挂补偿(重扫冻结清单内悬挂件,逐件 CAS 置 null;**冲突登记、不再容忍跳过**)→ ④ scan 标记(清单内 active→location_deleted,条件迁移幂等)→ ⑤ **终态收敛检查**(清单内除根外残留节点=0 / 挂在清单上的未删物品=0 / 清单 location_id 的 active scan=0;违者回补对应阶段或转 conflict)→ ⑥ 删根(检查点随之消失)→ 返回 {ok:true, deleted_nodes, unmounted, compensated, scans_marked}。**根节点最后删除**(架构裁定),「根在 ⇒ 冻结清单在」由此成为不变量。任意步中断 ⇒ {ok:false, error:"UNMOUNT_INCOMPLETE", pending:{op_id,phase,status,counts}},**绝不假报成功**;补偿阶段冲突 ⇒ 检查点 status:"conflict"、根保留、终检不过,响应附冲突件清单(与 P0-A 阶段一熔断同语义,推广至阶段二)。
 
-**恢复矩阵(P0-B,如实)**:
+### 3.1 阶段二恢复机制(P0-B 闭环:B1 最薄操作检查点)
+
+**路线评估(B1 vs B2,第三轮 6400568173 二选一)**:
+
+- **B1(采纳,架构推荐)**:任何硬删之前,将 operation_id + 子树节点清单 + 阶段状态持久化为最薄删除检查点;后续重试凭检查点完成剩余节点删除、scan 标记与悬挂补偿;完成前禁止新挂载/移动进入 deleting 子树;失败时 PENDING/RETRYABLE/CONFLICT 如实报告;根删除在 scan/物品终结之后。
+- **B2(不采纳,缺口如实记录)**:不建检查点,仅改删除/scan/补偿顺序并以逐中断点故障注入证明「只凭现存结构与家庭数据即可恢复」。其证明负担在本仓库现存数据下有**两处硬缺口**:① 部分节点硬删后原 `sub.ids` 丢失——scan 行与悬挂挂载的识别都依赖已删节点 id 集合,节点既删则集合不可重建;若把顺序改为「根最后删」以保清单,根文档即成为事实上的持久化恢复凭据——那已是 B1 的最薄形态,不是独立的 B2;② 「完成前禁止新挂载/移动进入 deleting 子树」在无持久标记时无实现点(客户端与跨函数写方无从得知 deleting 态),只能退化为删除后全局自愈扫描,超出单次操作恢复、且未获架构授权。故障注入证明未启动,理论分析已见上述缺口,故不选。若后续复审要求重评 B2,须先就①②给出可恢复性证明。
+
+**存储形态(三选一权衡,冻结=方案三)**:
+
+1. 新集合(如 location_delete_ops):隔离最干净,但违反「不轻易新集合」纪律——README 新增部署步骤/权限/索引,且检查点须与根节点删除做跨集合协调(根删而检查点残留 ⇒ 另需孤儿清理逻辑,更厚)。不采。
+2. locations 集合内附加操作形状文档:_id=op_id,零新集合;但 `fetchHouseholdNodes`(handler.js:157-159)按家庭**全量**读集合并建树,list/rename/move/merge/delete/deletePreview 六处共用,混入非节点文档将污染树构建与计数(除非六处加过滤,回归面大);且集合唯一索引 (household_id,parent_id,name_norm) 逼操作文档伪造三键。不采。
+3. **(推荐,采纳)复用待删根节点文档附加 `deleting` 字段**(架构第三轮明示优先评估项):零新集合、零新索引、零新增部署步骤;检查点与子树根**同生共死**(根最后删 ⇒ 检查点自然消失,无孤儿清理任务);发现入口=按 node_id 读根文档,与 deletePreview/unmount 既有读路径重合,无新查询形态。代价如实:节点摘要 `summarize`(handler.js:326-337)为字段白名单投影,新字段不外泄,但 list/deletePreview 需**显式**增补 `deleting:true` 布尔供客户端置灰提示(只增字段);根文档若被控制台手工删除,检查点随之消失(超出系统承诺,如实披露,见反例矩阵)。
+
+**检查点文档形状(冻结)**——根节点文档附加字段:
+
+```
+deleting: {
+  op_id: "unmount:" + sha256(node_id) 前 16 hex(确定性,同节点重入同值;用于日志计数关联,不承担幂等),
+  node_id: 根节点 _id,
+  subtree_node_ids: [子树全部节点 id 冻结清单,含根;创建后不变],
+  phase: "nodes" | "compensate" | "scans" | "final",
+  counts: { unmounted, compensated, conflicts },   // 计数而非 resolved_item_ids 清单
+  created_at: ISO,
+  status: "pending" | "conflict"
+}
+```
+
+**counts 取计数、不取 resolved_item_ids 清单,理由(冻结)**:补偿逐件 CAS 恒带确定性 update_id("lunmount:"+sha256(node_id+":"+item_id))且三重重放识别,重跑天然去重,清单冗余;恢复起点是**重扫真实状态**(fetchActiveItems × 冻结清单过滤)而非回放清单——删除期并发挂载恰恰使任何预写清单失真,只有重扫描可信;子树物品数无硬上限(分页护栏 1 万),id 清单体积失控;冲突明细由续跑重扫即时得出、随响应返回,不持久化。
+
+**生命周期(冻结)**:
+
+- **创建**:阶段一全净(冲突熔断通过)后、任何硬删之前,对根文档置 deleting 字段(①先于②,顺序即安全;**条件写**,见「检查点并发约束」);置点失败(含文档超上限/字段校验失败)⇒ 失败关闭:零删除、按 UNMOUNT_INCOMPLETE 返回。并发双 unmount 同根 ⇒ 条件写先者立点,败者读得现存 deleting 且 op_id 确定性同值 ⇒ 识别为**同根重放**转续跑(v4 修正:互斥由条件写承担,op_id 只做重放识别,不做互斥证明)。
+- **阶段推进**:②③④各阶段完成即**对 phase 字段做条件更新**(op_id 匹配且 phase 等于本轮已完成阶段才前进,单调不回退,见「检查点并发约束」);各阶段自身幂等(节点 remove 对已删文档 no-op、CAS 三重重放、scan 条件迁移),**续跑从 checkpoint.phase 对应阶段起执行,重复执行安全**;实现亦可保守从头重放,幂等保证收敛(留实现自由度)。
+- **完成清理**:终检⑤全净 → 删根⑥ → 检查点随根文档消失。**不保留终态文档、不设 TTL 审计**——检查点是恢复凭据,不是操作账本(v2「不建节点级操作账本」立场延续);事后核对以 location_scans.location_deleted_at 时间戳与冲突响应为准,best-effort 披露。
+- **孤儿检查点处置**(检查点在、发起请求早已消亡):无 TTL、无定时任务、无后台自愈;纯**惰性**——发现点见下,由用户显式触发续跑。不提供「放弃」入口(放弃=控制台手工,超出承诺,如实披露)。
+- **检查点损坏**(字段形状非法/subtree_node_ids 非数组或空/phase 非法):续跑前置校验失败 ⇒ {ok:false, error:"UNMOUNT_CHECKPOINT_CORRUPT"},**如实报告需人工核对,绝不猜测续跑、绝不静默清标记**。
+
+**恢复路径(惰性,不建定时任务)**:
+
+- **发现点一**:deletePreview(node_id) 读根见 deleting ⇒ 响应附 `pending_unmount:{op_id, phase, status, created_at, counts}`(响应属用户本人数据,不进日志),客户端在删除弹层如实提示「上次『转为未归类』未完成,是否继续清理」。
+- **发现点二**:list 各层 children 摘要增 `deleting:true`(仅 deleting 节点携带,只增字段),客户端置灰并标注。
+- **续跑**:deleteLocation(mode:"unmount") 对带 deleting 根节点重入 ⇒ 直接续跑阶段二(阶段一在立点前已全净;期间理论上的新挂载由冻结门拒绝,门缝由终检⑤兜底)。**由用户显式触发**(弹层确认),绝不自动发起。
+- **错误码**:UNMOUNT_INCOMPLETE(中断未完)/ UNMOUNT_CHECKPOINT_CORRUPT(损坏)两个新码 + 既有 UNMOUNT_CONFLICT(补偿冲突复用,附 resume 语义),随 PR B 并入 API_CONTRACT.md locations 错误码表(「固定 10 个」计数同步修订)。
+
+**deleting 子树冻结不变量(v4 冻结,取代 v3「仅标记所在节点」口径)**:
+
+- **不变量(原文冻结)**:目标节点本身或任意祖先处于 deleting ⇒ 所有可能新增、迁入或重挂物品的写操作一律拒绝。**仅查目标节点自身字段不足够**(终审 P0-1):标记只写在待删根节点文档上——选删「书房→柜子→抽屉」时仅「书房」带 deleting,「第二层抽屉」自身无标记,另一客户端向抽屉挂物品若只查抽屉字段即错误放行;统一判定必须是「目标本身或任一祖先 deleting」(沿 parent 链上溯,或等价地判「目标 id ∈ 某 deleting 根的 subtree_node_ids 包含关系」,终审认可两条实现路径)。
+- **实现口径(合同只冻不变量与入口清单,实现路径留给 PR-B 评审)**:挂载类写操作必须校验**目标的祖先链**。两侧服务端已有读节点设施,零新增读形态:D1 的 resolveLocationContext(video.js:1367-1400)本就 fetchHouseholdLocationNodes 拉全家庭节点做子树校验——在全量节点上做祖先链/子树包含判定即可;B 页显式 node_id 校验本就按 { _id, household_id } 读目标节点——读后沿 parent 链逐级上溯至 home 根即得祖先链。
+- **入口清单(完整枚举,含可能绕过检查点的旧入口;拒绝语义一律 INVALID_INPUT 附 detail:{reason:"deleting"},零新增错误码)**:
+  - locations:**linkItem**(目标在 deleting 子树内)/ **ensureAndLink**(语音/照片链路:路径任一段落在 deleting 子树内即拒——该链路经 ensurePathSegments **自动建节点,挂载与建节点两个动作都要冻结**)/ **applyScan**(向导:branches 与 mounts 的路径落在 deleting 子树内即拒,逐件按既有 conflict 状态语义如实返回,零静默)/ **rename / move(任一端)/ merge(source 或 target)** 作用于 deleting 子树内节点(含根)时 / **deleteLocation(migrate 与 purge 两模式)**作用于 deleting 子树内节点(含根)时 / **ensurePath**(在 deleting 子树下创建子节点——subtree_node_ids 创建后不变、不含新节点,向 deleting 子树建节点本身即违反冻结)/ **delete(旧 action,含 force)**作用于 deleting 子树内任一节点(含根)即拒——终审 P0-2 点名的绕过点:阶段一已摘空物品后 delete(force) 恰满足其空判,可把带 deleting 的根整支硬删、检查点随之消失,必须关死。
+  - itemsApi:**D1 videoSceneCommit 挂载**(node_id 与 move_to_node_id,经 resolveLocationContext 增补)/ **B 页 videoSceneCommit 挂载**(显式 node_id 校验增补)——**跨部署包,同样上溯祖先链**;isHomeRoot 单一判定已有「itemsApi/locations 各自包内副本互指」先例(§2),deleting 祖先链判定沿用同款互指注释。归 **PR B** 实现(标记随 PR B 诞生),涉及 itemsApi 同步重部署(README 部署清单同步)。
+  - **unlinkItem 放行**(摘挂方向与收敛一致,不新增风险,维持第三轮裁定)。
+
+**检查点并发约束(v4 冻结,终审 P0-3)**:
+
+- **立点=条件写**:检查点写入仅在根文档当前**不存在 deleting 字段**时成功(防双开);条件写失败、文档超上限、字段校验失败 ⇒ 一律失败关闭——零删除,按 UNMOUNT_INCOMPLETE 返回(§3 ①「写失败=零删除」的细化)。**互斥由条件写承担,op_id 相同不作为互斥证明**(终审原文)。
+- **嵌套拒绝**:目标节点自身或任意祖先已带 deleting 时对其发起 unmount ⇒ INVALID_INPUT 附 detail:{reason:"deleting"},不立第二检查点(两个删除域交叉会使冻结清单互不包含、六步序列语义破坏,从入口拒绝);唯一例外=目标恰为 deleting 根自身的重入 ⇒ 续跑(恢复路径,见上)。
+- **同根并发重复发起**:并发双 unmount 同根 ⇒ 条件写只允许一个立点;败者读得现存 deleting 且 op_id 确定性同值 ⇒ 识别为**同根重放**,转续跑。op_id 的角色(v4 冻结修正,取代 v3「op_id 确定性同值,后者=续跑」的表述):只做重放识别与日志计数关联,不做互斥。
+- **阶段推进=对 phase 的条件更新**:仅当 op_id 匹配且 phase 等于本轮已完成阶段时才前进(phase 单调:nodes → compensate → scans → final,绝不回退);并发续跑交错时后写者条件失配 ⇒ 重读 phase 再续,各阶段幂等保证收敛。
+
+**部署顺序(v4,如实披露)**:**门是防、终检是兜**(既有哲学)——违反冻结的写入即使发生,也必在终检⑤重扫暴露:悬挂件 ⇒ 补偿,补偿冲突 ⇒ 转 conflict,**绝不宣称「物品均已解挂」而删根**。locations 与 itemsApi 的冻结门**可分批部署**:某侧门未上线时,该侧写入由终态收敛检查在恢复时兜住(违反冻结的写入体现在终检不过 → 补偿或 conflict)。优先序(终审 P0-3 建议):itemsApi 读 deleting 的防护**先于** locations 启用写 deleting 的 unmount 上线,可消除旧 B/D1 写端趁隙挂载的窗口;若实际顺序颠倒或存在间隙,**不承诺零中间态**——窗口内挂入的物品由终检在恢复时兜住(补偿转「尚未归类」或登记 conflict,响应与 UI 如实标注,不丢失、不静默),随 PR-B 如实呈报。合同只硬性要求两点:①两侧门最终都到位,窗口闭合;②窗口内任何违反冻结的写入不得丢失——终检兜底 + conflict 如实报告。
+
+**与 migrate/purge 的关系(冻结:本波仅 unmount 纳入,已知不对称)**:migrate/purge 维持既有序列与中断披露(v2 §3 记录的 NOT_FOUND 同级风险),**不因 B1 落地而改变**。理由:第三轮 HOLD 仅针对 unmount(新增破坏性能力须自带可追踪完成态);migrate/purge 为已上线语义,改其删除序列(根最后删)将触及六处共用读侧与已验收反例,回归面扩大。如实记录:purge 同样硬删子树,其「部分删除后清单丢失」缺口与 unmount 同源,**不随本机制自动修复**;是否将 B1 序列推广至三模式、消除不对称,列为开放问题(随本版 PR 呈报)。
+
+**安全(冻结)**:deleting 字段由 locations 云函数独占读写(itemsApi 仅读校验、绝不写);集合权限不变(所有用户不可读不可写,README 步骤 4③),客户端不直读字段明细(仅 list 布尔与 deletePreview 摘要两项显式投影);字段内容无 PII——纯 id、哈希、枚举、计数、ISO 时间戳,**不含节点名、物品名、路径文本、用户话语**;日志沿用 action/error/ms/count 纪律,subtree_node_ids/op_id 明细绝不进日志。
+
+**恢复矩阵(P0-B,v3 凭 B1 检查点闭环)**:
 
 | 中断点 | 状态 | 恢复 |
 | --- | --- | --- |
 | 阶段一任意时刻 | 节点完好,部分物品已解挂(已解挂物品安全落在「尚未归类」,幂等) | **自动收敛**:重跑=重新预览(剩余物品更少)→ 继续 |
-| 阶段二开始后 | 节点已删/删除中,重试可能 NOT_FOUND | **不宣称自动收敛**:重试遇 NOT_FOUND 如实返回「位置已在删除中或已删除;物品均已解挂,可在『尚未归类』与物品列表核对」;残留风险(scan 标记/悬挂补偿)与既有 migrate 的中断披露同级,不新增保证、不新建节点级操作账本 |
+| 阶段二立检查点之前 | 尚无任何删除(检查点先于首个硬删) | 零删除,等同阶段一末态,重入重新发起即可 |
+| 阶段二任意时刻(检查点已立) | 根带 deleting:冻结清单与 phase 在;后代可能部分已删、补偿/scan 可能未完 | **凭检查点续跑收敛**:重入 unmount 从 phase 续执行,各阶段幂等;终检全净后删根、检查点消失;未完成期间响应 UNMOUNT_INCOMPLETE,绝不假报成功 |
+| 补偿阶段冲突 | status:"conflict",根与清单在,冲突件挂着 | 不自动重试;响应附冲突件(current),用户核对后续跑(重扫自然只含未决件) |
+| 检查点损坏 / 根文档被控制台手工删 | 清单不可信 / 检查点已随根消失 | UNMOUNT_CHECKPOINT_CORRUPT 如实报告、人工核对;后者超出系统承诺,如实披露(与 migrate 同级的残余风险,不扩大到 unmount 正常路径) |
 
 **「尚未归类」投影(已裁定:首期不分页)**:上限 50 条不变;**固定标注「仅显示最近 50 件,共 M 件」**(M=既有 unmounted_count);unmount 完成提示展示总数(N 件已转未归类);**找回路径明示**:超出 50 件的旧物品经首页搜索/物品列表可达,生成向导亦可整批处理——该路径写入客户端文案。分页列为债务。
 
@@ -59,13 +132,30 @@
 
 **根禁挂审计**:W1-W6 每路径「物品挂根→拒绝」各一反例;ensureAndLink 空路径/纯空白→拒绝。
 
-**unmount**:阶段一逐件 CAS(重放幂等/已解挂跳过/冲突登记带 current);**冲突存在→nodes_deleted=0 且 scan 不动**(熔断);无冲突→节点硬删+补偿+scan 置 location_deleted;阶段一中断→重跑收敛(预览件数递减);阶段二中断→NOT_FOUND 如实文案(不宣称收敛);摘挂值**恒为 null**(断言写入值形态,"" 即红);location_text 原样保留;预览计数准确;四选弹层;与 migrate/purge 既有反例零回归。
+**unmount**:阶段一逐件 CAS(重放幂等/已解挂跳过/冲突登记带 current);**冲突存在→nodes_deleted=0 且 scan 不动**(熔断);无冲突→立检查点→后代硬删+补偿+scan 置 location_deleted+终检+删根(B1 六步);阶段一中断→重跑收敛(预览件数递减);摘挂值**恒为 null**(断言写入值形态,"" 即红);location_text 原样保留;预览计数准确;四选弹层;与 migrate/purge 既有反例零回归。
+
+**unmount 阶段二恢复(B1,第三轮最低反例全数冻结)**:
+- **逐中断点注入**:立检查点后/后代删除半途/补偿前/scan 前/终检前/删根前各注入一次失败 → 重入 unmount 续跑收敛 → 根删、检查点消失、清单内 scan=location_deleted、无悬挂未删物品;未完成期间响应 ok:false(UNMOUNT_INCOMPLETE),**绝不假报成功、不把 NOT_FOUND 视作已完成**。
+- **孤儿检查点**(立点后进程消亡,无进行中操作)→ deletePreview 附 pending_unmount、list children 带 deleting:true → 客户端提示续跑 → 用户显式触发后收敛。
+- **检查点损坏**(deleting 字段形状非法/清单空)→ UNMOUNT_CHECKPOINT_CORRUPT 如实报告,零删除零标记零续跑,人工核对。
+- **补偿阶段 CAS 冲突** → status:"conflict"、根保留、终检不过,响应附冲突件清单(current);用户核对后续跑;**compensated_skipped 静默容忍不再适用于 unmount**。
+- **删除期另一客户端挂载**(跨函数并发,第三轮点名反例,第四轮升格为子树判定):冻结门生效后 itemsApi D1/B 挂 **deleting 子树内**节点(终审 P0-1 实际场景:书房在删、第二层抽屉自身无标记,向抽屉挂 → 仍拒绝)→ INVALID_INPUT({reason:"deleting"});门缝交错绕过 → 终检重扫发现悬挂件 → 补偿或转 conflict,绝不宣称已全解挂。
+- **deleting 冻结门(子树判定)**:linkItem/ensureAndLink/applyScan/rename/move/merge/deleteLocation(migrate、purge)对 deleting 子树内节点(祖先带标记、目标自身无标记)→ INVALID_INPUT({reason:"deleting"})各一反例;unlinkItem 放行(方向一致)。
+- **v4 子树冻结与并发反例(第四轮 5649434567 终审补强,全数冻结)**:
+  - **祖先 deleting 逐入口拒绝**(场景同上:目标自身无标记、祖先在删):linkItem 挂到后代 / ensureAndLink 路径末段为后代 / ensurePath 在子树下建节点 / applyScan branch 或 mount 路径入子树 / rename、move(任一端)、merge(source/target)作用于子树内节点 / **旧 delete(含 force)作用于子树内节点**(含 delete(force) 打向 deleting 根本身) / deleteLocation migrate 与 purge 作用于子树内节点 / D1 videoSceneCommit(node_id 与 move_to_node_id)挂到后代 / B 页 videoSceneCommit 挂到后代 → **每入口至少一反例,断言 INVALID_INPUT + detail:{reason:"deleting"} 且零写入**。
+  - **嵌套 unmount 拒绝**:祖先带 deleting 时对后代发起 unmount → INVALID_INPUT({reason:"deleting"}),不立第二检查点;对 deleting 根重入 → 续跑(唯一放行例外)。
+  - **并发检查点条件写**:双开同根并发立点 → 仅一个条件写成功,败者识别现存 deleting 转**同根重放/续跑**;断言不出现双检查点、不出现清单交叉。
+  - **phase 条件推进**:并发续跑交错推进 → 条件更新仅 op_id+当前 phase 匹配才前进,后写者失配重读再续,phase 单调不回退。
+  - **部署窗口如实披露**:itemsApi 读门未上线窗口内 D1/B 挂入 deleting 子树 → 物品不丢失,终检兜住(补偿转「尚未归类」或登记 conflict),响应如实、绝不假报全解挂删根。
+- **立点即断**(检查点写入失败)→ 零删除,重入重新立点(节点未动,清单重算一致)。
+- **确保不删 item、quantity、reminder、photo/video evidence**(第三轮原文):全程仅动节点文档、挂载字段、scan 状态。
 
 **全局**:语音/照片挂载链路(ensureAndLink)零改动——既有测试全绿是硬门。
 
-## 5. 实施组织(已裁定)
+## 5. 实施组织(已裁定,第三轮放行 + 第四轮终审补强)
 
-D0 v2 放行后:**PR A**=B 页挂载+根禁挂收口(itemsApi+B 页客户端;语音/照片零改动)∥ **PR B**=unmount(locations+客户端弹层)。独立 worktree、独立审查、按序合并部署。第二波 UI(六件)维持后续 issue。
+第三轮裁定 **PR A GO**;PR B 经第四轮终审(5649434567)判定 B1 主体 PASS、HOLD 至合同补强——本 v4 完成子树冻结不变量、入口补全、并发约束与部署顺序补强,**申请复核点火**。放行后两 PR 可并行:
+**PR A**=B 页挂载+根禁挂收口(itemsApi+B 页客户端;语音/照片零改动)∥ **PR B**=unmount+B1 检查点机器+deleting 子树冻结门(含 itemsApi resolveLocationContext/video.js 祖先链校验增补与 itemsApi 同步重部署,部署顺序见 §3.1)+客户端弹层与续跑提示+§4 恢复反例(测试先行,允许先红);PR B 同步修订 API_CONTRACT.md locations 节(错误码 10→13、deleting 投影字段)与 README 部署清单(无新集合,零索引零权限变更)。独立 worktree、独立审查、按序合并部署,人批合并。第二波 UI(六件)维持后续 issue。
 
 ## 6. 裁定记录
 
@@ -73,3 +163,5 @@ D0 v2 放行后:**PR A**=B 页挂载+根禁挂收口(itemsApi+B 页客户端;语
 | --- | --- |
 | 第一轮(6400332718) | 方向 GO/实施 HOLD;四 P0;三决策点方向 |
 | 第二轮(6400474894) | 方案 Z 接受;B 页任意非根节点接受;冲突件不自动重试=有条件接受(P0-A 熔断入合同);投影不分页=有条件接受(截断标注+找回路径入合同);P0-B 恢复承诺降级为两阶段矩阵;P0-C 双窗口;摘挂值统一 null;D1 行表述修正;#116 正文需标注被 Z 取代(已加) |
+| 第三轮(6400568173) | **PR A GO / PR B HOLD(P0-B 未闭环)**;B1 检查点路线采纳(架构推荐),B2 证明负担与现存数据缺口如实记录于 §3.1;检查点=待删根文档附加 deleting 字段(零新集合),根节点最后删除;完成前冻结子树挂载/移动(含 itemsApi 侧一行校验);终态收敛检查兜底;补偿冲突不再容忍跳过;新错误码 3 个随 PR B 入 API_CONTRACT;migrate/purge 维持现状=已知不对称(推广与否列开放问题);「阶段二沿用 migrate 机器」的 v2 表述被本版取代 |
+| 第四轮(5649434567) | **B1 主体 PASS / PR-B HOLD 至冻结门补强,补全后复核即可点火**:deleting 必须对整棵子树生效(「目标本身或任一祖先 deleting」统一判定,仅查目标节点字段不足够,孙节点无标记的反例入 §4);旧入口补全(delete(force) 可硬删带 deleting 的根须关死、ensurePath 不得向子树建节点、move/merge/rename/linkItem/ensureAndLink/applyScan/deleteLocation(migrate/purge)、itemsApi D1/B 目标及其祖先,跨部署包同上溯);并发约束合同化(立点条件写防双开、op_id 只做重放识别不做互斥证明、phase 条件单调推进、超限/畸形在任何硬删前失败关闭);部署顺序:itemsApi 读门先于 unmount 上线为优先序,间隙由终检兜底、不承诺零中间态如实披露 |
