@@ -263,6 +263,14 @@ export interface SceneDraftItem {
    */
   quantity?: number;
   unit?: string;
+  /**
+   * B 页「归到」显式挂载(#116 PR A,D0-CONTRACT v2 §1):草稿行选择器选定的
+   * 目标节点 id。选定时 locationText 同步写为节点路径文本(服务端权威口径);
+   * 清除时移除本字段、locationText 保留用户可编辑文本(= 纯文本现状,零感知)。
+   * 只随 target:"new" 提交;existing 行残留绝不进载荷(E7 类边界)。
+   * 合并/拆分产出的新草稿一律重置(与数量纪律同款:归属逐行重新确认)。
+   */
+  nodeId?: string;
 }
 
 export interface SceneObservationGroup {
@@ -310,6 +318,7 @@ export function newSceneDraft(partial?: Partial<SceneDraftItem>): SceneDraftItem
     checked: partial?.checked !== false,
     quantity: partial?.quantity,
     unit: partial?.unit,
+    nodeId: partial?.nodeId,
   };
 }
 
@@ -526,10 +535,19 @@ export type SceneCommitBuildResult =
   | { ok: true; items: VideoSceneCommitItem[] }
   | { ok: false; message: string };
 
+/**
+ * B 页「归到」路径缓存(#116 PR A):node_id → 节点路径段(选择器选定时记下,
+ * 页面内存态)。build 时在场则做客户端第一道一致性校验(与 D1 页同款);会话
+ * 恢复后缓存缺失则照常透传——服务端权威校验(location_text === 节点路径)是
+ * 第二道门。
+ */
+export type SceneNodePaths = Record<string, readonly string[]>;
+
 export function buildSceneCommitItems(
   drafts: SceneDraftItem[],
   observations: SceneObservation[],
   durationMs: number,
+  nodePaths?: SceneNodePaths,
 ): SceneCommitBuildResult {
   const picked = drafts.filter((d) => d.checked);
   if (picked.length < 1) return { ok: false, message: "请至少勾选一件物品" };
@@ -580,6 +598,16 @@ export function buildSceneCommitItems(
         note: draft.note.trim(),
         highlights,
       };
+      // B 页「归到」(#116 PR A):显式选定节点 → 携带 node_id(显式携带才进服务端
+      // 签名)。有路径缓存时校验 location_text 与节点路径逐字一致(客户端第一道
+      // 门,D1 页同款);缓存缺失(会话恢复)照常透传,服务端权威校验兜底。
+      if (draft.nodeId !== undefined && draft.nodeId !== "") {
+        const path = nodePaths !== undefined ? nodePaths[draft.nodeId] : undefined;
+        if (path !== undefined && location !== path.join(" / ")) {
+          return { ok: false, message: "「" + name + "」的位置记录与所选位置不一致,请重选或清除后再改文字" };
+        }
+        item.node_id = draft.nodeId;
+      }
       if (draft.quantity !== undefined) {
         item.quantity = draft.quantity;
         item.unit = draft.unit;
@@ -595,6 +623,21 @@ export function sceneConfidenceText(confidence: "high" | "mid" | "low"): string 
   if (confidence === "high") return "较有把握";
   if (confidence === "mid") return "可能";
   return "不确定";
+}
+
+/**
+ * B 页保存完成文案(#116 PR A,D0-CONTRACT v2 §1 窗口二):凡有「已保存、
+ * 未挂载」(ok:true 且 mounted:false,挂载被并发删节点/CAS 失败降级)的行,
+ * 完成页文案必须如实区分,不得显示完整成功;全部挂载成功(或未携带挂载)时
+ * 与现状文案逐字一致(零感知)。
+ */
+export function sceneDoneText(results: ReadonlyArray<{ ok: boolean; mounted?: boolean }>): string {
+  const saved = results.filter((r) => r.ok === true).length;
+  const unmounted = results.filter((r) => r.ok === true && r.mounted === false).length;
+  if (unmounted > 0) {
+    return "已为 " + saved + " 件物品保存同一段视频证据;其中 " + unmounted + " 件已保存、未挂载(所选位置刚有变化),稍后可在位置页整理。";
+  }
+  return "已为 " + saved + " 件物品保存同一段视频证据,每件高亮彼此独立。";
 }
 
 export function sceneHighlightCount(
