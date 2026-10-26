@@ -183,7 +183,7 @@ Page({
         expire: null,
         remindAt: "",
         remindGeneration: -1,
-        today: (0, remind_ui_1.localTodayYmd)(),
+        pickerStart: (0, remind_ui_1.pickerStartYmd)(),
         remindBusy: false,
         notifyAccepted: false,
         diagEntryVisible: false,

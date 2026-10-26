@@ -75,3 +75,42 @@ test("askUseUp:只剩一次二次确认——确认 true / 取消 false,不再�
   await ui.askUseUp("");
   assert.ok(modals[0].content.indexOf("这件东西") !== -1, "空名兜底「这件东西」");
 });
+
+/* ---------------- 提醒滚轮起点(2026-10-26 真机反馈:8 点后从明天起) ---------------- */
+
+test("pickerStartYmd:8 点前=今天,8 点起=明天(含月末翻转)", function () {
+  assert.equal(ui.pickerStartYmd(new Date(2026, 9, 15, 7, 59)), "2026-10-15", "8 点前今天");
+  assert.equal(ui.pickerStartYmd(new Date(2026, 9, 15, 8, 0)), "2026-10-16", "8 点整即明天(扫描 08:00 已触发)");
+  assert.equal(ui.pickerStartYmd(new Date(2026, 9, 15, 23, 30)), "2026-10-16", "深夜仍明天");
+  assert.equal(ui.pickerStartYmd(new Date(2026, 9, 31, 9, 0)), "2026-11-01", "月末翻转");
+  assert.equal(ui.pickerStartYmd(new Date(2026, 11, 31, 9, 0)), "2027-01-01", "年末翻转");
+});
+
+test("pickerDateProblem:8 点后设今天拒绝(推送扫描已过),8 点前今天可设;昨天/超限照旧拒", function () {
+  assert.equal(ui.pickerDateProblem("2026-10-15", new Date(2026, 9, 15, 7, 59)), "", "8 点前今天可设");
+  assert.notEqual(ui.pickerDateProblem("2026-10-15", new Date(2026, 9, 15, 8, 1)), "", "8 点后今天拒绝");
+  assert.equal(ui.pickerDateProblem("2026-10-16", new Date(2026, 9, 15, 8, 1)), "", "8 点后明天可设");
+  assert.notEqual(ui.pickerDateProblem("2026-10-14", new Date(2026, 9, 15, 8, 1)), "", "昨天拒绝");
+});
+
+test("REMIND-ENTRY-UX:提醒设置上移 item 主界面(编辑表单不再含提醒字段);滚轮起点 8 点后=明天(两页同源)", function () {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const ROOT = path.join(__dirname, "..");
+  const itemWxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/item/item.wxml"), "utf8");
+  // 主界面设置行在编辑表单之外(notify-chip 之前),带 pickerStart 边界
+  const setRowIdx = itemWxml.indexOf("remind-set-row");
+  const chipIdx = itemWxml.indexOf("到期微信提醒显式入口");
+  const editFoldIdx = itemWxml.indexOf("编辑");
+  assert.ok(setRowIdx !== -1 && chipIdx !== -1 && setRowIdx < chipIdx, "设置行在主界面(notify-chip 前)");
+  assert.ok(itemWxml.indexOf('start="{{ pickerStart }}"', setRowIdx) !== -1, "设置行滚轮起点=pickerStart");
+  assert.ok(itemWxml.indexOf('bindtap="onRemindFieldClear"') !== -1, "✕ 清除仍在");
+  // 编辑表单区域不再包含提醒 picker(以表单容器后的字段区为准:移除后 onRemindDateChange 只出现一次)
+  assert.equal(itemWxml.split('bindchange="onRemindDateChange"').length - 1, 1, "全页仅设置行一处日期 picker");
+  const itemJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/item/item.js"), "utf8");
+  assert.ok(itemJs.indexOf("pickerStartYmd") !== -1, "item 页 data 由 pickerStartYmd 供值");
+  const confirmWxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/confirm/confirm.wxml"), "utf8");
+  assert.ok(confirmWxml.indexOf('start="{{ pickerStart }}"') !== -1, "确认页 picker 也有起点边界");
+  const confirmJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/confirm/confirm.js"), "utf8");
+  assert.ok(confirmJs.indexOf("pickerDateProblem") !== -1, "确认页提交校验同源(低版本无 start 钳制也拦得住)");
+});

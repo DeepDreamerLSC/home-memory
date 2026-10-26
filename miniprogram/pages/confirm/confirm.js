@@ -5,6 +5,7 @@ const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
 const batch_save_1 = require("../../utils/batch-save");
 const quantity_1 = require("../../utils/quantity");
+const remind_ui_1 = require("../../utils/remind-ui");
 const subscribe_1 = require("../../utils/subscribe");
 const draft_session_1 = require("../../utils/draft-session");
 /** 本地日期 → YYYY-MM-DD( picker mode=date 的 value 形态) */
@@ -41,6 +42,8 @@ Page({
         editingName: false,
         editingLocation: false,
         today: todayYmd(),
+        /** 提醒滚轮起点(8 点后=明天;与 item 页同源 remind-ui.pickerStartYmd) */
+        pickerStart: (0, remind_ui_1.pickerStartYmd)(),
         manualQuantity: "",
         manualUnitIndex: 0,
         unitOptions: quantity_1.UNIT_SET,
@@ -467,6 +470,12 @@ Page({
         }
         const value = e.detail && typeof e.detail.value === "string" ? e.detail.value : "";
         if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            return;
+        }
+        // 滚轮起点(8 点后=明天)与提交校验同源;低版本 picker 无 start 钳制时也拦得住
+        const problem = (0, remind_ui_1.pickerDateProblem)(value);
+        if (problem !== "") {
+            wx.showToast({ title: problem, icon: "none" });
             return;
         }
         this.setData({
