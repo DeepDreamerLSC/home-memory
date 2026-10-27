@@ -16,6 +16,7 @@ import {
 import type { LocationsRequestSeq } from "../../utils/locations-cache";
 import { errorMessage, formatDateTime, uuid } from "../../utils/api";
 import { callItemsApi, isApiError } from "../../utils/api";
+import { CLIENT_NETWORK, CLIENT_TIMEOUT, CLIENT_BAD_RESPONSE } from "../../utils/api";
 import { lastScanSummaryText } from "../../utils/location-scan";
 import { householdScopeName, isHouseholdScopeShared, isScopeVerified } from "../../utils/household-scope";
 import { HIGHLIGHT_QUERY_KEY } from "../../utils/nav-highlight";
@@ -105,6 +106,12 @@ interface AddPanelState {
 }
 
 /** ③ 位置内直接添加物品(#121 批次乙):名称 + 数量步进器 + 单位选择器 */
+/** 模糊传输失败(评审 5664505818 终审):服务端可能已执行但客户端无法确认——
+ * 超时/断网/坏响应都属此类,重试必须幂等(冻结值),不得视为确定失败 */
+function isAmbiguousTransportFailure(e: unknown): boolean {
+  return isApiError(e) && (e.code === CLIENT_NETWORK || e.code === CLIENT_TIMEOUT || e.code === CLIENT_BAD_RESPONSE);
+}
+
 interface ItemPanelState {
   visible: boolean;
   /** 建档幂等键(评审 5663031433):同面板会话固定,重试返回已有物品不重复建档 */
@@ -1782,7 +1789,7 @@ Page<
       this.setData({ itemPanel: { ...this.data.itemPanel, busy: false } });
       // 建档超时(响应未到):物品可能已保存(operation_id 幂等,重试不重复)
       // ——如实描述,不直接断言失败;提示重试(服务端幂等返回已有物品)
-      if (created === null && isApiError(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || errorMessage(e).indexOf("超时") !== -1 || errorMessage(e).indexOf("timeout") !== -1)) {
+      if (created === null && isAmbiguousTransportFailure(e)) {
         wx.showModal({
           title: "可能已保存",
           content: "网络不稳,物品可能已记住。点「重试」确认(不会重复添加);或稍后在首页查看。",
@@ -1795,7 +1802,7 @@ Page<
       if (created !== null) {
         // 挂载超时/失败分流(评审 5664505818):超时=「待核对」口径(可能已挂上);
         // 明确服务端拒绝=「没挂上」口径(确定失败)
-        const mountTimeout = isApiError(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || errorMessage(e).indexOf("超时") !== -1 || errorMessage(e).indexOf("timeout") !== -1);
+        const mountTimeout = isAmbiguousTransportFailure(e);
         wx.showModal({
           title: mountTimeout ? "物品已保存，位置挂载状态待核对" : "已记住，但没挂上",
           content:

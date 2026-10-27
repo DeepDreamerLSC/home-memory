@@ -5,12 +5,19 @@ const locations_api_1 = require("../../utils/locations-api");
 const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
 const api_2 = require("../../utils/api");
+const api_3 = require("../../utils/api");
 const location_scan_1 = require("../../utils/location-scan");
 const household_scope_1 = require("../../utils/household-scope");
 const nav_highlight_1 = require("../../utils/nav-highlight");
 const location_nav_1 = require("../../utils/location-nav");
 const location_icon_view_1 = require("../../utils/location-icon-view");
 const quantity_1 = require("../../utils/quantity");
+/** ③ 位置内直接添加物品(#121 批次乙):名称 + 数量步进器 + 单位选择器 */
+/** 模糊传输失败(评审 5664505818 终审):服务端可能已执行但客户端无法确认——
+ * 超时/断网/坏响应都属此类,重试必须幂等(冻结值),不得视为确定失败 */
+function isAmbiguousTransportFailure(e) {
+    return (0, api_2.isApiError)(e) && (e.code === api_3.CLIENT_NETWORK || e.code === api_3.CLIENT_TIMEOUT || e.code === api_3.CLIENT_BAD_RESPONSE);
+}
 /** ② 根层「常用房间」预设(一键创建;v2 横幅 #121 冻结清单) */
 const ROOT_ROOM_PRESETS = [
     "书房", "卧室", "厨房", "客厅", "卫生间", "玄关", "阳台", "餐厅", "储物间",
@@ -1441,7 +1448,7 @@ Page({
             this.setData({ itemPanel: { ...this.data.itemPanel, busy: false } });
             // 建档超时(响应未到):物品可能已保存(operation_id 幂等,重试不重复)
             // ——如实描述,不直接断言失败;提示重试(服务端幂等返回已有物品)
-            if (created === null && (0, api_2.isApiError)(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || (0, api_1.errorMessage)(e).indexOf("超时") !== -1 || (0, api_1.errorMessage)(e).indexOf("timeout") !== -1)) {
+            if (created === null && isAmbiguousTransportFailure(e)) {
                 wx.showModal({
                     title: "可能已保存",
                     content: "网络不稳,物品可能已记住。点「重试」确认(不会重复添加);或稍后在首页查看。",
@@ -1456,7 +1463,7 @@ Page({
             if (created !== null) {
                 // 挂载超时/失败分流(评审 5664505818):超时=「待核对」口径(可能已挂上);
                 // 明确服务端拒绝=「没挂上」口径(确定失败)
-                const mountTimeout = (0, api_2.isApiError)(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || (0, api_1.errorMessage)(e).indexOf("超时") !== -1 || (0, api_1.errorMessage)(e).indexOf("timeout") !== -1);
+                const mountTimeout = isAmbiguousTransportFailure(e);
                 wx.showModal({
                     title: mountTimeout ? "物品已保存，位置挂载状态待核对" : "已记住，但没挂上",
                     content: "「" + name + "」已保存。" +
