@@ -92,7 +92,7 @@
           <input class="input" placeholder="放在哪里" placeholder-class="placeholder" value="{{ rows[0].locationText }}" maxlength="200" disabled="{{ batchSaving || rows[0].status === 'saving' || rows[0].status === 'saved' }}" data-index="0" bindinput="onRowLocationInput" />
         </view>
         <view wx:if="{{ rows[0].mountPathText }}" class="mount-preview">
-          <view class="mount-check">✓</view><view class="mount-text">归到「{{ rows[0].mountPathText }}」</view><view class="mount-swap" data-index="0" bindtap="onMountSwapTap">更换</view>
+          <view class="mount-check">✓</view><view wx:if="{{ rows[0].mountIcon }}" class="mount-icon"><image class="loc-icon theme-light" src="{{ rows[0].mountIcon }}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{ rows[0].mountIconDark }}" mode="aspectFit"/></view><view class="mount-text">归到「{{ rows[0].mountPathText }}」</view><view class="mount-swap" data-index="0" bindtap="onMountSwapTap">更换</view>
         </view>
         <!-- 提醒行(#36):原话里明确说了日期才显示;改=日期选择器弹层,✕=连日期一起清除(灰显「不提醒」);没提取到不催 -->
         <view wx:if="{{ rows[0].remindAt || rows[0].remindTouched }}" class="sumrow">
@@ -271,7 +271,7 @@
         <!-- 「将放入」副文(十七轮):certain 行明示挂靠预览,「换」=同款选位置;
              模糊行无副文(=确认后先进「尚未归类」),绝不静默建路径 -->
         <view wx:if="{{ item.mountPathText }}" class="row-mount">
-          <text class="row-mount-text">归到「{{ item.mountPathText }}」</text>
+          <view wx:if="{{ item.mountIcon }}" class="mount-icon"><image class="loc-icon theme-light" src="{{ item.mountIcon }}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{ item.mountIconDark }}" mode="aspectFit"/></view><text class="row-mount-text">归到「{{ item.mountPathText }}」</text>
           <text
             class="row-mount-swap"
             data-index="{{ index }}"

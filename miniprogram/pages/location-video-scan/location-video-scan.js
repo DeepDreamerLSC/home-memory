@@ -22,6 +22,7 @@ const video_scene_1 = require("../../utils/video-scene");
 const keep_screen_1 = require("../../utils/keep-screen");
 const scene_groups_1 = require("../../utils/scene-groups");
 const video_target_1 = require("../../utils/video-target");
+const location_nav_1 = require("../../utils/location-nav");
 const photo_vl_1 = require("../../utils/photo-vl");
 const households_api_1 = require("../../utils/households-api");
 const household_scope_1 = require("../../utils/household-scope");
@@ -65,6 +66,36 @@ function normalizeHighlightInput(raw) {
     if (raw.frame_ms !== undefined)
         out.frame_ms = raw.frame_ms;
     return out;
+}
+/**
+ * ④(#121 批次乙)提交结果 → 跳转高亮目标(纯函数):
+ * 优先「三选·移动到当前位置并关联」的显式移动件(物品移动完成的本体),
+ * 否则取子树内第一件挂上的新物品;两者皆无 → null(原路返回,不投高亮)。
+ */
+function pickCommitHighlight(frozenItems, results) {
+    let fallback = null;
+    for (const row of results) {
+        if (row.ok !== true || typeof row.item_id !== "string" || row.item_id === "") {
+            continue;
+        }
+        const frozen = frozenItems.find((f) => f.draft_key === row.draft_key);
+        if (frozen === undefined) {
+            continue;
+        }
+        if (frozen.target === "existing") {
+            if (typeof frozen.move_to_node_id === "string" && frozen.move_to_node_id !== "") {
+                return { nodeId: frozen.move_to_node_id, itemId: row.item_id };
+            }
+            continue;
+        }
+        if (fallback === null &&
+            typeof frozen.node_id === "string" &&
+            frozen.node_id !== "" &&
+            row.mounted !== false) {
+            fallback = { nodeId: frozen.node_id, itemId: row.item_id };
+        }
+    }
+    return fallback;
 }
 function matchLevelText(level) {
     if (level === 1)
@@ -127,6 +158,12 @@ Page({
     pathsByNodeId: {},
     scanSession: undefined,
     scanEpoch: 0,
+    /**
+     * ④(#121 批次乙)提交完成后的跳转高亮目标:优先三选「移动到当前位置并
+     * 关联」的物品(物品移动完成),否则本子树内新挂的第一件;done 相页
+     * 「回到位置页」按方案回退/navigateTo 并投递短高亮。null = 无(原路返回)。
+     */
+    doneHighlight: null,
     /**
      * 零隐私使用埋点会话计数器(#85/#76 降本阶梯第 2 级):纯内存、不入 storage
      * (会话存储字段集保持旧版不变);计数/门/构建逻辑在 utils/usage-metrics,
@@ -1162,6 +1199,7 @@ Page({
         }
     },
     async commitFrozenUpload(pending) {
+        this.doneHighlight = null;
         this.setData({ phase: "committing", busy: true, errorText: "" });
         try {
             const res = await (0, api_1.callItemsApi)({
@@ -1192,6 +1230,9 @@ Page({
             }
             const notMounted = res.results.filter((r) => r.ok === true && r.mounted === false).length;
             const mountedNote = notMounted > 0 ? ";有 " + notMounted + " 件刚建档还没挂上位置,可稍后在这里手动挂载" : "";
+            // ④ 跳转高亮目标:优先显式移动(三选「移动到当前位置并关联」)的那件,
+            // 否则本子树内挂上的第一件新物品;都没有 = 无高亮,「回到位置页」原路返回
+            this.doneHighlight = pickCommitHighlight(pending.frozenItems, res.results);
             this.setData({
                 phase: "done",
                 busy: false,
@@ -1317,6 +1358,14 @@ Page({
     /** 弹层防冒泡占位(点面板不吃掉遮罩关闭) */
     noop() { },
     onDoneBackTap() {
+        // ④(#121 批次乙)有挂载/移动结果 → 按方案回到目标位置层并短高亮该物品
+        // (目标层通常就在栈内下一层:回退不加层,pending 高亮由其 onShow 消费);
+        // 无结果(只回看/无挂载)保持原路返回
+        const hl = this.doneHighlight;
+        if (hl !== null && hl.nodeId !== "") {
+            (0, location_nav_1.navToLocationLayer)(hl.nodeId, hl.itemId);
+            return;
+        }
         wx.navigateBack({
             fail: () => {
                 wx.showToast({ title: "返回失败,请手动返回", icon: "none" });

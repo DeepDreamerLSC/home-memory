@@ -80,3 +80,17 @@
 .sumrow .qty-stepper { justify-content: flex-end; flex: 1; }
 .row-qty { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 16rpx; }
 .row-qty-label { font-size: 24rpx; color: var(--text-2, #999); }
+
+/* ⑥(#121 批次乙)「归到」行语义图标(挂靠目标末段):资产在场才渲染(现状无
+   徽章,零漂移);明暗由全局 .theme-light/.theme-dark(appearance 变量)跟随 */
+.mount-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: 6rpx;
+}
+
+.mount-icon .loc-icon {
+  width: 36rpx;
+  height: 36rpx;
+}

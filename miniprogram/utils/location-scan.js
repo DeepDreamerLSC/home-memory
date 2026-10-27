@@ -9,6 +9,7 @@ exports.lastScanSummaryText = lastScanSummaryText;
 exports.subtreeOptionViews = subtreeOptionViews;
 const video_scene_1 = require("./video-scene");
 const quantity_1 = require("./quantity");
+const location_icon_view_1 = require("./location-icon-view");
 /** 会话 storage key:按 scope + node_id 隔离(§6.2,独立于 B 的 scene 会话) */
 exports.LOCATION_SCAN_SESSION_PREFIX = "home-memory:location-scan-session:";
 /** 会话 TTL:24h,同 B 的 scene 会话纪律 */
@@ -181,10 +182,15 @@ function subtreeOptionViews(subtree, rootLocationId) {
             break;
         }
     }
-    return subtree.map((node) => ({
-        location_id: node.location_id,
-        name: node.name,
-        depth: rootDepth >= 0 ? Math.max(0, node.path.length - rootDepth) : 0,
-        pathText: node.path.join(" / "),
-    }));
+    return subtree.map((node) => {
+        const art = (0, location_icon_view_1.locationIconArtwork)(node.name);
+        return {
+            location_id: node.location_id,
+            name: node.name,
+            depth: rootDepth >= 0 ? Math.max(0, node.path.length - rootDepth) : 0,
+            pathText: node.path.join(" / "),
+            icon: art.icon,
+            iconDark: art.iconDark,
+        };
+    });
 }

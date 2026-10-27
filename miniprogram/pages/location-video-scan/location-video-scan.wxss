@@ -105,3 +105,16 @@
 .stepNum { min-width: 64rpx; text-align: center; font-size: 28rpx; font-weight: 800; }
 .step-unit-btn { padding: 8rpx 14rpx; border-radius: 10rpx; background: rgba(0,0,0,.06); font-size: 24rpx; }
 .qty-pending { font-size: 22rpx; color: var(--text-2, #999); }
+
+/* ⑥(#121 批次乙)子位置选择器行语义图标:资产在场才渲染(现状无徽章,零漂移);
+   明暗由全局 .theme-light/.theme-dark(appearance 变量)自动跟随 */
+.option-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.option-icon .loc-icon {
+  width: 44rpx;
+  height: 44rpx;
+}

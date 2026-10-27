@@ -17,6 +17,13 @@ import {
   type BatchRow,
 } from "../../utils/batch-save";
 import { DEFAULT_UNIT, QUANTITY_MAX, UNIT_SET, parseQuantityText } from "../../utils/quantity";
+import { locationIconArtwork } from "../../utils/location-icon-view";
+
+/** ⑥(#121 批次乙)「归到」行图标字段:挂靠目标末段名 → 同一语义映射;无资产双空串 */
+function mountIconFields(path: string[]): { mountIcon: string; mountIconDark: string } {
+  const art = locationIconArtwork(path.length > 0 ? path[path.length - 1] : "");
+  return { mountIcon: art.icon, mountIconDark: art.iconDark };
+}
 import { pickerDateProblem, pickerStartYmd } from "../../utils/remind-ui";
 import { askNotifyIntent, requestExpirySubscribe } from "../../utils/subscribe";
 import {
@@ -80,6 +87,9 @@ interface ConfirmRow extends BatchRow {
   mountPath: string[];
   /** 「放进」行显示文本(路径 join " / ";wxml 无数组 join,预计算) */
   mountPathText: string;
+  /** ⑥(#121 批次乙)「归到」行语义图标(挂靠目标末段);双空串 = 无资产不渲染 */
+  mountIcon: string;
+  mountIconDark: string;
   /** 行内固定挂靠幂等键(create 成功后 ensureAndLink 用;失败重试沿用) */
   mountUpdateId: string;
   /**
@@ -278,6 +288,7 @@ Page<
         remindConverted: d.remind_converted === true,
         mountPath,
         mountPathText: mountPath.join(" / "),
+        ...mountIconFields(mountPath),
         mountUpdateId: uuid(),
         quantity: quantityProvided ? (d.quantity as number) : 1,
         unit: quantityProvided ? (d.unit as string) : DEFAULT_UNIT,
@@ -321,6 +332,7 @@ Page<
           remindConverted: typeof saved.remindConverted === "boolean" ? saved.remindConverted : rows[i].remindConverted,
           mountPath,
           mountPathText: mountPath.join(" / "),
+          ...mountIconFields(mountPath),
           quantity: savedQuantity ? (saved.quantity as number) : rows[i].quantity,
           unit: savedQuantity ? (saved.unit as string) : rows[i].unit,
           unitIndex: Math.max(
@@ -599,6 +611,8 @@ Page<
     if (mountStale) {
       patch["rows[" + index + "].mountPath"] = [];
       patch["rows[" + index + "].mountPathText"] = "";
+      patch["rows[" + index + "].mountIcon"] = "";
+      patch["rows[" + index + "].mountIconDark"] = "";
     }
     this.setData(patch);
     if (mountStale) {
@@ -744,9 +758,12 @@ Page<
           if (picked.length === 0) {
             return; // 异常回传:不写,原路径保持
           }
+          const icon = mountIconFields(picked);
           this.setData({
             ["rows[" + index + "].mountPath"]: picked,
             ["rows[" + index + "].mountPathText"]: picked.join(" / "),
+            ["rows[" + index + "].mountIcon"]: icon.mountIcon,
+            ["rows[" + index + "].mountIconDark"]: icon.mountIconDark,
           });
           this.persistRows();
           const pages = getCurrentPages();

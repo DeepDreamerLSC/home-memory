@@ -159,6 +159,7 @@
           data-node-id="{{item.locationId}}"
           bindtap="onNodeOptionTap"
         >
+          <view wx:if="{{item.icon}}" class="option-icon"><image class="loc-icon theme-light" src="{{item.icon}}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{item.iconDark}}" mode="aspectFit"/></view>
           <view class="item-main">
             <view class="item-name">{{item.name}}（{{item.itemCount}} 件）</view>
             <view class="item-location">{{item.pathText}}</view>
