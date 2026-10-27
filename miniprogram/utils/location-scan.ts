@@ -20,6 +20,7 @@ import {
   type SceneObservation,
 } from "./video-scene";
 import { isUnit, isValidCreateQuantity } from "./quantity";
+import { locationIconArtwork } from "./location-icon-view";
 
 /** 会话 storage key:按 scope + node_id 隔离(§6.2,独立于 B 的 scene 会话) */
 export const LOCATION_SCAN_SESSION_PREFIX = "home-memory:location-scan-session:";
@@ -233,6 +234,9 @@ export interface SubtreeOptionView {
   /** 相对进入位置的深度(0=本层),渲染缩进用 */
   depth: number;
   pathText: string;
+  /** ⑥ 语义图标双主题路径对(#121 批次乙);双空串 = 无资产 → 不渲染(现状) */
+  icon: string;
+  iconDark: string;
 }
 
 export function subtreeOptionViews(
@@ -246,10 +250,15 @@ export function subtreeOptionViews(
       break;
     }
   }
-  return subtree.map((node) => ({
-    location_id: node.location_id,
-    name: node.name,
-    depth: rootDepth >= 0 ? Math.max(0, node.path.length - rootDepth) : 0,
-    pathText: node.path.join(" / "),
-  }));
+  return subtree.map((node) => {
+    const art = locationIconArtwork(node.name);
+    return {
+      location_id: node.location_id,
+      name: node.name,
+      depth: rootDepth >= 0 ? Math.max(0, node.path.length - rootDepth) : 0,
+      pathText: node.path.join(" / "),
+      icon: art.icon,
+      iconDark: art.iconDark,
+    };
+  });
 }

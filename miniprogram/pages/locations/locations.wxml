@@ -26,7 +26,8 @@
   </view>
 
   <block wx:else>
-    <view class="crumb-row">
+    <view class="crumb-row {{ highlightId === currentNodeId && !isRoot ? 'row-hl' : '' }}">
+      <view wx:if="{{ headIcon }}" class="head-icon"><image class="loc-icon theme-light" src="{{ headIcon }}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{ headIconDark }}" mode="aspectFit"/></view>
       <view class="crumb">{{ breadcrumbText }}</view>
       <view wx:if="{{ familyShared }}" class="family-flag">共享家庭·{{ familyName }}</view>
       <view wx:if="{{ refreshing }}" class="refresh-flag">同步中…</view>
@@ -73,19 +74,20 @@
     <view class="card">
       <view class="card-head">
         <view class="card-title">位置</view>
-        <view wx:if="{{ mode === 'browse' }}" class="add-link" bindtap="onAddTap">+ 添加</view>
+        <view wx:if="{{ mode === 'browse' }}" class="row-more add-plus" catchtap="onAddTap">＋</view>
       </view>
       <view wx:if="{{ children.length === 0 }}" class="empty-text">
-        {{ isRoot ? '还没有房间。右上角「添加」,或从上方生成空间树。' : '这里还没有更细的位置。' }}
+        {{ isRoot ? '还没有房间。右上角「＋」一键加常用房间,或从上方生成空间树。' : '这里还没有更细的位置。' }}
       </view>
       <view
         wx:for="{{ children }}"
         wx:key="location_id"
-        class="item-row {{ item.disabled || item.deleting ? 'row-disabled' : '' }}"
+        class="item-row {{ item.disabled || item.deleting ? 'row-disabled' : '' }} {{ highlightId === item.location_id ? 'row-hl' : '' }}"
         data-index="{{ index }}"
         bindtap="onChildTap"
+        bindlongpress="onChildLongPress"
       >
-        <view class="item-icon">{{ item.name[0] }}</view>
+        <view class="item-icon"><block wx:if="{{ item.icon }}"><image class="loc-icon theme-light" src="{{ item.icon }}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{ item.iconDark }}" mode="aspectFit"/></block><block wx:else>{{ item.name[0] }}</block></view>
         <view class="item-main">
           <view class="item-name">{{ item.name }}</view>
           <view class="item-location">{{ item.countText }}</view>
@@ -106,9 +108,10 @@
       <view
         wx:for="{{ items }}"
         wx:key="item_id"
-        class="item-row"
+        class="item-row {{ highlightId === item.item_id ? 'row-hl' : '' }}"
         data-index="{{ index }}"
         bindtap="onItemTap"
+        bindlongpress="onItemLongPress"
       >
         <view class="item-icon">{{ item.name[0] }}</view>
         <view class="item-main">
@@ -224,6 +227,78 @@
     <button class="btn block danger" disabled="{{ scanDeleteLayer.busy }}" bindtap="onScanDeleteConfirmTap">
       <view class="btn-face">删除</view>
     </button>
+  </view>
+</view>
+
+<!-- ②「+」面板:常用预设 chips 一键创建 + 自定义输入(根层=房间 / 子层=家具);非根层另有「添加物品」入口(③) -->
+<view wx:if="{{ addPanel.visible }}" class="layer-mask" bindtap="onAddPanelClose">
+  <view class="add-layer" catchtap="noop">
+    <view class="card-head">
+      <view class="card-title">{{ isRoot ? '添加房间' : '在「' + currentNodeName + '」里添加' }}</view>
+      <view class="add-link" bindtap="onAddPanelClose">关闭</view>
+    </view>
+    <view class="hint">{{ isRoot ? '点一个常用房间直接添加,或用自定义输入。' : '点一个常用家具/位置直接添加,或用自定义输入。' }}</view>
+    <view class="chip-row">
+      <view wx:for="{{ addPanel.presets }}" wx:key="*this" class="chip" data-name="{{ item }}" catchtap="onAddPresetTap">{{ item }}</view>
+    </view>
+    <view class="field">
+      <view class="label">自定义</view>
+      <view class="custom-inline">
+        <input
+          class="input"
+          placeholder="{{ isRoot ? '如:茶室' : '如:第二个抽屉' }}"
+          placeholder-class="placeholder"
+          value="{{ addPanel.customName }}"
+          maxlength="30"
+          disabled="{{ acting }}"
+          bindinput="onAddPanelInput"
+        />
+        <button class="btn" size="mini" disabled="{{ acting }}" bindtap="onAddCustomTap"><view class="btn-face">添加</view></button>
+      </view>
+    </view>
+    <view wx:if="{{ !isRoot }}" class="hint">要直接记一件东西放这里?</view>
+    <button wx:if="{{ !isRoot }}" class="btn block" disabled="{{ acting }}" bindtap="onAddItemTap"><view class="btn-face">＋ 添加物品到这里</view></button>
+  </view>
+</view>
+
+<!-- ③ 位置内直接添加物品:名称 + 数量步进器 + 单位选择器(复用确认页组件模式) -->
+<view wx:if="{{ itemPanel.visible }}" class="layer-mask" bindtap="onItemPanelClose">
+  <view class="add-layer" catchtap="noop">
+    <view class="card-head">
+      <view class="card-title">在「{{ currentNodeName }}」记一件东西</view>
+      <view class="add-link" bindtap="onItemPanelClose">关闭</view>
+    </view>
+    <view class="field">
+      <view class="label">物品</view>
+      <input
+        class="input"
+        placeholder="物品名称"
+        placeholder-class="placeholder"
+        value="{{ itemPanel.name }}"
+        maxlength="50"
+        disabled="{{ itemPanel.busy }}"
+        bindinput="onItemNameInput"
+      />
+    </view>
+    <view class="field">
+      <view class="label">数量</view>
+      <view class="qty-stepper">
+        <view class="qty-step-btn" data-d="{{ -1 }}" catchtap="onItemQtyStep">−</view>
+        <text class="qty-step-num">{{ itemPanel.quantity }}</text>
+        <view class="qty-step-btn" data-d="{{ 1 }}" catchtap="onItemQtyStep">+</view>
+        <picker
+          class="qty-unit"
+          range="{{ unitOptions }}"
+          value="{{ itemPanel.unitIndex }}"
+          disabled="{{ itemPanel.busy }}"
+          bindchange="onItemUnitChange"
+        >
+          <view class="qty-unit-btn">{{ unitOptions[itemPanel.unitIndex] }} <text class="qty-chev">›</text></view>
+        </picker>
+      </view>
+    </view>
+    <view class="hint">记下后直接挂到「{{ currentNodeName }}」,位置记录按本层路径保存;确认后才保存。</view>
+    <button class="btn primary block" loading="{{ itemPanel.busy }}" disabled="{{ itemPanel.busy }}" bindtap="onItemSaveTap"><view class="btn-face">确认记住</view></button>
   </view>
 </view>
 
