@@ -386,17 +386,13 @@ test("提交链:选远端无任何提交,选本地按各自路径提交(文本 u
   );
 });
 
-test("新页面结构接线:冲突面板在编辑折叠内,保存禁用与双保险门禁在册", function () {
+test("新页面结构接线:冲突面板在独立编辑面板内,保存禁用与双保险门禁在册", function () {
   var wxml = read("pages/item/item.wxml");
-  // 面板在编辑折叠体内(fold-body 之内、edit-card 之前),先于表单出现
-  var foldBodyIdx = wxml.indexOf('class="fold-body');
-  var conflictIdx = wxml.indexOf("conflict-card");
-  var editCardIdx = wxml.indexOf("edit-card");
-  assert.ok(foldBodyIdx !== -1 && conflictIdx !== -1 && editCardIdx !== -1, "折叠体/冲突面板/编辑卡都在");
-  assert.ok(
-    foldBodyIdx < conflictIdx && conflictIdx < editCardIdx,
-    "冲突面板应位于编辑折叠体内、编辑表单卡之前"
-  );
+  // 冲突在独立编辑面板内、字段之前展示。
+  var panelIdx = wxml.indexOf('id="item-edit-panel"');
+  var conflictIdx = wxml.indexOf('class="card conflict-card"');
+  var fieldIdx = wxml.indexOf('bindinput="onNameInput"');
+  assert.ok(panelIdx >= 0 && panelIdx < conflictIdx && conflictIdx < fieldIdx);
   // 双值并排 + 选边按钮 + 提醒用换算后的用户词汇展示
   assert.ok(wxml.indexOf("你的修改") !== -1 && wxml.indexOf("最新记录") !== -1, "并排展示两版值");
   assert.ok(wxml.indexOf("onChooseLocal") !== -1 && wxml.indexOf("onChooseRemote") !== -1, "选边按钮接线");
@@ -404,10 +400,7 @@ test("新页面结构接线:冲突面板在编辑折叠内,保存禁用与双保
   // 保存按钮:未选完禁用(门禁可视层)
   var saveIdx = wxml.indexOf("保存修改");
   assert.ok(saveIdx !== -1, "保存按钮在");
-  assert.ok(
-    wxml.slice(0, saveIdx).lastIndexOf('disabled="{{ conflictPending }}"') > wxml.slice(0, saveIdx).lastIndexOf("<button"),
-    "保存按钮的 disabled 绑定 conflictPending"
-  );
+  assert.match(wxml, /<button[^>]*disabled="{{\s*conflictPending\s*}}"[^>]*bindtap="onSaveTap">保存修改/, "保存按钮保持冲突禁用门禁");
   // 编译产物:双保险门禁 + 四字段刷新 + 提醒补写路径
   var js = read("pages/item/item.js");
   assert.ok(js.indexOf("请先为冲突字段选择保留哪一版") !== -1, "onSaveTap 内的门禁提示在册");

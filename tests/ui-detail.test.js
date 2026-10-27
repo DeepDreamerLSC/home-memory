@@ -40,12 +40,13 @@ test("found is navigation only and remains gated during a write", () => {
   assert.equal(value.data.version, 0);
 });
 
-test("update position opens and locates the existing guarded edit form", () => {
+test("update position opens a focused panel without page scrolling", () => {
   const value = page();
   scroll = "";
   value.onUpdateLocationTap();
+  assert.equal(value.data.detailPanel, "location");
   assert.equal(value.data.editPanelOpen, true);
-  assert.equal(scroll, "#item-edit-panel");
-  value.onQuoteToggle();
-  assert.equal(value.data.detailQuoteOpen, true);
+  assert.equal(scroll, "");
+  value.onPanelClose();
+  assert.equal(value.data.detailPanel, "");
 });

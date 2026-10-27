@@ -157,6 +157,23 @@ function conflictDisplayText(key, value) {
 }
 Page({
     data: {
+        detailPanel: "",
+        mediaTab: "photo",
+        mediaScrollTarget: "",
+        recordedName: "",
+        recordedNote: "",
+        recordedRemindAt: "",
+        quantityShortText: "待核对",
+        quantityIsZero: false,
+        quantityUnitVerified: false,
+        quantityUnitChanged: false,
+        reminderDateDraft: "",
+        reminderConfirming: false,
+        reminderNeedsSave: false,
+        locationPathDraft: [],
+        locationCommitSaving: false,
+        panelError: "",
+        photoLookupFailed: false,
         itemId: "",
         name: "",
         locationText: "",
@@ -229,6 +246,9 @@ Page({
         noteFoldOpen: false,
     },
     /** 最近一次加载到的内容,用于判断是否有修改 */
+    locationNodeDraft: null,
+    locationChoiceScope: (0, household_scope_1.captureScopeGeneration)(),
+    locationLinkRetry: null,
     original: { name: "", location: "", note: "" },
     remindOriginal: "",
     remindRemoteUnknown: false,
@@ -490,14 +510,151 @@ Page({
             ? { action: "remindClear", dueDate: "" }
             : { action: "remindSet", dueDate: this.data.remindAt };
     },
-    /** 编辑折叠:常态只读,点开才出现表单;保存成功后自动收回 */
-    onEditToggle() {
-        this.setData({ editPanelOpen: !this.data.editPanelOpen });
+    openDetailPanel(panel) {
+        if (this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving || this.data.locationCommitSaving)
+            return;
+        const patch = { detailPanel: panel, moreOpen: false, panelError: "" };
+        if (panel === "location") {
+            if (this.data.conflicts.length === 0)
+                this.setData({ locationText: this.original.location });
+            this.locationChoiceScope = (0, household_scope_1.captureScopeGeneration)();
+            this.locationNodeDraft = null;
+            patch.locationPathDraft = this.data.spacePath.slice();
+            patch.editPanelOpen = true;
+        }
+        else if (panel === "info") {
+            patch.editPanelOpen = true;
+        }
+        else if (panel === "quantity") {
+            patch.quantityPanelOpen = true;
+            patch.quantityUnitVerified = false;
+            patch.quantityUnitChanged = this.quantityRetry !== null && this.quantityOriginal.unit !== null && quantity_1.UNIT_SET[this.data.quantityUnitIndex] !== this.quantityOriginal.unit;
+            if (!this.quantityRetry) {
+                patch.quantityDraft = this.quantityOriginal.quantity === null ? "" : String(this.quantityOriginal.quantity);
+                patch.quantityUnitIndex = this.quantityOriginal.unit === null ? 0 : Math.max(0, quantity_1.UNIT_SET.indexOf(this.quantityOriginal.unit));
+            }
+        }
+        else if (panel === "reminder") {
+            patch.reminderDateDraft = this.data.remindAt || this.data.pickerStart;
+        }
+        else if (panel === "media") {
+            patch.mediaTab = this.data.evidenceReady || !this.data.videoReady ? "photo" : "video";
+            patch.evidenceOpen = true;
+        }
+        this.setData(patch);
     },
-    onUpdateLocationTap() {
-        this.setData({ editPanelOpen: true }, () => {
-            wx.pageScrollTo({ selector: "#item-edit-panel", duration: 220 });
-        });
+    onPanelClose() {
+        if (this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving || this.data.locationCommitSaving)
+            return;
+        const panel = this.data.detailPanel;
+        const patch = { detailPanel: "", editPanelOpen: false, quantityPanelOpen: false, mountPanelOpen: false, panelError: "" };
+        if (this.data.conflicts.length === 0 && (panel === "location" || panel === "info")) {
+            patch.name = this.original.name;
+            patch.locationText = this.original.location;
+            patch.note = this.original.note;
+        }
+        if (panel === "location") {
+            this.locationNodeDraft = null;
+            this.locationLinkRetry = null;
+        }
+        if (panel === "media") {
+            void cancelActiveVideoAi(this.data.itemId);
+            patch.videoOpen = false;
+            patch.videoAiBusy = false;
+            patch.videoAiCandidates = [];
+            patch.evidenceOpen = false;
+        }
+        patch.reminderNeedsSave = this.pendingRemindWrite() !== null;
+        this.setData(patch);
+    },
+    onEditToggle() { this.openDetailPanel("info"); },
+    onUpdateLocationTap() { this.openDetailPanel("location"); },
+    onContinueReviewTap() {
+        this.openDetailPanel(this.data.reminderNeedsSave && this.data.conflicts.length === 0 ? "reminder" : "info");
+    },
+    onOpenReminderTap() { this.openDetailPanel("reminder"); },
+    onReminderDraftChange(e) { this.setData({ reminderDateDraft: e.detail.value }); },
+    async onReminderConfirmTap() {
+        const date = this.data.reminderDateDraft;
+        if ((0, remind_ui_1.pickerDateProblem)(date) !== "") {
+            wx.showToast({ title: (0, remind_ui_1.pickerDateProblem)(date), icon: "none" });
+            return;
+        }
+        if (this.data.remindBusy || this.data.saving || this.data.quantitySaving || this.data.reminderConfirming)
+            return;
+        this.setData({ reminderConfirming: true });
+        try {
+            if (this.pendingRemindWrite() !== null || this.hasRemindConflict()) {
+                this.setPendingRemind(date);
+                this.syncConflictFromInput("remind", date);
+                await this.onSaveTap();
+            }
+            else
+                await this.onRemindDateChange({ detail: { value: date } });
+            const pending = this.pendingRemindWrite() !== null;
+            this.setData({ reminderNeedsSave: pending });
+            if (!pending && !this.data.conflictPending && this.remindOriginal === date)
+                this.setData({ detailPanel: "" });
+        }
+        finally {
+            this.setData({ reminderConfirming: false });
+        }
+    },
+    onMediaEntryTap() { this.openDetailPanel("media"); },
+    onPendingMediaTap() { this.openDetailPanel("media"); this.setData({ mediaTab: "video" }); },
+    onMediaTabTap(e) {
+        const tab = e.currentTarget.dataset.tab;
+        if (tab !== "photo" && tab !== "video")
+            return;
+        if (tab === "photo") {
+            void cancelActiveVideoAi(this.data.itemId);
+            this.setData({ videoOpen: false, videoAiBusy: false, videoAiCandidates: [] });
+        }
+        this.setData({ mediaTab: tab, evidenceOpen: true });
+    },
+    onQuantityStep(e) {
+        if (this.data.quantitySaving)
+            return;
+        const value = Number(this.data.quantityDraft || 0) + Number(e.currentTarget.dataset.delta);
+        if (Number.isInteger(value))
+            this.setData({ quantityDraft: String(Math.max(0, Math.min(9999, value))) });
+    },
+    onQuantityUnitVerify(e) { this.setData({ quantityUnitVerified: e.detail.value.includes("verified") }); },
+    async onSaveLocationTap() {
+        if (this.data.locationCommitSaving || this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.deleting || this.data.mountSaving)
+            return;
+        if (!(0, household_scope_1.isScopeGenerationCurrent)(this.locationChoiceScope)) {
+            this.setData({ panelError: "家庭已切换，请重新打开这件物品后再修改。" });
+            return;
+        }
+        const description = this.data.locationText.trim();
+        if (!description) {
+            wx.showToast({ title: "请填写具体放在哪里", icon: "none" });
+            return;
+        }
+        this.setData({ locationCommitSaving: true, panelError: "" });
+        try {
+            await this.onSaveTap();
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(this.locationChoiceScope)) {
+                this.setData({ panelError: "家庭已切换，请重新打开这件物品后再修改。" });
+                return;
+            }
+            if (this.original.location !== description || this.data.conflictPending || this.data.conflicts.length > 0)
+                return;
+            if (this.locationNodeDraft) {
+                const choice = this.locationNodeDraft;
+                const linked = await this.doLinkToNode(choice.nodeId, choice.path);
+                if (!linked) {
+                    this.setData({ detailPanel: "location", editPanelOpen: true, panelError: "位置描述已保存，归类尚未更新。请核对后重试。" });
+                    return;
+                }
+            }
+            this.locationNodeDraft = null;
+            this.setData({ detailPanel: "", editPanelOpen: false });
+        }
+        finally {
+            this.setData({ locationCommitSaving: false });
+        }
     },
     onFoundTap() {
         // Finding an item is feedback, not a new location fact or reminder completion.
@@ -528,6 +685,8 @@ Page({
         this.setData({
             itemId: s.item_id,
             name: s.name,
+            recordedName: s.name,
+            recordedNote: s.note,
             locationText: s.location_text,
             recordedLocationText: s.location_text,
             artworkLight: (0, ui_1.itemArtwork)(s.name),
@@ -543,6 +702,8 @@ Page({
             vagueQuote: vague,
             quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
             quantityConfirmed: q.quantity !== null,
+            quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+            quantityIsZero: q.quantity === 0,
             quantityPanelOpen: false,
             quantityDraft: "",
             quantityUnitIndex: unitIndex,
@@ -554,7 +715,10 @@ Page({
     },
     /* ---------------- 数量:「设为当前总数」(issue #102 Q1,Q0-CONTRACT §4.2/§10.3) ---------------- */
     onQuantityPanelToggle() {
-        this.setData({ quantityPanelOpen: !this.data.quantityPanelOpen });
+        if (this.data.detailPanel === "quantity")
+            this.onPanelClose();
+        else
+            this.openDetailPanel("quantity");
     },
     onQuantityInput(e) {
         this.setData({
@@ -563,7 +727,7 @@ Page({
     },
     onQuantityUnitChange(e) {
         const idx = Number(e && e.detail ? e.detail.value : 0);
-        this.setData({ quantityUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < quantity_1.UNIT_SET.length ? idx : 0 });
+        this.setData({ quantityUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < quantity_1.UNIT_SET.length ? idx : 0, quantityUnitVerified: false, quantityUnitChanged: this.quantityOriginal.unit !== null && quantity_1.UNIT_SET[idx] !== this.quantityOriginal.unit });
     },
     onNoteFoldToggle() {
         this.setData({ noteFoldOpen: !this.data.noteFoldOpen });
@@ -592,6 +756,10 @@ Page({
             return;
         }
         const unit = quantity_1.UNIT_SET[this.data.quantityUnitIndex] || "件";
+        if (this.data.detailPanel === "quantity" && this.quantityOriginal.unit !== null && unit !== this.quantityOriginal.unit && !this.data.quantityUnitVerified) {
+            wx.showToast({ title: "请按新单位重新核对总数并勾选确认", icon: "none" });
+            return;
+        }
         if (this.quantityOriginal.quantity === parsed &&
             this.quantityOriginal.unit === unit) {
             wx.showToast({ title: "内容没有变化", icon: "none" });
@@ -619,7 +787,10 @@ Page({
                 updatedAtText: (0, api_1.formatDateTime)(res.item.updated_at),
                 quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
                 quantityConfirmed: q.quantity !== null,
+                quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+                quantityIsZero: q.quantity === 0,
                 quantityPanelOpen: false,
+                detailPanel: this.data.detailPanel === "quantity" ? "" : this.data.detailPanel,
                 quantityDraft: "",
             });
             wx.showToast({ title: "已记为当前总数", icon: "success" });
@@ -637,6 +808,8 @@ Page({
                         version: cur.version,
                         quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
                         quantityConfirmed: q.quantity !== null,
+                        quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+                        quantityIsZero: q.quantity === 0,
                         quantityDraft: "",
                         quantityUnitIndex: q.unit === null ? 0 : Math.max(0, quantity_1.UNIT_SET.indexOf(q.unit)),
                     });
@@ -865,7 +1038,7 @@ Page({
                 }
             }
             // 全部落库:收回冲突面板与编辑折叠,回到只读答案
-            this.setData({ conflicts: [], conflictPending: false, editPanelOpen: false });
+            this.setData({ conflicts: [], conflictPending: false, editPanelOpen: false, detailPanel: this.data.locationCommitSaving ? "location" : "", reminderNeedsSave: false });
             wx.showToast({ title: "已保存", icon: "success" });
         }
         catch (e) {
@@ -1023,11 +1196,15 @@ Page({
             name: outcome.merged.name,
             locationText: outcome.merged.location,
             recordedLocationText: item.location_text,
+            recordedName: item.name,
+            recordedNote: item.note || "",
             note: outcome.merged.note,
             version: item.version,
             updatedAtText: (0, api_1.formatDateTime)(item.updated_at),
             quantityText: (0, quantity_1.quantityConfirmedText)(q.quantity, q.unit, q.quantity_confirmed_at),
             quantityConfirmed: q.quantity !== null,
+            quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+            quantityIsZero: q.quantity === 0,
             quantityUnitIndex: q.unit === null ? 0 : Math.max(0, quantity_1.UNIT_SET.indexOf(q.unit)),
             conflicts: entries.map((c) => ({
                 ...c,
@@ -1038,6 +1215,8 @@ Page({
             conflictPending: hasConflicts,
             // 冲突面板在编辑折叠内:强制展开,保证用户看得见两版值再选
             editPanelOpen: hasConflicts ? true : this.data.editPanelOpen,
+            detailPanel: hasConflicts ? (this.data.detailPanel === "location" ? "location" : "info") : this.data.detailPanel,
+            recordedRemindAt: row === undefined ? this.data.recordedRemindAt : remoteRemind,
             ...remindPatch,
         });
         return "refreshed";
@@ -1157,6 +1336,10 @@ Page({
      * ensurePath + linkItem。AI 不可用时兜底为手动选位置(选择模式)。
      */
     async onMountTap() {
+        if (this.data.detailPanel === "location" && this.data.locationText.trim() !== this.original.location) {
+            wx.showToast({ title: "先确认位置描述，再整理归类", icon: "none" });
+            return;
+        }
         if (this.data.saving || this.data.deleting || this.data.mounting) {
             return;
         }
@@ -1244,7 +1427,14 @@ Page({
                 encodeURIComponent("把「" + (this.data.name || "这件物品") + "」放到哪个位置…"),
             events: {
                 pickNode: (d) => {
-                    void this.doLinkToNode(d.location_id, d.path);
+                    if (this.data.detailPanel === "location") {
+                        if (!(0, household_scope_1.isScopeGenerationCurrent)(this.locationChoiceScope))
+                            return;
+                        this.locationNodeDraft = { nodeId: d.location_id, path: Array.isArray(d.path) ? d.path : [] };
+                        this.setData({ locationPathDraft: this.locationNodeDraft.path });
+                    }
+                    else
+                        void this.doLinkToNode(d.location_id, d.path);
                     // 退栈统一由发起页计算(选择器页自身不再逐层退,#29 后续):
                     // 选择器页只叠在本页正上方,一次退掉全部。
                     const pages = getCurrentPages();
@@ -1269,16 +1459,20 @@ Page({
                 icon: "none",
                 duration: 2500,
             });
-            return;
+            return false;
         }
+        const staged = this.data.detailPanel === "location";
+        const retry = staged && this.locationLinkRetry?.nodeId === nodeId ? this.locationLinkRetry : { nodeId, version: this.data.version, updateId: (0, api_1.uuid)() };
+        if (staged)
+            this.locationLinkRetry = retry;
         this.setData({ mountSaving: true });
         try {
             const res = await (0, locations_api_1.callLocationsApi)({
                 action: "linkItem",
                 item_id: this.data.itemId,
                 node_id: nodeId,
-                expected_version: this.data.version,
-                update_id: (0, api_1.uuid)(),
+                expected_version: retry.version,
+                update_id: retry.updateId,
             });
             this.setData({
                 version: res.item.version,
@@ -1286,10 +1480,13 @@ Page({
                 // 刚亲手选定的位置:大卡如实跟进(选择器回传的展示用路径)
                 spacePath: Array.isArray(path) ? path : this.data.spacePath,
             });
+            this.locationLinkRetry = null;
             wx.showToast({ title: "已记到这个位置", icon: "success" });
+            return true;
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
+                this.locationLinkRetry = null;
                 // 物品被并发修改:与保存冲突同一口径走四字段冲突刷新——双方都改且不同
                 // 的字段进冲突面板显式选边(未选完前保存被门禁拦住,上一轮未选边的
                 // 条目也保留),绝不静默覆盖;无冲突字段维持三方合并,对齐版本后重试整理
@@ -1303,7 +1500,7 @@ Page({
                             this.goBack();
                         },
                     });
-                    return;
+                    return false;
                 }
                 if (result === "refreshed") {
                     wx.showToast({
@@ -1327,6 +1524,7 @@ Page({
         finally {
             this.setData({ mountSaving: false });
         }
+        return false;
     },
     /** 确认候选分段:ensurePath(用户确认后的唯一建节点入口)→ linkItem(版本条件更新) */
     async confirmMount() {
@@ -1374,6 +1572,8 @@ Page({
                 mountPanelOpen: false,
                 // 刚确认并记入的位置分段:大卡如实跟进(与 ensurePath 收到的完全一致)
                 spacePath: names,
+                detailPanel: this.data.detailPanel === "location" ? "" : this.data.detailPanel,
+                editPanelOpen: false,
             });
             wx.showToast({ title: "已记到这个位置", icon: "success" });
         }
@@ -1488,6 +1688,7 @@ Page({
         this.applyReminderRow(row);
     },
     applyReminderRow(row) {
+        this.setData({ recordedRemindAt: row ? row.due_date : "", reminderNeedsSave: false });
         if (row === null) {
             // 已确认这件当前无提醒:轮次号记 0(补录语义的 expected_generation)
             this.remindOriginal = "";
@@ -2046,6 +2247,7 @@ Page({
     async refreshEvidence() {
         this.setData({
             evidenceReady: false,
+            photoLookupFailed: false,
             evidenceNoPhoto: false,
             evidenceOpen: false,
             evidenceOlderOpen: false,
@@ -2053,6 +2255,7 @@ Page({
         });
         const rows = await this.fetchEvidenceRows();
         if (rows === undefined) {
+            this.setData({ photoLookupFailed: true });
             return;
         }
         if (rows.length === 0) {
@@ -2178,6 +2381,7 @@ Page({
         }
     },
     scrollVideoCard() {
+        this.setData({ detailPanel: "media", mediaTab: "video", mediaScrollTarget: "video-evidence-card" });
         setTimeout(() => {
             if (typeof wx === "undefined" || typeof wx.pageScrollTo !== "function")
                 return;
@@ -2206,6 +2410,8 @@ Page({
         const initialTime = Math.max(0, (startMs - 300) / 1000);
         const key = highlight === null ? "" : highlight.key;
         this.setData({
+            detailPanel: "media",
+            mediaTab: "video",
             videoOpen: true,
             videoSelected: selected,
             videoSelectedHighlightKey: key,

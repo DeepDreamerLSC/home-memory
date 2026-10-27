@@ -65,3 +65,9 @@ None required for the approved UI implementation; any future visual direction ch
 - Voice adjustments show target, original value, operation and result before explicit confirmation. Ambiguous targets, mismatched units, version conflicts and unknown write results require user resolution.
 - Photo/video candidate grouping is explicit. Observation counts never imply quantity; retain original sources, and use whole-photo evidence when multiple boxes are combined.
 - Keep the existing visual tokens and short Chinese copy; no separate inventory navigation, low-stock thresholds or automatic deduction.
+
+## Detail simplification proposal
+- Approved for implementation, 2026-10-27, based on main `f626b0c`; reference `docs/design/detail-simplification-v1/`. Use the approved compact prototype, including 22px item names and 18px narrow-screen location text.
+- Prioritize recorded location; use a small fallback illustration and three compact rows for quantity, reminder and media. Keep pending uploads and actionable failures visible.
+- Each edit opens a focused panel with cancel and explicit confirmation. Retain independent semantics of location description/tree classification, quantity, reminder completion and media history.
+- Group photo/video viewing into one entry; preserve explicit playback, search video deep links, original notes and existing conflict/retry safeguards in any later implementation.
