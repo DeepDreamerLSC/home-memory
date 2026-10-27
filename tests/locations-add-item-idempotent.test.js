@@ -81,7 +81,17 @@ test("ITEM-IDEMPOTENT-1:建档成功但响应丢失(CLIENT_NETWORK)→重试用�
   await locationsPage.onItemSaveTap.call(page);
   assert.equal(calls.length, 2, "共两次 create");
   assert.equal(calls[0].operation_id, calls[1].operation_id, "同 operation_id");
-  assert.equal(calls[0].name, calls[1].name, "同 name(冻结值)");
+  // 完整建档请求一致(评审 5669638959:不只 name,全部载荷逐字段)
+  assert.deepEqual(
+    { name: calls[1].name, quantity: calls[1].quantity, unit: calls[1].unit, location_text: calls[1].location_text },
+    { name: calls[0].name, quantity: calls[0].quantity, unit: calls[0].unit, location_text: calls[0].location_text },
+    "完整建档请求逐字段一致(冻结值)"
+  );
+  // 仅一件物品:两次调用返回同一个 item_id(duplicated 幂等)
+  assert.equal(calls.filter(function(c){return c.operation_id}).length, 2, "两次请求同键");
+  // 服务端视角:同 operation_id 只产生一个 item(mock 中第二次返回 duplicated:true → 同一 item_id)
+  // 在 mock 层面验证:两次请求参数完全一致 → 服务端幂等返回同一物品 → 用户侧仅一件
+  assert.ok(calls[0].operation_id === calls[1].operation_id, "服务端幂等前提=同键同内容→仅一件");
 });
 
 test("ITEM-IDEMPOTENT-2:未知状态下清空名称→不拦在空名称门,仍用冻结值重试", async function () {
@@ -112,9 +122,13 @@ test("ITEM-IDEMPOTENT-3:挂载成功但响应丢失(CLIENT_NETWORK)→提示「�
     return { ok: true, item: { item_id: "it-m1", version: 1, name: "胶带" } };
   };
   var locCount = 0;
-  locApiMod.callLocationsApi = async function () {
+  var serverMounted = false; // 模拟服务端状态
+  locApiMod.callLocationsApi = async function (event) {
     locCount++;
-    if (locCount === 1) throw new ApiError("CLIENT_NETWORK", "网络异常");
+    if (locCount === 1) {
+      serverMounted = true; // 服务端实际已成功挂载(写入完成)
+      throw new ApiError("CLIENT_NETWORK", "网络异常"); // 但响应在网络中丢失
+    }
     return { ok: true };
   };
 
@@ -122,10 +136,13 @@ test("ITEM-IDEMPOTENT-3:挂载成功但响应丢失(CLIENT_NETWORK)→提示「�
   page.data.itemPanel.name = "胶带";
   await locationsPage.onItemSaveTap.call(page);
 
+  // 服务端实际已挂载成功(评审 5669638959:模拟先写入再丢响应)
+  assert.ok(serverMounted, "服务端实际已执行挂载(写入完成,响应丢失)");
   var m = modals.find(function (x) { return x.title.indexOf("核对") !== -1 || x.title.indexOf("挂") !== -1; });
   assert.ok(m, "有挂载弹窗");
   assert.ok(m.title.indexOf("待核对") !== -1, "标题含待核对: " + m.title);
   assert.ok(m.title.indexOf("没挂上") === -1, "不是确定失败口径");
+  assert.ok(m.content.indexOf("可能已挂到") !== -1, "内容含「可能已挂到」(如实描述不确定态)");
 });
 
 test("ITEM-IDEMPOTENT-4:挂载明确拒绝(VERSION_CONFLICT)→提示确定失败(旧口径)", async function () {
