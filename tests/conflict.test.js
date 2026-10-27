@@ -400,7 +400,7 @@ test("新页面结构接线:冲突面板在独立编辑面板内,保存禁用与
   // 保存按钮:未选完禁用(门禁可视层)
   var saveIdx = wxml.indexOf("保存修改");
   assert.ok(saveIdx !== -1, "保存按钮在");
-  assert.match(wxml, /<button[^>]*disabled="{{\s*conflictPending\s*}}"[^>]*bindtap="onSaveTap">保存修改/, "保存按钮保持冲突禁用门禁");
+  assert.match(wxml, /<button[^>]*disabled="{{\s*conflictPending\s*}}"[^>]*bindtap="onInfoSaveTap">保存修改/, "保存按钮保持冲突禁用门禁");
   // 编译产物:双保险门禁 + 四字段刷新 + 提醒补写路径
   var js = read("pages/item/item.js");
   assert.ok(js.indexOf("请先为冲突字段选择保留哪一版") !== -1, "onSaveTap 内的门禁提示在册");

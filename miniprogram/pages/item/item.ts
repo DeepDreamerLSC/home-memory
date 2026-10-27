@@ -523,6 +523,7 @@ Page<
     pendingRemindWrite(): { action: "remindSet" | "remindClear"; dueDate: string } | null;
     refreshForConflict(): Promise<RefreshResult>;
     onSaveTap(): Promise<void>;
+    onInfoSaveTap(): Promise<void>;
     /** 「⋯」次级菜单:开 / 关 / 三项动作 */
     onMoreTap(): void;
     onSheetClose(): void;
@@ -1045,6 +1046,16 @@ Page<
     }
     patch.reminderNeedsSave = this.pendingRemindWrite() !== null;
     this.setData(patch);
+  },
+
+  async onInfoSaveTap() {
+    if (this.data.saving || this.data.deleting || this.data.remindBusy || this.data.reminderConfirming) return;
+    // 普通名称备注保存不补写提醒；已显式裁决的提醒冲突仍交给通用门禁处理。
+    if (this.pendingRemindWrite() !== null && !this.hasRemindConflict()) {
+      this.setData({ panelError: "请先处理尚未保存的到期提醒，再保存名称与备注。", reminderNeedsSave: true });
+      return;
+    }
+    await this.onSaveTap();
   },
 
   onEditToggle() { this.openDetailPanel("info"); },

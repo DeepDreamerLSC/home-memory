@@ -323,7 +323,7 @@
       <button wx:if="{{detailPanel === 'location'}}" class="detail-confirm" loading="{{saving || mountSaving || locationCommitSaving}}" disabled="{{conflictPending}}" bindtap="onSaveLocationTap">确认更新位置</button>
       <button wx:elif="{{detailPanel === 'quantity'}}" class="detail-confirm" loading="{{quantitySaving}}" bindtap="onQuantitySaveTap">确认数量</button>
       <button wx:elif="{{detailPanel === 'reminder'}}" class="detail-confirm" loading="{{remindBusy || saving || reminderConfirming}}" disabled="{{reminderConfirming}}" bindtap="onReminderConfirmTap">确认日期</button>
-      <button wx:else class="detail-confirm" loading="{{saving}}" disabled="{{conflictPending}}" bindtap="onSaveTap">保存修改</button>
+      <button wx:else class="detail-confirm" loading="{{saving}}" disabled="{{conflictPending}}" bindtap="onInfoSaveTap">保存修改</button>
     </view>
   </view>
 </view>

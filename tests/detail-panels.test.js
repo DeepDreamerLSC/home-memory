@@ -70,3 +70,74 @@ for (const scenario of [
     assert.equal(p.data.locationCommitSaving, false);
   });
 }
+
+for (const scenario of [
+  { label: 'pending date', original: '', draft: '2026-11-15', conflicts: [] },
+  { label: 'pending clear', original: '2026-11-15', draft: '', conflicts: [] },
+  { label: 'text-only conflict with a pending reminder', original: '', draft: '2026-11-15', conflicts: [{ key: 'note', choice: 'local' }] },
+]) {
+  test(`detail panels: name/note confirmation cannot submit ${scenario.label}`, async () => {
+    const p = page();
+    let saves = 0;
+    p.remindOriginal = scenario.original;
+    p.data.remindAt = scenario.original;
+    p.onOpenReminderTap();
+    p.setPendingRemind(scenario.draft);
+    p.onPanelClose();
+    p.onEditToggle();
+    p.onNoteInput({ detail: { value: '独立的备注修改' } });
+    p.data.conflicts = scenario.conflicts;
+    p.onSaveTap = async () => { saves++; };
+    await p.onInfoSaveTap();
+    assert.equal(saves, 0);
+    assert.equal(p.data.detailPanel, 'info');
+    assert.match(p.data.panelError, /请先处理.*提醒/);
+    assert.equal(p.data.note, '独立的备注修改');
+    assert.equal(p.data.remindAt, scenario.draft);
+    assert.deepEqual(p.data.conflicts, scenario.conflicts);
+    assert.equal(p.data.reminderNeedsSave, true);
+  });
+}
+
+test('detail panels: explicit four-field conflict resolution still saves text and reminder', async () => {
+  const api = require('../miniprogram/utils/api.js');
+  const originalCall = api.callItemsApi;
+  const calls = [];
+  const p = page();
+  p.onEditToggle();
+  p.data.name = '新的名称';
+  p.data.locationText = '新的位置';
+  p.data.note = '新的备注';
+  p.data.version = 7;
+  p.data.remindAt = '2026-11-15';
+  p.data.remindGeneration = 3;
+  p.data.wantsNotify = false;
+  p.data.conflicts = [
+    { key: 'name', localValue: '新的名称', remoteValue: '棉柔巾', choice: 'local' },
+    { key: 'location', localValue: '新的位置', remoteValue: '旧位置', choice: 'local' },
+    { key: 'note', localValue: '新的备注', remoteValue: '原备注', choice: 'local' },
+    { key: 'remind', localValue: '2026-11-15', remoteValue: '', choice: 'local' },
+  ];
+  api.callItemsApi = async request => {
+    calls.push(request);
+    if (request.action === 'update') return { item: { item_id: p.data.itemId, name: request.name, location_text: request.location_text, note: request.note, version: 8, updated_at: '2026-10-28T00:00:00Z' } };
+    if (request.action === 'remindSet') return { reminder: { due_date: request.due_date, generation: 4, kind: '下次维护' } };
+    throw new Error('Unexpected write: ' + request.action);
+  };
+  try {
+    p.data.conflicts[0].choice = null;
+    p.data.conflictPending = true;
+    await p.onInfoSaveTap();
+    assert.deepEqual(calls, [], 'unresolved conflict still blocks all writes');
+    p.data.conflicts[0].choice = 'local';
+    p.data.conflictPending = false;
+    await p.onInfoSaveTap();
+    assert.deepEqual(calls.map(request => request.action), ['update', 'remindSet']);
+    assert.equal(calls[0].expected_version, 7);
+    assert.equal(calls[0].note, '新的备注');
+    assert.equal(calls[1].expected_generation, 3);
+    assert.equal(calls[1].due_date, '2026-11-15');
+    assert.equal(p.data.detailPanel, '');
+    assert.deepEqual(p.data.conflicts, []);
+  } finally { api.callItemsApi = originalCall; }
+});
