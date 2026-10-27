@@ -1392,8 +1392,13 @@ Page({
         }
         const name = panel.name.trim();
         if (!name) {
-            wx.showToast({ title: "名称不能为空", icon: "none" });
-            return;
+            // 未知结果下重试(评审 5667400648):表单被清空但存在冻结请求 →
+            // 跳过空名称验证,用冻结内容重试(服务端幂等返回已有物品);
+            // 无冻结请求 → 正常空名称提示(首次提交尚未发生)
+            if (!panel.createOperationId || !panel.frozenName) {
+                wx.showToast({ title: "名称不能为空", icon: "none" });
+                return;
+            }
         }
         const nodeId = this.data.currentNodeId;
         if (!nodeId || this.data.isRoot) {
