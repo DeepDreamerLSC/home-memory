@@ -71,27 +71,49 @@ test("ITEM-IDEMPOTENT-1:建档成功但响应丢失(CLIENT_NETWORK)→重试用�
   };
   locApiMod.callLocationsApi = async function () { return { ok: true }; };
 
+  // 服务端视角:模拟服务端建档表(评审 5669868681)
+  var serverItems = []; // 服务端已有的物品(模拟数据库)
+  var serverOps = {};   // operation_id → item_id(幂等索引)
+  var linkedItemIds = []; // linkItem 调用收到的 item_id
+
+  apiMod.callItemsApi = async function (event) {
+    calls.push(event);
+    // 服务端幂等:同 operation_id → 返回已有物品(duplicated),绝不重复建档
+    if (serverOps[event.operation_id]) {
+      var existing = serverItems.find(function (it) { return it.item_id === serverOps[event.operation_id]; });
+      return { ok: true, item: existing, duplicated: true };
+    }
+    // 首次:服务端建档成功,但响应在网络中丢失
+    var itemId = "it-srv-" + serverItems.length;
+    serverItems.push({ item_id: itemId, version: 1, name: event.name });
+    serverOps[event.operation_id] = itemId;
+    throw new ApiError("CLIENT_NETWORK", "网络异常");
+  };
+  locApiMod.callLocationsApi = async function (event) {
+    if (event && event.item_id) linkedItemIds.push(event.item_id);
+    return { ok: true };
+  };
+
   var page = makePage();
   page.data.itemPanel.name = "充电器";
   await locationsPage.onItemSaveTap.call(page);
-  assert.ok(modals.some(function (m) { return m.title.indexOf("可能已保存") !== -1; }), "首次超时提示: " + modals.map(function(m){return m.title}).join("|"));
+  assert.ok(modals.some(function (m) { return m.title.indexOf("可能已保存") !== -1; }), "首次超时提示");
   assert.ok(page.data.itemPanel.createOperationId !== "", "operation_id 已生成");
+  assert.equal(serverItems.length, 1, "服务端已建档(首笔写入成功): " + serverItems.length + " 件");
 
-  // 重试(用户点确认或再次调用)
+  // 重试
   await locationsPage.onItemSaveTap.call(page);
   assert.equal(calls.length, 2, "共两次 create");
   assert.equal(calls[0].operation_id, calls[1].operation_id, "同 operation_id");
-  // 完整建档请求一致(评审 5669638959:不只 name,全部载荷逐字段)
   assert.deepEqual(
     { name: calls[1].name, quantity: calls[1].quantity, unit: calls[1].unit, location_text: calls[1].location_text },
     { name: calls[0].name, quantity: calls[0].quantity, unit: calls[0].unit, location_text: calls[0].location_text },
     "完整建档请求逐字段一致(冻结值)"
   );
-  // 仅一件物品:两次调用返回同一个 item_id(duplicated 幂等)
-  assert.equal(calls.filter(function(c){return c.operation_id}).length, 2, "两次请求同键");
-  // 服务端视角:同 operation_id 只产生一个 item(mock 中第二次返回 duplicated:true → 同一 item_id)
-  // 在 mock 层面验证:两次请求参数完全一致 → 服务端幂等返回同一物品 → 用户侧仅一件
-  assert.ok(calls[0].operation_id === calls[1].operation_id, "服务端幂等前提=同键同内容→仅一件");
+  assert.equal(serverItems.length, 1, "最终仅一件物品(重试不重复建档): " + serverItems.length + " 件");
+  // 恢复后的挂载目标:linkItem 的 item_id = 首次创建的物品
+  assert.ok(linkedItemIds.length > 0, "linkItem 被调用");
+  assert.equal(linkedItemIds[0], serverItems[0].item_id, "linkItem.item_id = 首次创建的物品(" + linkedItemIds[0] + " vs " + serverItems[0].item_id + ")");
 });
 
 test("ITEM-IDEMPOTENT-2:未知状态下清空名称→不拦在空名称门,仍用冻结值重试", async function () {
@@ -109,10 +131,14 @@ test("ITEM-IDEMPOTENT-2:未知状态下清空名称→不拦在空名称门,仍�
   await locationsPage.onItemSaveTap.call(page);
   assert.equal(page.data.itemPanel.frozenName, "剪刀", "冻结=剪刀");
 
-  page.data.itemPanel.name = ""; // 清空
+  page.data.itemPanel.name = ""; // 清空名称
+  page.data.itemPanel.quantity = 5; // 修改数量(冻结时是 1)
+  page.data.itemPanel.unitIndex = 3; // 修改单位(冻结时是 0=件,3=盒)
   await locationsPage.onItemSaveTap.call(page);
   assert.ok(!toasts.some(function (t) { return t.title.indexOf("名称不能为空") !== -1; }), "空名称不拦截");
-  assert.equal(calls[1].name, "剪刀", "重试用冻结值");
+  assert.equal(calls[1].name, "剪刀", "重试用冻结 name");
+  assert.equal(calls[1].quantity, 1, "重试用冻结 quantity(改成了 5 仍用 1)");
+  assert.equal(calls[1].unit, "件", "重试用冻结 unit(改成了盒仍用件)");
   assert.equal(calls[0].operation_id, calls[1].operation_id, "同 operation_id");
 });
 
