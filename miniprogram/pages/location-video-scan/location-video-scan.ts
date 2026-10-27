@@ -38,6 +38,7 @@ import {
   type SceneGroupView,
 } from "../../utils/scene-groups";
 import { createVideoFrameSession, type VideoFrameSession } from "../../utils/video-target";
+import { navToLocationLayer } from "../../utils/location-nav";
 import { recognizeWithVl, type PhotoVlPrepared } from "../../utils/photo-vl";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { householdScopeId } from "../../utils/household-scope";
@@ -242,6 +243,42 @@ function normalizeHighlightInput(raw: VideoEvidenceHighlightInput): VideoEvidenc
   return out;
 }
 
+/**
+ * ④(#121 批次乙)提交结果 → 跳转高亮目标(纯函数):
+ * 优先「三选·移动到当前位置并关联」的显式移动件(物品移动完成的本体),
+ * 否则取子树内第一件挂上的新物品;两者皆无 → null(原路返回,不投高亮)。
+ */
+function pickCommitHighlight(
+  frozenItems: VideoSceneCommitItem[],
+  results: Array<{ draft_key: string; ok: boolean; item_id?: string; mounted?: boolean }>,
+): { nodeId: string; itemId: string } | null {
+  let fallback: { nodeId: string; itemId: string } | null = null;
+  for (const row of results) {
+    if (row.ok !== true || typeof row.item_id !== "string" || row.item_id === "") {
+      continue;
+    }
+    const frozen = frozenItems.find((f) => f.draft_key === row.draft_key);
+    if (frozen === undefined) {
+      continue;
+    }
+    if (frozen.target === "existing") {
+      if (typeof frozen.move_to_node_id === "string" && frozen.move_to_node_id !== "") {
+        return { nodeId: frozen.move_to_node_id, itemId: row.item_id };
+      }
+      continue;
+    }
+    if (
+      fallback === null &&
+      typeof frozen.node_id === "string" &&
+      frozen.node_id !== "" &&
+      row.mounted !== false
+    ) {
+      fallback = { nodeId: frozen.node_id, itemId: row.item_id };
+    }
+  }
+  return fallback;
+}
+
 function matchLevelText(level: 1 | 2 | 3 | 4): string {
   if (level === 1) return "同位置同名";
   if (level === 2) return "同位置相似";
@@ -302,6 +339,12 @@ Page({
   pathsByNodeId: {} as Record<string, string[]>,
   scanSession: undefined as VideoFrameSession | undefined,
   scanEpoch: 0,
+  /**
+   * ④(#121 批次乙)提交完成后的跳转高亮目标:优先三选「移动到当前位置并
+   * 关联」的物品(物品移动完成),否则本子树内新挂的第一件;done 相页
+   * 「回到位置页」按方案回退/navigateTo 并投递短高亮。null = 无(原路返回)。
+   */
+  doneHighlight: null as { nodeId: string; itemId: string } | null,
   /**
    * 零隐私使用埋点会话计数器(#85/#76 降本阶梯第 2 级):纯内存、不入 storage
    * (会话存储字段集保持旧版不变);计数/门/构建逻辑在 utils/usage-metrics,
@@ -1343,6 +1386,7 @@ Page({
   },
 
   async commitFrozenUpload(pending: PendingUpload) {
+    this.doneHighlight = null;
     this.setData({ phase: "committing", busy: true, errorText: "" });
     try {
       const res = await callItemsApi({
@@ -1373,6 +1417,9 @@ Page({
       }
       const notMounted = res.results.filter((r) => r.ok === true && r.mounted === false).length;
       const mountedNote = notMounted > 0 ? ";有 " + notMounted + " 件刚建档还没挂上位置,可稍后在这里手动挂载" : "";
+      // ④ 跳转高亮目标:优先显式移动(三选「移动到当前位置并关联」)的那件,
+      // 否则本子树内挂上的第一件新物品;都没有 = 无高亮,「回到位置页」原路返回
+      this.doneHighlight = pickCommitHighlight(pending.frozenItems, res.results);
       this.setData({
         phase: "done",
         busy: false,
@@ -1496,6 +1543,14 @@ Page({
   noop() {},
 
   onDoneBackTap() {
+    // ④(#121 批次乙)有挂载/移动结果 → 按方案回到目标位置层并短高亮该物品
+    // (目标层通常就在栈内下一层:回退不加层,pending 高亮由其 onShow 消费);
+    // 无结果(只回看/无挂载)保持原路返回
+    const hl = this.doneHighlight;
+    if (hl !== null && hl.nodeId !== "") {
+      navToLocationLayer(hl.nodeId, hl.itemId);
+      return;
+    }
     wx.navigateBack({
       fail: () => {
         wx.showToast({ title: "返回失败,请手动返回", icon: "none" });

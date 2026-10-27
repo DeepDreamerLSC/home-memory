@@ -38,6 +38,8 @@ import {
   type SceneGroupView,
 } from "../../utils/scene-groups";
 import { createVideoFrameSession, type VideoFrameSession } from "../../utils/video-target";
+import { navToLocationLayer } from "../../utils/location-nav";
+import { locationIconArtwork } from "../../utils/location-icon-view";
 import { recognizeWithVl, type PhotoVlPrepared } from "../../utils/photo-vl";
 import { ensureScopeVerified } from "../../utils/households-api";
 import { householdScopeId } from "../../utils/household-scope";
@@ -112,6 +114,9 @@ interface NodeOptionView {
   pathText: string;
   hasChildren: boolean;
   itemCount: number;
+  /** ⑥ 语义图标双主题路径对(#121 批次乙);双空串 = 无资产 → 不渲染(现状) */
+  icon: string;
+  iconDark: string;
 }
 
 /** 选择器导航栈:顶层 { locationId:"", name:"家", path:[] } = home 根层(不可挂,仅浏览) */
@@ -230,6 +235,29 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && Array.isArray(v) === false;
 }
 
+/**
+ * ④(#121 批次乙)提交结果 → 跳转高亮目标(纯函数):「归到」显式挂载
+ * (new + node_id)的第一件成功件(ok 且 mounted);只记文字/挂载失败 → null。
+ */
+function pickSceneCommitHighlight(
+  frozenItems: VideoSceneCommitItem[],
+  results: Array<{ draft_key: string; ok: boolean; item_id?: string; mounted?: boolean }>,
+): { nodeId: string; itemId: string } | null {
+  for (const row of results) {
+    if (row.ok !== true || typeof row.item_id !== "string" || row.item_id === "" || row.mounted === false) {
+      continue;
+    }
+    const frozen = frozenItems.find((f) => f.draft_key === row.draft_key);
+    if (frozen === undefined || frozen.target !== "new") {
+      continue;
+    }
+    if (typeof frozen.node_id === "string" && frozen.node_id !== "") {
+      return { nodeId: frozen.node_id, itemId: row.item_id };
+    }
+  }
+  return null;
+}
+
 function normalizeHighlightInput(raw: VideoEvidenceHighlightInput): VideoEvidenceHighlightInput {
   const box: Box | null = raw.box === null ? null : {
     x1: raw.box.x1,
@@ -344,6 +372,11 @@ Page({
    * 与 D1 页共用同一实现,页面只调用。
    */
   usage: createUsageSession(),
+  /**
+   * ④(#121 批次乙)提交完成后的跳转高亮目标:「归到」显式挂载的第一件
+   * (物品移动完成);null = 无(只记文字/无挂载)→「返回」原路返回。
+   */
+  doneHighlight: null as { nodeId: string; itemId: string } | null,
 
   /**
    * 「归到」路径缓存(#116 PR A):node_id → 节点路径段(页面内存态,选择器
@@ -1085,14 +1118,19 @@ Page({
         ? await callLocationsApi({ action: "list" })
         : await callLocationsApi({ action: "list", parent_id: top.locationId });
       if (this.nodeSelectorSeq.isCurrent(seq) !== true) return;
-      const options: NodeOptionView[] = (res.children || []).map((c) => ({
-        locationId: c.location_id,
-        name: c.name,
-        path: c.path.slice(),
-        pathText: c.path.join(" / "),
-        hasChildren: c.child_count > 0,
-        itemCount: c.item_count,
-      }));
+      const options: NodeOptionView[] = (res.children || []).map((c) => {
+        const art = locationIconArtwork(c.name);
+        return {
+          locationId: c.location_id,
+          name: c.name,
+          path: c.path.slice(),
+          pathText: c.path.join(" / "),
+          hasChildren: c.child_count > 0,
+          itemCount: c.item_count,
+          icon: art.icon,
+          iconDark: art.iconDark,
+        };
+      });
       this.setData({ nodeSelectorOptions: options, nodeSelectorLoading: false });
     } catch (e) {
       if (this.nodeSelectorSeq.isCurrent(seq) !== true) return;
@@ -1354,6 +1392,7 @@ Page({
   },
 
   async commitFrozenUpload(pending: PendingUpload) {
+    this.doneHighlight = null;
     this.setData({ phase: "committing", busy: true, errorText: "" });
     try {
       const res = await callItemsApi({
@@ -1383,6 +1422,9 @@ Page({
         }, () => this.saveSession());
         return;
       }
+      // ④ 跳转高亮目标:「归到」显式挂载的第一件成功件(ok 且 mounted);
+      // 只记文字(无 node_id)/挂载失败行如实不算
+      this.doneHighlight = pickSceneCommitHighlight(pending.frozenItems, res.results);
       this.setData({
         phase: "done",
         busy: false,
@@ -1489,6 +1531,14 @@ Page({
   },
 
   onDoneBackTap() {
+    // ④(#121 批次乙)有「归到」挂载结果 → 按方案跳目标位置层并短高亮该物品
+    // (B 页通常从首页进入、栈内无目标层 → 前进带 hl;栈内已有则回退不加层);
+    // 无挂载(只记文字)保持原路返回
+    const hl = this.doneHighlight;
+    if (hl !== null && hl.nodeId !== "") {
+      navToLocationLayer(hl.nodeId, hl.itemId);
+      return;
+    }
     wx.navigateBack({
       fail: () => {
         wx.showToast({ title: "返回失败，请手动返回", icon: "none" });

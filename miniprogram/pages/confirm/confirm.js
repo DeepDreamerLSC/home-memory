@@ -5,6 +5,12 @@ const api_1 = require("../../utils/api");
 const locations_api_1 = require("../../utils/locations-api");
 const batch_save_1 = require("../../utils/batch-save");
 const quantity_1 = require("../../utils/quantity");
+const location_icon_view_1 = require("../../utils/location-icon-view");
+/** ⑥(#121 批次乙)「归到」行图标字段:挂靠目标末段名 → 同一语义映射;无资产双空串 */
+function mountIconFields(path) {
+    const art = (0, location_icon_view_1.locationIconArtwork)(path.length > 0 ? path[path.length - 1] : "");
+    return { mountIcon: art.icon, mountIconDark: art.iconDark };
+}
 const remind_ui_1 = require("../../utils/remind-ui");
 const subscribe_1 = require("../../utils/subscribe");
 const draft_session_1 = require("../../utils/draft-session");
@@ -105,6 +111,7 @@ Page({
                 remindConverted: d.remind_converted === true,
                 mountPath,
                 mountPathText: mountPath.join(" / "),
+                ...mountIconFields(mountPath),
                 mountUpdateId: (0, api_1.uuid)(),
                 quantity: quantityProvided ? d.quantity : 1,
                 unit: quantityProvided ? d.unit : quantity_1.DEFAULT_UNIT,
@@ -146,6 +153,7 @@ Page({
                     remindConverted: typeof saved.remindConverted === "boolean" ? saved.remindConverted : rows[i].remindConverted,
                     mountPath,
                     mountPathText: mountPath.join(" / "),
+                    ...mountIconFields(mountPath),
                     quantity: savedQuantity ? saved.quantity : rows[i].quantity,
                     unit: savedQuantity ? saved.unit : rows[i].unit,
                     unitIndex: Math.max(0, quantity_1.UNIT_SET.indexOf(savedQuantity ? saved.unit : rows[i].unit)),
@@ -409,6 +417,8 @@ Page({
         if (mountStale) {
             patch["rows[" + index + "].mountPath"] = [];
             patch["rows[" + index + "].mountPathText"] = "";
+            patch["rows[" + index + "].mountIcon"] = "";
+            patch["rows[" + index + "].mountIconDark"] = "";
         }
         this.setData(patch);
         if (mountStale) {
@@ -546,9 +556,12 @@ Page({
                     if (picked.length === 0) {
                         return; // 异常回传:不写,原路径保持
                     }
+                    const icon = mountIconFields(picked);
                     this.setData({
                         ["rows[" + index + "].mountPath"]: picked,
                         ["rows[" + index + "].mountPathText"]: picked.join(" / "),
+                        ["rows[" + index + "].mountIcon"]: icon.mountIcon,
+                        ["rows[" + index + "].mountIconDark"]: icon.mountIconDark,
                     });
                     this.persistRows();
                     const pages = getCurrentPages();

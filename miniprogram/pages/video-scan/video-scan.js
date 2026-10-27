@@ -17,6 +17,8 @@ const video_scene_1 = require("../../utils/video-scene");
 const keep_screen_1 = require("../../utils/keep-screen");
 const scene_groups_1 = require("../../utils/scene-groups");
 const video_target_1 = require("../../utils/video-target");
+const location_nav_1 = require("../../utils/location-nav");
+const location_icon_view_1 = require("../../utils/location-icon-view");
 const photo_vl_1 = require("../../utils/photo-vl");
 const households_api_1 = require("../../utils/households-api");
 const household_scope_1 = require("../../utils/household-scope");
@@ -52,6 +54,25 @@ function storageRemove(key) {
 }
 function isRecord(v) {
     return typeof v === "object" && v !== null && Array.isArray(v) === false;
+}
+/**
+ * ④(#121 批次乙)提交结果 → 跳转高亮目标(纯函数):「归到」显式挂载
+ * (new + node_id)的第一件成功件(ok 且 mounted);只记文字/挂载失败 → null。
+ */
+function pickSceneCommitHighlight(frozenItems, results) {
+    for (const row of results) {
+        if (row.ok !== true || typeof row.item_id !== "string" || row.item_id === "" || row.mounted === false) {
+            continue;
+        }
+        const frozen = frozenItems.find((f) => f.draft_key === row.draft_key);
+        if (frozen === undefined || frozen.target !== "new") {
+            continue;
+        }
+        if (typeof frozen.node_id === "string" && frozen.node_id !== "") {
+            return { nodeId: frozen.node_id, itemId: row.item_id };
+        }
+    }
+    return null;
 }
 function normalizeHighlightInput(raw) {
     const box = raw.box === null ? null : {
@@ -166,6 +187,11 @@ Page({
      * 与 D1 页共用同一实现,页面只调用。
      */
     usage: (0, usage_metrics_1.createUsageSession)(),
+    /**
+     * ④(#121 批次乙)提交完成后的跳转高亮目标:「归到」显式挂载的第一件
+     * (物品移动完成);null = 无(只记文字/无挂载)→「返回」原路返回。
+     */
+    doneHighlight: null,
     /**
      * 「归到」路径缓存(#116 PR A):node_id → 节点路径段(页面内存态,选择器
      * 选定时记下)。build 时在场做客户端第一道一致性校验;会话恢复后缓存缺失
@@ -901,14 +927,19 @@ Page({
                 : await (0, locations_api_1.callLocationsApi)({ action: "list", parent_id: top.locationId });
             if (this.nodeSelectorSeq.isCurrent(seq) !== true)
                 return;
-            const options = (res.children || []).map((c) => ({
-                locationId: c.location_id,
-                name: c.name,
-                path: c.path.slice(),
-                pathText: c.path.join(" / "),
-                hasChildren: c.child_count > 0,
-                itemCount: c.item_count,
-            }));
+            const options = (res.children || []).map((c) => {
+                const art = (0, location_icon_view_1.locationIconArtwork)(c.name);
+                return {
+                    locationId: c.location_id,
+                    name: c.name,
+                    path: c.path.slice(),
+                    pathText: c.path.join(" / "),
+                    hasChildren: c.child_count > 0,
+                    itemCount: c.item_count,
+                    icon: art.icon,
+                    iconDark: art.iconDark,
+                };
+            });
             this.setData({ nodeSelectorOptions: options, nodeSelectorLoading: false });
         }
         catch (e) {
@@ -1173,6 +1204,7 @@ Page({
         }
     },
     async commitFrozenUpload(pending) {
+        this.doneHighlight = null;
         this.setData({ phase: "committing", busy: true, errorText: "" });
         try {
             const res = await (0, api_1.callItemsApi)({
@@ -1202,6 +1234,9 @@ Page({
                 }, () => this.saveSession());
                 return;
             }
+            // ④ 跳转高亮目标:「归到」显式挂载的第一件成功件(ok 且 mounted);
+            // 只记文字(无 node_id)/挂载失败行如实不算
+            this.doneHighlight = pickSceneCommitHighlight(pending.frozenItems, res.results);
             this.setData({
                 phase: "done",
                 busy: false,
@@ -1313,6 +1348,14 @@ Page({
         }
     },
     onDoneBackTap() {
+        // ④(#121 批次乙)有「归到」挂载结果 → 按方案跳目标位置层并短高亮该物品
+        // (B 页通常从首页进入、栈内无目标层 → 前进带 hl;栈内已有则回退不加层);
+        // 无挂载(只记文字)保持原路返回
+        const hl = this.doneHighlight;
+        if (hl !== null && hl.nodeId !== "") {
+            (0, location_nav_1.navToLocationLayer)(hl.nodeId, hl.itemId);
+            return;
+        }
         wx.navigateBack({
             fail: () => {
                 wx.showToast({ title: "返回失败，请手动返回", icon: "none" });

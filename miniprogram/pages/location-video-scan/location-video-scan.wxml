@@ -213,6 +213,7 @@
             data-node-id="{{ item.location_id }}"
             bindtap="onNodeOptionTap"
           >
+            <view wx:if="{{ item.icon }}" class="option-icon"><image class="loc-icon theme-light" src="{{ item.icon }}" mode="aspectFit"/><image class="loc-icon theme-dark" src="{{ item.iconDark }}" mode="aspectFit"/></view>
             <view class="item-name">{{ item.name }}</view>
             <view class="item-location">{{ item.pathText }}</view>
           </view>

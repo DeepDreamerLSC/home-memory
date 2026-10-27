@@ -139,3 +139,16 @@
 .layer-btns .primary-btn { margin-top: 14rpx; flex: 1; }
 /* 「归到」行与既有 target-row 同款底色,仅字重区分 */
 .node-row { font-weight: 700; color: var(--text-2, #5f5437); }
+
+/* ⑥(#121 批次乙)「归到」选择器行语义图标:资产在场才渲染(现状无徽章,零漂移);
+   明暗由全局 .theme-light/.theme-dark(appearance 变量)自动跟随 */
+.option-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.option-icon .loc-icon {
+  width: 44rpx;
+  height: 44rpx;
+}

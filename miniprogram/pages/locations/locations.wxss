@@ -264,3 +264,118 @@
   line-height: 1;
   flex-shrink: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* #121 批次乙 ①②③④⑥ */
+
+/* ① 树行/物品行头部「＋」:与「⋯」同视觉等级(复用 .row-more 语言,再加号字形) */
+.add-plus {
+  font-weight: 800;
+}
+
+/* ④ 短高亮(800ms):柔和强调色底,不引入新颜色变量;含本层头部(合并落层) */
+.row-hl {
+  background: var(--accent-dim);
+  border-radius: 12rpx;
+  transition: background 200ms ease-out;
+}
+
+/* ⑥ 语义图标:双路 image 的显隐交给全局 .theme-light/.theme-dark(appearance 变量自动跟随) */
+.head-icon {
+  display: flex;
+  align-items: center;
+  margin-right: 10rpx;
+  flex-shrink: 0;
+}
+
+.head-icon .loc-icon,
+.loc-icon {
+  width: 44rpx;
+  height: 44rpx;
+}
+
+/* ②「+」半屏面板:与删除弹层同一底部面板语言 */
+.add-layer {
+  width: 100%;
+  background: var(--card);
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 28rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.add-layer .hint {
+  text-align: left;
+}
+
+/* 预设 chips:换行铺排,点按即建 */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.chip {
+  padding: 14rpx 26rpx;
+  border-radius: 999rpx;
+  background: var(--accent-dim);
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 1;
+  min-height: 56rpx;
+  display: flex;
+  align-items: center;
+}
+
+/* 自定义输入行:输入 + 添加按钮并排 */
+.custom-inline {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.custom-inline .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ③ 数量步进器 + 单位选择器(与确认页 confirm.wxss 同款形态,页面样式不跨页共享) */
+.qty-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.qty-step-btn {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
+  background: var(--card-inset);
+  font-size: 30rpx;
+  color: var(--text);
+}
+
+.qty-step-num {
+  min-width: 56rpx;
+  text-align: center;
+  font-size: 28rpx;
+  color: var(--text);
+}
+
+.qty-unit-btn {
+  padding: 8rpx 16rpx;
+  border-radius: 12rpx;
+  background: var(--card-inset);
+  font-size: 24rpx;
+  color: var(--text);
+}
+
+.qty-chev {
+  margin-left: 6rpx;
+  opacity: 0.55;
+}

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const appearance_page_1 = require("../../utils/appearance-page");
+const location_nav_1 = require("../../utils/location-nav");
 const api_1 = require("../../utils/api");
 const quantity_1 = require("../../utils/quantity");
 const households_api_1 = require("../../utils/households-api");
@@ -1287,6 +1288,10 @@ Page({
                 spacePath: Array.isArray(path) ? path : this.data.spacePath,
             });
             wx.showToast({ title: "已记到这个位置", icon: "success" });
+            // ④(#121 批次乙)移动完成:按方案跳目标层并短高亮该物品行——
+            // 栈内已有目标层(典型:从位置树下钻进来的)回退不加层,目标页 onShow
+            // 消费 pending 高亮;否则前进带 hl,目标页 onLoad 读取;栈近满 redirect
+            (0, location_nav_1.navToLocationLayer)(nodeId, this.data.itemId);
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
@@ -1376,6 +1381,8 @@ Page({
                 spacePath: names,
             });
             wx.showToast({ title: "已记到这个位置", icon: "success" });
+            // ④(#121 批次乙)整理位置完成:同手动兜底——跳目标层短高亮该物品行
+            (0, location_nav_1.navToLocationLayer)(target.location_id, this.data.itemId);
         }
         catch (e) {
             if (e instanceof api_1.ApiError && e.code === "VERSION_CONFLICT") {
