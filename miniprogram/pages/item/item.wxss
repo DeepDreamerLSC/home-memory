@@ -748,3 +748,81 @@ button.detail-update { flex: 0 0 176rpx; min-width: 176rpx; max-width: 176rpx; }
 /* 提醒设置行(2026-10-26 上移主界面):picker 按钮与 ✕ 清除横向排布 */
 .remind-set-row { display: flex; align-items: center; gap: 16rpx; margin: 14rpx 24rpx 0; }
 .remind-set-row picker { flex: 1; }
+
+/* 2026-10-27 批准的详情减法：小图、位置主卡、三行摘要与单任务面板。 */
+.page-with-detail-dock { padding: 30rpx 42rpx calc(160rpx + env(safe-area-inset-bottom)); }
+.detail-head { margin: 0 0 34rpx; gap: 24rpx; }
+.detail-thumb { width: 98rpx; height: 98rpx; flex: 0 0 98rpx; border-radius: 28rpx; background: var(--card-inset); display: flex; align-items: center; justify-content: center; }
+.detail-art { width: 82rpx; height: 82rpx; }
+.pagetitle { font-size: 44rpx; letter-spacing: -1rpx; }
+.detail-shared { margin-top: 8rpx; font-size: 20rpx; color: var(--text-2); }
+button.detail-more { color: var(--text); width: 88rpx; min-width: 88rpx; min-height: 88rpx; margin: 0; padding: 0; font-size: 44rpx; font-weight: 400; background: transparent; border: none; line-height: 88rpx; }
+.detail-more::after { border: 0; }
+.bigcard { margin: 0; padding: 32rpx; border-radius: 40rpx; }
+.bigcard-lbl { margin: 0 0 22rpx; font-size: 22rpx; }
+.bigcard-location { font-size: 36rpx; line-height: 1.5; margin: 14rpx 0 25rpx; letter-spacing: -.6rpx; }
+.bigcard-path { font-size: 23rpx; }
+.bigcard-sep { margin: 0 10rpx; }
+.detail-meta { margin: 0; display: flex; justify-content: space-between; gap: 12rpx; font-size: 20rpx; }
+.detail-rows { margin-top: 20rpx; }
+button.detail-row { font-weight: 400; color: var(--text); display: flex; align-items: center; gap: 20rpx; width: 100%; min-height: 118rpx; margin: 0; padding: 24rpx 2rpx; border-radius: 0; background: transparent; border-bottom: 1rpx solid var(--line); text-align: left; line-height: 1.5; }
+.detail-row::after { border: 0; }
+.detail-row-label { font-size: 26rpx; flex: 0 0 auto; }
+.detail-row-value { flex: 1; min-width: 0; font-size: 23rpx; color: var(--text-2); text-align: right; }
+.detail-row-value.strong { color: var(--text); font-size: 28rpx; font-weight: 500; }
+.detail-chevron { color: var(--text-3); font-size: 32rpx; }
+.detail-row-symbol { font-size: 32rpx; color: var(--text-2); width: 34rpx; text-align: center; }
+.detail-row-icon { width: 34rpx; height: 34rpx; flex: 0 0 34rpx; }
+.detail-row-icon image { width: 34rpx; height: 34rpx; }
+.detail-footnote { color: var(--text-3); font-size: 20rpx; line-height: 1.7; margin: 26rpx 0 0; }
+.detail-attention { border: 1rpx solid var(--banner-line); background: var(--banner-bg); padding: 20rpx 24rpx; margin-bottom: 26rpx; border-radius: 26rpx; color: var(--text); font-size: 23rpx; line-height: 1.7; }
+button.detail-inline { display: inline-block; width: auto; min-height: 80rpx; margin: 0; padding: 12rpx 0; color: var(--text-2); background: transparent; border: 0; font-size: 23rpx; line-height: 1.6; text-align: left; text-decoration: underline; }
+.detail-inline::after { border: 0; }
+.detail-inline.danger { color: var(--danger); }
+.detail-panel-mask { position: fixed; left: 0; right: 0; top: 0; bottom: 0; background: rgba(17,23,14,.42); z-index: 80; display: flex; align-items: flex-end; }
+.detail-panel { width: 100%; height: 88vh; max-height: 88vh; border-radius: 48rpx 48rpx 0 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; color: var(--text); }
+.detail-handle { width: 70rpx; height: 8rpx; border-radius: 8rpx; background: var(--line); margin: 18rpx auto 24rpx; flex-shrink: 0; }
+.detail-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20rpx; padding: 0 42rpx 26rpx; flex-shrink: 0; }
+.detail-panel-title { font-size: 40rpx; font-weight: 600; line-height: 1.5; }
+.detail-panel-sub { margin-top: 8rpx; font-size: 22rpx; color: var(--text-2); }
+button.detail-close { width: 72rpx; min-width: 72rpx; height: 72rpx; min-height: 72rpx; margin: 0; padding: 0; border-radius: 50%; background: var(--card-inset); line-height: 72rpx; color: var(--text); font-size: 38rpx; }
+.detail-close::after { border: 0; }
+.detail-panel-body { flex: 1; min-height: 0; height: 0; box-sizing: border-box; padding: 0 42rpx; }
+.detail-panel-body .field { margin: 22rpx 0 30rpx; }
+.detail-panel-body .label { color: var(--text-2); font-size: 24rpx; margin-bottom: 16rpx; }
+.detail-panel-body .textarea { height: 180rpx; min-height: 180rpx; box-sizing: border-box; }
+.detail-panel-body .card { margin: 22rpx 0; }
+.detail-panel-body .hint { margin: 16rpx 0; }
+.detail-panel-body .field-btn { width: 100%; box-sizing: border-box; font-weight: 400; margin: 0; font-size: 26rpx; background: var(--card); border: 1rpx solid var(--line); border-radius: 24rpx; min-height: 96rpx; }
+.detail-panel-actions { flex-shrink: 0; padding: 22rpx 42rpx calc(16rpx + env(safe-area-inset-bottom)); border-top: 1rpx solid var(--line); display: flex; gap: 18rpx; background: var(--bg); }
+button.detail-cancel, button.detail-confirm { margin: 0; padding: 22rpx 28rpx; min-height: 98rpx; border-radius: 30rpx; font-size: 26rpx; line-height: 1.5; }
+button.detail-cancel { border: 1rpx solid var(--line); background: var(--card); color: var(--text); }
+button.detail-confirm { flex: 1; background: var(--go-bg); color: var(--go-fg); }
+.detail-confirm::after, .detail-cancel::after { border: 0; }
+.detail-confirm[disabled], .detail-cancel[disabled], .detail-close[disabled] { opacity: .45; }
+.detail-preview { background: var(--card-inset); border: 1rpx solid var(--line); border-radius: 26rpx; padding: 26rpx; margin: 32rpx 0 18rpx; font-size: 26rpx; line-height: 1.7; }
+.detail-preview .label { font-size: 20rpx; margin-bottom: 10rpx; }
+.detail-preview-text { white-space: pre-wrap; word-break: break-all; }
+.detail-number-fields { display: flex; gap: 18rpx; }
+.detail-stepper { display: flex; flex: 1; min-width: 0; align-items: center; border-radius: 24rpx; border: 1rpx solid var(--line); background: var(--card); overflow: hidden; }
+.detail-stepper .input { flex: 1; width: 0; border: 0; text-align: center; font-size: 44rpx; margin: 0; padding: 8rpx 0; background: transparent; }
+.detail-stepper button { flex: 0 0 96rpx; width: 96rpx; min-width: 96rpx; margin: 0; padding: 0; min-height: 100rpx; background: transparent; line-height: 100rpx; font-size: 44rpx; }
+.detail-stepper button::after { border: 0; }
+.detail-unit { padding: 24rpx; min-width: 132rpx; min-height: 100rpx; box-sizing: border-box; border-radius: 24rpx; border: 1rpx solid var(--line); background: var(--card); font-size: 26rpx; }
+.detail-unit-check { display: flex; align-items: flex-start; gap: 16rpx; margin: 24rpx 0; color: var(--text-2); font-size: 22rpx; line-height: 1.7; }
+.detail-unit-check checkbox { transform: scale(.8); transform-origin: left top; }
+.detail-panel-body .remind-set-row { margin: 22rpx 0; display: block; }
+.detail-notify { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; padding: 22rpx 0; border-top: 1rpx solid var(--line); font-size: 25rpx; }
+.detail-notify .notify-chip { margin: 0; width: auto; min-width: 0; padding: 0; flex-shrink: 0; }
+.detail-notify .notify-chip-face { font-size: 22rpx; }
+.detail-reminder-actions { display: flex; justify-content: space-between; gap: 16rpx; }
+.detail-media-tabs { display: flex; gap: 8rpx; background: var(--card-inset); padding: 8rpx; border-radius: 24rpx; margin: 4rpx 0 24rpx; }
+.detail-media-tabs button { flex: 1; background: transparent; margin: 0; padding: 16rpx; border-radius: 18rpx; font-size: 25rpx; color: var(--text-2); line-height: 1.5; }
+.detail-media-tabs button::after { border: 0; }
+.detail-media-tabs button.selected { background: var(--card); color: var(--text); }
+.detail-panel-body .vd-card, .detail-panel-body .ev-card, .detail-panel-body .ev-none, .detail-panel-body .vd-empty, .detail-panel-body .vd-pending { margin: 20rpx 0; }
+button.sheet-act { display: flex; justify-content: space-between; width: 100%; margin: 0; background: transparent; border-radius: 0; text-align: left; color: var(--text); }
+.sheet-act::after, .sheet-close::after { border: 0; }
+button.sheet-close { margin: 12rpx 0 0; width: 100%; background: var(--card-inset); color: var(--text); }
+
+.detail-panel-quantity, .detail-panel-reminder { height: 72vh; }

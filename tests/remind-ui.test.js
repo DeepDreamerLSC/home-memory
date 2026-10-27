@@ -98,15 +98,12 @@ test("REMIND-ENTRY-UX:提醒设置上移 item 主界面(编辑表单不再含提
   const path = require("node:path");
   const ROOT = path.join(__dirname, "..");
   const itemWxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/item/item.wxml"), "utf8");
-  // 主界面设置行在编辑表单之外(notify-chip 之前),带 pickerStart 边界
-  const setRowIdx = itemWxml.indexOf("remind-set-row");
-  const chipIdx = itemWxml.indexOf("到期微信提醒显式入口");
-  const editFoldIdx = itemWxml.indexOf("编辑");
-  assert.ok(setRowIdx !== -1 && chipIdx !== -1 && setRowIdx < chipIdx, "设置行在主界面(notify-chip 前)");
-  assert.ok(itemWxml.indexOf('start="{{ pickerStart }}"', setRowIdx) !== -1, "设置行滚轮起点=pickerStart");
-  assert.ok(itemWxml.indexOf('bindtap="onRemindFieldClear"') !== -1, "✕ 清除仍在");
-  // 编辑表单区域不再包含提醒 picker(以表单容器后的字段区为准:移除后 onRemindDateChange 只出现一次)
-  assert.equal(itemWxml.split('bindchange="onRemindDateChange"').length - 1, 1, "全页仅设置行一处日期 picker");
+  assert.ok(itemWxml.includes('bindtap="onOpenReminderTap"'), "主界面一键进入提醒面板");
+  assert.match(itemWxml, /start="{{\s*pickerStart\s*}}"[^>]*bindchange="onReminderDraftChange"/, "日期先暂存，保留选择边界");
+  assert.equal(itemWxml.split('bindchange="onReminderDraftChange"').length - 1, 1);
+  assert.ok(itemWxml.includes('bindtap="onReminderConfirmTap"'), "日期明确确认后才提交");
+  assert.ok(itemWxml.includes('bindtap="onRemindFieldClear"'), "清除仍独立接线");
+  assert.match(itemWxml, /<button[^>]*bindtap="onNotifyChipTap"/, "微信通知由显式按钮触发");
   const itemJs = fs.readFileSync(path.join(ROOT, "miniprogram/pages/item/item.js"), "utf8");
   assert.ok(itemJs.indexOf("pickerStartYmd") !== -1, "item 页 data 由 pickerStartYmd 供值");
   const confirmWxml = fs.readFileSync(path.join(ROOT, "miniprogram/pages/confirm/confirm.wxml"), "utf8");

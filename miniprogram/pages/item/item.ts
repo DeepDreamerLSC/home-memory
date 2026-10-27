@@ -251,6 +251,8 @@ function videoFallbackNotice(
 }
 
 /** 刷新最新数据的结果 */
+type DetailPanel = "" | "location" | "quantity" | "reminder" | "media" | "info";
+
 type RefreshResult = "refreshed" | "notfound" | "error";
 
 /** 冲突态面板里的单个字段条目:两版值 + 用户显式选择(null 表示尚未选择);
@@ -271,6 +273,23 @@ function conflictDisplayText(key: EditableField, value: string): string {
 
 Page<
   {
+    detailPanel: DetailPanel;
+    mediaTab: "photo" | "video";
+    mediaScrollTarget: string;
+    recordedName: string;
+    recordedNote: string;
+    recordedRemindAt: string;
+    quantityShortText: string;
+    quantityIsZero: boolean;
+    quantityUnitVerified: boolean;
+    quantityUnitChanged: boolean;
+    reminderDateDraft: string;
+    reminderConfirming: boolean;
+    reminderNeedsSave: boolean;
+    locationPathDraft: string[];
+    locationCommitSaving: boolean;
+    panelError: string;
+    photoLookupFailed: boolean;
     itemId: string;
     name: string;
     locationText: string;
@@ -424,6 +443,21 @@ Page<
     noteFoldOpen: boolean;
   },
   {
+    locationNodeDraft: { nodeId: string; path: string[] } | null;
+    locationChoiceScope: number;
+    locationLinkRetry: { nodeId: string; version: number; updateId: string } | null;
+    openDetailPanel(panel: DetailPanel): void;
+    onPanelClose(): void;
+    onContinueReviewTap(): void;
+    onOpenReminderTap(): void;
+    onReminderDraftChange(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
+    onReminderConfirmTap(): Promise<void>;
+    onMediaEntryTap(): void;
+    onMediaTabTap(e: WechatMiniprogram.CustomEvent): void;
+    onPendingMediaTap(): void;
+    onQuantityStep(e: WechatMiniprogram.CustomEvent): void;
+    onQuantityUnitVerify(e: WechatMiniprogram.CustomEvent<{ value: string[] }>): void;
+    onSaveLocationTap(): Promise<void>;
     original: { name: string; location: string; note: string };
 
     videoEntryHint: VideoPlaybackHint | null;
@@ -489,6 +523,7 @@ Page<
     pendingRemindWrite(): { action: "remindSet" | "remindClear"; dueDate: string } | null;
     refreshForConflict(): Promise<RefreshResult>;
     onSaveTap(): Promise<void>;
+    onInfoSaveTap(): Promise<void>;
     /** 「⋯」次级菜单:开 / 关 / 三项动作 */
     onMoreTap(): void;
     onSheetClose(): void;
@@ -503,7 +538,7 @@ Page<
     onMountTap(): Promise<void>;
     onMountSegmentInput(e: WechatMiniprogram.CustomEvent<{ value: string }>): void;
     openLocationPicker(): void;
-    doLinkToNode(nodeId: string, path?: string[]): Promise<void>;
+    doLinkToNode(nodeId: string, path?: string[]): Promise<boolean>;
     confirmMount(): Promise<void>;
     cancelMount(): void;
     /**
@@ -580,6 +615,23 @@ Page<
   }
 >({
   data: {
+    detailPanel: "" as DetailPanel,
+    mediaTab: "photo" as "photo" | "video",
+    mediaScrollTarget: "",
+    recordedName: "",
+    recordedNote: "",
+    recordedRemindAt: "",
+    quantityShortText: "待核对",
+    quantityIsZero: false,
+    quantityUnitVerified: false,
+    quantityUnitChanged: false,
+    reminderDateDraft: "",
+    reminderConfirming: false,
+    reminderNeedsSave: false,
+    locationPathDraft: [] as string[],
+    locationCommitSaving: false,
+    panelError: "",
+    photoLookupFailed: false,
     itemId: "",
     name: "",
     locationText: "",
@@ -658,6 +710,9 @@ Page<
   },
 
   /** 最近一次加载到的内容,用于判断是否有修改 */
+  locationNodeDraft: null as { nodeId: string; path: string[] } | null,
+  locationChoiceScope: captureScopeGeneration(),
+  locationLinkRetry: null as { nodeId: string; version: number; updateId: string } | null,
   original: { name: "", location: "", note: "" },
 
   remindOriginal: "",
@@ -949,15 +1004,124 @@ Page<
       : { action: "remindSet", dueDate: this.data.remindAt };
   },
 
-  /** 编辑折叠:常态只读,点开才出现表单;保存成功后自动收回 */
-  onEditToggle() {
-    this.setData({ editPanelOpen: !this.data.editPanelOpen });
+  openDetailPanel(panel: DetailPanel) {
+    if (this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving || this.data.locationCommitSaving) return;
+    const patch: Record<string, unknown> = { detailPanel: panel, moreOpen: false, panelError: "" };
+    if (panel === "location") {
+      if (this.data.conflicts.length === 0) this.setData({ locationText: this.original.location });
+      this.locationChoiceScope = captureScopeGeneration();
+      this.locationNodeDraft = null;
+      patch.locationPathDraft = this.data.spacePath.slice();
+      patch.editPanelOpen = true;
+    } else if (panel === "info") {
+      patch.editPanelOpen = true;
+    } else if (panel === "quantity") {
+      patch.quantityPanelOpen = true;
+      patch.quantityUnitVerified = false;
+      patch.quantityUnitChanged = this.quantityRetry !== null && this.quantityOriginal.unit !== null && UNIT_SET[this.data.quantityUnitIndex] !== this.quantityOriginal.unit;
+      if (!this.quantityRetry) {
+        patch.quantityDraft = this.quantityOriginal.quantity === null ? "" : String(this.quantityOriginal.quantity);
+        patch.quantityUnitIndex = this.quantityOriginal.unit === null ? 0 : Math.max(0, UNIT_SET.indexOf(this.quantityOriginal.unit));
+      }
+    } else if (panel === "reminder") {
+      patch.reminderDateDraft = this.data.remindAt || this.data.pickerStart;
+    } else if (panel === "media") {
+      patch.mediaTab = this.data.evidenceReady || !this.data.videoReady ? "photo" : "video";
+      patch.evidenceOpen = true;
+    }
+    this.setData(patch);
   },
 
-  onUpdateLocationTap() {
-    this.setData({ editPanelOpen: true }, () => {
-      wx.pageScrollTo({ selector: "#item-edit-panel", duration: 220 });
-    });
+  onPanelClose() {
+    if (this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving || this.data.locationCommitSaving) return;
+    const panel = this.data.detailPanel;
+    const patch: Record<string, unknown> = { detailPanel: "", editPanelOpen: false, quantityPanelOpen: false, mountPanelOpen: false, panelError: "" };
+    if (this.data.conflicts.length === 0 && (panel === "location" || panel === "info")) {
+      patch.name = this.original.name; patch.locationText = this.original.location; patch.note = this.original.note;
+    }
+    if (panel === "location") { this.locationNodeDraft = null; this.locationLinkRetry = null; }
+    if (panel === "media") {
+      void cancelActiveVideoAi(this.data.itemId);
+      patch.videoOpen = false; patch.videoAiBusy = false; patch.videoAiCandidates = []; patch.evidenceOpen = false;
+    }
+    patch.reminderNeedsSave = this.pendingRemindWrite() !== null;
+    this.setData(patch);
+  },
+
+  async onInfoSaveTap() {
+    if (this.data.saving || this.data.deleting || this.data.remindBusy || this.data.reminderConfirming) return;
+    // 普通名称备注保存不补写提醒；已显式裁决的提醒冲突仍交给通用门禁处理。
+    if (this.pendingRemindWrite() !== null && !this.hasRemindConflict()) {
+      this.setData({ panelError: "请先处理尚未保存的到期提醒，再保存名称与备注。", reminderNeedsSave: true });
+      return;
+    }
+    await this.onSaveTap();
+  },
+
+  onEditToggle() { this.openDetailPanel("info"); },
+  onUpdateLocationTap() { this.openDetailPanel("location"); },
+  onContinueReviewTap() {
+    this.openDetailPanel(this.data.reminderNeedsSave && this.data.conflicts.length === 0 ? "reminder" : "info");
+  },
+  onOpenReminderTap() { this.openDetailPanel("reminder"); },
+  onReminderDraftChange(e) { this.setData({ reminderDateDraft: e.detail.value }); },
+  async onReminderConfirmTap() {
+    const date = this.data.reminderDateDraft;
+    if (pickerDateProblem(date) !== "") { wx.showToast({ title: pickerDateProblem(date), icon: "none" }); return; }
+    if (this.data.remindBusy || this.data.saving || this.data.quantitySaving || this.data.reminderConfirming) return;
+    this.setData({ reminderConfirming: true });
+    try {
+      if (this.pendingRemindWrite() !== null || this.hasRemindConflict()) {
+        this.setPendingRemind(date);
+        this.syncConflictFromInput("remind", date);
+        await this.onSaveTap();
+      } else await this.onRemindDateChange({ detail: { value: date } } as WechatMiniprogram.CustomEvent<{ value: string }>);
+      const pending = this.pendingRemindWrite() !== null;
+      this.setData({ reminderNeedsSave: pending });
+      if (!pending && !this.data.conflictPending && this.remindOriginal === date) this.setData({ detailPanel: "" });
+    } finally { this.setData({ reminderConfirming: false }); }
+  },
+  onMediaEntryTap() { this.openDetailPanel("media"); },
+  onPendingMediaTap() { this.openDetailPanel("media"); this.setData({ mediaTab: "video" }); },
+  onMediaTabTap(e) {
+    const tab = e.currentTarget.dataset.tab;
+    if (tab !== "photo" && tab !== "video") return;
+    if (tab === "photo") { void cancelActiveVideoAi(this.data.itemId); this.setData({ videoOpen: false, videoAiBusy: false, videoAiCandidates: [] }); }
+    this.setData({ mediaTab: tab, evidenceOpen: true });
+  },
+  onQuantityStep(e) {
+    if (this.data.quantitySaving) return;
+    const value = Number(this.data.quantityDraft || 0) + Number(e.currentTarget.dataset.delta);
+    if (Number.isInteger(value)) this.setData({ quantityDraft: String(Math.max(0, Math.min(9999, value))) });
+  },
+  onQuantityUnitVerify(e) { this.setData({ quantityUnitVerified: e.detail.value.includes("verified") }); },
+
+  async onSaveLocationTap() {
+    if (this.data.locationCommitSaving || this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving) return;
+    // 通用保存会补写提醒；位置确认不能代替用户提交另一面板的草稿。
+    if (this.pendingRemindWrite() !== null || this.hasRemindConflict()) {
+      this.setData({ panelError: "请先处理尚未保存或有冲突的到期提醒，再确认更新位置。", reminderNeedsSave: true });
+      return;
+    }
+    if (!isScopeGenerationCurrent(this.locationChoiceScope)) { this.setData({ panelError: "家庭已切换，请重新打开这件物品后再修改。" }); return; }
+    const description = this.data.locationText.trim();
+    if (!description) { wx.showToast({ title: "请填写具体放在哪里", icon: "none" }); return; }
+    this.setData({ locationCommitSaving: true, panelError: "" });
+    try {
+      await this.onSaveTap();
+      if (!isScopeGenerationCurrent(this.locationChoiceScope)) { this.setData({ panelError: "家庭已切换，请重新打开这件物品后再修改。" }); return; }
+      if (this.original.location !== description || this.data.conflictPending || this.data.conflicts.length > 0) return;
+      if (this.locationNodeDraft) {
+        const choice = this.locationNodeDraft;
+        const linked = await this.doLinkToNode(choice.nodeId, choice.path);
+        if (!linked) {
+          this.setData({ detailPanel: "location", editPanelOpen: true, panelError: "位置描述已保存，归类尚未更新。请核对后重试。" });
+          return;
+        }
+      }
+      this.locationNodeDraft = null;
+      this.setData({ detailPanel: "", editPanelOpen: false });
+    } finally { this.setData({ locationCommitSaving: false }); }
   },
 
   onFoundTap() {
@@ -990,6 +1154,8 @@ Page<
     this.setData({
       itemId: s.item_id,
       name: s.name,
+      recordedName: s.name,
+      recordedNote: s.note,
       locationText: s.location_text,
       recordedLocationText: s.location_text,
       artworkLight: itemArtwork(s.name),
@@ -1005,6 +1171,8 @@ Page<
       vagueQuote: vague,
       quantityText: quantityConfirmedText(q.quantity, q.unit, q.quantity_confirmed_at),
       quantityConfirmed: q.quantity !== null,
+        quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+        quantityIsZero: q.quantity === 0,
       quantityPanelOpen: false,
       quantityDraft: "",
       quantityUnitIndex: unitIndex,
@@ -1018,7 +1186,8 @@ Page<
   /* ---------------- 数量:「设为当前总数」(issue #102 Q1,Q0-CONTRACT §4.2/§10.3) ---------------- */
 
   onQuantityPanelToggle() {
-    this.setData({ quantityPanelOpen: !this.data.quantityPanelOpen });
+    if (this.data.detailPanel === "quantity") this.onPanelClose();
+    else this.openDetailPanel("quantity");
   },
 
   onQuantityInput(e) {
@@ -1029,7 +1198,7 @@ Page<
 
   onQuantityUnitChange(e) {
     const idx = Number(e && e.detail ? e.detail.value : 0);
-    this.setData({ quantityUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < UNIT_SET.length ? idx : 0 });
+    this.setData({ quantityUnitIndex: Number.isInteger(idx) && idx >= 0 && idx < UNIT_SET.length ? idx : 0, quantityUnitVerified: false, quantityUnitChanged: this.quantityOriginal.unit !== null && UNIT_SET[idx] !== this.quantityOriginal.unit });
   },
 
   onNoteFoldToggle() {
@@ -1060,6 +1229,9 @@ Page<
       return;
     }
     const unit = UNIT_SET[this.data.quantityUnitIndex] || "件";
+    if (this.data.detailPanel === "quantity" && this.quantityOriginal.unit !== null && unit !== this.quantityOriginal.unit && !this.data.quantityUnitVerified) {
+      wx.showToast({ title: "请按新单位重新核对总数并勾选确认", icon: "none" }); return;
+    }
     if (
       this.quantityOriginal.quantity === parsed &&
       this.quantityOriginal.unit === unit
@@ -1089,7 +1261,10 @@ Page<
         updatedAtText: formatDateTime(res.item.updated_at),
         quantityText: quantityConfirmedText(q.quantity, q.unit, q.quantity_confirmed_at),
         quantityConfirmed: q.quantity !== null,
+        quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+        quantityIsZero: q.quantity === 0,
         quantityPanelOpen: false,
+        detailPanel: this.data.detailPanel === "quantity" ? "" : this.data.detailPanel,
         quantityDraft: "",
       });
       wx.showToast({ title: "已记为当前总数", icon: "success" });
@@ -1106,6 +1281,8 @@ Page<
             version: cur.version,
             quantityText: quantityConfirmedText(q.quantity, q.unit, q.quantity_confirmed_at),
             quantityConfirmed: q.quantity !== null,
+        quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+        quantityIsZero: q.quantity === 0,
             quantityDraft: "",
             quantityUnitIndex: q.unit === null ? 0 : Math.max(0, UNIT_SET.indexOf(q.unit)),
           });
@@ -1329,7 +1506,7 @@ Page<
         }
       }
       // 全部落库:收回冲突面板与编辑折叠,回到只读答案
-      this.setData({ conflicts: [], conflictPending: false, editPanelOpen: false });
+      this.setData({ conflicts: [], conflictPending: false, editPanelOpen: false, detailPanel: this.data.locationCommitSaving ? "location" : "", reminderNeedsSave: false });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (e) {
       // 记录失败的更新供重试复用 update id(仅同样内容且有文本变更的重试)
@@ -1497,11 +1674,15 @@ Page<
       name: outcome.merged.name,
       locationText: outcome.merged.location,
       recordedLocationText: item.location_text,
+      recordedName: item.name,
+      recordedNote: item.note || "",
       note: outcome.merged.note,
       version: item.version,
       updatedAtText: formatDateTime(item.updated_at),
       quantityText: quantityConfirmedText(q.quantity, q.unit, q.quantity_confirmed_at),
       quantityConfirmed: q.quantity !== null,
+        quantityShortText: q.quantity === null ? "待核对" : `${q.quantity} ${q.unit}`,
+        quantityIsZero: q.quantity === 0,
       quantityUnitIndex: q.unit === null ? 0 : Math.max(0, UNIT_SET.indexOf(q.unit)),
       conflicts: entries.map((c) => ({
         ...c,
@@ -1512,6 +1693,8 @@ Page<
       conflictPending: hasConflicts,
       // 冲突面板在编辑折叠内:强制展开,保证用户看得见两版值再选
       editPanelOpen: hasConflicts ? true : this.data.editPanelOpen,
+      detailPanel: hasConflicts ? (this.data.detailPanel === "location" ? "location" : "info") : this.data.detailPanel,
+      recordedRemindAt: row === undefined ? this.data.recordedRemindAt : remoteRemind,
       ...remindPatch,
     });
     return "refreshed";
@@ -1640,6 +1823,7 @@ Page<
    * ensurePath + linkItem。AI 不可用时兜底为手动选位置(选择模式)。
    */
   async onMountTap() {
+    if (this.data.detailPanel === "location" && this.data.locationText.trim() !== this.original.location) { wx.showToast({ title: "先确认位置描述，再整理归类", icon: "none" }); return; }
     if (this.data.saving || this.data.deleting || this.data.mounting) {
       return;
     }
@@ -1728,7 +1912,11 @@ Page<
         encodeURIComponent("把「" + (this.data.name || "这件物品") + "」放到哪个位置…"),
       events: {
         pickNode: (d: { location_id: string; path?: string[] }) => {
-          void this.doLinkToNode(d.location_id, d.path);
+          if (this.data.detailPanel === "location") {
+            if (!isScopeGenerationCurrent(this.locationChoiceScope)) return;
+            this.locationNodeDraft = { nodeId: d.location_id, path: Array.isArray(d.path) ? d.path : [] };
+            this.setData({ locationPathDraft: this.locationNodeDraft.path });
+          } else void this.doLinkToNode(d.location_id, d.path);
           // 退栈统一由发起页计算(选择器页自身不再逐层退,#29 后续):
           // 选择器页只叠在本页正上方,一次退掉全部。
           const pages = getCurrentPages();
@@ -1754,16 +1942,19 @@ Page<
         icon: "none",
         duration: 2500,
       });
-      return;
+      return false;
     }
+    const staged = this.data.detailPanel === "location";
+    const retry = staged && this.locationLinkRetry?.nodeId === nodeId ? this.locationLinkRetry : { nodeId, version: this.data.version, updateId: uuid() };
+    if (staged) this.locationLinkRetry = retry;
     this.setData({ mountSaving: true });
     try {
       const res = await callLocationsApi({
         action: "linkItem",
         item_id: this.data.itemId,
         node_id: nodeId,
-        expected_version: this.data.version,
-        update_id: uuid(),
+        expected_version: retry.version,
+        update_id: retry.updateId,
       });
       this.setData({
         version: res.item.version,
@@ -1771,13 +1962,16 @@ Page<
         // 刚亲手选定的位置:大卡如实跟进(选择器回传的展示用路径)
         spacePath: Array.isArray(path) ? path : this.data.spacePath,
       });
+      this.locationLinkRetry = null;
       wx.showToast({ title: "已记到这个位置", icon: "success" });
       // ④(#121 批次乙)移动完成:按方案跳目标层并短高亮该物品行——
       // 栈内已有目标层(典型:从位置树下钻进来的)回退不加层,目标页 onShow
       // 消费 pending 高亮;否则前进带 hl,目标页 onLoad 读取;栈近满 redirect
       navToLocationLayer(nodeId, this.data.itemId);
+      return true;
     } catch (e) {
       if (e instanceof ApiError && e.code === "VERSION_CONFLICT") {
+        this.locationLinkRetry = null;
         // 物品被并发修改:与保存冲突同一口径走四字段冲突刷新——双方都改且不同
         // 的字段进冲突面板显式选边(未选完前保存被门禁拦住,上一轮未选边的
         // 条目也保留),绝不静默覆盖;无冲突字段维持三方合并,对齐版本后重试整理
@@ -1791,7 +1985,7 @@ Page<
               this.goBack();
             },
           });
-          return;
+          return false;
         }
         if (result === "refreshed") {
           wx.showToast({
@@ -1813,6 +2007,7 @@ Page<
     } finally {
       this.setData({ mountSaving: false });
     }
+    return false;
   },
 
   /** 确认候选分段:ensurePath(用户确认后的唯一建节点入口)→ linkItem(版本条件更新) */
@@ -1861,6 +2056,8 @@ Page<
         mountPanelOpen: false,
         // 刚确认并记入的位置分段:大卡如实跟进(与 ensurePath 收到的完全一致)
         spacePath: names,
+        detailPanel: this.data.detailPanel === "location" ? "" : this.data.detailPanel,
+        editPanelOpen: false,
       });
       wx.showToast({ title: "已记到这个位置", icon: "success" });
       // ④(#121 批次乙)整理位置完成:同手动兜底——跳目标层短高亮该物品行
@@ -1978,6 +2175,7 @@ Page<
   },
 
   applyReminderRow(row: RemindRow | null) {
+    this.setData({ recordedRemindAt: row ? row.due_date : "", reminderNeedsSave: false });
     if (row === null) {
       // 已确认这件当前无提醒:轮次号记 0(补录语义的 expected_generation)
       this.remindOriginal = "";
@@ -2535,6 +2733,7 @@ Page<
   async refreshEvidence(): Promise<void> {
     this.setData({
       evidenceReady: false,
+      photoLookupFailed: false,
       evidenceNoPhoto: false,
       evidenceOpen: false,
       evidenceOlderOpen: false,
@@ -2542,6 +2741,7 @@ Page<
     });
     const rows = await this.fetchEvidenceRows();
     if (rows === undefined) {
+      this.setData({ photoLookupFailed: true });
       return;
     }
     if (rows.length === 0) {
@@ -2666,6 +2866,7 @@ Page<
   },
 
   scrollVideoCard(): void {
+    this.setData({ detailPanel: "media", mediaTab: "video", mediaScrollTarget: "video-evidence-card" });
     setTimeout(() => {
       if (typeof wx === "undefined" || typeof wx.pageScrollTo !== "function") return;
       try {
@@ -2692,6 +2893,8 @@ Page<
     const initialTime = Math.max(0, (startMs - 300) / 1000);
     const key = highlight === null ? "" : highlight.key;
     this.setData({
+      detailPanel: "media",
+      mediaTab: "video",
       videoOpen: true,
       videoSelected: selected,
       videoSelectedHighlightKey: key,

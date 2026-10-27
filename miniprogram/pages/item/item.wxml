@@ -1,82 +1,140 @@
 <view class="appearance-root" style="{{themeStyle}}">
 <view class="page page-with-detail-dock">
   <view class="detail-head">
-    <view class="detail-title"><view class="pagetitle">{{ name }}</view></view>
-    <view class="more-inline" bindtap="onMoreTap"><view class="more-inline-face">⋯</view></view>
-  </view>
-  <view class="detail-visual">
-    <image wx:if="{{ evidenceReady && evidence && !evidence.latest.urlFail }}" class="detail-photo" src="{{ evidence.latest.photoUrl }}" mode="aspectFill" bindtap="onEvidenceTap" />
-    <block wx:else>
-      <image class="detail-art theme-light" src="{{ artworkLight }}" mode="aspectFit" />
-      <image class="detail-art theme-dark" src="{{ artworkDark }}" mode="aspectFit" />
-    </block>
-  </view>
-  <view class="bigcard-lbl">上次记录位置</view>
-  <view class="bigcard">
-    <view wx:if="{{ spacePath.length > 0 }}" class="bigcard-path">
-      <block wx:for="{{ spacePath }}" wx:key="*this">
-        <text>{{ item }}</text><text wx:if="{{ index < spacePath.length - 1 }}" class="bigcard-sep">›</text>
-      </block>
+    <view class="detail-thumb">
+      <image class="detail-art theme-light" src="{{artworkLight}}" mode="aspectFit" />
+      <image class="detail-art theme-dark" src="{{artworkDark}}" mode="aspectFit" />
     </view>
-    <view class="bigcard-location">{{ recordedLocationText || locationText }}</view>
-    <view wx:if="{{ lastConfirmedText }}" class="detail-meta">{{ lastConfirmedText }}</view>
+    <view class="detail-title"><view class="pagetitle">{{recordedName || name}}</view><view class="detail-shared">{{familyShared ? '家人可见' : '个人记录'}}</view></view>
+    <button class="detail-more" bindtap="onMoreTap" aria-label="更多操作">⋯</button>
+  </view>
+  <view wx:if="{{videoPending}}" class="detail-attention">
+    <view>有一段视频还没关联到这件物品。</view><button class="detail-inline" bindtap="onPendingMediaTap">查看并处理 ›</button>
+  </view>
+  <view wx:if="{{conflicts.length > 0 || reminderNeedsSave}}" class="detail-attention">
+    <view>有修改尚未保存，请核对后继续。</view><button class="detail-inline" bindtap="onContinueReviewTap">继续核对 ›</button>
+  </view>
+  <view class="bigcard">
+    <view class="bigcard-lbl">上次记录位置</view>
+    <view wx:if="{{spacePath.length}}" class="bigcard-path"><block wx:for="{{spacePath}}" wx:key="*this"><text>{{item}}</text><text wx:if="{{index < spacePath.length - 1}}" class="bigcard-sep">›</text></block></view>
+    <view class="bigcard-location">{{recordedLocationText}}</view>
+    <view class="detail-meta"><text>{{lastConfirmedText}}</text><text>物品可能已移动。</text></view>
     <view wx:if="{{ vagueQuote && !expire }}" class="bigcard-quote vague-quote">当时提到时间:『{{ vagueQuote }}』(没换算成日期)</view>
   </view>
-  <view class="bigcard-tiny">物品可能已移动。</view>
-
-  <!-- 数量区(issue #102 Q1,Q0-CONTRACT §10.1):「上次确认 ×N单位」或「待核对」,
-       唯一来源=items 投影字段;0=确认目前没有(物品/位置/提醒/证据全保留) -->
-  <view class="qty-row">
-    <view class="qty-main">
-      <view class="qty-t {{ quantityConfirmed ? '' : 'unconfirmed' }}">{{ quantityText }}</view>
-      <view class="qty-sub">改数量不影响位置、提醒和照片视频</view>
-    </view>
-    <view class="qty-act {{ quantitySaving ? 'busy' : '' }}" bindtap="onQuantityPanelToggle">{{ quantityPanelOpen ? '收起' : '设为当前总数 ›' }}</view>
+  <view class="detail-rows">
+    <button class="detail-row" bindtap="onQuantityPanelToggle"><view class="detail-row-symbol">□</view><text class="detail-row-label">数量</text><text class="detail-row-value strong">{{quantityShortText}}{{quantityIsZero ? ' · 目前没有' : ''}}</text><text class="detail-chevron">›</text></button>
+    <button class="detail-row" bindtap="onOpenReminderTap"><view class="detail-row-icon"><image class="theme-light" src="/assets/icons/clock.png"/><image class="theme-dark" src="/assets/icons/clock-dark.png"/></view><text class="detail-row-label">到期提醒</text><text class="detail-row-value">{{recordedRemindAt ? recordedRemindAt + ' 到期' : '未设置'}}</text><text class="detail-chevron">›</text></button>
+    <button class="detail-row" bindtap="onMediaEntryTap"><view class="detail-row-icon"><image class="theme-light" src="/assets/icons/camera.png"/><image class="theme-dark" src="/assets/icons/camera-dark.png"/></view><text class="detail-row-label">照片与视频</text><view class="detail-row-value"><block wx:if="{{videoPending}}">视频待关联</block><block wx:elif="{{photoLookupFailed || videoLookupFailed}}">部分留证待重试</block><block wx:elif="{{evidenceReady || videoReady}}"><text wx:if="{{evidenceReady}}">{{evidence.olderCount + 1}} 张照片</text><text wx:if="{{evidenceReady && videoReady}}"> · </text><text wx:if="{{videoReady}}">{{videoEvidence.all.length}} 段视频</text></block><block wx:else>查看或添加</block></view><text class="detail-chevron">›</text></button>
   </view>
-  <view wx:if="{{ quantityPanelOpen }}" class="card qty-card">
-    <view class="field">
-      <view class="label">当前总数(0-9999)</view>
-      <input
-        class="input"
-        type="number"
-        placeholder="{{ quantityConfirmed ? '填核对后的当前总数(0-9999)' : '待核对,数一数现在有几件' }}"
-        placeholder-class="placeholder"
-        value="{{ quantityDraft }}"
-        disabled="{{ quantitySaving }}"
-        bindinput="onQuantityInput"
-      />
-    </view>
-    <view class="field">
-      <view class="label">单位</view>
-      <picker
-        range="{{ unitOptions }}"
-        value="{{ quantityUnitIndex }}"
-        disabled="{{ quantitySaving }}"
-        bindchange="onQuantityUnitChange"
-      >
-        <view class="field-btn">
-          <text class="field-val">{{ unitOptions[quantityUnitIndex] }}</text>
-          <text class="field-chev">›</text>
+  <view class="detail-footnote">{{quantityText}}。影像仅记录当时。</view>
+</view>
+
+<view wx:if="{{detailPanel}}" class="detail-panel-mask" catchtouchmove="noop" bindtap="onPanelClose">
+  <view class="detail-panel detail-panel-{{detailPanel}}" catchtap="noop">
+    <view class="detail-handle"></view>
+    <view class="detail-panel-head"><view><view class="detail-panel-title">{{detailPanel === 'location' ? '放到哪里了？' : detailPanel === 'quantity' ? '现在有多少？' : detailPanel === 'reminder' ? '到期提醒' : detailPanel === 'media' ? '照片与视频' : '名称与备注'}}</view><view class="detail-panel-sub">{{recordedName || name}}</view></view><button class="detail-close" bindtap="onPanelClose" aria-label="关闭面板" disabled="{{saving || quantitySaving || remindBusy || reminderConfirming || mountSaving || locationCommitSaving}}">×</button></view>
+    <scroll-view scroll-y class="detail-panel-body" scroll-into-view="{{mediaScrollTarget}}">
+      <view wx:if="{{panelError}}" class="detail-attention panel-attention">{{panelError}}</view>
+      <view wx:if="{{detailPanel === 'location' || detailPanel === 'info'}}" id="item-edit-panel">
+    <!-- 冲突面板(issue #6):保存或改提醒命中版本冲突后出现,逐字段并排
+         「你的修改 / 最新记录」;未选完前下方保存按钮禁用,直接在表单里改不算选择 -->
+    <view wx:if="{{ conflicts.length > 0 }}" class="card conflict-card">
+      <view class="conflict-title">这些字段与最新记录冲突</view>
+      <view class="conflict-desc">
+        别的设备也改了这些字段。逐项选择保留哪一版后才能保存;在下面表单里直接改不算选择。
+      </view>
+      <view wx:for="{{ conflicts }}" wx:key="key" class="conflict-item">
+        <view class="conflict-item-title">{{ item.label }}</view>
+        <view class="conflict-row">
+          <view class="conflict-side">
+            <view class="conflict-side-label">你的修改</view>
+            <view class="conflict-value">{{ item.localDisplay }}</view>
+          </view>
+          <view class="conflict-side">
+            <view class="conflict-side-label">最新记录</view>
+            <view class="conflict-value">{{ item.remoteDisplay }}</view>
+          </view>
         </view>
-      </picker>
+        <view class="conflict-actions">
+          <button
+            class="btn conflict-btn {{ item.choice === 'local' ? 'primary' : '' }}"
+            bindtap="onChooseLocal"
+            data-key="{{ item.key }}"
+          >
+            <view class="btn-face">保留我的修改</view>
+          </button>
+          <button
+            class="btn conflict-btn {{ item.choice === 'remote' ? 'primary' : '' }}"
+            bindtap="onChooseRemote"
+            data-key="{{ item.key }}"
+          >
+            <view class="btn-face">采用最新记录</view>
+          </button>
+        </view>
+      </view>
     </view>
-    <view class="hint">填 0 = 确认目前没有(物品记录、位置、提醒和照片视频都保留);改单位需按新单位重新核对总数,不做换算。</view>
-    <button class="btn ink block" loading="{{ quantitySaving }}" bindtap="onQuantitySaveTap">
-      <view class="btn-face">记为当前总数</view>
-    </button>
+
+        <view wx:if="{{detailPanel === 'info'}}" class="field"><view class="label">名称</view><input class="input" value="{{name}}" maxlength="50" disabled="{{saving}}" bindinput="onNameInput" /></view>
+        <view wx:if="{{detailPanel === 'location'}}" class="field"><view class="label">归类位置</view><button class="field-btn" bindtap="openLocationPicker" disabled="{{saving || mountSaving || locationCommitSaving}}"><text class="field-val"><block wx:if="{{locationPathDraft.length}}" wx:for="{{locationPathDraft}}" wx:key="*this">{{item}}{{index < locationPathDraft.length - 1 ? ' / ' : ''}}</block><block wx:if="{{!locationPathDraft.length}}">选择已有位置（可选）</block></text><text class="field-chev">›</text></button></view>
+        <view wx:if="{{detailPanel === 'location' || conflicts.length > 0}}" class="field"><view class="label">具体放在哪里</view><textarea class="textarea" value="{{locationText}}" maxlength="200" disabled="{{saving || mountSaving || locationCommitSaving}}" bindinput="onLocationInput" /></view>
+        <view wx:if="{{detailPanel === 'info'}}" class="field"><view class="label">备注</view><textarea class="textarea" value="{{note}}" maxlength="200" disabled="{{saving}}" bindinput="onNoteInput" /></view>
+        <view wx:if="{{detailPanel === 'location'}}" class="detail-preview"><view class="label">确认后记录为</view><view wx:if="{{locationPathDraft.length}}" class="hint"><block wx:for="{{locationPathDraft}}" wx:key="*this">{{item}}{{index < locationPathDraft.length - 1 ? ' / ' : ''}}</block></view><view class="detail-preview-text">{{locationText || '请补充具体位置'}}</view></view>
+        <view wx:if="{{detailPanel === 'location'}}" class="hint">只更新位置，数量、提醒和历史影像继续保留。</view>
+        <button wx:if="{{detailPanel === 'location'}}" class="detail-inline" bindtap="onMountTap" disabled="{{saving || mountSaving || locationCommitSaving}}">按已保存的描述整理归类</button>
+  <!-- 整理位置:候选分段逐段核对,确认后才会创建位置并记入(ensurePath 只在确认后建节点) -->
+  <view wx:if="{{ mountPanelOpen }}" class="card">
+    <view class="card-title">整理位置(请核对)</view>
+    <view class="hint">
+      从大到小逐段核对,可以直接改;{{ mountOrderViolation ? '分段顺序与原文对不上,务必逐段核对。' : '' }}确认后才会记到这个位置。
+    </view>
+    <view
+      wx:for="{{ mountSegments }}"
+      wx:key="idx"
+      class="field"
+    >
+      <view class="label">
+        第 {{ index + 1 }} 段 · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · 不太确定' : '' }}
+      </view>
+      <input
+        class="input {{ item.needConfirm ? 'input-warn' : '' }}"
+        value="{{ item.name }}"
+        maxlength="30"
+        data-index="{{ index }}"
+        bindinput="onMountSegmentInput"
+      />
+      <view wx:if="{{ item.hintName }}" class="hint">
+        与已有的「{{ item.hintName }}」同名,确认后直接用那个位置
+      </view>
+    </view>
+      <button
+        class="btn ink block"
+        loading="{{ mountSaving }}"
+        bindtap="confirmMount"
+      >
+        <view class="btn-face">确认放这里</view>
+      </button>
+      <button class="btn block" bindtap="cancelMount"><view class="btn-face">取消</view></button>
   </view>
-
-  <!-- 原备注折叠(Q0-CONTRACT §10.2 主规则:note 原样折叠、绝不与数量并排、
-       不解析为库存;旧 ×N/500ml 一字不改写;编辑态 textarea 永远显示存储原文) -->
-  <view wx:if="{{ note }}" class="note-fold-row" bindtap="onNoteFoldToggle">
-    <text>原备注</text>
-    <text class="note-fold-chev {{ noteFoldOpen ? 'open' : '' }}">{{ noteFoldOpen ? '收起' : '查看' }}</text>
-  </view>
-  <view wx:if="{{ noteFoldOpen }}" class="note-fold-body">{{ note }}</view>
-
-  <view class="detail-quote-row" bindtap="onQuoteToggle"><text>原话</text><text>{{ detailQuoteOpen ? '收起' : '查看' }}</text></view>
-  <view wx:if="{{ detailQuoteOpen }}" class="detail-quote">{{ recordedLocationText || locationText }}</view>
-
+      </view>
+      <view wx:if="{{detailPanel === 'quantity'}}">
+        <view class="field"><view class="label">当前总数</view><view class="detail-number-fields"><view class="detail-stepper"><button data-delta="-1" bindtap="onQuantityStep" disabled="{{quantitySaving}}" aria-label="减少数量">−</button><input class="input" type="number" value="{{quantityDraft}}" placeholder="待核对" disabled="{{quantitySaving}}" bindinput="onQuantityInput"/><button data-delta="1" bindtap="onQuantityStep" disabled="{{quantitySaving}}" aria-label="增加数量">+</button></view><picker range="{{unitOptions}}" value="{{quantityUnitIndex}}" disabled="{{quantitySaving}}" bindchange="onQuantityUnitChange"><view class="detail-unit">{{unitOptions[quantityUnitIndex]}} ›</view></picker></view></view>
+        <view class="detail-preview"><view class="label">上次确认</view><view>{{quantityText}}</view></view>
+        <view class="hint">填 0 表示目前没有，物品记录、位置、提醒和影像仍然保留。</view>
+        <checkbox-group wx:if="{{quantityUnitChanged}}" bindchange="onQuantityUnitVerify"><label class="detail-unit-check"><checkbox value="verified" checked="{{quantityUnitVerified}}" disabled="{{quantitySaving}}"/><text>如果更改单位，我已按新单位重新核对总数</text></label></checkbox-group>
+      </view>
+      <view wx:if="{{detailPanel === 'reminder'}}">
+        <view class="field remind-set-row"><view class="label">到期日期</view><picker mode="date" value="{{reminderDateDraft || pickerStart}}" start="{{pickerStart}}" disabled="{{remindBusy || saving}}" bindchange="onReminderDraftChange"><view class="field-btn"><text class="field-val">{{reminderDateDraft || '选择日期'}}</text><text class="field-chev">›</text></view></picker></view>
+        <view class="hint">设置后会出现在小程序的到期列表。</view>
+        <view wx:if="{{expire && expire.convertedNote}}" class="expire-sub converted-note">按『{{ expire.convertedNote }}』换算，请核对日期。</view>
+        <!-- 到期微信提醒显式入口：保留真实 button tap，不在 picker change 自动申请 -->
+        <view class="detail-notify"><view><view>微信消息提醒</view><view class="hint">{{notifyAccepted ? '本机已记录开启状态' : '需在微信中单独开启'}}</view></view><button wx:if="{{remindAt && !notifyAccepted}}" class="notify-chip" bindtap="onNotifyChipTap"><view class="notify-chip-face">开启微信提醒 ›</view></button><view wx:elif="{{!remindAt}}" class="hint">先确认日期</view></view>
+        <view class="detail-reminder-actions"><button wx:if="{{expire}}" class="detail-inline" bindtap="onExpireDoneTap" disabled="{{remindBusy || conflictPending}}">已处理这次提醒</button><button wx:if="{{remindAt}}" class="detail-inline danger" bindtap="onRemindFieldClear" disabled="{{remindBusy}}">清除提醒</button></view>
+        <view wx:if="{{reminderNeedsSave || conflictPending}}" class="detail-attention panel-attention">提醒修改尚未保存，请核对冲突后继续。<button class="detail-inline" bindtap="onContinueReviewTap">继续核对 ›</button></view>
+        <view wx:if="{{diagEntryVisible}}" class="diag-entry" bindtap="onDiagEntryTap">订阅手势诊断 ›</view>
+      </view>
+      <view wx:if="{{detailPanel === 'media'}}">
+        <view class="detail-media-tabs"><button class="{{mediaTab === 'photo' ? 'selected' : ''}}" data-tab="photo" bindtap="onMediaTabTap">照片</button><button class="{{mediaTab === 'video' ? 'selected' : ''}}" data-tab="video" bindtap="onMediaTabTap">视频</button></view>
+        <view wx:if="{{mediaTab === 'video'}}">
   <view wx:if="{{ videoPending }}" class="vd-pending">
     <view class="vd-pending-title">视频待关联</view>
     <view class="vd-pending-sub">{{ videoPendingText }}</view>
@@ -204,6 +262,10 @@
   <view wx:elif="{{ videoBusy }}" class="vd-empty">视频处理中…</view>
   <view wx:elif="{{ videoPending === null && videoLookupFailed === false }}" class="vd-empty" bindtap="onAddVideoTap">添加视频留证</view>
 
+
+        </view>
+        <view wx:if="{{mediaTab === 'photo'}}">
+          <view wx:if="{{photoLookupFailed}}" class="detail-attention panel-attention">照片暂时无法加载。<button class="detail-inline" bindtap="refreshEvidence">重试加载</button></view>
   <!-- 照片证据回放(#3):照片是历史证据——只说明拍摄当日记录在哪,不冒充当前位置;
        位置已变更时以文字位置为准、旧照片作证据。拉取失败整卡不渲染(增强露出,静默) -->
   <view wx:if="{{ evidenceReady && evidence }}" class="ev-card">
@@ -252,214 +314,20 @@
     <view class="ev-none-go" hover-class="ev-none-go-hover" hover-stay-time="80" bindtap="onRetakeTap">去补拍</view>
   </view>
 
-  <!-- 保质期行(#36):有 active 提醒才显示;到了那天出现在「快到期」里,不做任何推送承诺 -->
-  <view wx:if="{{ expire }}" class="expire-row">
-    <view class="expire-main">
-      <view class="expire-t">{{ expire.mainText }}</view>
-      <!-- 换算候选标注(#36 真机反馈三件 A):日期来自服务端对『原相对话』的闭集换算 -->
-      <view wx:if="{{ expire.convertedNote }}" class="expire-sub converted-note">按『{{ expire.convertedNote }}』换算</view>
-      <view class="expire-sub">到了那天,它会出现在「快到期」里</view>
-    </view>
-    <view class="r-done {{ remindBusy || conflictPending ? 'busy' : '' }}" bindtap="onExpireDoneTap"><view class="r-done-face">已处理</view></view>
-  </view>
 
-  <!-- 提醒设置行(2026-10-26 真机反馈:设置提醒与物品信息无关,上移到主界面;
-       原「编辑」表单内的提醒字段移除,改期/补录都在这里):picker 滚轮起点 8 点后=明天 -->
-  <view class="remind-set-row">
-    <picker
-      mode="date"
-      value="{{ remindAt || pickerStart }}"
-      start="{{ pickerStart }}"
-      disabled="{{ remindBusy }}"
-      bindchange="onRemindDateChange"
-    >
-      <view class="field-btn">
-        <text wx:if="{{ remindAt }}" class="field-val">{{ remindAt }} 到期</text>
-        <text wx:else class="field-ph">设到期提醒</text>
-        <text class="field-chev">›</text>
-      </view>
-    </picker>
-    <view wx:if="{{ remindAt }}" class="clearx" bindtap="onRemindFieldClear"><view class="clearx-face">✕</view></view>
-  </view>
-
-  <!-- 到期微信提醒显式入口(#36 真机手势规则):picker bindchange 无点击手势,订阅授权
-       必须由真实 tap 发起;有生效提醒且本地未标记「已开启」才显示,accept 后收起
-       (本地标记是展示启发式,权威记录在服务端 remind_subscriptions)。
-       0.9.3(鸿蒙真机反馈):view+bindtap 在鸿蒙微信上丢手势令牌(requestSubscribeMessage
-       报 can only be invoked by user TAP gesture),换原生 button+bindtap 直接触发 -->
-  <button
-    wx:if="{{ remindAt && !notifyAccepted }}"
-    class="notify-chip"
-    hover-class="notify-chip-hover"
-    hover-stay-time="80"
-    bindtap="onNotifyChipTap"
-  >
-    <view class="notify-chip-face">到期时微信提醒我 ›</view>
-  </button>
-
-  <!-- 订阅手势诊断入口(#36 鸿蒙真机手势排查,仅 develop 环境显示):素按钮二分实验页,
-       正式版/体验版用户不可见 -->
-  <view wx:if="{{ diagEntryVisible }}" class="diag-entry" bindtap="onDiagEntryTap">订阅手势诊断 ›</view>
-
-  <!-- 编辑全部折叠:展开后是原有表单与保存路径(expected_version / 冲突处理不变) -->
-  <view
-    class="fold {{ editPanelOpen ? 'open' : '' }}"
-    hover-class="fold-hover"
-    hover-stay-time="80"
-    bindtap="onEditToggle"
-  >
-    <text>编辑物品信息</text>
-    <text class="fold-chev {{ editPanelOpen ? 'up' : '' }}">›</text>
-  </view>
-  <view id="item-edit-panel" class="fold-body {{ editPanelOpen ? 'open' : '' }}">
-    <!-- 冲突面板(issue #6):保存或改提醒命中版本冲突后出现,逐字段并排
-         「你的修改 / 最新记录」;未选完前下方保存按钮禁用,直接在表单里改不算选择 -->
-    <view wx:if="{{ conflicts.length > 0 }}" class="card conflict-card">
-      <view class="conflict-title">这些字段与最新记录冲突</view>
-      <view class="conflict-desc">
-        别的设备也改了这些字段。逐项选择保留哪一版后才能保存;在下面表单里直接改不算选择。
-      </view>
-      <view wx:for="{{ conflicts }}" wx:key="key" class="conflict-item">
-        <view class="conflict-item-title">{{ item.label }}</view>
-        <view class="conflict-row">
-          <view class="conflict-side">
-            <view class="conflict-side-label">你的修改</view>
-            <view class="conflict-value">{{ item.localDisplay }}</view>
-          </view>
-          <view class="conflict-side">
-            <view class="conflict-side-label">最新记录</view>
-            <view class="conflict-value">{{ item.remoteDisplay }}</view>
-          </view>
-        </view>
-        <view class="conflict-actions">
-          <button
-            class="btn conflict-btn {{ item.choice === 'local' ? 'primary' : '' }}"
-            bindtap="onChooseLocal"
-            data-key="{{ item.key }}"
-          >
-            <view class="btn-face">保留我的修改</view>
-          </button>
-          <button
-            class="btn conflict-btn {{ item.choice === 'remote' ? 'primary' : '' }}"
-            bindtap="onChooseRemote"
-            data-key="{{ item.key }}"
-          >
-            <view class="btn-face">采用最新记录</view>
-          </button>
         </view>
       </view>
+    </scroll-view>
+    <view wx:if="{{detailPanel !== 'media'}}" class="detail-panel-actions">
+      <button class="detail-cancel" bindtap="onPanelClose" disabled="{{saving || quantitySaving || remindBusy || reminderConfirming || mountSaving || locationCommitSaving}}">取消</button>
+      <button wx:if="{{detailPanel === 'location'}}" class="detail-confirm" loading="{{saving || mountSaving || locationCommitSaving}}" disabled="{{conflictPending}}" bindtap="onSaveLocationTap">确认更新位置</button>
+      <button wx:elif="{{detailPanel === 'quantity'}}" class="detail-confirm" loading="{{quantitySaving}}" bindtap="onQuantitySaveTap">确认数量</button>
+      <button wx:elif="{{detailPanel === 'reminder'}}" class="detail-confirm" loading="{{remindBusy || saving || reminderConfirming}}" disabled="{{reminderConfirming}}" bindtap="onReminderConfirmTap">确认日期</button>
+      <button wx:else class="detail-confirm" loading="{{saving}}" disabled="{{conflictPending}}" bindtap="onInfoSaveTap">保存修改</button>
     </view>
-    <view class="card edit-card">
-      <view class="field">
-        <view class="label">名称</view>
-        <input
-          class="input"
-          placeholder="物品名称(必填)"
-          placeholder-class="placeholder"
-          value="{{ name }}"
-          maxlength="50"
-          bindinput="onNameInput"
-        />
-      </view>
-      <view class="field">
-        <view class="label">位置(必填)</view>
-        <input
-          class="input"
-          placeholder="放在哪里"
-          placeholder-class="placeholder"
-          value="{{ locationText }}"
-          maxlength="200"
-          bindinput="onLocationInput"
-        />
-      </view>
-      <view class="field">
-        <view class="label">备注</view>
-        <textarea
-          class="textarea"
-          placeholder="选填,最多 200 字"
-          placeholder-class="placeholder"
-          value="{{ note }}"
-          maxlength="200"
-          auto-height
-          bindinput="onNoteInput"
-        />
-      </view>
-
-      <button
-        class="btn ink block"
-        loading="{{ saving }}"
-        disabled="{{ conflictPending }}"
-        bindtap="onSaveTap"
-      >
-        <view class="btn-face">保存修改</view>
-      </button>
-      <view class="fold-note">与他处改动冲突时,保存前会先让你核对。</view>
-    </view>
-  </view>
-
-  <!-- 整理位置:候选分段逐段核对,确认后才会创建位置并记入(ensurePath 只在确认后建节点) -->
-  <view wx:if="{{ mountPanelOpen }}" class="card">
-    <view class="card-title">整理位置(请核对)</view>
-    <view class="hint">
-      从大到小逐段核对,可以直接改;{{ mountOrderViolation ? '分段顺序与原文对不上,务必逐段核对。' : '' }}确认后才会记到这个位置。
-    </view>
-    <view
-      wx:for="{{ mountSegments }}"
-      wx:key="idx"
-      class="field"
-    >
-      <view class="label">
-        第 {{ index + 1 }} 段 · 把握 {{ item.confidenceText }}{{ item.needConfirm ? ' · 不太确定' : '' }}
-      </view>
-      <input
-        class="input {{ item.needConfirm ? 'input-warn' : '' }}"
-        value="{{ item.name }}"
-        maxlength="30"
-        data-index="{{ index }}"
-        bindinput="onMountSegmentInput"
-      />
-      <view wx:if="{{ item.hintName }}" class="hint">
-        与已有的「{{ item.hintName }}」同名,确认后直接用那个位置
-      </view>
-    </view>
-      <button
-        class="btn ink block"
-        loading="{{ mountSaving }}"
-        bindtap="confirmMount"
-      >
-        <view class="btn-face">确认放这里</view>
-      </button>
-      <button class="btn block" bindtap="cancelMount"><view class="btn-face">取消</view></button>
   </view>
 </view>
 
-<!-- 「⋯」次级菜单:底部弹层(分享给家人 / 整理位置 / 删除) -->
-<view
-  class="sheet-mask {{ moreOpen ? 'open' : '' }}"
-  bindtap="onSheetClose"
-  catchtouchmove="noop"
->
-  <view class="sheet" catchtap="noop">
-    <view class="sheet-title">{{ name || '这件物品' }} · 更多</view>
-    <view wx:if="{{ familyShared }}" class="sheet-act" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onShareTap">
-      <view class="sheet-act-name">分享给家人</view>
-      <view class="sheet-act-sub">家里人都能看到这条记录</view>
-    </view>
-    <view class="sheet-act" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onTidyTap">
-      <view class="sheet-act-name">整理位置</view>
-      <view class="sheet-act-sub">选择它属于哪个房间 / 家具</view>
-    </view>
-    <view class="sheet-act warn" hover-class="sheet-act-hover" hover-stay-time="60" bindtap="onDeleteTap">
-      <view class="sheet-act-name">删除这条记录</view>
-      <view class="sheet-act-sub">需要二次确认</view>
-    </view>
-    <view class="sheet-close" bindtap="onSheetClose">取消</view>
-  </view>
-</view>
-
-<view wx:if="{{ !editPanelOpen }}" class="detail-dock">
-  <button class="detail-found" hover-class="btn-press" bindtap="onFoundTap" disabled="{{ saving || deleting || mountSaving || quantitySaving }}"><text class="found-check">✓</text>找到了</button>
-  <button class="detail-update" hover-class="btn-press" bindtap="onUpdateLocationTap" disabled="{{ saving || deleting || mountSaving || quantitySaving }}">更新位置</button>
-</view>
-
+<view class="sheet-mask {{moreOpen ? 'open' : ''}}" bindtap="onSheetClose" catchtouchmove="noop"><view class="sheet" catchtap="noop"><view class="sheet-title">{{recordedName || name}} · 更多</view><button class="sheet-act" bindtap="onEditToggle"><view class="sheet-act-name">编辑名称与备注</view><text>›</text></button><view wx:if="{{familyShared}}" class="sheet-act"><view class="sheet-act-name">共享状态</view><view class="sheet-act-sub">家人可见</view></view><button class="sheet-act warn" bindtap="onDeleteTap"><view class="sheet-act-name">删除这条记录</view><view class="sheet-act-sub">需要二次确认</view></button><button class="sheet-close" bindtap="onSheetClose">取消</button></view></view>
+<view wx:if="{{!detailPanel}}" class="detail-dock"><button class="detail-found" bindtap="onFoundTap" disabled="{{saving || deleting || mountSaving || quantitySaving || locationCommitSaving}}"><text class="found-check">✓</text>找到了</button><button class="detail-update" bindtap="onUpdateLocationTap" disabled="{{saving || deleting || mountSaving || quantitySaving || locationCommitSaving}}">更新位置</button></view>
 </view>
