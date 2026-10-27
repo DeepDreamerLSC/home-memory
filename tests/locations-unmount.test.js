@@ -1057,7 +1057,7 @@ test("ORPHAN-SWEEP-SCAN-FAILED:终检孤儿扫描的节点全量读失败 → co
   await assertConverged(t, ids, []);
 });
 
-/* ---------- 评审 5655357130 存量 cp_rev 引导 / 评审 5660650680 迟到初始化回退闭环 ---------- */
+/* ---------- 评审 5660849034:存量受控初始化(listAction 字段缺席迁移笔)+ 纯整数 CAS,时间戳互斥谓词全消灭(v4.4;取代 v4.3「引导笔仅 bump+立点笔合一」与 v4.2 两笔初始化) ---------- */
 
 /** 存量形状:移除全部 location 文档的 cp_rev(模拟本合同落地前出生的节点) */
 async function stripCpRev(db) {
@@ -1076,47 +1076,36 @@ async function rootRawDoc(db, rootId) {
   return rows[0] || null;
 }
 
+/** 迁移笔识别:cond 的 cp_rev 值为字段缺席哨兵({ __hm_field_absent__: true } 形状) */
+function isMigrationPen(cond) {
+  return !!(
+    cond && cond.cp_rev !== null && typeof cond.cp_rev === "object" &&
+    cond.cp_rev.__hm_field_absent__ === true
+  );
+}
+
 /**
- * 存量立点观察门闩(v4.3 口径):立点笔=patch 带 deleting 且 cp_rev:1、谓词**无**
- * cp_rev(存量步② 合一笔;新节点 CAS 立点笔谓词带 cp_rev:0,phase 推进笔 cp_rev≥2,
- * 均不计)。恒定 now 注入(updated_at 全程同值)——存量首立点无整数谓词可用(字段
- * 尚未出生),同值重复命中写同值 1,幂等不回退,互斥由 phase 推进的 cp_rev 条件写收敛。
- * stats:{ attempts(立点笔次数), wins(其中落库成功数), guidePens(引导笔次数——
- * patch 仅 updated_at、绝不含 cp_rev), revWrites(全部成功落库的 cp_rev 写值序列) }
+ * 并发迁移门闩(LEGACY-MIGRATION-ABSENT-COND):同一 _id 的迁移笔都到齐后才放行
+ * 执行——两笔都按「读到的无 cp_rev 形状」建好谓词后才落笔,字段缺席条件只允许
+ * 恰一笔命中(第一笔把 cp_rev 从无到 0,第二笔谓词必失配),绝不覆盖已存在值。
  */
-function stockEstablishGateDb(db, stats) {
+function migrationRaceGateDb(db, targetId, stats) {
   var arrivals = 0;
   var release;
   var gate = new Promise(function (res) { release = res; });
   return observingWhereDb(db, function (cond, options, q) {
-    var d = options && options.data;
-    // 引导笔特征:patch 仅含 updated_at(v4.2 的初始化笔 patch 含 cp_rev:0,新方案绝不)
-    var isGuide = !!(
-      d && d.deleting === undefined && d.cp_rev === undefined &&
-      cond && cond.cp_rev === undefined && cond.updated_at !== undefined &&
-      Object.keys(d).length === 1
-    );
-    if (isGuide) stats.guidePens += 1;
-    // 立点笔特征:patch 带 deleting 且为合一写 cp_rev=1(谓词无整数可用)
-    var isEstablish = !!(d && d.deleting !== undefined && d.cp_rev === 1 && cond.cp_rev === undefined);
-    if (!isEstablish && d && d.cp_rev !== undefined && !isGuide) {
-      // phase 推进笔(cp_rev≥2):记录成功落库的 cp_rev 写值,供「绝不写 0/绝不回退」断言
-      return q.update(options).then(function (res) {
-        if (res && res.stats && res.stats.updated >= 1) stats.revWrites.push(d.cp_rev);
-        return res;
-      });
-    }
-    if (!isEstablish) {
+    if (!(cond && cond._id === targetId && isMigrationPen(cond))) {
       return q.update(options);
     }
-    stats.attempts += 1;
     arrivals += 1;
+    stats.pens += 1;
     if (arrivals === 2) release();
     return gate.then(function () {
       return q.update(options).then(function (res) {
         if (res && res.stats && res.stats.updated >= 1) {
           stats.wins += 1;
-          stats.revWrites.push(d.cp_rev);
+        } else {
+          stats.misses += 1;
         }
         return res;
       });
@@ -1124,145 +1113,209 @@ function stockEstablishGateDb(db, stats) {
   });
 }
 
+test("LEGACY-MIGRATION-ABSENT-COND:listAction 读到无 cp_rev 节点 → 字段缺席谓词迁移笔写入 cp_rev:0;再次 list 零新笔;两个并发 listAction 对同一节点恰一笔迁移成功(失配笔绝不覆盖已存在值);迁移后 unmount 正常收敛", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  // 单次 list:全部存量节点各恰一笔迁移笔,写后 cp_rev=0(整数),节点其余字段不动
+  var pens1 = { count: 0 };
+  var countDb1 = observingWhereDb(t.db, function (cond, options, q) {
+    if (isMigrationPen(cond)) pens1.count += 1;
+    return q.update(options);
+  });
+  var res1 = await locHandler({ action: "list" }, Object.assign({}, t.deps, { db: countDb1 }));
+  assert.equal(res1.ok, true, JSON.stringify(res1));
+  assert.equal(pens1.count, 5, "5 个存量节点各恰一笔迁移笔(谓词=cp_rev 字段缺席,零时间戳)");
+  var nodes1 = await rawDocs(t.db, "locations");
+  assert.equal(nodes1.length, 5);
+  for (var i = 0; i < nodes1.length; i++) {
+    assert.ok(
+      Number.isInteger(nodes1[i].cp_rev) && nodes1[i].cp_rev === 0,
+      "迁移后 cp_rev=0:" + nodes1[i]._id + "(实测:" + JSON.stringify(nodes1[i].cp_rev) + ")"
+    );
+  }
+  // 再次 list:全部节点已带 cp_rev ⇒ 零新迁移笔(字段缺席谓词对存在值恒失配,幂等收敛)
+  var pens2 = { count: 0 };
+  var countDb2 = observingWhereDb(t.db, function (cond, options, q) {
+    if (isMigrationPen(cond)) pens2.count += 1;
+    return q.update(options);
+  });
+  await locHandler({ action: "list" }, Object.assign({}, t.deps, { db: countDb2 }));
+  assert.equal(pens2.count, 0, "已迁移节点不再发笔");
+
+  // 并发:两个 listAction 都按存量形状读到 → 同一节点两笔迁移笔,恰一笔命中
+  await stripCpRev(t.db);
+  var stats = { pens: 0, wins: 0, misses: 0 };
+  var raceDb = migrationRaceGateDb(t.db, ids.studyId, stats);
+  var results = await Promise.all([
+    locHandler({ action: "list" }, Object.assign({}, t.deps, { db: raceDb })),
+    locHandler({ action: "list" }, Object.assign({}, t.deps, { db: raceDb }))
+  ]);
+  assert.equal(results[0].ok, true, JSON.stringify(results[0]));
+  assert.equal(results[1].ok, true, JSON.stringify(results[1]));
+  assert.equal(stats.pens, 2, "两个并发 listAction 对书房根各发一笔迁移笔");
+  assert.equal(stats.wins, 1, "字段缺席条件:恰一笔把 cp_rev 从无写到 0");
+  assert.equal(stats.misses, 1, "另一笔谓词失配(cp_rev 已存在),绝不二次覆盖/回写");
+  var rootAfter = await rootRawDoc(t.db, ids.studyId);
+  assert.ok(Number.isInteger(rootAfter.cp_rev) && rootAfter.cp_rev === 0, "终态 cp_rev=0");
+
+  // 迁移完成后 unmount 立点走纯整数 CAS(0→1),正常收敛(原 STOCK-CP-REV-BOOTSTRAP 场景)
+  var un = await unmount(t.deps, ids.studyId);
+  assert.equal(un.ok, true, JSON.stringify(un));
+  assert.equal(un.deleted_nodes, 3, "受控迁移不改变删除计数");
+  await assertConverged(t, ids, []);
+});
+
+test("LEGACY-UNMOUNT-WITHOUT-MIGRATION:直接调 unmount(未走 listAction)遇缺 cp_rev 根 → 阶段一之前失败关闭 INVALID_INPUT(明确提示走删除预览),零解挂零写入零删除;走一次 list 后同一请求成功(受控迁移闭环)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  var item = await createItem(t.deps, "op-legacy-direct", "字典", "书房的书柜");
+  await linkItem(t.deps, item, ids.layerId, 1, "u-legacy-direct");
+  await stripCpRev(t.db);
+  var res = await unmount(t.deps, ids.studyId);
+  assert.equal(res.ok, false, JSON.stringify(res));
+  assert.equal(res.error, "INVALID_INPUT", "缺 cp_rev 根:失败关闭,受控迁移路径");
+  assert.ok(
+    res.message.indexOf("请先进入该位置的删除预览再重试") !== -1,
+    "错误消息明确引导受控迁移入口(实测:" + res.message + ")"
+  );
+  var nodes = await rawDocs(t.db, "locations");
+  assert.equal(nodes.length, 5, "零删除:全部节点仍在");
+  var root = nodes.find(function (n) { return n._id === ids.studyId; });
+  assert.equal(root.deleting, undefined, "未立检查点");
+  assert.equal(root.cp_rev, undefined, "unmount 路径绝不就地初始化(迁移只发生在 list 读路径)");
+  var itemDoc = (await rawDocs(t.db, "items")).find(function (d) { return d._id === item; });
+  assert.equal(itemDoc.location_node_id, ids.layerId, "阶段一未执行:挂载未被解挂(失败关闭先于一切副作用)");
+  // 受控迁移闭环:走一次 list(惰性迁移)后,同一 unmount 请求即成功
+  var listed = await locHandler({ action: "list" }, t.deps);
+  assert.equal(listed.ok, true, JSON.stringify(listed));
+  var ok = await unmount(t.deps, ids.studyId);
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  await assertConverged(t, ids, [item]);
+});
+
+test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根经 list 迁移(cp_rev=0)后,恒定时间戳(updated_at 全程同值)双立点 → 纯整数 CAS 恰一个成功,败者读得现存 deleting 转同根重放续跑,双双收敛零残留(存量互斥不再依赖时间戳)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  await locHandler({ action: "list" }, t.deps); // 受控迁移:全部节点 cp_rev=0
+  var stats = { attempts: 0, wins: 0 };
+  var gateDb = sameMsEstablishGateDb(t.db, stats);
+  var fixedNow = function () { return "2099-01-01T00:00:00.000Z"; };
+  var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+  var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+
+  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+
+  assert.equal(stats.attempts, 2, "两个写入者都发起了整数 CAS 立点笔(谓词 cp_rev=0)");
+  assert.equal(stats.wins, 1, "同毫秒双立点:纯整数 CAS 只允许恰好一个成功(updated_at 同值,不参与互斥)");
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 败者同根重放续跑,双双收敛");
+  }
+  await assertConverged(t, ids, []);
+});
+
 /**
- * 迟到引导门闩(评审 5660650680 点名的确定性交错):第二个到达的引导笔挂起,直到
- * 一笔立点笔(patch 带 deleting)真正落库后才放行执行——即「B 的引导谓词先构建、
- * A 完成引导+立点(cp_rev=1,deleting)之后 B 才落笔」。新旧两种引导笔形状都识别
- * (patch 无 deleting、谓词无 cp_rev、patch 含 updated_at),使本门闩对 v4.2 的
- * 初始化笔同样生效(该形状此刻会把 cp_rev 回写成 0——反例位)。probe 记录:
- * releasedAt(是否确在立点后放行)/ updated(迟到笔命中数)/ doc(执行后的根形状)。
+ * 迟到立点门闩(评审 5660849034 点名的确定性交错,v4.4 口径):双立点笔都到齐后才
+ * 放行**先到者(A)**执行;后到者(B,谓词持旧 cp_rev=0)持续挂起。A 立点(cp_rev
+ * 0→1)→ 推进笔把 cp_rev 写到 2 → A 的下一笔检查点写(cp_rev=3)被注入故障打断,
+ * A 以 UNMOUNT_INCOMPLETE 落定、库内检查点停在 cp_rev=2;此刻才放行 B 的迟到立点
+ * 笔执行——即「B 的立点笔晚于 A 推进到 cp_rev=2 之后才执行」。恒定时间戳注入:
+ * updated_at 全程同值,迟到立点笔的 updated_at 谓词照样命中,**只能由 cp_rev 谓词
+ * 拦下**(v4.3 时间戳引导在同毫秒下恰在此处失效:迟到立点命中旧 updated_at 谓词,
+ * 把已推进的 cp_rev=2/orphan_ids 覆盖回 1/nodes——评审点名漏洞)。
+ * probe:{ releaseLate()(外部放行迟到笔), lateUpdated(B 笔命中数),
+ * before(A 落定后、B 执行前根形状), after(B 迟到笔执行后根形状) }
  */
-function lateInitGateDb(db, probe) {
-  var guideArrivals = 0;
-  var releaseEstablished;
-  var established = new Promise(function (res) { releaseEstablished = res; });
+function lateEstablishGateDb(db, probe) {
+  var establishArrivals = 0;
+  var releaseBoth;
+  var bothArrived = new Promise(function (res) { releaseBoth = res; });
+  var releaseLate;
+  var lateGate = new Promise(function (res) { releaseLate = res; });
+  var sawAdvance2 = false;
+  var faulted = false;
+  probe.releaseLate = releaseLate;
   return observingWhereDb(db, function (cond, options, q) {
     var d = options && options.data;
-    if (d && d.deleting !== undefined) {
-      // 立点/phase 推进笔:首笔成功落库即放行迟到引导笔
-      return q.update(options).then(function (res) {
-        if (res && res.stats && res.stats.updated >= 1) releaseEstablished();
-        return res;
-      });
+    if (!(d && d.deleting !== undefined)) {
+      return q.update(options); // 非检查点笔直通
     }
-    var isGuideLike = !!(
-      d && d.deleting === undefined && cond && cond.cp_rev === undefined &&
-      cond.updated_at !== undefined && Object.keys(d).indexOf("updated_at") !== -1
-    );
-    if (isGuideLike) {
-      guideArrivals += 1;
-      if (guideArrivals === 2) {
-        return established.then(function () {
-          probe.releasedAt = "after-establish";
-          return q.update(options).then(function (res) {
-            probe.updated = res && res.stats ? res.stats.updated : -1;
-            return rootRawDoc(db, cond._id).then(function (doc) {
-              probe.doc = doc;
-              return res;
-            });
-          });
+    var isEstablish = !!(d.cp_rev === 1 && cond.cp_rev === 0);
+    if (isEstablish) {
+      establishArrivals += 1;
+      if (establishArrivals === 2) releaseBoth();
+      if (establishArrivals === 1) {
+        // A(先到):两笔到齐后立即执行,随后一路推进直至被故障打断
+        return bothArrived.then(function () {
+          return q.update(options);
         });
       }
+      // B(后到、迟到):挂起到 A 落定、外部调 probe.releaseLate() 后才执行
+      return lateGate.then(function () {
+        return q.update(options).then(function (res) {
+          probe.lateUpdated = res && res.stats ? res.stats.updated : -1;
+          return rootRawDoc(db, cond._id).then(function (doc) {
+            probe.after = doc;
+            return res;
+          });
+        });
+      });
     }
-    return q.update(options);
+    // 检查点推进笔:cp_rev=2 落库后,武装「打断下一笔(cp_rev=3)」——打断先于执行,
+    // 库内检查点停在 cp_rev=2
+    if (sawAdvance2 && !faulted && d.cp_rev === 3) {
+      faulted = true;
+      return Promise.reject(new Error("fault:late-establish:advance3"));
+    }
+    return q.update(options).then(function (res) {
+      if (res && res.stats && res.stats.updated >= 1 && d.cp_rev === 2) {
+        sawAdvance2 = true;
+      }
+      return res;
+    });
   });
 }
 
-test("STOCK-CP-REV-BOOTSTRAP:存量根(无 cp_rev)单次 unmount → 引导笔仅 bump updated_at(绝不写 cp_rev)+ 立点笔合一写 cp_rev=1+deleting,收敛零残留", async () => {
+test("STOCK-LATE-ESTABLISH-AFTER-ADVANCE:A 立点+推进到 cp_rev=2 后,B 的迟到立点(恒定时间戳,updated_at 谓词同值仍命中)才执行 → cp_rev 谓词失配 0 命中,已推进检查点(含 subtree_node_ids/counts 及 orphan_ids 等全部清单字段)分毫未动,B 转同根重放续跑收敛(评审 5660849034 点名交错;v4.3 同毫秒迟到立点覆盖漏洞的反例位)", async () => {
   var t = fresh();
   var ids = await setupTree(t);
   await stripCpRev(t.db);
-  var res = await unmount(t.deps, ids.studyId);
-  assert.equal(res.ok, true, JSON.stringify(res));
-  assert.equal(res.deleted_nodes, 3, "存量引导不改变删除计数");
-  await assertConverged(t, ids, []);
-});
-
-test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根(无 cp_rev)同毫秒双请求 → 引导笔仅 bump updated_at(patch 绝不含 cp_rev)+ 立点笔合一写 cp_rev=1+deleting(同值幂等,绝无 0 回写),双双同根续跑收敛零残留", async () => {
-  var t = fresh();
-  var ids = await setupTree(t);
-  await stripCpRev(t.db);
-  var stats = { attempts: 0, wins: 0, guidePens: 0, revWrites: [] };
-  var gateDb = stockEstablishGateDb(t.db, stats);
-  // 恒定时间戳=根当前 updated_at(同毫秒语义:本测试所有写都不改变 updated_at 的值)
+  await locHandler({ action: "list" }, t.deps); // 受控迁移:全部节点 cp_rev=0
+  // 恒定时间戳 = 根当前 updated_at:B 的迟到立点笔 updated_at 谓词全程同值命中,
+  // 0 命中只能归因于 cp_rev 谓词失配(这正是被消灭的时间戳互斥缺口)
   var rootDoc = await rootRawDoc(t.db, ids.studyId);
   var sameMs = rootDoc.updated_at;
   var fixedNow = function () { return sameMs; };
+  var probe = {};
+  var gateDb = lateEstablishGateDb(t.db, probe);
   var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
   var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
 
-  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+  var pA = unmount(depsA, ids.studyId);
+  var pB = unmount(depsB, ids.studyId);
+  // 先到立点者(runner,不绑定具体请求)一路推进直至被注入故障打断落定;后到的
+  // 迟到立点笔此刻仍挂起(未执行),库内检查点稳定停在 cp_rev=2
+  var runnerRes = await Promise.race([pA, pB]);
 
-  assert.equal(stats.guidePens, 2, "两个写入者各发一笔引导笔(patch 仅 updated_at)");
-  assert.equal(stats.attempts, 2, "两个写入者都发起了立点笔");
-  // 存量首立点无整数谓词可用(cp_rev 字段尚未出生):同值可重复命中——写的是同值
-  // cp_rev=1 与确定性同 op_id 检查点,幂等不构成回退;此后互斥由 phase 推进的
-  // cp_rev 条件写承担(评审 5660650680:v4.2 初始化笔在此交错会把 cp_rev 回写为 0)
-  assert.equal(stats.wins, 2, "同值双立点幂等命中(值恒 1,无 0 回写)");
-  assert.equal(stats.revWrites[0], 1, "首笔落库的 cp_rev=1(引导笔不写 cp_rev,1 由立点笔合一引入)");
-  assert.ok(
-    stats.revWrites.every(function (v) { return v >= 1; }),
-    "任何成功落库的检查点写都不写 0/不回退(实测序列:" + JSON.stringify(stats.revWrites) + ")"
+  assert.equal(runnerRes.ok, false, JSON.stringify(runnerRes));
+  assert.equal(runnerRes.error, "UNMOUNT_INCOMPLETE", "先到立点者被注入故障打断,如实未完成");
+  probe.before = await rootRawDoc(t.db, ids.studyId);
+  assert.ok(probe.before, "先到者落定后根形状已采样");
+  assert.equal(probe.before.cp_rev, 2, "库内检查点停在 cp_rev=2(推进笔已落库)");
+  assert.equal(probe.before.deleting.phase, "compensate", "phase 已推进到 compensate(不再是立点时的 nodes)");
+  probe.releaseLate(); // 此刻才放行迟到立点笔(晚于推进到 cp_rev=2 之后)
+  var settled = await Promise.all([pA, pB]);
+
+  assert.equal(probe.lateUpdated, 0, "迟到立点笔 0 命中——cp_rev 谓词失配(updated_at 同值已命中,全靠整数 CAS 拦下)");
+  assert.deepEqual(probe.after.deleting, probe.before.deleting, "已推进检查点整体分毫未动(含 subtree_node_ids/counts/orphan_ids 等全部清单字段,绝无覆盖回 nodes/低版本)");
+  assert.equal(probe.after.cp_rev, 2, "cp_rev 仍为 2,版本号零回退");
+  assert.equal(
+    settled.filter(function (r) { return r.ok === true; }).length,
+    1,
+    "恰一个请求收敛完成(迟到者转同根重放续跑),另一请求如实 UNMOUNT_INCOMPLETE:" +
+      JSON.stringify(settled.map(function (r) { return r.ok + "/" + r.error; }))
   );
-  for (var i = 0; i < results.length; i++) {
-    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 并发同根续跑,双双收敛");
-  }
-  await assertConverged(t, ids, []);
-});
-
-test("STOCK-LATE-INIT-ROLLBACK:存量根(无 cp_rev)B 的引导谓词先构建、A bump+立点(cp_rev=1,deleting)后才执行 → 迟到笔谓词失配 0 命中、cp_rev 仍 ≥1、deleting 完好、B 转同根重放续跑(评审 5660650680 点名交错)", async () => {
-  var t = fresh();
-  var ids = await setupTree(t);
-  await stripCpRev(t.db);
-  var probe = {};
-  var gateDb = lateInitGateDb(t.db, probe);
-  // 共享推进时钟:A 的引导/立点各写新值 ⇒ B 手里旧 updated_at 谓词必失配
-  var depsA = Object.assign({}, t.deps, { db: gateDb });
-  var depsB = Object.assign({}, t.deps, { db: gateDb });
-
-  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
-
-  assert.equal(probe.releasedAt, "after-establish", "迟到引导笔确在立点之后才执行(交错注入生效)");
-  assert.equal(probe.updated, 0, "B 的迟到引导笔 0 命中(A 已 bump 改写 updated_at,谓词失配)");
-  assert.ok(probe.doc, "迟到笔执行后根形状已采样");
-  assert.ok(
-    Number.isInteger(probe.doc.cp_rev) && probe.doc.cp_rev >= 1,
-    "A 的 cp_rev 仍 ≥1——迟到笔绝不写 cp_rev,无回退(实测:" + JSON.stringify(probe.doc.cp_rev) + ")"
-  );
-  assert.ok(probe.doc.deleting, "deleting 完好");
-  assert.equal(probe.doc.deleting.op_id, "unmount:" + digest16(ids.studyId), "检查点 op_id 确定性同值");
-  for (var i = 0; i < results.length; i++) {
-    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "A 完成 / B 同根重放续跑,双双收敛");
-  }
-  await assertConverged(t, ids, []);
-});
-
-test("STOCK-LATE-INIT-SAME-MS-NO-ROLLBACK:恒定时间戳(updated_at 全程同值)下 B 引导笔迟到于 A 立点之后执行 → 命中亦只 bump 时间戳、cp_rev 绝不回写为 0,deleting 完好,双双收敛零残留(v4.2 迟到回退漏洞的确定性反例位)", async () => {
-  var t = fresh();
-  var ids = await setupTree(t);
-  await stripCpRev(t.db);
-  // 同毫秒:updated_at 值全程不变——v4.2 的迟到初始化笔在此刻命中并把 cp_rev 回写
-  // 为 0(评审 5660650680 确定性交错);v4.3 引导笔只写时间戳,命中亦零危害
-  var rootDoc = await rootRawDoc(t.db, ids.studyId);
-  var sameMs = rootDoc.updated_at;
-  var probe = {};
-  var gateDb = lateInitGateDb(t.db, probe);
-  var fixedNow = function () { return sameMs; };
-  var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
-  var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
-
-  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
-
-  assert.equal(probe.releasedAt, "after-establish", "迟到引导笔确在立点之后才执行(交错注入生效)");
-  assert.equal(probe.updated, 1, "同值命中允许(仅写 updated_at,patch 无 cp_rev)");
-  assert.ok(
-    probe.doc && Number.isInteger(probe.doc.cp_rev) && probe.doc.cp_rev >= 1,
-    "cp_rev ≥1,绝无回退为 0(实测:" + JSON.stringify(probe.doc && probe.doc.cp_rev) + ")"
-  );
-  assert.ok(probe.doc && probe.doc.deleting, "deleting 完好");
-  for (var i = 0; i < results.length; i++) {
-    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "A 完成 / B 同根重放续跑,双双收敛");
-  }
   await assertConverged(t, ids, []);
 });
 

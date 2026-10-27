@@ -3,7 +3,9 @@
 /**
  * locations 纯函数 handler(docs/design/location-tree.md §5)。
  * handler(event, deps):身份只来自 deps.householdId,绝不从 event 读取任何身份字段;
- * deps = { db, now(), genId(), digest(s), householdId, logger, callLLM?(仅 LLM action 需要) }。
+ * deps = { db, now(), genId(), digest(s), householdId, logger, callLLM?(仅 LLM action 需要),
+ *   fieldAbsent?()?(可选:「字段缺席」查询条件的取值,v4.4 存量迁移笔谓词;生产端
+ *   index.js 注入 db.command.exists(false),未注入时用库内哨兵,memoryDb 同语义识别) }。
  * - db 类 action:list/ensurePath/rename/move/merge/delete/linkItem/unlinkItem/applyScan/
  *   ensureAndLink(十七轮「放进」:建缺失路径 + 挂靠一次完成);
  * - LLM 类 action(parseLocation/scanHousehold)在 lib/parse.js,这里 lazy require 避免循环依赖;
@@ -120,6 +122,49 @@ function isReplay(doc, expectedVersion, updateId, fingerprint) {
 
 function locCol(deps) {
   return deps.db.collection(LOC_COLLECTION);
+}
+
+/**
+ * 「字段缺席」查询条件的取值(评审 5660849034 裁定方向:经过验证的数据库字段
+ * 缺席条件,取代一切时间戳互斥谓词)。生产端由 index.js 注入 deps.fieldAbsent()
+ * → db.command.exists(false)(wx-server-sdk 原生支持,真实库按字段缺席匹配);
+ * 未注入时(全部离线测试)退回库内哨兵,tests/helpers/memoryDb.js 的 matches
+ * 对 { __hm_field_absent__: true } 形状按「字段不存在或值为 undefined」识别——
+ * 两侧语义一致:并发两笔「从无到有」的写恰一笔命中,迟到者谓词必失配。
+ */
+var FIELD_ABSENT_SENTINEL = { __hm_field_absent__: true };
+
+function fieldAbsentCond(deps) {
+  if (deps && typeof deps.fieldAbsent === "function") {
+    return deps.fieldAbsent();
+  }
+  return FIELD_ABSENT_SENTINEL;
+}
+
+/**
+ * 存量 cp_rev 受控惰性迁移(v4.4,评审 5660849034;与 unmount 解耦):对读到的
+ * 缺 cp_rev 节点逐个写一笔 `where({_id, household_id, cp_rev: <字段缺席>})
+ * .update({cp_rev: 0})`。原子性由「字段缺席」谓词承担——两个并发迁移,第一个
+ * 把 cp_rev 从无到 0,第二个谓词(cp_rev 不存在)失配 0 命中;即便迟到于他人
+ * 立点/推进(cp_rev 已 ≥1)之后,谓词同样必失配,**版本号回退在结构上不可能**。
+ * 谓词不含任何时间戳。迁移失败(抛错/0 命中)不使读路径失败:unmount 侧对缺
+ * cp_rev 根失败关闭兜底(受控迁移路径),不因一笔机会性迁移阻塞浏览。
+ */
+async function migrateLegacyCpRev(deps, nodes) {
+  for (var i = 0; i < nodes.length; i++) {
+    if (Number.isInteger(nodes[i].cp_rev)) {
+      continue;
+    }
+    try {
+      await locCol(deps).where({
+        _id: nodes[i]._id,
+        household_id: deps.householdId,
+        cp_rev: fieldAbsentCond(deps)
+      }).update({ data: { cp_rev: 0, updated_at: deps.now() } });
+    } catch (migrateErr) {
+      // 读路径上的机会性迁移:失败不阻断 list;unmount 侧失败关闭保证不变量
+    }
+  }
 }
 
 function itemsCol(deps) {
@@ -596,7 +641,7 @@ function pathEntersFrozenSubtree(nodes, segments) {
 // ---------------------------------------------------------------------------
 
 /**
- * list:树浏览(纯读 + 根层惰性建 home 根)。
+ * list:树浏览(读路径 + 根层惰性建 home 根 + 存量 cp_rev 惰性迁移,v4.4)。
  * 返回 parent(或 home 根)的直接子节点与直接挂载物品;item_count 为整棵子树计数;
  * unmounted_count = 未删且未挂载(缺失/null/悬挂)物品数;dangling_mounts 为其中悬挂件数。
  * 根层(#36 0.6.0 真机反馈 Fix 3)另附 unmounted_items 投影(item_id/name/
@@ -632,6 +677,11 @@ async function listAction(event, deps) {
   var isRoot = isHomeRoot(parent);
 
   var nodes = await fetchHouseholdNodes(deps);
+  // 存量 cp_rev 受控惰性迁移(v4.4,评审 5660849034):读到缺 cp_rev 的节点即以
+  // 「字段缺席」谓词条件写 cp_rev:0(与 unmount 解耦;谓词零时间戳,并发恰一笔
+  // 命中,迟到者必失配)。unmount 前必经本读路径,迁移完成后立点统一走整数 CAS;
+  // 未迁移根在 unmount 侧失败关闭(受控迁移路径),绝不回退时间戳引导。
+  await migrateLegacyCpRev(deps, nodes);
   var items = await fetchActiveItems(deps);
   var stats = buildItemCountMap(nodes, items);
   var childCounts = buildChildCountMap(nodes);
@@ -2165,10 +2215,11 @@ async function unmountRunPhases(deps, cp) {
 }
 
 /**
- * unmount 主体(§3 两阶段):重入分流(根已带 deleting ⇒ 直接续跑,唯一放行
- * 例外;祖先带 deleting ⇒ 嵌套拒绝,不立第二检查点)→ 阶段一逐件解挂 → 冲突
- * 熔断(P0-A)→ 步①立检查点(条件写:根文档 updated_at 未被并发改动才成功,
- * 防双开;败者读得现存 deleting 且 op_id 确定性同值 ⇒ 同根重放转续跑)。
+ * unmount 主体(§3 两阶段,v4.4):重入分流(根已带 deleting ⇒ 直接续跑,唯一
+ * 放行例外;祖先带 deleting ⇒ 嵌套拒绝,不立第二检查点)→ 存量缺 cp_rev 失败
+ * 关闭(受控迁移只走 list 读路径)→ 阶段一逐件解挂 → 冲突熔断(P0-A)→ 步①
+ * 立检查点(纯整数 CAS:where cp_rev=当前值 set cp_rev+1 与 deleting 同笔;
+ * 败者读得现存 deleting 且 op_id 确定性同值 ⇒ 同根重放转续跑)。
  */
 async function unmountLocationAction(deps, node, nodes) {
   var rootId = node._id;
@@ -2187,6 +2238,17 @@ async function unmountLocationAction(deps, node, nodes) {
     // 嵌套 unmount(两个删除域交叉,§3.1):祖先在删(自身无标记)/ 后代根带
     // pending 检查点(祖先域会把后代清单连同根文档一起吞掉)——均拒绝,不立第二检查点
     return failDeletingFrozen();
+  }
+  // 存量根(无 cp_rev)受控迁移失败关闭(v4.4,评审 5660849034):存量初始化只
+  // 发生在 list 读路径的字段缺席条件笔(migrateLegacyCpRev,与 unmount 解耦),
+  // unmount 路径不再做任何时间戳引导/就地初始化。读到缺 cp_rev ⇒ 未走受控迁移
+  // 路径(如直接 API 调用)⇒ 阶段一之前即失败关闭 INVALID_INPUT,零解挂零删除
+  // 零写入,提示走删除预览入口(list 惰性迁移后重试)。
+  if (!Number.isInteger(fresh.cp_rev)) {
+    return fail(
+      "INVALID_INPUT",
+      "该位置的数据需要先完成初始化,请先进入该位置的删除预览再重试"
+    );
   }
   // —— 阶段一:逐件 CAS 解挂(枚举子树未删物品;摘挂值恒 null)
   var sub = tree.collectSubtree(nodes, rootId);
@@ -2209,24 +2271,18 @@ async function unmountLocationAction(deps, node, nodes) {
     };
   }
   // —— 阶段二·步①:于待删根文档置 deleting 检查点(先立点、后删除;冻结清单
-  // 以立点时的最新树为准,创建后不变)。条件写口径(评审 5654328065 P0-1 修订):
-  // **互斥由 cp_rev 单调条件写承担**——根文档整数字段 cp_rev(建节点出生即 0),
-  // 立点=条件更新 where{_id, cp_rev: 预期值} set cp_rev+1 与 deleting 同笔;
-  // 同毫秒并发的两个立点者谓词值相同(都读到 cp_rev=N),但先者落笔即把 cp_rev 推到
-  // N+1,后者谓词必失配 0 命中 ⇒ 恰好一个立点成功,败者读得现存 deleting(op_id
-  // 确定性同值)转同根重放续跑——毫秒精度不再参与互斥。updated_at 仅作并存保守谓词
-  // 保留(并发无关写如 rename 仍走失败关闭分支,既有语义不变)。
-  // 存量引导(评审 5660650680 修订,v4.3):存量根文档无 cp_rev——步① **引导笔=
-  // 仅 bump updated_at**(条件更新 where{_id, updated_at 未被并发改动} set
-  // updated_at,**绝不写 cp_rev**)。v4.2 的初始化笔直接 set cp_rev:0 存在迟到
-  // 回退漏洞:其谓词只含 updated_at,特定交错下(同毫秒值不变,或迟到笔先建
-  // where、他人已引导+立点后才执行)仍可命中,把已立点的 cp_rev 从 1(或更高)
-  // 回写成 0,破坏 cp_rev 单调不变量。引导笔只 bump 时间戳后,pending 在旧
-  // updated_at 上的一切谓词(含另一迟到引导笔)全部失配;**本函数全路径唯有
-  // 立点笔与检查点推进笔写 cp_rev(值恒为 现值+1,存量立点恒为 1),不存在任何
-  // 写 0 的笔**,迟到者结构上无从回退版本号。绝不采用「where cp_rev:0 命中缺失
-  // 字段」的合一谓词:memoryDb 与真实库的等值匹配都不命中缺失字段的文档,该
-  // 谓词对存量根恒 0 命中(死路)。
+  // 以立点时的最新树为准,创建后不变)。条件写口径(v4.4,评审 5660849034 裁定
+  // 方向:彻底消灭时间戳互斥谓词):**立点一律纯整数 CAS**——谓词 where{_id,
+  // cp_rev: 当前值} set cp_rev+1 与 deleting 同笔;同毫秒并发的两个立点者谓词
+  // 值相同(都读到 cp_rev=N),但先者落笔即把 cp_rev 推到 N+1,后者谓词必失配
+  // 0 命中 ⇒ 恰好一个立点成功,败者读得现存 deleting(op_id 确定性同值)转同根
+  // 重放续跑。迟到立点(谓词持旧 cp_rev)即便晚至他人推进到更高版本之后执行,
+  // 谓词同样必失配——**已推进的检查点(含 orphan_ids 等全部清单字段)结构上
+  // 不可能被旧立点覆盖回 nodes/低版本**,这正是 v4.3「时间戳引导笔」被废止的
+  // 原因(同毫秒下迟到立点仍可命中旧 updated_at 谓词,评审 5660849034)。
+  // updated_at 仅作并存保守谓词保留(并发无关写如 rename 仍走失败关闭分支,
+  // 既有语义不变),不承担互斥。存量根在进入本段前已由上方失败关闭保证带整数
+  // cp_rev(新节点出生即 0 / 存量经 list 字段缺席笔迁移后同为 0)。
   var nodesFresh = await fetchHouseholdNodes(deps);
   var subFresh = tree.collectSubtree(nodesFresh, rootId);
   if (subFresh.nodes.length === 0) {
@@ -2241,68 +2297,19 @@ async function unmountLocationAction(deps, node, nodes) {
     created_at: deps.now(),
     status: "pending"
   };
-  var pointFresh = fresh;
-  if (!Number.isInteger(fresh.cp_rev)) {
-    // 存量步①:引导笔=仅 bump updated_at(绝不写 cp_rev)。抛错(文档超上限等)
-    // 与 0 命中同路走重读分流;命中与否以 stats 为准(重读后 cp_rev 仍缺席即未生效)。
-    var guided = false;
-    try {
-      var guideRes = await locCol(deps).where({
-        _id: rootId,
-        household_id: deps.householdId,
-        updated_at: fresh.updated_at
-      }).update({ data: { updated_at: deps.now() } });
-      guided = !!(guideRes && guideRes.stats && guideRes.stats.updated >= 1);
-    } catch (guideErr) {
-      // 引导笔失败:与下方立点失败同语义,走重读分流
-    }
-    // 存量步②:重读分流。迟到引导(B)的 where(updated_at=旧值)在他人已 bump
-    // 后必失配(或同毫秒同值命中但只写时间戳)——重读见 deleting ⇒ 同根重放
-    // 转续跑(立点笔合一写 cp_rev=1+deleting,互斥由其谓词承担);无 deleting、
-    // 无 cp_rev 且引导笔未生效 ⇒ 并发无关写(如 rename)占用 ⇒ 失败关闭。
-    var afterGuide = await findNodeById(deps, rootId);
-    if (!afterGuide) {
-      return fail("NOT_FOUND");
-    }
-    if (afterGuide.deleting !== undefined) {
-      // 并发者已完成立点:同根重放转续跑(版本号由对方立点笔引入,绝无回退)
-      var guidedCp = validCheckpoint(afterGuide.deleting, rootId, deps);
-      if (guidedCp === null) {
-        return fail("UNMOUNT_CHECKPOINT_CORRUPT");
-      }
-      return unmountRunPhases(deps, guidedCp);
-    }
-    if (!guided && !Number.isInteger(afterGuide.cp_rev)) {
-      // 引导笔未生效且无并发立点 ⇒ 并发无关写(如 rename)占用了 updated_at:
-      // 失败关闭(既有保守语义),零删除,重入重新发起
-      return {
-        ok: false,
-        error: "UNMOUNT_INCOMPLETE",
-        message: ERROR_MESSAGES.UNMOUNT_INCOMPLETE,
-        pending: projectCheckpoint(checkpoint),
-        detail: { pending: projectCheckpoint(checkpoint) }
-      };
-    }
-    pointFresh = afterGuide;
-  }
   var pointCond = {
     _id: rootId,
     household_id: deps.householdId,
-    updated_at: pointFresh.updated_at
+    updated_at: fresh.updated_at,
+    // 纯整数 CAS 互斥谓词(新节点出生即 0 / 存量经 list 迁移后同为 0):
+    // 同毫秒双立点仅一个成功,迟到立点必失配
+    cp_rev: fresh.cp_rev
   };
-  var pointData = { deleting: checkpoint, updated_at: deps.now() };
-  if (Number.isInteger(pointFresh.cp_rev)) {
-    // 新节点(建节点出生即 cp_rev=0)或已带整数版本号的根:整数 CAS 互斥谓词,
-    // 同毫秒双立点仅一个成功
-    pointCond.cp_rev = pointFresh.cp_rev;
-    pointData.cp_rev = pointFresh.cp_rev + 1;
-  } else {
-    // 存量步② 立点笔(合一):谓词=刚 bump 过的 updated_at,一笔写入 cp_rev=1 与
-    // deleting——版本号与检查点同笔出生,任何迟到引导/立点都不可能制造「有检查
-    // 点无版本号」或「版本号回退」形状(同毫秒下谓词可同值重复命中,但写的是
-    // 同值 cp_rev=1 与确定性同 op_id 检查点,幂等不回退)
-    pointData.cp_rev = 1;
-  }
+  var pointData = {
+    deleting: checkpoint,
+    updated_at: deps.now(),
+    cp_rev: fresh.cp_rev + 1
+  };
   var wrote = null;
   try {
     wrote = await locCol(deps).where(pointCond).update({ data: pointData });
