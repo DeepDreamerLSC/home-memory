@@ -109,6 +109,7 @@ interface ItemPanelState {
   visible: boolean;
   /** 建档幂等键(评审 5663031433):同面板会话固定,重试返回已有物品不重复建档 */
   createOperationId: string;
+  createPayloadSig: string;
   name: string;
   quantity: number;
   unitIndex: number;
@@ -379,6 +380,7 @@ Page<
     itemPanel: {
       visible: false,
       createOperationId: "",
+      createPayloadSig: "",
       name: "",
       quantity: 1,
       unitIndex: 0,
@@ -1680,7 +1682,7 @@ Page<
     }
     this.setData({
       addPanel: { ...this.data.addPanel, visible: false },
-      itemPanel: { visible: true, createOperationId: "", name: "", quantity: 1, unitIndex: 0, busy: false },
+      itemPanel: { visible: true, createOperationId: "", createPayloadSig: "", name: "", quantity: 1, unitIndex: 0, busy: false },
     });
   },
 
@@ -1730,8 +1732,10 @@ Page<
     const locationText = this.nodePath.join(" / ");
     // 建档幂等(评审 5663031433 P1):同一次面板会话固定 operation_id,
     // 服务端已建档但客户端超时 → 重试返回已有物品(duplicated),绝不重复建档
-    if (!panel.createOperationId) {
+    const payloadSig = name + "|" + panel.quantity + "|" + UNIT_SET[panel.unitIndex];
+    if (!panel.createOperationId || panel.createPayloadSig !== payloadSig) {
       panel.createOperationId = uuid();
+      panel.createPayloadSig = payloadSig;
       this.setData({ itemPanel: { ...panel } });
     }
     this.setData({ itemPanel: { ...this.data.itemPanel, busy: true }, acting: true });
