@@ -2118,11 +2118,13 @@ async function unmountRunPhases(deps, cp) {
         scans_marked: scansMarked
       };
     }
-    // 不假报:删除后新并发写入产生残留孤儿(或复扫失败无法证实零残留)
+    // 不假报:删除后新并发写入产生残留孤儿(或复扫失败无法证实零残留)。
+    // 文案口径(评审 5660650680 附带要求):原根已硬删,普通位置页不一定能
+    // 导航到或重新删除残留孤儿——只建议人工核对,不承诺从已删位置自动重新进入清理
     return {
       ok: false,
       error: "UNMOUNT_INCOMPLETE",
-      message: "位置删除已执行,但检测到删除期间的新增写入产生了残留的孤立位置,请重新对该位置发起删除或人工核对处理",
+      message: "位置删除已执行,但检测到删除期间的新增写入产生了残留的孤立位置,请人工核对后再行处理",
       deleted_nodes: deletedTotal, // 如实报告已删除部分
       remounted: 0,
       unmounted: counts.unmounted,
@@ -2133,7 +2135,7 @@ async function unmountRunPhases(deps, cp) {
         post_root_orphans: postOrphans, // null ⇒ 复扫失败
         rescan_failed: postOrphans === null,
         advice:
-          "删除后检测到新并发写入:残留孤儿节点 id 已随响应列出,检查点已随根位置删除、无自动恢复凭据;建议对残留位置重新发起删除或人工核对处理"
+          "删除后检测到新并发写入:残留孤儿节点 id 已随响应列出,原位置已删除、检查点已随之清除,无自动恢复凭据;请人工核对残留位置后再行处理,勿从已删位置重试"
       }
     };
   } catch (err) {
@@ -2214,13 +2216,17 @@ async function unmountLocationAction(deps, node, nodes) {
   // N+1,后者谓词必失配 0 命中 ⇒ 恰好一个立点成功,败者读得现存 deleting(op_id
   // 确定性同值)转同根重放续跑——毫秒精度不再参与互斥。updated_at 仅作并存保守谓词
   // 保留(并发无关写如 rename 仍走失败关闭分支,既有语义不变)。
-  // 存量引导(评审 5655357130 修 1):存量根文档无 cp_rev——**先做原子初始化笔**
-  // (条件更新 where{_id, updated_at 未被并发改动} set cp_rev:0,不写 deleting,
-  // 幂等:并发多笔同值初始化互不冲突),成功者重读再走 cp_rev 0→1 整数 CAS 立点。
-  // 绝不采用「where cp_rev:0 命中缺失字段」的合一谓词:memoryDb 与真实库的等值
-  // 匹配都不命中缺失字段的文档,该谓词对存量根恒 0 命中(死路);两笔方案在两种
-  // 库语义下都成立且可测——同毫秒双请求要么都完成同值初始化(幂等),要么一方
-  // 失配重读续走,随后的整数 CAS 恒恰一个成功。
+  // 存量引导(评审 5660650680 修订,v4.3):存量根文档无 cp_rev——步① **引导笔=
+  // 仅 bump updated_at**(条件更新 where{_id, updated_at 未被并发改动} set
+  // updated_at,**绝不写 cp_rev**)。v4.2 的初始化笔直接 set cp_rev:0 存在迟到
+  // 回退漏洞:其谓词只含 updated_at,特定交错下(同毫秒值不变,或迟到笔先建
+  // where、他人已引导+立点后才执行)仍可命中,把已立点的 cp_rev 从 1(或更高)
+  // 回写成 0,破坏 cp_rev 单调不变量。引导笔只 bump 时间戳后,pending 在旧
+  // updated_at 上的一切谓词(含另一迟到引导笔)全部失配;**本函数全路径唯有
+  // 立点笔与检查点推进笔写 cp_rev(值恒为 现值+1,存量立点恒为 1),不存在任何
+  // 写 0 的笔**,迟到者结构上无从回退版本号。绝不采用「where cp_rev:0 命中缺失
+  // 字段」的合一谓词:memoryDb 与真实库的等值匹配都不命中缺失字段的文档,该
+  // 谓词对存量根恒 0 命中(死路)。
   var nodesFresh = await fetchHouseholdNodes(deps);
   var subFresh = tree.collectSubtree(nodesFresh, rootId);
   if (subFresh.nodes.length === 0) {
@@ -2237,31 +2243,37 @@ async function unmountLocationAction(deps, node, nodes) {
   };
   var pointFresh = fresh;
   if (!Number.isInteger(fresh.cp_rev)) {
-    // 存量引导:原子初始化笔(cp_rev:0)。抛错(文档超上限等)与 0 命中同路
-    // 失败关闭——重读后无整数 cp_rev 且无并发立点 ⇒ 零删除返回。
+    // 存量步①:引导笔=仅 bump updated_at(绝不写 cp_rev)。抛错(文档超上限等)
+    // 与 0 命中同路走重读分流;命中与否以 stats 为准(重读后 cp_rev 仍缺席即未生效)。
+    var guided = false;
     try {
-      await locCol(deps).where({
+      var guideRes = await locCol(deps).where({
         _id: rootId,
         household_id: deps.householdId,
         updated_at: fresh.updated_at
-      }).update({ data: { cp_rev: 0, updated_at: deps.now() } });
-    } catch (initErr) {
-      // 初始化笔失败:与下方立点失败同语义,走重读分流
+      }).update({ data: { updated_at: deps.now() } });
+      guided = !!(guideRes && guideRes.stats && guideRes.stats.updated >= 1);
+    } catch (guideErr) {
+      // 引导笔失败:与下方立点失败同语义,走重读分流
     }
-    var afterInit = await findNodeById(deps, rootId);
-    if (!afterInit) {
+    // 存量步②:重读分流。迟到引导(B)的 where(updated_at=旧值)在他人已 bump
+    // 后必失配(或同毫秒同值命中但只写时间戳)——重读见 deleting ⇒ 同根重放
+    // 转续跑(立点笔合一写 cp_rev=1+deleting,互斥由其谓词承担);无 deleting、
+    // 无 cp_rev 且引导笔未生效 ⇒ 并发无关写(如 rename)占用 ⇒ 失败关闭。
+    var afterGuide = await findNodeById(deps, rootId);
+    if (!afterGuide) {
       return fail("NOT_FOUND");
     }
-    if (afterInit.deleting !== undefined) {
-      // 并发者已完成立点:同根重放转续跑(互斥由对方的 CAS 已承担)
-      var initCp = validCheckpoint(afterInit.deleting, rootId, deps);
-      if (initCp === null) {
+    if (afterGuide.deleting !== undefined) {
+      // 并发者已完成立点:同根重放转续跑(版本号由对方立点笔引入,绝无回退)
+      var guidedCp = validCheckpoint(afterGuide.deleting, rootId, deps);
+      if (guidedCp === null) {
         return fail("UNMOUNT_CHECKPOINT_CORRUPT");
       }
-      return unmountRunPhases(deps, initCp);
+      return unmountRunPhases(deps, guidedCp);
     }
-    if (!Number.isInteger(afterInit.cp_rev)) {
-      // 初始化笔未生效且无并发立点 ⇒ 并发无关写(如 rename)占用了 updated_at:
+    if (!guided && !Number.isInteger(afterGuide.cp_rev)) {
+      // 引导笔未生效且无并发立点 ⇒ 并发无关写(如 rename)占用了 updated_at:
       // 失败关闭(既有保守语义),零删除,重入重新发起
       return {
         ok: false,
@@ -2271,16 +2283,26 @@ async function unmountLocationAction(deps, node, nodes) {
         detail: { pending: projectCheckpoint(checkpoint) }
       };
     }
-    pointFresh = afterInit;
+    pointFresh = afterGuide;
   }
   var pointCond = {
     _id: rootId,
     household_id: deps.householdId,
-    updated_at: pointFresh.updated_at,
-    cp_rev: pointFresh.cp_rev // 互斥谓词:同毫秒双立点(含存量引导后)仅一个成功
+    updated_at: pointFresh.updated_at
   };
   var pointData = { deleting: checkpoint, updated_at: deps.now() };
-  pointData.cp_rev = pointFresh.cp_rev + 1;
+  if (Number.isInteger(pointFresh.cp_rev)) {
+    // 新节点(建节点出生即 cp_rev=0)或已带整数版本号的根:整数 CAS 互斥谓词,
+    // 同毫秒双立点仅一个成功
+    pointCond.cp_rev = pointFresh.cp_rev;
+    pointData.cp_rev = pointFresh.cp_rev + 1;
+  } else {
+    // 存量步② 立点笔(合一):谓词=刚 bump 过的 updated_at,一笔写入 cp_rev=1 与
+    // deleting——版本号与检查点同笔出生,任何迟到引导/立点都不可能制造「有检查
+    // 点无版本号」或「版本号回退」形状(同毫秒下谓词可同值重复命中,但写的是
+    // 同值 cp_rev=1 与确定性同 op_id 检查点,幂等不回退)
+    pointData.cp_rev = 1;
+  }
   var wrote = null;
   try {
     wrote = await locCol(deps).where(pointCond).update({ data: pointData });

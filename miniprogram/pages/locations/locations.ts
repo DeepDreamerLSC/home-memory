@@ -1285,6 +1285,22 @@ Page<
         return;
       }
       if (isLocationsApiErrorWithCode(e, "UNMOUNT_INCOMPLETE")) {
+        // 删根后复扫分支(评审 5660650680 文案修正):终检后的轻量复扫发现残留孤儿
+        // (或复扫失败无法证实零残留)时,原根已硬删、检查点已随之清除——绝不提示
+        // 「再点一次即可继续清理」(已删位置无从续跑),只建议人工核对
+        const d = (e.detail || {}) as { post_root_orphans?: unknown; rescan_failed?: unknown };
+        if (Array.isArray(d.post_root_orphans) || d.rescan_failed === true) {
+          this.setData({
+            deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+          });
+          wx.showModal({
+            title: "删除后需人工核对",
+            content:
+              "位置已删除,但检测到删除期间的新增写入产生了残留的孤立位置;清理记录已随位置一并删除、无法自动恢复,请人工核对后再行处理。",
+            showCancel: false,
+          });
+          return;
+        }
         wx.showModal({
           title: "清理未完成",
           content: "上次的「转为未归类」还没完成,物品都在;再点一次「转为未归类」即可继续清理。",

@@ -1057,7 +1057,7 @@ test("ORPHAN-SWEEP-SCAN-FAILED:终检孤儿扫描的节点全量读失败 → co
   await assertConverged(t, ids, []);
 });
 
-/* ---------- 评审 5655357130 快速复审三项收尾:存量 cp_rev 引导 / 孤儿先持久后删 / 删根后复扫 ---------- */
+/* ---------- 评审 5655357130 存量 cp_rev 引导 / 评审 5660650680 迟到初始化回退闭环 ---------- */
 
 /** 存量形状:移除全部 location 文档的 cp_rev(模拟本合同落地前出生的节点) */
 async function stripCpRev(db) {
@@ -1070,10 +1070,19 @@ async function stripCpRev(db) {
   }
 }
 
+/** 根文档原始形状直读(不投影) */
+async function rootRawDoc(db, rootId) {
+  var rows = (await db.collection("locations").where({ _id: rootId }).get()).data;
+  return rows[0] || null;
+}
+
 /**
- * 存量根同毫秒双立点门闩:两个写入者的立点笔(patch 带 deleting)都到齐后才放行,
- * 恒定 now 注入(updated_at 全程同值)——互斥只能由整数谓词承担。
- * stats:{ attempts(立点笔次数), wins(其中落库成功数), withRevPredicate(带 cp_rev 谓词的笔数) }
+ * 存量立点观察门闩(v4.3 口径):立点笔=patch 带 deleting 且 cp_rev:1、谓词**无**
+ * cp_rev(存量步② 合一笔;新节点 CAS 立点笔谓词带 cp_rev:0,phase 推进笔 cp_rev≥2,
+ * 均不计)。恒定 now 注入(updated_at 全程同值)——存量首立点无整数谓词可用(字段
+ * 尚未出生),同值重复命中写同值 1,幂等不回退,互斥由 phase 推进的 cp_rev 条件写收敛。
+ * stats:{ attempts(立点笔次数), wins(其中落库成功数), guidePens(引导笔次数——
+ * patch 仅 updated_at、绝不含 cp_rev), revWrites(全部成功落库的 cp_rev 写值序列) }
  */
 function stockEstablishGateDb(db, stats) {
   var arrivals = 0;
@@ -1081,26 +1090,85 @@ function stockEstablishGateDb(db, stats) {
   var gate = new Promise(function (res) { release = res; });
   return observingWhereDb(db, function (cond, options, q) {
     var d = options && options.data;
-    // 立点笔特征:patch 带 deleting 且为 cp_rev 0→1 的整数 CAS(存量引导完成后的
-    // 首笔;phase 推进笔 cp_rev≥2 不计,初始化笔不带 deleting 不计)
-    var isEstablish = !!(d && d.deleting !== undefined && d.cp_rev === 1 && cond.cp_rev === 0);
+    // 引导笔特征:patch 仅含 updated_at(v4.2 的初始化笔 patch 含 cp_rev:0,新方案绝不)
+    var isGuide = !!(
+      d && d.deleting === undefined && d.cp_rev === undefined &&
+      cond && cond.cp_rev === undefined && cond.updated_at !== undefined &&
+      Object.keys(d).length === 1
+    );
+    if (isGuide) stats.guidePens += 1;
+    // 立点笔特征:patch 带 deleting 且为合一写 cp_rev=1(谓词无整数可用)
+    var isEstablish = !!(d && d.deleting !== undefined && d.cp_rev === 1 && cond.cp_rev === undefined);
+    if (!isEstablish && d && d.cp_rev !== undefined && !isGuide) {
+      // phase 推进笔(cp_rev≥2):记录成功落库的 cp_rev 写值,供「绝不写 0/绝不回退」断言
+      return q.update(options).then(function (res) {
+        if (res && res.stats && res.stats.updated >= 1) stats.revWrites.push(d.cp_rev);
+        return res;
+      });
+    }
     if (!isEstablish) {
       return q.update(options);
     }
     stats.attempts += 1;
-    if (cond.cp_rev !== undefined) stats.withRevPredicate += 1;
     arrivals += 1;
     if (arrivals === 2) release();
     return gate.then(function () {
       return q.update(options).then(function (res) {
-        if (res && res.stats && res.stats.updated >= 1) stats.wins += 1;
+        if (res && res.stats && res.stats.updated >= 1) {
+          stats.wins += 1;
+          stats.revWrites.push(d.cp_rev);
+        }
         return res;
       });
     });
   });
 }
 
-test("STOCK-CP-REV-BOOTSTRAP:存量根(无 cp_rev)单次 unmount → 原子初始化笔(cp_rev:0,不写 deleting)+ 整数 CAS 立点,收敛零残留", async () => {
+/**
+ * 迟到引导门闩(评审 5660650680 点名的确定性交错):第二个到达的引导笔挂起,直到
+ * 一笔立点笔(patch 带 deleting)真正落库后才放行执行——即「B 的引导谓词先构建、
+ * A 完成引导+立点(cp_rev=1,deleting)之后 B 才落笔」。新旧两种引导笔形状都识别
+ * (patch 无 deleting、谓词无 cp_rev、patch 含 updated_at),使本门闩对 v4.2 的
+ * 初始化笔同样生效(该形状此刻会把 cp_rev 回写成 0——反例位)。probe 记录:
+ * releasedAt(是否确在立点后放行)/ updated(迟到笔命中数)/ doc(执行后的根形状)。
+ */
+function lateInitGateDb(db, probe) {
+  var guideArrivals = 0;
+  var releaseEstablished;
+  var established = new Promise(function (res) { releaseEstablished = res; });
+  return observingWhereDb(db, function (cond, options, q) {
+    var d = options && options.data;
+    if (d && d.deleting !== undefined) {
+      // 立点/phase 推进笔:首笔成功落库即放行迟到引导笔
+      return q.update(options).then(function (res) {
+        if (res && res.stats && res.stats.updated >= 1) releaseEstablished();
+        return res;
+      });
+    }
+    var isGuideLike = !!(
+      d && d.deleting === undefined && cond && cond.cp_rev === undefined &&
+      cond.updated_at !== undefined && Object.keys(d).indexOf("updated_at") !== -1
+    );
+    if (isGuideLike) {
+      guideArrivals += 1;
+      if (guideArrivals === 2) {
+        return established.then(function () {
+          probe.releasedAt = "after-establish";
+          return q.update(options).then(function (res) {
+            probe.updated = res && res.stats ? res.stats.updated : -1;
+            return rootRawDoc(db, cond._id).then(function (doc) {
+              probe.doc = doc;
+              return res;
+            });
+          });
+        });
+      }
+    }
+    return q.update(options);
+  });
+}
+
+test("STOCK-CP-REV-BOOTSTRAP:存量根(无 cp_rev)单次 unmount → 引导笔仅 bump updated_at(绝不写 cp_rev)+ 立点笔合一写 cp_rev=1+deleting,收敛零残留", async () => {
   var t = fresh();
   var ids = await setupTree(t);
   await stripCpRev(t.db);
@@ -1110,23 +1178,90 @@ test("STOCK-CP-REV-BOOTSTRAP:存量根(无 cp_rev)单次 unmount → 原子初�
   await assertConverged(t, ids, []);
 });
 
-test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根(无 cp_rev)同毫秒双立点 → 初始化笔幂等 + cp_rev 0→1 整数 CAS 恰一个成功,败者读得现存 deleting 转同根重放续跑,双双收敛零残留", async () => {
+test("STOCK-CP-REV-SAME-MS-DOUBLE-ESTABLISH:存量根(无 cp_rev)同毫秒双请求 → 引导笔仅 bump updated_at(patch 绝不含 cp_rev)+ 立点笔合一写 cp_rev=1+deleting(同值幂等,绝无 0 回写),双双同根续跑收敛零残留", async () => {
   var t = fresh();
   var ids = await setupTree(t);
   await stripCpRev(t.db);
-  var stats = { attempts: 0, wins: 0, withRevPredicate: 0 };
+  var stats = { attempts: 0, wins: 0, guidePens: 0, revWrites: [] };
   var gateDb = stockEstablishGateDb(t.db, stats);
-  var fixedNow = function () { return "2099-01-03T00:00:00.000Z"; };
+  // 恒定时间戳=根当前 updated_at(同毫秒语义:本测试所有写都不改变 updated_at 的值)
+  var rootDoc = await rootRawDoc(t.db, ids.studyId);
+  var sameMs = rootDoc.updated_at;
+  var fixedNow = function () { return sameMs; };
   var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
   var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
 
   var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
 
+  assert.equal(stats.guidePens, 2, "两个写入者各发一笔引导笔(patch 仅 updated_at)");
   assert.equal(stats.attempts, 2, "两个写入者都发起了立点笔");
-  assert.equal(stats.withRevPredicate, 2, "立点笔全部带 cp_rev 整数谓词(初始化笔引导完成),绝不留无谓词窗口");
-  assert.equal(stats.wins, 1, "同毫秒双立点恰一个成功(存量引导由 CAS 收敛,updated_at 等值不再参与互斥)");
+  // 存量首立点无整数谓词可用(cp_rev 字段尚未出生):同值可重复命中——写的是同值
+  // cp_rev=1 与确定性同 op_id 检查点,幂等不构成回退;此后互斥由 phase 推进的
+  // cp_rev 条件写承担(评审 5660650680:v4.2 初始化笔在此交错会把 cp_rev 回写为 0)
+  assert.equal(stats.wins, 2, "同值双立点幂等命中(值恒 1,无 0 回写)");
+  assert.equal(stats.revWrites[0], 1, "首笔落库的 cp_rev=1(引导笔不写 cp_rev,1 由立点笔合一引入)");
+  assert.ok(
+    stats.revWrites.every(function (v) { return v >= 1; }),
+    "任何成功落库的检查点写都不写 0/不回退(实测序列:" + JSON.stringify(stats.revWrites) + ")"
+  );
   for (var i = 0; i < results.length; i++) {
-    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 败者同根重放续跑,双双收敛");
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "胜者完成 / 并发同根续跑,双双收敛");
+  }
+  await assertConverged(t, ids, []);
+});
+
+test("STOCK-LATE-INIT-ROLLBACK:存量根(无 cp_rev)B 的引导谓词先构建、A bump+立点(cp_rev=1,deleting)后才执行 → 迟到笔谓词失配 0 命中、cp_rev 仍 ≥1、deleting 完好、B 转同根重放续跑(评审 5660650680 点名交错)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  var probe = {};
+  var gateDb = lateInitGateDb(t.db, probe);
+  // 共享推进时钟:A 的引导/立点各写新值 ⇒ B 手里旧 updated_at 谓词必失配
+  var depsA = Object.assign({}, t.deps, { db: gateDb });
+  var depsB = Object.assign({}, t.deps, { db: gateDb });
+
+  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+
+  assert.equal(probe.releasedAt, "after-establish", "迟到引导笔确在立点之后才执行(交错注入生效)");
+  assert.equal(probe.updated, 0, "B 的迟到引导笔 0 命中(A 已 bump 改写 updated_at,谓词失配)");
+  assert.ok(probe.doc, "迟到笔执行后根形状已采样");
+  assert.ok(
+    Number.isInteger(probe.doc.cp_rev) && probe.doc.cp_rev >= 1,
+    "A 的 cp_rev 仍 ≥1——迟到笔绝不写 cp_rev,无回退(实测:" + JSON.stringify(probe.doc.cp_rev) + ")"
+  );
+  assert.ok(probe.doc.deleting, "deleting 完好");
+  assert.equal(probe.doc.deleting.op_id, "unmount:" + digest16(ids.studyId), "检查点 op_id 确定性同值");
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "A 完成 / B 同根重放续跑,双双收敛");
+  }
+  await assertConverged(t, ids, []);
+});
+
+test("STOCK-LATE-INIT-SAME-MS-NO-ROLLBACK:恒定时间戳(updated_at 全程同值)下 B 引导笔迟到于 A 立点之后执行 → 命中亦只 bump 时间戳、cp_rev 绝不回写为 0,deleting 完好,双双收敛零残留(v4.2 迟到回退漏洞的确定性反例位)", async () => {
+  var t = fresh();
+  var ids = await setupTree(t);
+  await stripCpRev(t.db);
+  // 同毫秒:updated_at 值全程不变——v4.2 的迟到初始化笔在此刻命中并把 cp_rev 回写
+  // 为 0(评审 5660650680 确定性交错);v4.3 引导笔只写时间戳,命中亦零危害
+  var rootDoc = await rootRawDoc(t.db, ids.studyId);
+  var sameMs = rootDoc.updated_at;
+  var probe = {};
+  var gateDb = lateInitGateDb(t.db, probe);
+  var fixedNow = function () { return sameMs; };
+  var depsA = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+  var depsB = Object.assign({}, t.deps, { db: gateDb, now: fixedNow });
+
+  var results = await Promise.all([unmount(depsA, ids.studyId), unmount(depsB, ids.studyId)]);
+
+  assert.equal(probe.releasedAt, "after-establish", "迟到引导笔确在立点之后才执行(交错注入生效)");
+  assert.equal(probe.updated, 1, "同值命中允许(仅写 updated_at,patch 无 cp_rev)");
+  assert.ok(
+    probe.doc && Number.isInteger(probe.doc.cp_rev) && probe.doc.cp_rev >= 1,
+    "cp_rev ≥1,绝无回退为 0(实测:" + JSON.stringify(probe.doc && probe.doc.cp_rev) + ")"
+  );
+  assert.ok(probe.doc && probe.doc.deleting, "deleting 完好");
+  for (var i = 0; i < results.length; i++) {
+    assert.equal(results[i].ok, true, JSON.stringify(results[i]), "A 完成 / B 同根重放续跑,双双收敛");
   }
   await assertConverged(t, ids, []);
 });
@@ -1264,6 +1399,12 @@ test("POST-ROOT-RESCAN-NO-FALSE-SUCCESS:终检通过→删根瞬间并发建子�
   assert.deepEqual(res.detail.post_root_orphans, [lateChildId], "残留孤儿 id 清单如实随响应返回");
   assert.equal(res.detail.rescan_failed, false);
   assert.equal(typeof res.detail.advice, "string", "附处置建议");
+  // 文案口径(评审 5660650680 附带要求):不承诺从已删位置重新发起删除/自动恢复,
+  // 只建议人工核对——原根已硬删,普通位置页不一定能导航或重新删除残留孤儿
+  assert.ok(res.message.indexOf("人工核对") !== -1, "message 建议人工核对:" + res.message);
+  assert.ok(res.message.indexOf("重新对该位置发起删除") === -1, "message 不得承诺从已删位置重新发起删除");
+  assert.ok(res.detail.advice.indexOf("人工核对") !== -1, "advice 建议人工核对");
+  assert.ok(res.detail.advice.indexOf("重新发起删除") === -1, "advice 不得承诺重新发起删除");
   var nodes = await rawDocs(t.db, "locations");
   assert.equal(nodes.some(function (n) { return n._id === ids.studyId; }), false, "根确已删");
   assert.equal(nodes.some(function (n) { return n._id === lateChildId; }), true, "残留孤儿如实保留(不无凭据硬删)");

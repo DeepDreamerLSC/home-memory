@@ -236,6 +236,40 @@ test("UNMOUNT-INCOMPLETE-COPY:未完成态如实提示可续跑,绝不假报成�
   assert.equal(page.data.deleteLayer.busy, false);
 });
 
+test("UNMOUNT-POST-ROOT-RESCAN-COPY:删根后复扫发现残留孤儿 → 提示人工核对,绝不承诺「再点一次即可继续清理」(评审 5660650680 文案口径)", async () => {
+  resetStubs();
+  locationsRouter(function (event) {
+    if (event.action === "deleteLocation") {
+      return Promise.reject(new locationsApi.LocationsApiError(
+        "UNMOUNT_INCOMPLETE",
+        "位置删除已执行,但检测到删除期间的新增写入产生了残留的孤立位置,请人工核对后再行处理",
+        {
+          post_root_orphans: ["lc_late_child"],
+          rescan_failed: false,
+          advice:
+            "删除后检测到新并发写入:残留孤儿节点 id 已随响应列出,原位置已删除、检查点已随之清除,无自动恢复凭据;请人工核对残留位置后再行处理,勿从已删位置重试",
+        },
+      ));
+    }
+    return { ok: true };
+  });
+  var page = makePage(locationsPage);
+  page.setData({ deleteLayer: layer() });
+  await page.doUnmountDelete();
+  assert.equal(toasts.length, 0, "绝不假报成功");
+  assert.equal(modalQueue.length, 1);
+  assert.ok(
+    modalQueue[0].content.indexOf("人工核对") !== -1,
+    "只建议人工核对后再行处理:" + JSON.stringify(modalQueue[0].content),
+  );
+  assert.ok(
+    modalQueue[0].content.indexOf("继续清理") === -1,
+    "原根已硬删,不得承诺再点一次即可继续清理(已删位置无从续跑)",
+  );
+  assert.equal(page.data.deleteLayer.visible, false, "弹层关闭:已删位置不得再点");
+  assert.equal(page.data.deleteLayer.busy, false);
+});
+
 test("UNMOUNT-RESUME-ENTRY:deleting 子节点在列表置灰并标注,入口走 ⋯→删除 的 pending 提示;选择模式下并入 disabled(「选这个」不渲染)", async () => {
   var page = makePage(locationsPage);
   page.setData({ mode: "browse" });
