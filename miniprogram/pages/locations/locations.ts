@@ -109,7 +109,10 @@ interface ItemPanelState {
   visible: boolean;
   /** 建档幂等键(评审 5663031433):同面板会话固定,重试返回已有物品不重复建档 */
   createOperationId: string;
-  createPayloadSig: string;
+  frozenName: string;
+  frozenQuantity: number;
+  frozenUnitIndex: number;
+  frozenLocationText: string;
   name: string;
   quantity: number;
   unitIndex: number;
@@ -380,7 +383,10 @@ Page<
     itemPanel: {
       visible: false,
       createOperationId: "",
-      createPayloadSig: "",
+      frozenName: "",
+      frozenQuantity: 0,
+      frozenUnitIndex: 0,
+      frozenLocationText: "",
       name: "",
       quantity: 1,
       unitIndex: 0,
@@ -1682,7 +1688,7 @@ Page<
     }
     this.setData({
       addPanel: { ...this.data.addPanel, visible: false },
-      itemPanel: { visible: true, createOperationId: "", createPayloadSig: "", name: "", quantity: 1, unitIndex: 0, busy: false },
+      itemPanel: { visible: true, createOperationId: "", frozenName: "", frozenQuantity: 0, frozenUnitIndex: 0, frozenLocationText: "", name: "", quantity: 1, unitIndex: 0, busy: false },
     });
   },
 
@@ -1732,22 +1738,31 @@ Page<
     const locationText = this.nodePath.join(" / ");
     // 建档幂等(评审 5663031433 P1):同一次面板会话固定 operation_id,
     // 服务端已建档但客户端超时 → 重试返回已有物品(duplicated),绝不重复建档
-    const payloadSig = name + "|" + panel.quantity + "|" + UNIT_SET[panel.unitIndex];
-    if (!panel.createOperationId || panel.createPayloadSig !== payloadSig) {
+    // 建档请求冻结(评审 5664505818 终案):首笔生成 operation_id 时快照全部字段;
+    // 未知结果(超时)下重试强制用冻结值——用户改了表单也用原始内容重试(幂等返回已有物品),
+    // 不自动生成新 key(旧请求可能已成功,新 key=第二件物品);表单修改仅在结果确定后生效
+    if (!panel.createOperationId) {
       panel.createOperationId = uuid();
-      panel.createPayloadSig = payloadSig;
+      panel.frozenName = name;
+      panel.frozenQuantity = panel.quantity;
+      panel.frozenUnitIndex = panel.unitIndex;
+      panel.frozenLocationText = locationText;
       this.setData({ itemPanel: { ...panel } });
     }
+    // 未知结果下重试:用冻结值(不是表单当前值)
+    const submitName = panel.frozenName || name;
+    const submitQuantity = panel.frozenQuantity || panel.quantity;
+    const submitUnit = UNIT_SET[panel.frozenUnitIndex ?? panel.unitIndex];
     this.setData({ itemPanel: { ...this.data.itemPanel, busy: true }, acting: true });
     let created: { item_id: string; version: number } | null = null;
     try {
       const res = await callItemsApi({
         action: "create",
         operation_id: panel.createOperationId,
-        name,
-        location_text: locationText,
-        quantity: panel.quantity,
-        unit: UNIT_SET[panel.unitIndex],
+        name: submitName,
+        location_text: panel.frozenLocationText || locationText,
+        quantity: submitQuantity,
+        unit: submitUnit,
       });
       created = { item_id: res.item.item_id, version: res.item.version };
       await callLocationsApi({
@@ -1778,12 +1793,17 @@ Page<
         return;
       }
       if (created !== null) {
-        // 挂载失败:物品已建档,绝不回滚;如实提示稍后从「尚未归类」找回
+        // 挂载超时/失败分流(评审 5664505818):超时=「待核对」口径(可能已挂上);
+        // 明确服务端拒绝=「没挂上」口径(确定失败)
+        const mountTimeout = isApiError(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || errorMessage(e).indexOf("超时") !== -1 || errorMessage(e).indexOf("timeout") !== -1);
         wx.showModal({
-          title: "已记住,但没挂上",
+          title: mountTimeout ? "物品已保存，位置挂载状态待核对" : "已记住，但没挂上",
           content:
-            "「" + name + "」已建档,但没能挂到「" + this.data.currentNodeName +
-            "」。弱网或服务异常时先不重试;稍后可从首页「尚未归类」找回它,再手动挂载。" +
+            "「" + name + "」已保存。" +
+            (mountTimeout
+              ? "位置挂载状态待核对——可能已挂到「" + this.data.currentNodeName + "」,也可能没挂上。"
+              : "没能挂到「" + this.data.currentNodeName + "」。") +
+            "稍后可从首页「尚未归类」或本位置查找;如未挂上,从物品详情手动挂载。" +
             "(" + errorMessage(e) + ")",
           showCancel: false,
           success: () => {
