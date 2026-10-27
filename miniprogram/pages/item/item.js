@@ -1316,9 +1316,10 @@ Page({
                 }
             }
             else {
+                // #116 冻结门:linkItem/ensurePath 挂向 deleting 子树被拒时单独翻译
                 wx.showModal({
                     title: "整理失败",
-                    content: (0, api_1.errorMessage)(e),
+                    content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e),
                     showCancel: false,
                 });
             }
@@ -1402,9 +1403,10 @@ Page({
                 }
             }
             else {
+                // #116 冻结门:linkItem/ensurePath 挂向 deleting 子树被拒时单独翻译
                 wx.showModal({
                     title: "整理失败",
-                    content: (0, api_1.errorMessage)(e),
+                    content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e),
                     showCancel: false,
                 });
             }

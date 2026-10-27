@@ -612,6 +612,11 @@ export interface LocationNodeSummary {
   child_count: number;
   created_from: LocationCreatedFrom;
   updated_at: string;
+  /**
+   * 仅 deleting 节点携带(issue #116 unmount,D0 v4 §3.1 发现点二):该节点正在
+   * 「转为未归类」清理中,客户端置灰并标注;检查点其余明细不外泄(白名单投影)
+   */
+  deleting?: boolean;
 }
 
 /** parseLocation 的单条层级候选段 */
@@ -712,7 +717,7 @@ export interface ApplyScanResult {
   mounts: ApplyScanMountResult[];
 }
 
-/** locations 协议错误码(契约固定 7 个) */
+/** locations 协议错误码(issue #116 unmount 起 13 个:新增 3 个 unmount 专用码) */
 export type LocationsApiErrorCode =
   | "INVALID_INPUT"
   | "NOT_FOUND"
@@ -720,7 +725,15 @@ export type LocationsApiErrorCode =
   | "VERSION_CONFLICT"
   | "NODE_NOT_EMPTY"
   | "NODE_CONFLICT"
-  | "AI_UNAVAILABLE";
+  | "AI_UNAVAILABLE"
+  | "FAMILY_SWITCHED"
+  | "FAMILY_STALE_SCOPE"
+  /** issue #116(D0 v4 §3 P0-A):阶段一/补偿冲突熔断,用户核对后重新预览 */
+  | "UNMOUNT_CONFLICT"
+  /** issue #116(D0 v4 §3):阶段二任意步中断,未完成绝不假报成功,可续跑 */
+  | "UNMOUNT_INCOMPLETE"
+  /** issue #116(D0 v4 §3.1):检查点损坏,失败关闭需人工核对 */
+  | "UNMOUNT_CHECKPOINT_CORRUPT";
 
 export interface LocationsApiErrorResponse {
   ok: false;
@@ -807,13 +820,15 @@ export type LocationsApiEvent =
   | { action: "deletePreview"; node_id: string }
   | ({
       /**
-       * D1(#94)删除位置三按钮的服务端动作:migrate=物品条件重挂上一级后删子树,
+       * D1(#94)三按钮 + #116 四选的服务端动作:migrate=物品条件重挂上一级后删子树,
        * scan 标 location_deleted;purge=客户端已逐件 itemsApi.delete,仍有活物品
-       * 挂载则 NODE_NOT_EMPTY 附清单(补删后重试,收敛式)。根位置两模式硬拒。
+       * 挂载则 NODE_NOT_EMPTY 附清单(补删后重试,收敛式);unmount(#116,D0 v4 §3)
+       * =物品逐件解挂转「尚未归类」(UNMOUNT_CONFLICT 熔断)→ B1 检查点六步终结
+       * 子树,未完成 UNMOUNT_INCOMPLETE 可惰性续跑。根位置各模式硬拒。
        */
       action: "deleteLocation";
       node_id: string;
-      mode: "migrate" | "purge";
+      mode: "migrate" | "purge" | "unmount";
     } & ScopeWriteBinding);
 
 /* ---------------- locations 响应 ---------------- */
@@ -1521,7 +1536,16 @@ export interface LocationScanContextResponse {
   household_truncated: boolean;
 }
 
-/** locations.deletePreview(只读):删除位置影响面计数(#94 三按钮弹窗文案来源) */
+/** unmount 检查点摘要(issue #116,D0 v4 §3.1:deletePreview 附带,提示续跑) */
+export interface PendingUnmountSummary {
+  op_id: string;
+  phase: "nodes" | "compensate" | "scans" | "final";
+  status: "pending" | "conflict";
+  created_at: string;
+  counts: { unmounted: number; compensated: number; conflicts: number };
+}
+
+/** locations.deletePreview(只读):删除位置影响面计数(#94 三按钮/#116 四选弹窗文案来源) */
 export interface LocationsDeletePreviewResponse {
   ok: true;
   /** 子树节点数(含自身) */
@@ -1534,17 +1558,23 @@ export interface LocationsDeletePreviewResponse {
   scan_count: number;
   /** node.path.length ≥ 2(父不是 home 根)时才允许「删位置并迁移物品」 */
   migrate_available: boolean;
+  /** issue #116:根带 deleting 检查点时携带(置灰/续跑提示) */
+  deleting?: boolean;
+  /** issue #116(D0 §3.1 发现点一):上次「转为未归类」未完成的续跑摘要;损坏检查点不携带 */
+  pending_unmount?: PendingUnmountSummary;
 }
 
-/** locations.deleteLocation(写类):migrate=物品重挂上一级;purge=客户端已逐件删物品 */
+/** locations.deleteLocation(写类):migrate=物品重挂上一级;purge=客户端已逐件删物品;unmount=解挂转未归类 */
 export interface LocationsDeleteLocationResponse {
   ok: true;
   deleted_nodes: number;
   /** 仅 migrate:重挂到上一级的物品数 */
   remounted: number;
+  /** 仅 unmount:解挂转「尚未归类」的物品数(含续跑时检查点冻结的计数) */
+  unmounted?: number;
   compensated: number;
   compensated_skipped: number;
-  /** 子树内被标记状态迁移的 scan 行数(migrate→location_deleted;purge→deleted) */
+  /** 子树内被标记状态迁移的 scan 行数(migrate/unmount→location_deleted;purge→deleted) */
   scans_marked: number;
 }
 

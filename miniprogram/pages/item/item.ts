@@ -19,6 +19,7 @@ import { ensureScopeVerified } from "../../utils/households-api";
 import { itemArtwork } from "../../utils/ui";
 import {
   callLocationsApi,
+  deletingFrozenMessage,
   isLocationsApiErrorWithCode,
 } from "../../utils/locations-api";
 import {
@@ -1797,9 +1798,10 @@ Page<
           });
         }
       } else {
+        // #116 冻结门:linkItem/ensurePath 挂向 deleting 子树被拒时单独翻译
         wx.showModal({
           title: "整理失败",
-          content: errorMessage(e),
+          content: deletingFrozenMessage(e) || errorMessage(e),
           showCancel: false,
         });
       }
@@ -1880,9 +1882,10 @@ Page<
           });
         }
       } else {
+        // #116 冻结门:linkItem/ensurePath 挂向 deleting 子树被拒时单独翻译
         wx.showModal({
           title: "整理失败",
-          content: errorMessage(e),
+          content: deletingFrozenMessage(e) || errorMessage(e),
           showCancel: false,
         });
       }

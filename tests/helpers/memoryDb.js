@@ -4,7 +4,9 @@
  * 内存版 CloudBase 文档数据库语义(docs/API_CONTRACT.md「离线测试规范」)。
  * 支持:
  *   db.collection(name).add({ data: doc })            → Promise<{ _id }>(与真实 SDK 一致:数据在 data 字段里)
- *   db.collection(name).where(cond).get()             → Promise<{ data: docs }>(AND 等值匹配)
+ *   db.collection(name).where(cond).get()             → Promise<{ data: docs }>(AND 等值匹配;
+ *                                                      cond 值为 { __hm_field_absent__: true } 哨兵时
+ *                                                      匹配「字段不存在」,对应真实库 db.command.exists(false))
  *   db.collection(name).where(cond).update({ data: patch }) → Promise<{ stats:{ updated: n } }>(与真实 SDK 一致)
  *   db.collection(name).where(cond).skip(n).limit(n).get()  → 同上,分页语义同 CloudBase
  *   db.collection(name).doc(id).get()                 → Promise<{ data: doc|null }>
@@ -38,10 +40,26 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/**
+ * 字段缺席条件(评审 5660849034「经过验证的数据库字段缺席条件」):cond 值为
+ * { __hm_field_absent__: true } 形状的哨兵对象时,匹配「文档中该字段不存在或值为
+ * undefined」;其余 cond 值行为不变(严格等值)。生产端 wx-server-sdk 由
+ * deps.fieldAbsent() 注入 db.command.exists(false)(真实库原生支持),离线测试经
+ * handler 的库内默认哨兵落到本识别约定——两侧条件语义一致:恰好一个并发写可把
+ * 字段从无到有,迟到者谓词必失配,绝不覆盖已存在值。
+ */
+function isFieldAbsentExpect(v) {
+  return v !== null && typeof v === "object" && v.__hm_field_absent__ === true;
+}
+
 function matches(doc, cond) {
   var keys = Object.keys(cond);
   for (var i = 0; i < keys.length; i++) {
-    if (doc[keys[i]] !== cond[keys[i]]) {
+    var expect = cond[keys[i]];
+    var hit = isFieldAbsentExpect(expect)
+      ? doc[keys[i]] === undefined // 哨兵:字段不存在(或值为 undefined)才算命中
+      : doc[keys[i]] === expect;
+    if (!hit) {
       return false;
     }
   }

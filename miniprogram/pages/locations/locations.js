@@ -80,6 +80,7 @@ Page({
             scanCount: 0,
             migrateAvailable: false,
             busy: false,
+            pendingUnmount: null,
         },
     },
     nodeId: "",
@@ -488,12 +489,13 @@ Page({
         void this.loadScanHistory();
         void this.loadScanSummary(this.data.currentNodeId);
     },
-    /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因 */
+    /** 子节点渲染装饰:计数文案;选择模式下计算禁用与原因;deleting 置灰标注(#116) */
     decorate(children) {
         const pickMode = this.data.mode === "pick";
         return children.map((c) => {
             let disabled = false;
             let disabledReason = "";
+            const deleting = c.deleting === true;
             if (pickMode) {
                 if (this.pickExcludePath) {
                     const p = c.path.join("/");
@@ -505,8 +507,18 @@ Page({
                 }
                 // 不再按 type 过滤(issue #30 PR A):跨层级选择交给服务端结构规则裁决
                 // (叶子跨层允许、带子树跨深度拒绝),选择器不做类型预筛。
+                if (deleting) {
+                    // #116 冻结门客户端半边:deleting 并入 disabled——「选这个」不再渲染,
+                    // 点行提示原因;服务端仍以 INVALID_INPUT{reason:"deleting"} 硬门兜底
+                    disabled = true;
+                    disabledReason = "该位置正在清理中,稍后再选";
+                }
             }
             const parts = [];
+            // issue #116(D0 §3.1 发现点二):deleting 节点置灰并标注续跑入口
+            if (deleting) {
+                parts.push("清理中·转为未归类未完成");
+            }
             if (c.item_count > 0) {
                 parts.push(c.item_count + " 件");
             }
@@ -515,6 +527,7 @@ Page({
             }
             return {
                 ...c,
+                deleting,
                 countText: parts.length > 0 ? parts.join(" · ") : "空",
                 disabled,
                 disabledReason,
@@ -865,7 +878,7 @@ Page({
      * NODE_NOT_EMPTY 收敛清单兜住删除期间的并发挂载。根位置无「⋯」入口,
      * 服务端 deletePreview/deleteLocation 再拦一层(双重防删)。
      * ------------------------------------------------------------------ */
-    /** 「⋯ → 删除」新流程:先拉影响面计数,再开三按钮弹层(纯读) */
+    /** 「⋯ → 删除」流程:先拉影响面计数,再开四选弹层(纯读) */
     async deleteNodeWithPreview(node) {
         if (this.data.acting) {
             return;
@@ -886,6 +899,9 @@ Page({
                     scanCount: preview.scan_count,
                     migrateAvailable: preview.migrate_available,
                     busy: false,
+                    // issue #116(D0 §3.1 发现点一):上次「转为未归类」未完成 ⇒ 附续跑摘要,
+                    // 只提示不自动发起(恢复=用户显式触发)
+                    pendingUnmount: preview.pending_unmount || null,
                 },
             });
         }
@@ -938,9 +954,10 @@ Page({
             await this.loadNode();
         }
         catch (e) {
-            // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试
+            // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试;
+            // deleting 冻结门(含后代向交叉域)单独翻译——通用「输入不合法」不知所云
             this.deleteLayerBusy(false);
-            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
         }
     },
     onPurgeTap() {
@@ -949,6 +966,94 @@ Page({
             return;
         }
         void this.doPurgeDelete();
+    },
+    /* ------------------------------------------------------------------
+     * issue #116「转为未归类」(D0 v4 §3 四选弹层):deleteLocation(mode:
+     * "unmount")——子树物品逐件解挂进「尚未归类」(location_text 保留原记录),
+     * 节点随 B1 检查点六步终结。对带 deleting 检查点的根重入即续跑(恢复路径,
+     * 用户显式触发);UNMOUNT_CONFLICT=已解挂 N 件、M 件需先核对(弹层保留,
+     * 核对后重新预览);UNMOUNT_INCOMPLETE=未完成如实提示可继续,绝不假报成功。
+     * ------------------------------------------------------------------ */
+    onUnmountTap() {
+        const layer = this.data.deleteLayer;
+        if (!layer.visible || layer.busy || this.data.acting) {
+            return;
+        }
+        void this.doUnmountDelete();
+    },
+    async doUnmountDelete() {
+        const layer = this.data.deleteLayer;
+        if (!layer.visible || layer.busy) {
+            return;
+        }
+        this.deleteLayerBusy(true);
+        try {
+            const res = await (0, locations_api_1.callLocationsApi)({
+                action: "deleteLocation",
+                node_id: layer.nodeId,
+                mode: "unmount",
+            });
+            // 完成提示展示转未归类总数(合同 §3「N 件已转未归类」):阶段一 unmounted
+            // 与阶段二补偿 compensated(窗口期悬挂件)都进了「尚未归类」,总数取二者之和
+            const total = (Number(res.unmounted) || 0) + (Number(res.compensated) || 0);
+            this.setData({
+                deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+            });
+            wx.showToast({
+                title: total > 0 ? "已删除;" + total + " 件物品已转未归类" : "已删除",
+                icon: total > 0 ? "none" : "success",
+                duration: total > 0 ? 3000 : 1500,
+            });
+            await this.loadNode();
+        }
+        catch (e) {
+            this.deleteLayerBusy(false);
+            if ((0, locations_api_1.isLocationsApiErrorWithCode)(e, "UNMOUNT_CONFLICT")) {
+                const d = (e.detail || {});
+                const done = Number(d.unmounted) || 0;
+                const pending = Array.isArray(d.conflicts) ? d.conflicts.length : 0;
+                // 冲突熔断(P0-A):旧预览计数已过期,弹层随冲突关闭——核对后重新预览→
+                // 重新确认发起下一轮(新预览自然只含剩余物品),不得带着旧计数直接再点
+                this.setData({
+                    deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+                });
+                wx.showModal({
+                    title: "有物品需要先核对",
+                    content: "已解挂 " + done + " 件、" + pending + " 件因他处修改需先核对。请到这些物品的详情页确认最新位置后,重新打开清理并预览,再确认下一轮。",
+                    showCancel: false,
+                });
+                return;
+            }
+            if ((0, locations_api_1.isLocationsApiErrorWithCode)(e, "UNMOUNT_INCOMPLETE")) {
+                // 删根后复扫分支(评审 5660650680 文案修正):终检后的轻量复扫发现残留孤儿
+                // (或复扫失败无法证实零残留)时,原根已硬删、检查点已随之清除——绝不提示
+                // 「再点一次即可继续清理」(已删位置无从续跑),只建议人工核对
+                const d = (e.detail || {});
+                if (Array.isArray(d.post_root_orphans) || d.rescan_failed === true) {
+                    this.setData({
+                        deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false, pendingUnmount: null },
+                    });
+                    wx.showModal({
+                        title: "删除后需人工核对",
+                        content: "位置已删除,但检测到删除期间的新增写入产生了残留的孤立位置;清理记录已随位置一并删除、无法自动恢复,请人工核对后再行处理。",
+                        showCancel: false,
+                    });
+                    return;
+                }
+                wx.showModal({
+                    title: "清理未完成",
+                    content: "上次的「转为未归类」还没完成,物品都在;再点一次「转为未归类」即可继续清理。",
+                    showCancel: false,
+                });
+                return;
+            }
+            if ((0, locations_api_1.isLocationsApiErrorWithCode)(e, "UNMOUNT_CHECKPOINT_CORRUPT")) {
+                wx.showModal({ title: "清理记录异常", content: (0, api_1.errorMessage)(e), showCancel: false });
+                return;
+            }
+            // deleting 冻结门(含后代向交叉域:子位置有未完成的清理)单独翻译
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
+        }
     },
     /**
      * 全部删除(#94 必须二次确认):先逐件 itemsApi.delete(软删级联——证据行、
@@ -1041,7 +1146,8 @@ Page({
         }
         catch (e) {
             this.deleteLayerBusy(false);
-            wx.showModal({ title: "删除失败", content: (0, api_1.errorMessage)(e), showCancel: false });
+            // deleting 冻结门(含后代向交叉域:子位置有未完成的清理)单独翻译
+            wx.showModal({ title: "删除失败", content: (0, locations_api_1.deletingFrozenMessage)(e) || (0, api_1.errorMessage)(e), showCancel: false });
         }
     },
     /** 弹层防冒泡占位(点面板不吃掉遮罩关闭) */

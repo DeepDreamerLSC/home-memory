@@ -87,6 +87,12 @@ exports.main = async function (event) {
     },
     digest: digest16,
     householdId: resolved.householdId,
+    // 「字段缺席」查询条件(v4.4,评审 5660849034):存量 cp_rev 迁移笔的互斥谓词
+    // 用真实库原生 db.command.exists(false)(memoryDb 离线侧按库内哨兵同语义模拟),
+    // 取代一切时间戳互斥谓词
+    fieldAbsent: function () {
+      return db.command.exists(false);
+    },
     // 写入硬门上下文(issue #34 P1-A):共享家庭(三向验证通过)强制
     // expected_household_id + expected_scope_revision;个人家庭维持宽松口径
     householdShared: resolved.shared === true,

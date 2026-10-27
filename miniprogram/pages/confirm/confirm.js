@@ -656,6 +656,12 @@ Page({
                 patch["rows[" + index + "].existing"] = error.existing;
                 patch["rows[" + index + "].itemId"] = error.existing.item_id;
             }
+            // #116 冻结门:ensureAndLink 挂向 deleting 子树被拒时,行级失败原因
+            // 用人话翻译(物品已保存、落「尚未归类」,等清理完成后再放进)
+            const frozenMsg = (0, locations_api_1.deletingFrozenMessage)(error);
+            if (frozenMsg) {
+                patch["rows[" + index + "].failMsg"] = frozenMsg;
+            }
             this.setData(patch);
             this.persistRows();
         });
