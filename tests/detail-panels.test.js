@@ -39,3 +39,34 @@ test('detail panels: position failure prevents classification write', async () =
 test('detail panels: reminder confirmation blocks duplicate submit and closing during authorization', async () => { const p = page(); let finish, calls = 0; p.onRemindDateChange = async () => { calls++; await new Promise(resolve => { finish = resolve; }); p.remindOriginal = p.data.reminderDateDraft; p.data.remindAt = p.data.reminderDateDraft; }; p.onOpenReminderTap(); const first = p.onReminderConfirmTap(); assert.equal(p.data.reminderConfirming, true); await p.onReminderConfirmTap(); p.onPanelClose(); assert.equal(p.data.detailPanel, 'reminder'); assert.equal(calls, 1); finish(); await first; assert.equal(p.data.reminderConfirming, false); assert.equal(p.data.detailPanel, ''); });
 test('detail panels: scope change during position save prevents subsequent classification write', async () => { const p = page(); let links = 0; p.onUpdateLocationTap(); p.onLocationInput({ detail: { value: '新位置' } }); p.locationNodeDraft = { nodeId: 'new-node', path: ['卧室'] }; p.onSaveTap = async () => { p.original.location = '新位置'; p.locationChoiceScope = -1; }; p.doLinkToNode = async () => { links++; return true; }; await p.onSaveLocationTap(); assert.equal(links, 0); assert.match(p.data.panelError, /家庭已切换/); assert.equal(p.data.detailPanel, 'location'); });
 test('detail panels: changed-unit retry retains a visible recount confirmation after reopening', () => { const p = page(); const next = p.data.unitOptions.findIndex(unit => unit !== '包'); p.data.quantityUnitIndex = next; p.data.quantityDraft = '2'; p.quantityRetry = { updateId: 'retry-id', quantity: 2, unit: p.data.unitOptions[next] }; p.onQuantityPanelToggle(); assert.equal(p.data.quantityUnitChanged, true); assert.equal(p.data.quantityUnitVerified, false); assert.equal(p.data.quantityDraft, '2'); p.onPanelClose(); p.onQuantityPanelToggle(); assert.equal(p.data.quantityUnitChanged, true); assert.equal(p.data.unitOptions[p.data.quantityUnitIndex], p.quantityRetry.unit); });
+
+for (const scenario of [
+  { label: 'pending date', original: '', draft: '2026-11-15', conflicts: [] },
+  { label: 'pending clear', original: '2026-11-15', draft: '', conflicts: [] },
+  { label: 'reminder conflict', original: '2026-11-15', draft: '2026-11-15', conflicts: [{ key: 'remind', choice: null }] },
+]) {
+  test(`detail panels: location confirmation cannot submit ${scenario.label}`, async () => {
+    const p = page();
+    let saves = 0, links = 0;
+    p.remindOriginal = scenario.original;
+    p.data.remindAt = scenario.original;
+    p.onOpenReminderTap();
+    p.setPendingRemind(scenario.draft);
+    p.data.conflicts = scenario.conflicts;
+    p.onPanelClose();
+    p.onUpdateLocationTap();
+    p.onLocationInput({ detail: { value: '洗手台新抽屉' } });
+    p.locationNodeDraft = { nodeId: 'new-node', path: ['卫生间'] };
+    p.onSaveTap = async () => { saves++; };
+    p.doLinkToNode = async () => { links++; return true; };
+    await p.onSaveLocationTap();
+    assert.equal(saves, 0, 'must not enter generic text/reminder save');
+    assert.equal(links, 0, 'must not write classification either');
+    assert.equal(p.data.detailPanel, 'location');
+    assert.match(p.data.panelError, /请先处理.*提醒/);
+    assert.equal(p.data.locationText, '洗手台新抽屉');
+    assert.equal(p.data.remindAt, scenario.draft);
+    assert.deepEqual(p.data.conflicts, scenario.conflicts);
+    assert.equal(p.data.locationCommitSaving, false);
+  });
+}

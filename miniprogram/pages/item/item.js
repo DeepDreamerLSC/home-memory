@@ -621,8 +621,13 @@ Page({
     },
     onQuantityUnitVerify(e) { this.setData({ quantityUnitVerified: e.detail.value.includes("verified") }); },
     async onSaveLocationTap() {
-        if (this.data.locationCommitSaving || this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.deleting || this.data.mountSaving)
+        if (this.data.locationCommitSaving || this.data.saving || this.data.quantitySaving || this.data.remindBusy || this.data.reminderConfirming || this.data.deleting || this.data.mountSaving)
             return;
+        // 通用保存会补写提醒；位置确认不能代替用户提交另一面板的草稿。
+        if (this.pendingRemindWrite() !== null || this.hasRemindConflict()) {
+            this.setData({ panelError: "请先处理尚未保存或有冲突的到期提醒，再确认更新位置。", reminderNeedsSave: true });
+            return;
+        }
         if (!(0, household_scope_1.isScopeGenerationCurrent)(this.locationChoiceScope)) {
             this.setData({ panelError: "家庭已切换，请重新打开这件物品后再修改。" });
             return;
