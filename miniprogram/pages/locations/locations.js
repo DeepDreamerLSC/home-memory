@@ -107,6 +107,7 @@ Page({
         },
         itemPanel: {
             visible: false,
+            createOperationId: "",
             name: "",
             quantity: 1,
             unitIndex: 0,
@@ -1346,7 +1347,7 @@ Page({
         }
         this.setData({
             addPanel: { ...this.data.addPanel, visible: false },
-            itemPanel: { visible: true, name: "", quantity: 1, unitIndex: 0, busy: false },
+            itemPanel: { visible: true, createOperationId: "", name: "", quantity: 1, unitIndex: 0, busy: false },
         });
     },
     onItemPanelClose() {
@@ -1389,12 +1390,18 @@ Page({
         }
         // 服务端权威路径文本 = path.join(" / ")(与 D1/B 页挂载同约定)
         const locationText = this.nodePath.join(" / ");
-        this.setData({ itemPanel: { ...panel, busy: true }, acting: true });
+        // 建档幂等(评审 5663031433 P1):同一次面板会话固定 operation_id,
+        // 服务端已建档但客户端超时 → 重试返回已有物品(duplicated),绝不重复建档
+        if (!panel.createOperationId) {
+            panel.createOperationId = (0, api_1.uuid)();
+            this.setData({ itemPanel: { ...panel } });
+        }
+        this.setData({ itemPanel: { ...this.data.itemPanel, busy: true }, acting: true });
         let created = null;
         try {
             const res = await (0, api_2.callItemsApi)({
                 action: "create",
-                operation_id: (0, api_1.uuid)(),
+                operation_id: panel.createOperationId,
                 name,
                 location_text: locationText,
                 quantity: panel.quantity,
@@ -1417,6 +1424,20 @@ Page({
         }
         catch (e) {
             this.setData({ itemPanel: { ...this.data.itemPanel, busy: false } });
+            // 建档超时(响应未到):物品可能已保存(operation_id 幂等,重试不重复)
+            // ——如实描述,不直接断言失败;提示重试(服务端幂等返回已有物品)
+            if (created === null && (0, api_2.isApiError)(e) && (e.code === "NETWORK_ERROR" || e.code === "TIMEOUT" || (0, api_1.errorMessage)(e).indexOf("超时") !== -1 || (0, api_1.errorMessage)(e).indexOf("timeout") !== -1)) {
+                wx.showModal({
+                    title: "可能已保存",
+                    content: "网络不稳,物品可能已记住。点「重试」确认(不会重复添加);或稍后在首页查看。",
+                    confirmText: "重试",
+                    cancelText: "稍后查看",
+                    success: (r) => { if (r.confirm) {
+                        void this.onItemSaveTap();
+                    } },
+                });
+                return;
+            }
             if (created !== null) {
                 // 挂载失败:物品已建档,绝不回滚;如实提示稍后从「尚未归类」找回
                 wx.showModal({
