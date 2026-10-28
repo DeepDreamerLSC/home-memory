@@ -467,6 +467,7 @@ Page<
   },
 
   onHide() {
+    disableHomeExitGuard();
     this.setData({ showLocationHint: false });
     this.onLocationMenuClose();
     this.profileRequest++;

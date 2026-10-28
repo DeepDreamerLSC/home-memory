@@ -201,6 +201,7 @@ Page({
         void this.refreshDueBanner();
     },
     onHide() {
+        (0, exit_guard_1.disableHomeExitGuard)();
         this.setData({ showLocationHint: false });
         this.onLocationMenuClose();
         this.profileRequest++;

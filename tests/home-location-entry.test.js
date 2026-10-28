@@ -13,3 +13,9 @@ test('home entry fails closed for stale family, moved target, picker mode and ho
 test('cancel from home-launched forms returns to the original page and cannot close a busy write',()=>{const p=page('addItem');p.data.itemPanel.visible=true;events.length=0;p.data.itemPanel.busy=true;p.onItemPanelClose();assert.equal(events.length,0);p.data.itemPanel.busy=false;p.onItemPanelClose();assert.equal(events.filter(e=>e.back).length,1);assert.equal(p.data.itemPanel.visible,false);});
 
 test('deleting the open map location returns to its parent while cancel returns to the original location',()=>{const p=page('delete');pages=[{currentNodeId:''},{currentNodeId:'child'},{}];events.length=0;p.returnHomeEntry('child');assert.equal(events.find(e=>e.back).delta,2);p.homeEntry='delete';events.length=0;p.returnHomeEntry();assert.equal(events.find(e=>e.back).delta,1);pages=[{},{}];});
+
+test('location browsing and move pickers never arm the application-exit prompt',()=>{
+  const oldEnable=wx.enableAlertBeforeUnload,oldTitle=wx.setNavigationBarTitle;
+  wx.enableAlertBeforeUnload=()=>events.push({exitGuard:true});wx.setNavigationBarTitle=()=>{};
+  try{for(const options of [{},{picker:'1'},{picker:'1',node_id:'child'}]){events.length=0;const p=page('');p.onLoad(options);assert.equal(events.filter(e=>e.exitGuard).length,0);assert.equal(p.data.mode,options.picker?'pick':'browse');}}finally{wx.enableAlertBeforeUnload=oldEnable;wx.setNavigationBarTitle=oldTitle;}
+});

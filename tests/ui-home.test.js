@@ -233,8 +233,9 @@ test("home child route from a previous household is cleared before requesting th
 test("home exit confirmation is root-only and restored when returning from a child", async () => {
   const h=harness();h.page.refreshFamilyChip=()=>{};h.page.loadMapLayer=async()=>{};h.page.loadRecent=async()=>{};h.page.refreshDueBanner=async()=>{};h.page.currentResumeSession=()=>null;h.page.currentPhotoResume=()=>null;
   h.pages([h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on"]);
-  h.pages([{route:"pages/index/index"},h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on"]);
-  h.pages([h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on","on"]);
+  h.page.onHide();assert.deepEqual(h.guardCalls,["on","off"]);
+  h.pages([{route:"pages/index/index"},h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on","off"]);
+  h.pages([h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on","off","on"]);
   await Promise.resolve();
 });
 
