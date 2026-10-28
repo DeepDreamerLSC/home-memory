@@ -74,6 +74,8 @@ None required for the approved UI implementation; any future visual direction ch
 
 
 ## Home location actions
-- Approved follow-up, 2026-10-28: place a native add button to the left of the 房间/位置 section title; keep it available on empty and leaf locations. Place current-location management at the right of this same title row, rather than next to the large page heading.
-- Long-press location tiles opens the guarded move/delete actions. Addition and deletion reuse existing forms and confirmation safeguards; loading, search results and unclassified views do not expose the section action row.
-- The in-page back label uses 30rpx text and an 88rpx minimum touch height. New section action buttons retain 88rpx touch areas and existing semantic theme colors.
+- Approved simplification, 2026-10-28: one heading names the current place (家里 / 书房 / 柜子). Remove the duplicate 房间/位置 subheading and current-location ellipsis menu. Keep add at the heading's right, plus the root profile avatar.
+- Short tap enters a location. Long press shows 管理「位置名」 with 改名 / 移动到… / 删除. To manage the open location, go back to its parent and long-press its tile. Merge remains available only in the dedicated position-management flow.
+- Show a dismissible inline 长按位置可改名、移动或删除 hint once when location cards first become available; persist exposure, hide on dismissal, long press or leaving the page.
+- Addition and deletion reuse existing forms and confirmation safeguards. The add button remains available on empty/leaf locations, but not on loading, failed, search or unclassified views. Home root uses manual recording with a real location.
+- The in-page back label uses 30rpx text and an 88rpx minimum touch height. Heading actions retain 88rpx touch areas and existing semantic theme colors.

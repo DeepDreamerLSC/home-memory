@@ -8,7 +8,7 @@ const path = require("node:path");
 const ts = require("typescript");
 
 // Compile in memory so these behavioral tests never mutate committed JS artifacts.
-function harness() {
+function harness(storage = new Map()) {
   let options;
   let scope = 1;
   let cacheGen = 1;
@@ -53,7 +53,7 @@ function harness() {
     exports: {}, Page: value => { options = value; },
     require: name => stubs[name] || {},
     getCurrentPages: () => pages,
-    wx: { navigateTo: o => navigation.push({method:"navigateTo",...o}), navigateBack: o => navigation.push({method:"navigateBack",...o}), showActionSheet: o => navigation.push({method:"sheet",...o}), showToast: o => navigation.push({method:"toast",...o}) },
+    wx: { getStorageSync: k=>storage.get(k), setStorageSync:(k,v)=>storage.set(k,v), navigateTo: o => navigation.push({method:"navigateTo",...o}), navigateBack: o => navigation.push({method:"navigateBack",...o}), showActionSheet: o => navigation.push({method:"sheet",...o}), showToast: o => navigation.push({method:"toast",...o}) },
   });
   const page = Object.assign({}, options, {
     data: structuredClone(options.data),
@@ -227,7 +227,7 @@ test("home child route from a previous household is cleared before requesting th
     assert.equal(h.page.data.containerName,"");
     return {node:{type:"home",location_id:"new-root",item_count:0,path:[]},children:[],items:[],unmounted_count:0};
   });
-  await h.page.loadMapLayer();assert.equal(h.calls.length,1);assert.equal(h.page.data.mapTitle,"家里有什么");
+  await h.page.loadMapLayer();assert.equal(h.calls.length,1);assert.equal(h.page.data.mapTitle,"家里");
 });
 
 test("home exit confirmation is root-only and restored when returning from a child", async () => {
@@ -239,19 +239,20 @@ test("home exit confirmation is root-only and restored when returning from a chi
 });
 
 
-test("home tile long press offers move and delete without drilling into the tile", () => {
+test("home tile long press names the target and offers rename, move and delete without drilling into the tile", () => {
   const h=harness();h.page.renderMap({node:{type:"home",location_id:"root",item_count:0,path:[]},children:[{location_id:"r",name:"书房",path:["书房"],item_count:0,child_count:0}],items:[],unmounted_count:0});
   h.page.data.mapLoading=false;h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});
-  assert.deepEqual(Array.from(h.navigation[0].itemList),["移动到…","删除"]);
-  h.page.onRoomTap({currentTarget:{dataset:{index:0}}});assert.equal(h.navigation.length,1);
-  h.navigation[0].success({tapIndex:0});assert.match(h.navigation[1].url,/picker=1/);assert.match(decodeURIComponent(h.navigation[1].url),/exclude_path=书房/);
+  assert.equal(h.page.data.locationMenuVisible,true);
+  assert.equal(h.page.data.locationMenuName,"书房");
+  h.page.onRoomTap({currentTarget:{dataset:{index:0}}});assert.equal(h.navigation.length,0);
+  h.page.onLocationMenuPick({currentTarget:{dataset:{action:"move"}}});assert.match(h.navigation[0].url,/picker=1/);assert.match(decodeURIComponent(h.navigation[0].url),/exclude_path=书房/);
   assert.equal(h.calls.length,0);
 });
 
 test("home tile delete only opens the existing preview flow, never directly mutates", () => {
   const h=harness();h.page.renderMap({node:{type:"home",location_id:"root",item_count:0,path:[]},children:[{location_id:"r",name:"书房",path:["书房"],item_count:0,child_count:0}],items:[],unmounted_count:0});
-  h.page.data.mapLoading=false;h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.navigation[0].success({tapIndex:1});
-  const url=new URL("https://local"+h.navigation[1].url);assert.equal(url.searchParams.get("home_action"),"delete");assert.equal(url.searchParams.get("home_target"),"r");assert.equal(h.calls.length,0);
+  h.page.data.mapLoading=false;h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.page.onLocationMenuPick({currentTarget:{dataset:{action:"delete"}}});
+  const url=new URL("https://local"+h.navigation[0].url);assert.equal(url.searchParams.get("home_action"),"delete");assert.equal(url.searchParams.get("home_target"),"r");assert.equal(h.calls.length,0);
 });
 
 test("home plus uses manual entry at root and binds the concrete current location in a child", () => {
@@ -265,4 +266,31 @@ test("moving a child tile refreshes the current grid instead of sending the pare
   const h=harness();h.page.currentNodeId="parent";h.page.requestSeq=require("../miniprogram/utils/locations-cache").createRequestSeq();
   h.api(async request=>request.action==="move"?{}:{node:{type:"home",location_id:"root",item_count:0,path:[]},children:[],items:[],unmounted_count:0});
   await h.page.doMove({location_id:"child"},"target");assert.equal(h.calls[0].action,"move");assert.ok(h.calls.some(c=>c.action==="list"));assert.equal(h.navigation.some(n=>n.method==="navigateBack"),false);
+});
+
+
+test("location hint appears only once when cards exist, and long press dismisses it", () => {
+  const storage=new Map();const h=harness(storage);
+  const response={node:{type:"home",location_id:"root",item_count:0,path:[]},children:[],items:[],unmounted_count:0};
+  h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,false);assert.equal(storage.size,0);
+  response.children=[{location_id:"r",name:"书房",path:["书房"],item_count:0,child_count:0}];
+  h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,true);assert.equal(storage.size,1);
+  const next=harness(storage);next.page.renderMap(response);assert.equal(next.page.data.showLocationHint,false);
+  let renamed;h.page.renameContainer=node=>{renamed=node};h.page.data.mapLoading=false;
+  h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});assert.equal(h.page.data.showLocationHint,false);
+  h.page.onLocationMenuPick({currentTarget:{dataset:{action:"rename"}}});assert.equal(renamed.location_id,"r");assert.equal(h.calls.length,0);
+});
+
+test("location hint does not appear in search or unclassified mode, and can be dismissed", () => {
+  const h=harness();const response={node:{type:"home",location_id:"root",item_count:0,path:[]},children:[{location_id:"r",name:"书房",item_count:0}],items:[],unmounted_count:0};
+  h.page.data.queried=true;h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,false);
+  h.page.data.queried=false;h.page.data.unmountedView=true;h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,false);
+  h.page.data.unmountedView=false;h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,true);
+  h.page.onLocationHintDismiss();h.page.renderMap(response);assert.equal(h.page.data.showLocationHint,false);
+});
+
+test("location menu closes without writes and rejects stale household targets", () => {
+  const h=harness();h.page.data.rooms=[{location_id:"r",name:"书房",path:["书房"]}];h.page.renderedScopeGen=1;h.page.data.mapLoading=false;
+  h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.scope(2);
+  h.page.onLocationMenuPick({currentTarget:{dataset:{action:"delete"}}});assert.equal(h.navigation.length,0);assert.equal(h.calls.length,0);assert.equal(h.page.data.locationMenuVisible,false);assert.equal(h.page.locationMenuTarget,null);
 });

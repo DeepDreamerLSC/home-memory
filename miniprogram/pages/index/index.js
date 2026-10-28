@@ -78,12 +78,15 @@ Page({
         photoResume: null,
         dueBanner: null,
         familyShared: false,
+        locationMenuVisible: false,
+        locationMenuName: "",
+        showLocationHint: false,
         firstUse: false,
         mapLoading: true,
         mapRefreshing: false,
         mapStale: false,
         mapError: "",
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         isRootView: true,
         containerName: "",
@@ -120,6 +123,8 @@ Page({
     viewStack: [],
     mapOpening: false,
     suppressRoomTapUntil: 0,
+    locationHintChecked: false,
+    locationMenuTarget: null,
     currentNodeId: "",
     currentNodePath: [],
     onLoad(options) {
@@ -154,7 +159,7 @@ Page({
             this.renderedScopeGen = Number.isSafeInteger(entryScope) && entryScope >= 0 ? entryScope : (0, household_scope_1.captureScopeGeneration)();
             this.setData({
                 firstUse: false, isRootView: !top, unmountedView: unmounted,
-                containerName: top ? top.name : "", mapTitle: top ? top.name + "里有什么" : "尚未归类",
+                containerName: top ? top.name : "", mapTitle: top ? top.name : "尚未归类",
                 backLabel: this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].name : "家里",
             });
         }
@@ -196,6 +201,8 @@ Page({
         void this.refreshDueBanner();
     },
     onHide() {
+        this.setData({ showLocationHint: false });
+        this.onLocationMenuClose();
         this.profileRequest++;
         this.recentRequestSeq += 1;
         if (this.voiceEntry !== null) {
@@ -542,7 +549,7 @@ Page({
                 unmountedCount: 0,
                 unmountedView: false,
                 unmountedItems: [],
-                mapTitle: "家里有什么",
+                mapTitle: "家里",
                 backLabel: "",
                 isRootView: true,
                 containerName: "",
@@ -619,7 +626,7 @@ Page({
                     unmountedCount: 0,
                     unmountedView: false,
                     unmountedItems: [],
-                    mapTitle: "家里有什么",
+                    mapTitle: "家里",
                     backLabel: "",
                     isRootView: true,
                     containerName: "",
@@ -684,6 +691,16 @@ Page({
             artworkDark: (0, ui_1.roomArtwork)(c.name, true),
             path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
         }));
+        if (!this.locationHintChecked && rooms.length > 0 && !this.data.queried && !this.data.unmountedView) {
+            this.locationHintChecked = true;
+            try {
+                if (!wx.getStorageSync("home_location_longpress_seen_v1")) {
+                    this.setData({ showLocationHint: true });
+                    wx.setStorageSync("home_location_longpress_seen_v1", true);
+                }
+            }
+            catch (_) { /* 提示存储失败不影响浏览与操作 */ }
+        }
         this.renderedCurrentView = true;
         this.renderedScopeGen = (0, household_scope_1.captureScopeGeneration)();
         const firstUse = isRoot && rooms.length === 0 && res.items.length === 0 && res.unmounted_count === 0;
@@ -702,8 +719,8 @@ Page({
             mapTitle: inUnmountedView
                 ? "尚未归类 · " + res.unmounted_count + " 件待核实"
                 : isRoot
-                    ? "家里有什么"
-                    : res.node.name + "里有什么",
+                    ? "家里"
+                    : res.node.name,
             backLabel: inUnmountedView
                 ? "家里"
                 : isRoot
@@ -753,27 +770,37 @@ Page({
         return true;
     },
     /** 点格子:整页切入该容器(中间区域整体替换,抬头随之变化) */
+    onLocationHintDismiss() {
+        this.setData({ showLocationHint: false });
+    },
     onRoomLongPress(e) {
         if (this.data.acting || this.data.mapLoading || this.renderedScopeGen === null || !(0, household_scope_1.isScopeGenerationCurrent)(this.renderedScopeGen))
             return;
         const room = this.data.rooms[Number(e.currentTarget.dataset.index)];
         if (!room)
             return;
-        const scope = (0, household_scope_1.captureScopeGeneration)();
+        this.onLocationHintDismiss();
         this.suppressRoomTapUntil = Date.now() + 350;
-        wx.showActionSheet({
-            itemList: ["移动到…", "删除"],
-            success: (r) => {
-                if (!(0, household_scope_1.isScopeGenerationCurrent)(scope))
-                    return;
-                const node = { location_id: room.location_id, name: room.name, path: room.path };
-                if (r.tapIndex === 0)
-                    this.moveContainer(node);
-                else if (r.tapIndex === 1)
-                    this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, room.location_id);
-            },
-            fail: () => { },
-        });
+        this.locationMenuTarget = { node: room, scope: (0, household_scope_1.captureScopeGeneration)() };
+        this.setData({ locationMenuVisible: true, locationMenuName: room.name });
+    },
+    onLocationMenuClose() {
+        this.locationMenuTarget = null;
+        this.setData({ locationMenuVisible: false, locationMenuName: "" });
+    },
+    onLocationMenuPick(e) {
+        const target = this.locationMenuTarget;
+        this.onLocationMenuClose();
+        if (!target || this.data.acting || !(0, household_scope_1.isScopeGenerationCurrent)(target.scope))
+            return;
+        const node = target.node;
+        const action = e.currentTarget.dataset.action;
+        if (action === "rename")
+            this.renameContainer(node);
+        else if (action === "move")
+            this.moveContainer(node);
+        else if (action === "delete")
+            this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, node.location_id);
     },
     onAddHereTap() {
         if (this.data.acting || this.data.mapLoading || this.data.unmountedView)
@@ -847,7 +874,7 @@ Page({
             this.renderedCurrentView = false;
             this.setData({
                 unmountedView: false,
-                mapTitle: "家里有什么",
+                mapTitle: "家里",
                 backLabel: "",
                 rooms: [],
                 directItems: [],
@@ -862,7 +889,7 @@ Page({
         this.setData({
             isRootView: parent === null,
             containerName: parent ? parent.name : "",
-            mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+            mapTitle: parent ? parent.name : "家里",
             backLabel: parent
                 ? this.viewStack.length >= 2
                     ? this.viewStack[this.viewStack.length - 2].name
@@ -916,34 +943,7 @@ Page({
             },
         });
     },
-    /* ---------------- 容器「⋯」整理位置(复用 locations 页动作与确认交互) ---------------- */
-    onContainerMore() {
-        if (this.data.acting) {
-            return;
-        }
-        const current = this.currentContainer();
-        if (current === null) {
-            return;
-        }
-        wx.showActionSheet({
-            itemList: ["改名", "移动到…", "合并到…", "删除位置"],
-            success: (r) => {
-                if (r.tapIndex === 0) {
-                    this.renameContainer(current);
-                }
-                else if (r.tapIndex === 1) {
-                    this.moveContainer(current);
-                }
-                else if (r.tapIndex === 2) {
-                    this.mergeContainer(current);
-                }
-                else if (r.tapIndex === 3) {
-                    this.openLocationAction("delete", this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].id : "", current.location_id);
-                }
-            },
-            fail: () => { },
-        });
-    },
+    /* ---------------- 卡片长按整理位置，复用已有确认交互 ---------------- */
     currentContainer() {
         const top = this.viewStack.length > 0 ? this.viewStack[this.viewStack.length - 1] : null;
         // 当前层数据未就绪(加载中/失败,currentNodeId 还是上一层的)或已在根层:无目标
@@ -1028,7 +1028,7 @@ Page({
             this.setData({
                 isRootView: true,
                 containerName: "",
-                mapTitle: "家里有什么",
+                mapTitle: "家里",
                 backLabel: "",
                 rooms: [],
                 directItems: [],
@@ -1090,7 +1090,7 @@ Page({
             this.setData({
                 isRootView: parent === null,
                 containerName: parent ? parent.name : "",
-                mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+                mapTitle: parent ? parent.name : "家里",
                 backLabel: parent
                     ? this.viewStack.length >= 2
                         ? this.viewStack[this.viewStack.length - 2].name

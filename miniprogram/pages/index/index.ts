@@ -159,6 +159,9 @@ Page<
     dueBanner: { text: string; overdue: number; soon: number } | null;
     /** 家庭上下文头:共享家庭=「我们家」(带圆点),个人=「我的家」 */
     familyShared: boolean;
+    locationMenuVisible: boolean;
+    locationMenuName: string;
+    showLocationHint: boolean;
     /** 首用态(H0):根层既无房间也无未归位物品 */
     firstUse: boolean;
     /** 当前视图层首载中(X1 骨架屏;屏上无内容) */
@@ -169,11 +172,11 @@ Page<
     mapStale: boolean;
     /** 首载失败(X2):失败的是这次加载,不是记录没了 */
     mapError: string;
-    /** 抬头:「家里有什么」/「X里有什么」 */
+    /** 抬头显示当前位置名称 */
     mapTitle: string;
     /** 返回胶囊文案(上一层名;根层为空不显示) */
     backLabel: string;
-    /** 是否根层视图(根层无「⋯」整理入口;「尚未归类」通栏格只在根层) */
+    /** 是否根层视图(「尚未归类」通栏格只在根层) */
     isRootView: boolean;
     /** 当前容器名(非根层「直接记录在 X」标题用) */
     containerName: string;
@@ -271,7 +274,7 @@ Page<
     mapOpening: boolean;
     openMapPage(layers: ViewLayer[], unmounted?: boolean): void;
     navigateMapBack(toRoot?: boolean): boolean;
-    /** 当前层节点标识与完整 path(容器「⋯」整理动作的目标) */
+    /** 当前层节点标识与完整 path(当前位置新增的目标) */
     currentNodeId: string;
     currentNodePath: string[];
     loadMapLayer(force?: boolean, retryOnStaleGen?: boolean): Promise<void>;
@@ -282,6 +285,11 @@ Page<
     onAddHereTap(): void;
     openLocationAction(action: "addItem" | "delete", nodeId: string, targetId?: string): void;
     suppressRoomTapUntil: number;
+    locationHintChecked: boolean;
+    onLocationHintDismiss(): void;
+    locationMenuTarget: { node: DisplayRoom; scope: number } | null;
+    onLocationMenuClose(): void;
+    onLocationMenuPick(e: WechatMiniprogram.CustomEvent): void;
     /** 「尚未归类」通栏格:点入未挂物品明细视图(Fix 3) */
     onUnmountedTap(): void;
     /** 明细行点击:按 item_id 进物品详情(原话位置在那里核对/整理) */
@@ -289,8 +297,7 @@ Page<
     onBackTap(): void;
     onDirectItemTap(e: WechatMiniprogram.CustomEvent): void;
     openItem(item: DisplayItem, spacePath?: string[], videoHint?: VideoPlaybackBadge | null): void;
-    /** 容器抬头「⋯」整理位置:改名/移动/合并(复用 locations 页动作与确认交互) */
-    onContainerMore(): void;
+    /** 位置动作复用 locations 页确认交互 */
     currentContainer(): { location_id: string; name: string; path: string[] } | null;
     renameContainer(node: { location_id: string; name: string }): void;
     doRename(
@@ -338,12 +345,15 @@ Page<
     photoResume: null as { count: number; mode: "review" | "evidence" } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
+    locationMenuVisible: false,
+    locationMenuName: "",
+    showLocationHint: false,
     firstUse: false,
     mapLoading: true,
     mapRefreshing: false,
     mapStale: false,
     mapError: "",
-    mapTitle: "家里有什么",
+    mapTitle: "家里",
     backLabel: "",
     isRootView: true,
     containerName: "",
@@ -381,6 +391,8 @@ Page<
   viewStack: [] as ViewLayer[],
   mapOpening: false,
   suppressRoomTapUntil: 0,
+  locationHintChecked: false,
+  locationMenuTarget: null as { node: DisplayRoom; scope: number } | null,
   currentNodeId: "",
   currentNodePath: [] as string[],
 
@@ -413,7 +425,7 @@ Page<
       this.renderedScopeGen = Number.isSafeInteger(entryScope) && entryScope >= 0 ? entryScope : captureScopeGeneration();
       this.setData({
         firstUse: false, isRootView: !top, unmountedView: unmounted,
-        containerName: top ? top.name : "", mapTitle: top ? top.name + "里有什么" : "尚未归类",
+        containerName: top ? top.name : "", mapTitle: top ? top.name : "尚未归类",
         backLabel: this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].name : "家里",
       });
     }
@@ -455,6 +467,8 @@ Page<
   },
 
   onHide() {
+    this.setData({ showLocationHint: false });
+    this.onLocationMenuClose();
     this.profileRequest++;
     this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
@@ -825,7 +839,7 @@ Page<
         unmountedCount: 0,
         unmountedView: false,
         unmountedItems: [],
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         isRootView: true,
         containerName: "",
@@ -904,7 +918,7 @@ Page<
           unmountedCount: 0,
           unmountedView: false,
           unmountedItems: [],
-          mapTitle: "家里有什么",
+          mapTitle: "家里",
           backLabel: "",
           isRootView: true,
           containerName: "",
@@ -968,6 +982,15 @@ Page<
       artworkDark: roomArtwork(c.name, true),
       path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
     }));
+    if (!this.locationHintChecked && rooms.length > 0 && !this.data.queried && !this.data.unmountedView) {
+      this.locationHintChecked = true;
+      try {
+        if (!wx.getStorageSync("home_location_longpress_seen_v1")) {
+          this.setData({ showLocationHint: true });
+          wx.setStorageSync("home_location_longpress_seen_v1", true);
+        }
+      } catch (_) { /* 提示存储失败不影响浏览与操作 */ }
+    }
     this.renderedCurrentView = true;
     this.renderedScopeGen = captureScopeGeneration();
     const firstUse =
@@ -987,8 +1010,8 @@ Page<
       mapTitle: inUnmountedView
         ? "尚未归类 · " + res.unmounted_count + " 件待核实"
         : isRoot
-          ? "家里有什么"
-          : res.node.name + "里有什么",
+          ? "家里"
+          : res.node.name,
       backLabel: inUnmountedView
         ? "家里"
         : isRoot
@@ -1038,22 +1061,34 @@ Page<
   },
 
   /** 点格子:整页切入该容器(中间区域整体替换,抬头随之变化) */
+  onLocationHintDismiss() {
+    this.setData({ showLocationHint: false });
+  },
+
   onRoomLongPress(e) {
     if (this.data.acting || this.data.mapLoading || this.renderedScopeGen === null || !isScopeGenerationCurrent(this.renderedScopeGen)) return;
     const room = this.data.rooms[Number(e.currentTarget.dataset.index)];
     if (!room) return;
-    const scope = captureScopeGeneration();
+    this.onLocationHintDismiss();
     this.suppressRoomTapUntil = Date.now() + 350;
-    wx.showActionSheet({
-      itemList: ["移动到…", "删除"],
-      success: (r) => {
-        if (!isScopeGenerationCurrent(scope)) return;
-        const node = { location_id: room.location_id, name: room.name, path: room.path };
-        if (r.tapIndex === 0) this.moveContainer(node);
-        else if (r.tapIndex === 1) this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, room.location_id);
-      },
-      fail: () => {},
-    });
+    this.locationMenuTarget = { node: room, scope: captureScopeGeneration() };
+    this.setData({ locationMenuVisible: true, locationMenuName: room.name });
+  },
+
+  onLocationMenuClose() {
+    this.locationMenuTarget = null;
+    this.setData({ locationMenuVisible: false, locationMenuName: "" });
+  },
+
+  onLocationMenuPick(e) {
+    const target = this.locationMenuTarget;
+    this.onLocationMenuClose();
+    if (!target || this.data.acting || !isScopeGenerationCurrent(target.scope)) return;
+    const node = target.node;
+    const action = e.currentTarget.dataset.action;
+    if (action === "rename") this.renameContainer(node);
+    else if (action === "move") this.moveContainer(node);
+    else if (action === "delete") this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, node.location_id);
   },
 
   onAddHereTap() {
@@ -1126,7 +1161,7 @@ Page<
       this.renderedCurrentView = false;
       this.setData({
         unmountedView: false,
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         rooms: [],
         directItems: [],
@@ -1142,7 +1177,7 @@ Page<
     this.setData({
       isRootView: parent === null,
       containerName: parent ? parent.name : "",
-      mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+      mapTitle: parent ? parent.name : "家里",
       backLabel: parent
         ? this.viewStack.length >= 2
           ? this.viewStack[this.viewStack.length - 2].name
@@ -1199,32 +1234,7 @@ Page<
     });
   },
 
-  /* ---------------- 容器「⋯」整理位置(复用 locations 页动作与确认交互) ---------------- */
-
-  onContainerMore() {
-    if (this.data.acting) {
-      return;
-    }
-    const current = this.currentContainer();
-    if (current === null) {
-      return;
-    }
-    wx.showActionSheet({
-      itemList: ["改名", "移动到…", "合并到…", "删除位置"],
-      success: (r) => {
-        if (r.tapIndex === 0) {
-          this.renameContainer(current);
-        } else if (r.tapIndex === 1) {
-          this.moveContainer(current);
-        } else if (r.tapIndex === 2) {
-          this.mergeContainer(current);
-        } else if (r.tapIndex === 3) {
-          this.openLocationAction("delete", this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].id : "", current.location_id);
-        }
-      },
-      fail: () => {},
-    });
-  },
+  /* ---------------- 卡片长按整理位置，复用已有确认交互 ---------------- */
 
   currentContainer() {
     const top =
@@ -1313,7 +1323,7 @@ Page<
       this.setData({
         isRootView: true,
         containerName: "",
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         rooms: [],
         directItems: [],
@@ -1381,7 +1391,7 @@ Page<
       this.setData({
         isRootView: parent === null,
         containerName: parent ? parent.name : "",
-        mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+        mapTitle: parent ? parent.name : "家里",
         backLabel: parent
           ? this.viewStack.length >= 2
             ? this.viewStack[this.viewStack.length - 2].name
