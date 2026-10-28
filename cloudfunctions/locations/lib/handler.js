@@ -26,6 +26,7 @@ var NODE_NAME_MAX = 30; // 节点名去首尾空白后 1-30 字(码点)
 var PATH_MAX_SEGMENTS = tree.PATH_MAX_DEPTH; // path 1-6 段
 var OPERATION_ID_MAX = 64;
 var HOME_NAME = "我的家";
+var ARTWORK_IDS = ["living", "bedroom", "study", "kitchen", "bathroom", "balcony", "entryway", "car", "wardrobe", "bookshelf", "refrigerator", "desk", "nightstand", "shoe-cabinet", "drawer-unit", "wall-cabinet", "drawer", "storage-box", "carton", "basket", "document-folder", "suitcase", "toolbox", "generic"];
 var CREATED_FROM_VALUES = ["bootstrap", "scan", "parse", "manual"];
 // CloudBase 云函数端 get() 默认最多 100 条;全量统计必须分页拉取(itemsApi 同款取舍)
 var PAGE_SIZE = 100;
@@ -397,6 +398,9 @@ function summarize(node, itemCounts, childCounts) {
     created_from: node.created_from,
     updated_at: node.updated_at
   };
+  if (node.artwork_id === null || ARTWORK_IDS.indexOf(node.artwork_id) !== -1) {
+    out.artwork_id = node.artwork_id;
+  }
   // issue #116 unmount(D0 §3.1 发现点二):仅 deleting 节点携带置灰布尔,只增字段,
   // 检查点其余明细(op_id/清单/phase/counts)绝不外泄(白名单投影)
   if (node.deleting !== undefined) {
@@ -799,6 +803,27 @@ async function ensurePathAction(event, deps) {
     }),
     created: ensured.created
   };
+}
+
+/** Visual override only; null restores client-side automatic name matching. */
+async function setArtworkAction(event, deps) {
+  if (!validItemId(event.node_id) || (event.artwork_id !== null && ARTWORK_IDS.indexOf(event.artwork_id) === -1)) {
+    return fail("INVALID_INPUT");
+  }
+  var node = await findNodeById(deps, event.node_id);
+  if (!node) return fail("NOT_FOUND");
+  if (isHomeRoot(node)) return fail("INVALID_INPUT");
+  var nodes = await fetchHouseholdNodes(deps);
+  if (buildFrozenIdSet(nodes)[node._id] === true) return failDeletingFrozen();
+  var updated = await locCol(deps)
+    .where({ _id: node._id, household_id: deps.householdId, deleting: fieldAbsentCond(deps) })
+    .update({ data: { artwork_id: event.artwork_id, updated_at: deps.now() } });
+  if (!updated.stats || updated.stats.updated !== 1) {
+    return await findNodeById(deps, node._id) ? failDeletingFrozen() : fail("NOT_FOUND");
+  }
+  var fresh = await findNodeById(deps, node._id);
+  if (!fresh) return fail("NOT_FOUND");
+  return { ok: true, node: await summarizeWithStats(deps, fresh) };
 }
 
 // ---------------------------------------------------------------------------
@@ -2564,6 +2589,7 @@ var DB_ACTIONS = {
   list: listAction,
   ensurePath: ensurePathAction,
   rename: renameAction,
+  setArtwork: setArtworkAction,
   move: moveAction,
   merge: mergeAction,
   delete: deleteAction,
@@ -2591,6 +2617,7 @@ var DB_ACTIONS = {
 var WRITE_DB_ACTIONS = {
   ensurePath: true,
   rename: true,
+  setArtwork: true,
   move: true,
   merge: true,
   delete: true,

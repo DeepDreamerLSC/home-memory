@@ -136,6 +136,7 @@ function validateLocationsOkResponse(action, r) {
             }
             break;
         case "rename":
+        case "setArtwork":
         case "move":
         case "merge":
             if (!isLocationNodeSummary(r.node)) {
@@ -226,6 +227,7 @@ function timeoutForAction(action) {
 const LOCATIONS_MUTATING_ACTIONS = new Set([
     "ensurePath",
     "rename",
+    "setArtwork",
     "move",
     "merge",
     "delete",

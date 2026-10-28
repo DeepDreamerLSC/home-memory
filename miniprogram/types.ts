@@ -599,8 +599,36 @@ export type LocationType = "home" | "room" | "furniture" | "container";
 /** 节点创建来源 */
 export type LocationCreatedFrom = "bootstrap" | "scan" | "parse" | "manual";
 
+export type LocationArtworkId =
+  | "living"
+  | "bedroom"
+  | "study"
+  | "kitchen"
+  | "bathroom"
+  | "balcony"
+  | "entryway"
+  | "car"
+  | "wardrobe"
+  | "bookshelf"
+  | "refrigerator"
+  | "desk"
+  | "nightstand"
+  | "shoe-cabinet"
+  | "drawer-unit"
+  | "wall-cabinet"
+  | "drawer"
+  | "storage-box"
+  | "carton"
+  | "basket"
+  | "document-folder"
+  | "suitcase"
+  | "toolbox"
+  | "generic";
+
 /** 节点摘要(list/ensurePath/rename/move/merge 响应共用) */
 export interface LocationNodeSummary {
+  /** 手动插画覆盖；缺失或 null 时按名称自动匹配，不改变位置层级。 */
+  artwork_id?: LocationArtworkId | null;
   location_id: string;
   name: string;
   type: LocationType;
@@ -757,6 +785,7 @@ export type LocationsApiEvent =
       created_from?: "scan" | "parse" | "manual";
     } & ScopeWriteBinding)
   | ({ action: "rename"; node_id: string; name: string } & ScopeWriteBinding)
+  | ({ action: "setArtwork"; node_id: string; artwork_id: LocationArtworkId | null } & ScopeWriteBinding)
   | ({
       action: "move";
       node_id: string;
@@ -869,6 +898,11 @@ export interface RenameLocationResponse {
   node: LocationNodeSummary;
 }
 
+export interface SetLocationArtworkResponse {
+  ok: true;
+  node: LocationNodeSummary;
+}
+
 export interface MoveLocationResponse {
   ok: true;
   node: LocationNodeSummary;
@@ -929,6 +963,7 @@ export type LocationsApiOkResponse =
   | ListLocationsResponse
   | EnsurePathResponse
   | RenameLocationResponse
+  | SetLocationArtworkResponse
   | MoveLocationResponse
   | MergeLocationResponse
   | DeleteLocationResponse

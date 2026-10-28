@@ -2,15 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.roomArtwork = roomArtwork;
 exports.itemArtwork = itemArtwork;
+const location_artwork_1 = require("./location-artwork");
 const appearance_1 = require("./appearance");
 /** Approved prototype artwork; unknown names keep a neutral storage/item drawing. */
-function roomArtwork(name, dark = false) {
-    const kind = /厨房|餐厅|餐厨/.test(name) ? "kitchen"
-        : /书房|办公室|工作间/.test(name) ? "study"
-            : /卧室|主卧|次卧|儿童房|客房/.test(name) ? "bedroom"
-                : /客厅|起居|玄关/.test(name) ? "living"
-                    : "storage";
-    return `${(0, appearance_1.getAppearance)().artPrefix}${kind}${dark ? "-dark" : ""}.png`;
+function roomArtwork(name, dark = false, override) {
+    return (0, location_artwork_1.locationArtworkSrc)((0, location_artwork_1.locationArtworkId)(name, override), dark);
 }
 function itemArtwork(name, dark = false) {
     const kind = /钥匙/.test(name) ? "key"

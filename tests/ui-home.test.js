@@ -19,6 +19,7 @@ function harness(storage = new Map()) {
   const guardCalls = [];
   let pages = [];
   const stubs = {
+    "../../utils/location-artwork": require("../miniprogram/utils/location-artwork"),
     "../../utils/appearance-page": {applyPageAppearance() {}},
     "../../utils/profile-api": {cachedUserProfile:()=>({nickname:""}),getUserProfile:async()=>({nickname:""})},
     "../../utils/exit-guard": { enableHomeExitGuard() {guardCalls.push("on");}, disableHomeExitGuard() {guardCalls.push("off");} },
@@ -294,4 +295,45 @@ test("location menu closes without writes and rejects stale household targets", 
   const h=harness();h.page.data.rooms=[{location_id:"r",name:"书房",path:["书房"]}];h.page.renderedScopeGen=1;h.page.data.mapLoading=false;
   h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.scope(2);
   h.page.onLocationMenuPick({currentTarget:{dataset:{action:"delete"}}});assert.equal(h.navigation.length,0);assert.equal(h.calls.length,0);assert.equal(h.page.data.locationMenuVisible,false);assert.equal(h.page.locationMenuTarget,null);
+});
+
+function artworkHarness(artworkId=null){
+  const h=harness();h.page.data.mapLoading=false;h.page.renderedScopeGen=1;
+  h.page.data.rooms=[{location_id:'r',name:'书房',path:['书房'],artworkId,artwork:'original',artworkDark:'original-dark'}];
+  h.page.loadMapLayer=async()=>{};
+  h.api(async request=>({node:{artwork_id:request.artwork_id}}));
+  h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});
+  h.page.onLocationMenuPick({currentTarget:{dataset:{action:'artwork'}}});
+  return h;
+}
+const chooseArtwork=id=>({currentTarget:{dataset:{id}}});
+test('artwork choice stays a draft until explicit save and cancellation leaves original untouched',()=>{
+  const h=artworkHarness();assert.equal(h.page.data.artworkOptions.length,24);assert.equal(h.page.data.artworkSelectedId,'');
+  h.page.onArtworkCategoryTap({currentTarget:{dataset:{category:'家具'}}});assert.equal(h.page.data.artworkOptions.length,8);
+  h.page.onArtworkPick(chooseArtwork('toolbox'));assert.equal(h.page.data.artworkSelectedId,'toolbox');assert.equal(h.calls.length,0);
+  h.page.onArtworkPickerClose();assert.equal(h.page.data.artworkPickerVisible,false);assert.equal(h.page.data.rooms[0].artworkId,null);assert.equal(h.calls.length,0);
+});
+test('artwork save targets the long-pressed node and reset sends null without renaming or moving it',async()=>{
+  const h=artworkHarness();h.page.onArtworkPick(chooseArtwork('toolbox'));await h.page.onArtworkSaveTap();
+  assert.equal(h.calls.length,1);assert.equal(h.calls[0].action,'setArtwork');assert.equal(h.calls[0].node_id,'r');assert.equal(h.calls[0].artwork_id,'toolbox');
+  assert.equal(h.page.data.rooms[0].artworkId,'toolbox');assert.equal(h.page.data.artworkPickerVisible,false);
+  h.page.openArtworkPicker(h.page.data.rooms[0]);h.page.onArtworkPick(chooseArtwork(''));await h.page.onArtworkSaveTap();assert.equal(h.calls[1].artwork_id,null);
+});
+test('artwork failed save preserves the draft and busy saves cannot duplicate or close',async()=>{
+  const h=artworkHarness(),d=deferred();h.api(()=>d.promise);h.page.onArtworkPick(chooseArtwork('toolbox'));
+  const save=h.page.onArtworkSaveTap();await h.page.onArtworkSaveTap();h.page.onArtworkPickerClose();assert.equal(h.calls.length,1);assert.equal(h.page.data.artworkPickerVisible,true);
+  d.reject(new Error('network'));await save;assert.equal(h.page.data.artworkPickerVisible,true);assert.equal(h.page.data.artworkSelectedId,'toolbox');assert.match(h.page.data.artworkError,/network/);assert.equal(h.page.data.rooms[0].artworkId,null);
+});
+test('artwork save fails closed on family drift before submit and while awaiting a response',async()=>{
+  const h=artworkHarness();h.page.onArtworkPick(chooseArtwork('toolbox'));h.scope(2);await h.page.onArtworkSaveTap();assert.equal(h.calls.length,0);assert.equal(h.page.data.artworkPickerVisible,false);
+  const pending=artworkHarness(),d=deferred();pending.api(()=>d.promise);pending.page.onArtworkPick(chooseArtwork('toolbox'));const save=pending.page.onArtworkSaveTap();pending.scope(2);d.resolve({});await save;
+  assert.equal(pending.page.data.rooms[0].artworkId,null);assert.equal(pending.page.data.artworkPickerVisible,false);
+});
+
+test('artwork save respects the authoritative response when another member has changed the same node',async()=>{
+  const h=artworkHarness();h.api(async()=>({node:{artwork_id:'basket'}}));h.page.onArtworkPick(chooseArtwork('toolbox'));await h.page.onArtworkSaveTap();assert.equal(h.page.data.rooms[0].artworkId,'basket');
+});
+
+test('a held long press cannot drill into a location after the short tap-suppression window expires',()=>{
+  const h=artworkHarness();h.page.onArtworkPickerClose();h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.page.suppressRoomTapUntil=0;h.page.onRoomTap({currentTarget:{dataset:{index:0}}});assert.equal(h.navigation.length,0);assert.equal(h.page.data.locationMenuVisible,true);
 });

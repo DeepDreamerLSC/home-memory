@@ -94,9 +94,27 @@
   <view class="sheet" catchtap="noop" role="dialog" aria-label="管理{{locationMenuName}}">
     <view class="sheet-title">管理「{{ locationMenuName }}」</view>
     <button class="sheet-act location-act" data-action="rename" bindtap="onLocationMenuPick">改名</button>
+    <button class="sheet-act location-act" data-action="artwork" bindtap="onLocationMenuPick">更换插画</button>
     <button class="sheet-act location-act" data-action="move" bindtap="onLocationMenuPick">移动到…</button>
     <button class="sheet-act location-act location-delete" data-action="delete" bindtap="onLocationMenuPick">删除</button>
     <button class="sheet-close location-act" bindtap="onLocationMenuClose">取消</button>
+  </view>
+</view>
+<view class="sheet-mask {{ artworkPickerVisible ? 'open' : '' }}" bindtap="onArtworkPickerClose">
+  <view class="sheet artwork-sheet" catchtap="noop" role="dialog" aria-label="更换{{artworkPickerName}}的插画">
+    <view class="sheet-title">{{ artworkPickerName }}的插画</view>
+    <button class="artwork-auto {{ artworkSelectedId === '' ? 'selected' : '' }}" data-id="" bindtap="onArtworkPick" disabled="{{artworkBusy}}" aria-label="按位置名称自动匹配插画">
+      <view class="artwork-auto-image"><image class="theme-light" src="{{artworkAutoLight}}" mode="aspectFit"/><image class="theme-dark" src="{{artworkAutoDark}}" mode="aspectFit"/></view>
+      <view class="artwork-auto-copy"><view>自动匹配</view><text>改名时跟随位置名称</text></view><text class="artwork-check">{{ artworkSelectedId === '' ? '✓' : '' }}</text>
+    </button>
+    <view class="artwork-tabs"><button wx:for="{{artworkCategories}}" wx:key="*this" class="{{artworkCategory === item ? 'active' : ''}}" data-category="{{item}}" bindtap="onArtworkCategoryTap" disabled="{{artworkBusy}}">{{item}}</button></view>
+    <scroll-view class="artwork-scroll" scroll-y="true">
+      <view class="artwork-grid"><button wx:for="{{artworkOptions}}" wx:key="id" class="artwork-choice {{artworkSelectedId === item.id ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="onArtworkPick" disabled="{{artworkBusy}}" aria-label="选择{{item.name}}插画">
+        <view class="artwork-choice-image"><image class="theme-light" src="{{item.image}}" mode="aspectFit"/><image class="theme-dark" src="{{item.imageDark}}" mode="aspectFit"/></view><view class="artwork-choice-label"><text>{{item.name}}</text><text>{{artworkSelectedId === item.id ? '✓' : ''}}</text></view>
+      </button></view>
+    </scroll-view>
+    <view wx:if="{{artworkError}}" class="artwork-error">{{artworkError}}</view>
+    <view class="artwork-footer"><button class="artwork-cancel" bindtap="onArtworkPickerClose" disabled="{{artworkBusy}}">取消</button><button class="artwork-save" bindtap="onArtworkSaveTap" disabled="{{artworkBusy || artworkSelectedId === artworkOriginalId}}">{{artworkBusy ? '保存中…' : '保存插画'}}</button></view>
   </view>
 </view>
 <voice-bar id="global-voice-bar" wx:if="{{ !firstUse || queried }}" />

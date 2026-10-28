@@ -6,9 +6,9 @@ const path = require("node:path");
 const { roomArtwork, itemArtwork } = require("../miniprogram/utils/ui.js");
 
 test("UI artwork maps Chinese room variants and keeps unknown rooms neutral", () => {
-  assert.equal(roomArtwork("儿童房"), "/assets/themes/cream/bedroom.png");
-  assert.equal(roomArtwork("餐厨区", true), "/assets/themes/cream/kitchen-dark.png");
-  assert.equal(roomArtwork("杂物间"), "/assets/themes/cream/storage.png");
+  assert.equal(roomArtwork("儿童房"), "/assets/location-artwork/cream/bedroom.png");
+  assert.equal(roomArtwork("餐厨区", true), "/assets/location-artwork/cream/kitchen-dark.png");
+  assert.equal(roomArtwork("杂物间"), "/assets/location-artwork/cream/generic.png");
 });
 
 test("UI artwork selects item categories and every light/dark output exists", () => {

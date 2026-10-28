@@ -160,3 +160,10 @@ test("system changes refresh a system-following draft while the saved mode stays
   assert.equal(harness.nav.at(-1).backgroundColor,harness.api.PALETTES.cobalt.dark[0]);
   page.onUnload();
 });
+
+test("location illustration overrides retain their identity across theme changes",()=>{
+  const h=setup();delete require.cache[require.resolve('../miniprogram/utils/appearance-page.js')];
+  const {applyPageAppearance}=require('../miniprogram/utils/appearance-page.js');
+  const page={data:{rooms:[{artworkId:'toolbox',artwork:'/assets/location-artwork/cream/toolbox.png',artworkDark:'/assets/location-artwork/cream/toolbox-dark.png'}],artworkOptions:[{id:'nightstand',image:'/assets/location-artwork/cream/nightstand.png'}],artworkAutoLight:'/assets/location-artwork/cream/study.png'},setData(patch){Object.assign(this.data,patch)}};
+  h.api.updateAppearance({palette:'cobalt'});applyPageAppearance(page);assert.equal(page.data.rooms[0].artworkId,'toolbox');assert.equal(page.data.rooms[0].artwork,'/assets/location-artwork/cobalt/toolbox.png');assert.equal(page.data.rooms[0].artworkDark,'/assets/location-artwork/cobalt/toolbox-dark.png');assert.equal(page.data.artworkOptions[0].image,'/assets/location-artwork/cobalt/nightstand.png');assert.equal(page.data.artworkAutoLight,'/assets/location-artwork/cobalt/study.png');
+});
