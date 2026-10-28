@@ -47,6 +47,7 @@ type DisplayRoom = {
   countText: string;
   artwork: string;
   artworkDark: string;
+  path: string[];
 };
 
 /** 「尚未归类」明细行(#36 真机反馈 Fix 3:首字块 + 名称 + 原话位置 + 灰标) */
@@ -277,6 +278,10 @@ Page<
     renderMap(res: ListLocationsResponse): void;
     onRetryTap(): void;
     onRoomTap(e: WechatMiniprogram.CustomEvent): void;
+    onRoomLongPress(e: WechatMiniprogram.CustomEvent): void;
+    onAddHereTap(): void;
+    openLocationAction(action: "addItem" | "delete", nodeId: string, targetId?: string): void;
+    suppressRoomTapUntil: number;
     /** 「尚未归类」通栏格:点入未挂物品明细视图(Fix 3) */
     onUnmountedTap(): void;
     /** 明细行点击:按 item_id 进物品详情(原话位置在那里核对/整理) */
@@ -375,6 +380,7 @@ Page<
   lastFirstUse: true,
   viewStack: [] as ViewLayer[],
   mapOpening: false,
+  suppressRoomTapUntil: 0,
   currentNodeId: "",
   currentNodePath: [] as string[],
 
@@ -960,6 +966,7 @@ Page<
       countText: roomCountText(c),
       artwork: roomArtwork(c.name),
       artworkDark: roomArtwork(c.name, true),
+      path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
     }));
     this.renderedCurrentView = true;
     this.renderedScopeGen = captureScopeGeneration();
@@ -1031,7 +1038,42 @@ Page<
   },
 
   /** 点格子:整页切入该容器(中间区域整体替换,抬头随之变化) */
+  onRoomLongPress(e) {
+    if (this.data.acting || this.data.mapLoading || this.renderedScopeGen === null || !isScopeGenerationCurrent(this.renderedScopeGen)) return;
+    const room = this.data.rooms[Number(e.currentTarget.dataset.index)];
+    if (!room) return;
+    const scope = captureScopeGeneration();
+    this.suppressRoomTapUntil = Date.now() + 350;
+    wx.showActionSheet({
+      itemList: ["移动到…", "删除"],
+      success: (r) => {
+        if (!isScopeGenerationCurrent(scope)) return;
+        const node = { location_id: room.location_id, name: room.name, path: room.path };
+        if (r.tapIndex === 0) this.moveContainer(node);
+        else if (r.tapIndex === 1) this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, room.location_id);
+      },
+      fail: () => {},
+    });
+  },
+
+  onAddHereTap() {
+    if (this.data.acting || this.data.mapLoading || this.data.unmountedView) return;
+    if (this.data.isRootView) { this.onTextRecordTap(); return; }
+    const current = this.currentContainer();
+    if (!current || this.renderedScopeGen === null || !isScopeGenerationCurrent(this.renderedScopeGen)) return;
+    this.openLocationAction("addItem", current.location_id);
+  },
+
+  openLocationAction(action, nodeId, targetId = "") {
+    wx.navigateTo({
+      url: "/pages/locations/locations?node_id=" + encodeURIComponent(nodeId) +
+        "&home_action=" + action + "&home_target=" + encodeURIComponent(targetId) + "&home_scope=" + captureScopeGeneration(),
+      fail: () => { wx.showToast({ title: "页面打开失败，请重试", icon: "none" }); },
+    });
+  },
+
   onRoomTap(e) {
+    if (Date.now() < this.suppressRoomTapUntil) return;
     if (this.data.acting) {
       return;
     }
@@ -1168,7 +1210,7 @@ Page<
       return;
     }
     wx.showActionSheet({
-      itemList: ["改名", "移动到…", "合并到…"],
+      itemList: ["改名", "移动到…", "合并到…", "删除位置"],
       success: (r) => {
         if (r.tapIndex === 0) {
           this.renameContainer(current);
@@ -1176,6 +1218,8 @@ Page<
           this.moveContainer(current);
         } else if (r.tapIndex === 2) {
           this.mergeContainer(current);
+        } else if (r.tapIndex === 3) {
+          this.openLocationAction("delete", this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].id : "", current.location_id);
         }
       },
       fail: () => {},
@@ -1258,6 +1302,7 @@ Page<
         new_parent_id: newParentId,
       });
       wx.showToast({ title: "已移动", icon: "success" });
+      if (node.location_id !== this.currentNodeId) { await this.loadMapLayer(true); return; }
       if (this.navigateMapBack(true)) return;
       // 容器搬了家:视图栈里的祖先层已过时(客户端拿不到新祖先 id),
       // 如实回根层重新看整张地图,不猜层级

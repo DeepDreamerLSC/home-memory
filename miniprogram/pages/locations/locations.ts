@@ -19,7 +19,7 @@ import { errorMessage, formatDateTime, uuid } from "../../utils/api";
 import { callItemsApi, isApiError } from "../../utils/api";
 import { CLIENT_NETWORK, CLIENT_TIMEOUT, CLIENT_BAD_RESPONSE } from "../../utils/api";
 import { lastScanSummaryText } from "../../utils/location-scan";
-import { householdScopeName, isHouseholdScopeShared, isScopeVerified } from "../../utils/household-scope";
+import { captureScopeGeneration, isScopeGenerationCurrent, householdScopeName, isHouseholdScopeShared, isScopeVerified } from "../../utils/household-scope";
 import { HIGHLIGHT_QUERY_KEY } from "../../utils/nav-highlight";
 import { consumePendingLocationHighlight, navToLocationLayer } from "../../utils/location-nav";
 import { locationIconArtwork } from "../../utils/location-icon-view";
@@ -234,6 +234,10 @@ Page<
     hlTimer: ReturnType<typeof setTimeout> | 0;
     /** ① 长按后的吞 tap 截止时间戳(0 = 无):老基础库长按后仍可能派发 tap,防御位 */
     suppressTapUntil: number;
+    homeAction: { kind: "addItem" | "delete"; targetId: string; scope: number } | null;
+    homeEntry: "" | "addItem" | "delete";
+    runHomeAction(res: ListLocationsResponse): Promise<void>;
+    returnHomeEntry(deletedNodeId?: string): boolean;
     onLoad(options: Record<string, string | undefined>): void;
     onShow(): void;
     onUnload(): void;
@@ -299,7 +303,7 @@ Page<
     onScanDeleteConfirmTap(): Promise<void>;
     refreshAfterScanDelete(): void;
     /** D1(#94)删除位置三按钮 + #116 四选:preview 影响面 → 弹层(取消/迁移/转未归类/全部删除) */
-    deleteNodeWithPreview(node: DisplayNode): Promise<void>;
+    deleteNodeWithPreview(node: Pick<LocationNodeSummary, "location_id" | "name">): Promise<void>;
     onDeleteLayerCancel(): void;
     onMigrateTap(): void;
     /** issue #116:「转为未归类」→ deleteLocation(mode:unmount);对带检查点根重入即续跑 */
@@ -402,6 +406,8 @@ Page<
     },
   },
 
+  homeAction: null as { kind: "addItem" | "delete"; targetId: string; scope: number } | null,
+  homeEntry: "" as "" | "addItem" | "delete",
   nodeId: "",
   nodePath: [] as string[],
   pickExcludePath: "",
@@ -428,6 +434,13 @@ Page<
     this.scanLoadSeq = 0;
     this.scanHistorySeq = 0;
     const isPicker = options.picker === "1";
+    const action = options.home_action;
+    this.homeEntry = !isPicker && (action === "addItem" || action === "delete") ? action : "";
+    const entryScope = Number(options.home_scope);
+    this.homeAction = this.homeEntry ? {
+      kind: this.homeEntry, targetId: safeDecode(options.home_target),
+      scope: Number.isSafeInteger(entryScope) && entryScope >= 0 ? entryScope : captureScopeGeneration(),
+    } : null;
     this.nodeId = safeDecode(options.node_id);
     this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
     // ④ navigateTo/redirectTo 场景:url 的 hl 参数(onLoad 只跑一次)
@@ -451,10 +464,12 @@ Page<
     if (pendingHl) {
       this.pendingHl = pendingHl;
     }
-    void this.loadNode();
+    void this.loadNode(!!this.homeAction);
   },
 
   onUnload() {
+    this.homeAction = null;
+    this.homeEntry = "";
     disableHomeExitGuard();
     if (this.hlTimer !== 0) {
       clearTimeout(this.hlTimer);
@@ -562,6 +577,7 @@ Page<
       writeLocationsLayer(this.nodeId, res, Date.now(), gen);
       this.renderList(res); // 刷新成功:原位 setData 更新,不闪屏
       this.setData({ loading: false, refreshing: false, stale: false, loadError: "" });
+      if (this.homeAction) await this.runHomeAction(res);
     } catch (e) {
       if (!this.requestSeq.isCurrent(seq)) {
         return;
@@ -573,6 +589,34 @@ Page<
         this.setData({ loading: false, refreshing: false, loadError: errorMessage(e) });
       }
     }
+  },
+
+  async runHomeAction(res) {
+    const action = this.homeAction;
+    if (!action) return;
+    this.homeAction = null;
+    if (this.data.mode !== "browse" || !isScopeGenerationCurrent(action.scope)) {
+      wx.showToast({ title: "家庭或位置已变化，请返回后重试", icon: "none" });
+      return;
+    }
+    if (action.kind === "addItem") {
+      if (res.node.type !== "home" && res.node.location_id === this.nodeId) this.onAddItemTap();
+      return;
+    }
+    const target = res.children.find(node => node.location_id === action.targetId);
+    if (!target) { wx.showToast({ title: "位置已变化，请返回后重试", icon: "none" }); return; }
+    await this.deleteNodeWithPreview(target);
+  },
+
+  returnHomeEntry(deletedNodeId = "") {
+    if (!this.homeEntry) return false;
+    this.homeEntry = "";
+    disableHomeExitGuard();
+    const pages = getCurrentPages();
+    const previous = pages[pages.length - 2] as unknown as { currentNodeId?: string } | undefined;
+    const delta = deletedNodeId && previous?.currentNodeId === deletedNodeId && pages.length > 2 ? 2 : 1;
+    wx.navigateBack({ delta, fail: () => { wx.showToast({ title: "请点击左上角返回", icon: "none" }); } });
+    return true;
   },
 
   /** list 响应(缓存或服务端)→ 上屏数据;原位 setData */
@@ -1368,7 +1412,9 @@ Page<
 
   /** 取消:关弹层,不调任何接口(#94 三按钮语义) */
   onDeleteLayerCancel() {
+    if (this.data.deleteLayer.busy) return;
     this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
+    if (this.homeEntry) this.returnHomeEntry();
   },
 
   deleteLayerBusy(busy) {
@@ -1408,6 +1454,7 @@ Page<
         icon: res.remounted > 0 ? "none" : "success",
         duration: res.remounted > 0 ? 3000 : 1500,
       });
+      if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId)) return;
       await this.loadNode();
     } catch (e) {
       // 迁移冲突/作用域变化是可重试的收敛语义:如实提示,弹层保留供重试;
@@ -1465,6 +1512,7 @@ Page<
         icon: total > 0 ? "none" : "success",
         duration: total > 0 ? 3000 : 1500,
       });
+      if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId)) return;
       await this.loadNode();
     } catch (e) {
       this.deleteLayerBusy(false);
@@ -1582,6 +1630,7 @@ Page<
           });
           this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
           wx.showToast({ title: "已全部删除", icon: "success" });
+          if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId)) return;
           await this.loadNode();
           return;
         } catch (e) {
@@ -1713,6 +1762,7 @@ Page<
       return; // 提交进行中不允许关闭(防半途丢上下文)
     }
     this.setData({ itemPanel: { ...this.data.itemPanel, visible: false } });
+    if (this.homeEntry) this.returnHomeEntry();
   },
 
   onItemNameInput(e) {
@@ -1795,6 +1845,7 @@ Page<
       });
       this.setData({ itemPanel: { ...this.data.itemPanel, visible: false, busy: false } });
       wx.showToast({ title: "已添加", icon: "success" });
+      if (this.homeEntry && this.returnHomeEntry()) return;
       await this.loadNode();
       // ④ 原地短高亮新物品(本层即可见)
       this.pendingHl = created.item_id;

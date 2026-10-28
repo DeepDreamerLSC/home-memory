@@ -53,7 +53,7 @@ function harness() {
     exports: {}, Page: value => { options = value; },
     require: name => stubs[name] || {},
     getCurrentPages: () => pages,
-    wx: { navigateTo: o => navigation.push({method:"navigateTo",...o}), navigateBack: o => navigation.push({method:"navigateBack",...o}), showToast: o => navigation.push({method:"toast",...o}) },
+    wx: { navigateTo: o => navigation.push({method:"navigateTo",...o}), navigateBack: o => navigation.push({method:"navigateBack",...o}), showActionSheet: o => navigation.push({method:"sheet",...o}), showToast: o => navigation.push({method:"toast",...o}) },
   });
   const page = Object.assign({}, options, {
     data: structuredClone(options.data),
@@ -194,7 +194,7 @@ test("home merging returns one native layer and moving returns to the native map
   for (const action of ["doMerge", "doMove"]) {
     const h=harness();h.api(async()=>({}));
     h.pages([{route:"pages/index/index",data:{}},{route:"pages/index/index",data:{}},h.page]);
-    h.page.viewStack=[{id:"r",name:"书房"},{id:"c",name:"柜子"}];
+    h.page.viewStack=[{id:"r",name:"书房"},{id:"c",name:"柜子"}];h.page.currentNodeId="c";
     await h.page[action]({location_id:"c"},"target");
     const back=h.navigation.find(n=>n.method==="navigateBack");
     assert.equal(back.delta,action==="doMerge"?1:2);
@@ -236,4 +236,33 @@ test("home exit confirmation is root-only and restored when returning from a chi
   h.pages([{route:"pages/index/index"},h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on"]);
   h.pages([h.page]);h.page.onShow();assert.deepEqual(h.guardCalls,["on","on"]);
   await Promise.resolve();
+});
+
+
+test("home tile long press offers move and delete without drilling into the tile", () => {
+  const h=harness();h.page.renderMap({node:{type:"home",location_id:"root",item_count:0,path:[]},children:[{location_id:"r",name:"书房",path:["书房"],item_count:0,child_count:0}],items:[],unmounted_count:0});
+  h.page.data.mapLoading=false;h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});
+  assert.deepEqual(Array.from(h.navigation[0].itemList),["移动到…","删除"]);
+  h.page.onRoomTap({currentTarget:{dataset:{index:0}}});assert.equal(h.navigation.length,1);
+  h.navigation[0].success({tapIndex:0});assert.match(h.navigation[1].url,/picker=1/);assert.match(decodeURIComponent(h.navigation[1].url),/exclude_path=书房/);
+  assert.equal(h.calls.length,0);
+});
+
+test("home tile delete only opens the existing preview flow, never directly mutates", () => {
+  const h=harness();h.page.renderMap({node:{type:"home",location_id:"root",item_count:0,path:[]},children:[{location_id:"r",name:"书房",path:["书房"],item_count:0,child_count:0}],items:[],unmounted_count:0});
+  h.page.data.mapLoading=false;h.page.onRoomLongPress({currentTarget:{dataset:{index:0}}});h.navigation[0].success({tapIndex:1});
+  const url=new URL("https://local"+h.navigation[1].url);assert.equal(url.searchParams.get("home_action"),"delete");assert.equal(url.searchParams.get("home_target"),"r");assert.equal(h.calls.length,0);
+});
+
+test("home plus uses manual entry at root and binds the concrete current location in a child", () => {
+  const root=harness();root.page.data.mapLoading=false;root.page.onAddHereTap();assert.match(root.navigation[0].url,/confirm.*manual=true/);
+  const h=harness();h.page.viewStack=[{id:"r",name:"书房"}];h.page.currentNodeId="r";h.page.renderedScopeGen=1;h.page.data.isRootView=false;h.page.data.containerName="书房";h.page.data.mapLoading=false;
+  h.page.onAddHereTap();const url=new URL("https://local"+h.navigation[0].url);assert.equal(url.searchParams.get("home_action"),"addItem");assert.equal(url.searchParams.get("node_id"),"r");
+  h.scope(2);h.page.onAddHereTap();assert.equal(h.navigation.length,1,"old household context cannot open a current-location form");
+});
+
+test("moving a child tile refreshes the current grid instead of sending the parent to root", async () => {
+  const h=harness();h.page.currentNodeId="parent";h.page.requestSeq=require("../miniprogram/utils/locations-cache").createRequestSeq();
+  h.api(async request=>request.action==="move"?{}:{node:{type:"home",location_id:"root",item_count:0,path:[]},children:[],items:[],unmounted_count:0});
+  await h.page.doMove({location_id:"child"},"target");assert.equal(h.calls[0].action,"move");assert.ok(h.calls.some(c=>c.action==="list"));assert.equal(h.navigation.some(n=>n.method==="navigateBack"),false);
 });

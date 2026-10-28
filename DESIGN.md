@@ -71,3 +71,9 @@ None required for the approved UI implementation; any future visual direction ch
 - Prioritize recorded location; use a small fallback illustration and three compact rows for quantity, reminder and media. Keep pending uploads and actionable failures visible.
 - Each edit opens a focused panel with cancel and explicit confirmation. Retain independent semantics of location description/tree classification, quantity, reminder completion and media history.
 - Group photo/video viewing into one entry; preserve explicit playback, search video deep links, original notes and existing conflict/retry safeguards in any later implementation.
+
+
+## Home location actions
+- Approved follow-up, 2026-10-28: place a native add button to the left of the 房间/位置 section title; keep it available on empty and leaf locations. Place current-location management at the right of this same title row, rather than next to the large page heading.
+- Long-press location tiles opens the guarded move/delete actions. Addition and deletion reuse existing forms and confirmation safeguards; loading, search results and unclassified views do not expose the section action row.
+- The in-page back label uses 30rpx text and an 88rpx minimum touch height. New section action buttons retain 88rpx touch areas and existing semantic theme colors.

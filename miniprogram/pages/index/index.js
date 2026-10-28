@@ -119,6 +119,7 @@ Page({
     lastFirstUse: true,
     viewStack: [],
     mapOpening: false,
+    suppressRoomTapUntil: 0,
     currentNodeId: "",
     currentNodePath: [],
     onLoad(options) {
@@ -681,6 +682,7 @@ Page({
             countText: roomCountText(c),
             artwork: (0, ui_1.roomArtwork)(c.name),
             artworkDark: (0, ui_1.roomArtwork)(c.name, true),
+            path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
         }));
         this.renderedCurrentView = true;
         this.renderedScopeGen = (0, household_scope_1.captureScopeGeneration)();
@@ -751,7 +753,50 @@ Page({
         return true;
     },
     /** 点格子:整页切入该容器(中间区域整体替换,抬头随之变化) */
+    onRoomLongPress(e) {
+        if (this.data.acting || this.data.mapLoading || this.renderedScopeGen === null || !(0, household_scope_1.isScopeGenerationCurrent)(this.renderedScopeGen))
+            return;
+        const room = this.data.rooms[Number(e.currentTarget.dataset.index)];
+        if (!room)
+            return;
+        const scope = (0, household_scope_1.captureScopeGeneration)();
+        this.suppressRoomTapUntil = Date.now() + 350;
+        wx.showActionSheet({
+            itemList: ["移动到…", "删除"],
+            success: (r) => {
+                if (!(0, household_scope_1.isScopeGenerationCurrent)(scope))
+                    return;
+                const node = { location_id: room.location_id, name: room.name, path: room.path };
+                if (r.tapIndex === 0)
+                    this.moveContainer(node);
+                else if (r.tapIndex === 1)
+                    this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, room.location_id);
+            },
+            fail: () => { },
+        });
+    },
+    onAddHereTap() {
+        if (this.data.acting || this.data.mapLoading || this.data.unmountedView)
+            return;
+        if (this.data.isRootView) {
+            this.onTextRecordTap();
+            return;
+        }
+        const current = this.currentContainer();
+        if (!current || this.renderedScopeGen === null || !(0, household_scope_1.isScopeGenerationCurrent)(this.renderedScopeGen))
+            return;
+        this.openLocationAction("addItem", current.location_id);
+    },
+    openLocationAction(action, nodeId, targetId = "") {
+        wx.navigateTo({
+            url: "/pages/locations/locations?node_id=" + encodeURIComponent(nodeId) +
+                "&home_action=" + action + "&home_target=" + encodeURIComponent(targetId) + "&home_scope=" + (0, household_scope_1.captureScopeGeneration)(),
+            fail: () => { wx.showToast({ title: "页面打开失败，请重试", icon: "none" }); },
+        });
+    },
     onRoomTap(e) {
+        if (Date.now() < this.suppressRoomTapUntil)
+            return;
         if (this.data.acting) {
             return;
         }
@@ -881,7 +926,7 @@ Page({
             return;
         }
         wx.showActionSheet({
-            itemList: ["改名", "移动到…", "合并到…"],
+            itemList: ["改名", "移动到…", "合并到…", "删除位置"],
             success: (r) => {
                 if (r.tapIndex === 0) {
                     this.renameContainer(current);
@@ -891,6 +936,9 @@ Page({
                 }
                 else if (r.tapIndex === 2) {
                     this.mergeContainer(current);
+                }
+                else if (r.tapIndex === 3) {
+                    this.openLocationAction("delete", this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].id : "", current.location_id);
                 }
             },
             fail: () => { },
@@ -965,6 +1013,10 @@ Page({
                 new_parent_id: newParentId,
             });
             wx.showToast({ title: "已移动", icon: "success" });
+            if (node.location_id !== this.currentNodeId) {
+                await this.loadMapLayer(true);
+                return;
+            }
             if (this.navigateMapBack(true))
                 return;
             // 容器搬了家:视图栈里的祖先层已过时(客户端拿不到新祖先 id),

@@ -9,7 +9,6 @@
   <view wx:if="{{ !firstUse || queried }}" class="heading-row">
     <view class="mtitle">{{ queried ? '找东西' : mapTitle }}</view>
     <button wx:if="{{isRootView && !unmountedView}}" class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button>
-    <view wx:elif="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
   </view>
   <view wx:if="{{!firstUse && !queried && !unmountedView}}" class="home-meta"><view wx:if="{{rememberedCount !== null}}" class="home-sub">{{isRootView ? '已记住' : '这里有'}} {{rememberedCount}} 件</view><view wx:if="{{isRootView}}" class="fam-chip" bindtap="onFamilyTap"><view class="fam-dot"/><text>{{familyShared ? '我们家' : '我的家'}}</text><template is="icon" data="{{name:'down'}}"/></view></view>
   <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
@@ -20,6 +19,14 @@
     <template is="icon" data="{{ name: 'search' }}" />
     <input class="search-input" placeholder="搜索物品" placeholder-class="placeholder" value="{{ queryText }}" confirm-type="search" bindinput="onQueryInput" bindconfirm="onQueryTap" />
     <view class="search-go-hit" hover-class="btn-press" bindtap="onQueryTap"><view class="search-go">{{ querying ? '…' : '→' }}</view></view>
+  </view>
+
+  <view wx:if="{{ !queried && !mapLoading && !mapError && !unmountedView }}" class="map-section-header">
+    <view class="map-section-title">
+      <button class="map-add" bindtap="onAddHereTap" aria-label="{{ isRootView ? '添加物品' : '在当前位置添加物品' }}" disabled="{{ acting || switchingFamily }}">+</button>
+      <view class="section-label">{{ isRootView ? '房间' : '位置' }}</view>
+    </view>
+    <button wx:if="{{ !isRootView }}" class="map-more" bindtap="onContainerMore" aria-label="管理当前位置" disabled="{{ acting || switchingFamily }}">⋯</button>
   </view>
 
   <block wx:if="{{ queried }}">
@@ -64,9 +71,8 @@
     </view>
   </block>
   <block wx:else>
-    <view wx:if="{{ rooms.length }}" class="section-label">{{ isRootView ? '房间' : '位置' }}</view>
     <view class="roomgrid">
-      <view wx:for="{{ rooms }}" wx:key="location_id" class="roomtile" hover-class="roomtile-active" data-index="{{ index }}" bindtap="onRoomTap">
+      <view wx:for="{{ rooms }}" wx:key="location_id" class="roomtile" hover-class="roomtile-active" data-index="{{ index }}" bindtap="onRoomTap" bindlongpress="onRoomLongPress">
         <view class="room-art"><image class="room-image theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="room-image theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view>
         <view class="room-info"><view class="room-copy"><view class="rname">{{ item.name }}</view><view class="rcount">{{ item.countText }}</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view>
       </view>
