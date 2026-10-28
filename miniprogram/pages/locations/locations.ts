@@ -1,4 +1,5 @@
 import { applyPageAppearance } from "../../utils/appearance-page";
+import { disableHomeExitGuard, enableHomeExitGuard } from "../../utils/exit-guard";
 import {
   callLocationsApi,
   deletingFrozenMessage,
@@ -414,6 +415,13 @@ Page<
   scanHistorySeq: 0,
 
   onLoad(options) {
+    // 鸿蒙真机反馈(2026-10-28):子层位置页手势返回直接退出小程序——
+    // 平台层手势未走页面栈导航;enableAlertBeforeUnload 弹确认,至少给用户一次拦截机会
+    // (仅非栈底:栈底是首页,由首页的退出确认负责)
+    const pages = getCurrentPages();
+    if (pages.length > 1) {
+      enableHomeExitGuard();
+    }
     // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
     this.requestSeq = createRequestSeq();
     this.renderedOnce = false;
@@ -447,6 +455,7 @@ Page<
   },
 
   onUnload() {
+    disableHomeExitGuard();
     if (this.hlTimer !== 0) {
       clearTimeout(this.hlTimer);
       this.hlTimer = 0;
