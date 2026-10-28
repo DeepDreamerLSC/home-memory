@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const appearance_page_1 = require("../../utils/appearance-page");
+const exit_guard_1 = require("../../utils/exit-guard");
 const locations_api_1 = require("../../utils/locations-api");
 const locations_cache_1 = require("../../utils/locations-cache");
 const api_1 = require("../../utils/api");
@@ -137,6 +138,13 @@ Page({
     scanLoadSeq: 0,
     scanHistorySeq: 0,
     onLoad(options) {
+        // 鸿蒙真机反馈(2026-10-28):子层位置页手势返回直接退出小程序——
+        // 平台层手势未走页面栈导航;enableAlertBeforeUnload 弹确认,至少给用户一次拦截机会
+        // (仅非栈底:栈底是首页,由首页的退出确认负责)
+        const pages = getCurrentPages();
+        if (pages.length > 1) {
+            (0, exit_guard_1.enableHomeExitGuard)();
+        }
         // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
         this.requestSeq = (0, locations_cache_1.createRequestSeq)();
         this.renderedOnce = false;
@@ -168,6 +176,7 @@ Page({
         void this.loadNode();
     },
     onUnload() {
+        (0, exit_guard_1.disableHomeExitGuard)();
         if (this.hlTimer !== 0) {
             clearTimeout(this.hlTimer);
             this.hlTimer = 0;
