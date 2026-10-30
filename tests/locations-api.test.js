@@ -80,3 +80,28 @@ test("LA-ERR2:服务端 message 缺失 → 客户端按错误码映射兜底文�
   assert.equal(thrown.code, "AI_UNAVAILABLE");
   assert.equal(thrown.message, FALLBACK_MESSAGE, "缺失 message 时用客户端兜底文案");
 });
+
+test('LA-ART:插画写入自动带家庭标记并使整树缓存失效', async function () {
+  var api = require('../miniprogram/utils/locations-api.js');
+  var scope = require('../miniprogram/utils/household-scope.js');
+  var cache = require('../miniprogram/utils/locations-cache.js');
+  scope.__resetHouseholdScopeForTest();
+  scope.captureHouseholdId('hh_artwork_test', 3);
+  var before = cache.captureCacheGeneration();
+  var calls = installWxStub({ok:true,node:{location_id:'node',name:'书房',type:'room',path:['书房'],artwork_id:'toolbox'}});
+  var response = await api.callLocationsApi({action:'setArtwork',node_id:'node',artwork_id:'toolbox'});
+  assert.equal(response.node.artwork_id,'toolbox');
+  assert.equal(calls[0].data.expected_household_id,'hh_artwork_test');
+  assert.equal(calls[0].data.expected_scope_revision,3);
+  assert.equal(cache.captureCacheGeneration(),before+1);
+  scope.__resetHouseholdScopeForTest();
+});
+
+test('LA-ART-BAD:插画写入残缺成功回包拒绝且不清缓存',async function () {
+  var api = require('../miniprogram/utils/locations-api.js');
+  var cache = require('../miniprogram/utils/locations-cache.js');
+  installWxStub({ok:true});
+  var before = cache.captureCacheGeneration();
+  await assert.rejects(api.callLocationsApi({action:'setArtwork',node_id:'node',artwork_id:null}),e=>e.code==='CLIENT_BAD_RESPONSE');
+  assert.equal(cache.captureCacheGeneration(),before);
+});

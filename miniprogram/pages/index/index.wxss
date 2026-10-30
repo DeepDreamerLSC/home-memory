@@ -124,3 +124,29 @@ button.location-act { width: 100%; margin-left: 0; margin-right: 0; padding-left
 button.location-act::after { border: none; }
 button.location-act.sheet-close { color: var(--text-2); font-size: 26rpx; }
 button.location-delete { color: var(--danger, #b44d43); }
+
+.artwork-sheet { display: flex; flex-direction: column; max-height: 86vh; padding: 30rpx 32rpx calc(24rpx + env(safe-area-inset-bottom)); }
+.artwork-sheet .sheet-title { font-size: 32rpx; overflow-wrap: anywhere; flex-shrink: 0; }
+.artwork-sheet button::after { border: none; }
+button.artwork-auto { width: 100%; font-weight: 400; display: flex; align-items: center; flex-shrink: 0; gap: 20rpx; margin: 0; padding: 12rpx 20rpx; min-height: 112rpx; text-align: left; border: 2rpx solid var(--line); border-radius: 22rpx; background: var(--card); color: var(--text); line-height: 1.5; }
+.artwork-auto.selected, .artwork-choice.selected { border-color: var(--text-2); }
+.artwork-auto-image { width: 110rpx; height: 74rpx; flex-shrink: 0; background: var(--room-bg); border-radius: 12rpx; }
+.artwork-auto-image image { width: 100%; height: 100%; }
+.artwork-auto-copy { flex: 1; font-size: 26rpx; }
+.artwork-auto-copy text { color: var(--text-2); font-size: 22rpx; }
+.artwork-check { min-width: 30rpx; font-size: 26rpx; color: var(--text-2); }
+.artwork-tabs { display: flex; gap: 10rpx; margin: 20rpx 0; flex-shrink: 0; }
+.artwork-tabs button { flex: 1; margin: 0; padding: 0; min-height: 80rpx; display: flex; align-items: center; justify-content: center; background: transparent; color: var(--text-2); font-size: 24rpx; border-radius: 40rpx; line-height: 1.4; }
+.artwork-tabs button.active { background: var(--card-inset); color: var(--text); }
+.artwork-scroll { min-height: 0; height: 36vh; flex: none; overflow: hidden; }
+.artwork-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16rpx; padding: 2rpx; }
+button.artwork-choice { width: 100%; margin: 0; padding: 0; min-width: 0; border: 2rpx solid var(--line); border-radius: 20rpx; background: var(--card); color: var(--text); overflow: hidden; line-height: 1.5; }
+.artwork-choice-image { height: 124rpx; background: var(--room-bg); }
+.artwork-choice-image image { width: 100%; height: 100%; }
+.artwork-choice-label { display: flex; justify-content: space-between; padding: 10rpx 12rpx; font-size: 22rpx; }
+.artwork-footer { position: relative; z-index: 1; background: var(--bg); display: flex; flex-shrink: 0; gap: 16rpx; margin-top: 22rpx; }
+.artwork-footer button { min-height: 88rpx; display: flex; align-items: center; justify-content: center; margin: 0; border-radius: 22rpx; line-height: 1.4; font-size: 26rpx; }
+.artwork-cancel { flex: 1; background: var(--card-inset); color: var(--text-2); }
+.artwork-save { flex: 2; background: var(--go-bg); color: var(--go-fg); }
+button.artwork-save[disabled] { background: var(--go-bg); color: var(--go-fg); opacity: .45; }
+.artwork-error { color: var(--danger, #b44d43); font-size: 24rpx; line-height: 1.5; padding-top: 16rpx; }

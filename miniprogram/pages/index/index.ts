@@ -1,3 +1,4 @@
+import { LOCATION_ARTWORK, isLocationArtworkId, locationArtworkId, locationArtworkSrc, type LocationArtworkCategory } from "../../utils/location-artwork";
 import { cachedUserProfile, getUserProfile } from "../../utils/profile-api";
 import { applyPageAppearance } from "../../utils/appearance-page";
 import { disableHomeExitGuard, enableHomeExitGuard } from "../../utils/exit-guard";
@@ -48,6 +49,7 @@ type DisplayRoom = {
   artwork: string;
   artworkDark: string;
   path: string[];
+  artworkId: string | null;
 };
 
 /** 「尚未归类」明细行(#36 真机反馈 Fix 3:首字块 + 名称 + 原话位置 + 灰标) */
@@ -159,6 +161,17 @@ Page<
     dueBanner: { text: string; overdue: number; soon: number } | null;
     /** 家庭上下文头:共享家庭=「我们家」(带圆点),个人=「我的家」 */
     familyShared: boolean;
+    artworkPickerVisible: boolean;
+    artworkPickerName: string;
+    artworkSelectedId: string;
+    artworkOriginalId: string;
+    artworkCategory: string;
+    artworkCategories: string[];
+    artworkOptions: { id: string; name: string; image: string; imageDark: string }[];
+    artworkAutoLight: string;
+    artworkAutoDark: string;
+    artworkBusy: boolean;
+    artworkError: string;
     locationMenuVisible: boolean;
     locationMenuName: string;
     showLocationHint: boolean;
@@ -290,6 +303,12 @@ Page<
     locationMenuTarget: { node: DisplayRoom; scope: number } | null;
     onLocationMenuClose(): void;
     onLocationMenuPick(e: WechatMiniprogram.CustomEvent): void;
+    artworkTarget: { nodeId: string; name: string; scope: number } | null;
+    openArtworkPicker(node: DisplayRoom): void;
+    onArtworkPickerClose(): void;
+    onArtworkCategoryTap(e: WechatMiniprogram.CustomEvent): void;
+    onArtworkPick(e: WechatMiniprogram.CustomEvent): void;
+    onArtworkSaveTap(): Promise<void>;
     /** 「尚未归类」通栏格:点入未挂物品明细视图(Fix 3) */
     onUnmountedTap(): void;
     /** 明细行点击:按 item_id 进物品详情(原话位置在那里核对/整理) */
@@ -345,6 +364,17 @@ Page<
     photoResume: null as { count: number; mode: "review" | "evidence" } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
+    artworkPickerVisible: false,
+    artworkPickerName: "",
+    artworkSelectedId: "",
+    artworkOriginalId: "",
+    artworkCategory: "全部",
+    artworkCategories: ["全部", "空间", "家具", "收纳"],
+    artworkOptions: [],
+    artworkAutoLight: "",
+    artworkAutoDark: "",
+    artworkBusy: false,
+    artworkError: "",
     locationMenuVisible: false,
     locationMenuName: "",
     showLocationHint: false,
@@ -393,6 +423,7 @@ Page<
   suppressRoomTapUntil: 0,
   locationHintChecked: false,
   locationMenuTarget: null as { node: DisplayRoom; scope: number } | null,
+  artworkTarget: null as { nodeId: string; name: string; scope: number } | null,
   currentNodeId: "",
   currentNodePath: [] as string[],
 
@@ -444,6 +475,10 @@ Page<
   },
 
   onShow() {
+    if (this.artworkTarget && !isScopeGenerationCurrent(this.artworkTarget.scope)) {
+      this.setData({ artworkBusy: false });
+      this.onArtworkPickerClose();
+    }
     if (typeof getCurrentPages === "function" && getCurrentPages().length === 1) enableHomeExitGuard();
     applyPageAppearance(this);
     const profile = cachedUserProfile();
@@ -478,6 +513,7 @@ Page<
   },
 
   onUnload() {
+    this.artworkTarget = null;
     disableHomeExitGuard();
     this.profileRequest++;
     this.recentRequestSeq += 1;
@@ -979,8 +1015,9 @@ Page<
       name: c.name,
       initial: c.name.length > 0 ? c.name[0] : "?",
       countText: roomCountText(c),
-      artwork: roomArtwork(c.name),
-      artworkDark: roomArtwork(c.name, true),
+      artwork: roomArtwork(c.name, false, c.artwork_id),
+      artworkDark: roomArtwork(c.name, true, c.artwork_id),
+      artworkId: c.artwork_id || null,
       path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
     }));
     if (!this.locationHintChecked && rooms.length > 0 && !this.data.queried && !this.data.unmountedView) {
@@ -1087,9 +1124,81 @@ Page<
     if (!target || this.data.acting || !isScopeGenerationCurrent(target.scope)) return;
     const node = target.node;
     const action = e.currentTarget.dataset.action;
-    if (action === "rename") this.renameContainer(node);
+    if (action === "artwork") this.openArtworkPicker(node);
+    else if (action === "rename") this.renameContainer(node);
     else if (action === "move") this.moveContainer(node);
     else if (action === "delete") this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, node.location_id);
+  },
+
+  openArtworkPicker(node) {
+    const selected = isLocationArtworkId(node.artworkId) ? node.artworkId : "";
+    this.artworkTarget = { nodeId: node.location_id, name: node.name, scope: captureScopeGeneration() };
+    this.setData({
+      artworkPickerVisible: true, artworkPickerName: node.name,
+      artworkSelectedId: selected, artworkOriginalId: selected,
+      artworkCategory: "全部", artworkBusy: false, artworkError: "",
+      artworkAutoLight: locationArtworkSrc(locationArtworkId(node.name)),
+      artworkAutoDark: locationArtworkSrc(locationArtworkId(node.name), true),
+      artworkOptions: LOCATION_ARTWORK.map(item => ({ id: item.id, name: item.name, image: locationArtworkSrc(item.id), imageDark: locationArtworkSrc(item.id, true) })),
+    });
+  },
+
+  onArtworkPickerClose() {
+    if (this.data.artworkBusy) return;
+    this.artworkTarget = null;
+    this.setData({ artworkPickerVisible: false, artworkError: "" });
+  },
+
+  onArtworkCategoryTap(e) {
+    if (this.data.artworkBusy) return;
+    const category = e.currentTarget.dataset.category;
+    if (!this.data.artworkCategories.includes(category)) return;
+    this.setData({ artworkCategory: category, artworkOptions: LOCATION_ARTWORK
+      .filter(item => category === "全部" || item.category === category as LocationArtworkCategory)
+      .map(item => ({ id: item.id, name: item.name, image: locationArtworkSrc(item.id), imageDark: locationArtworkSrc(item.id, true) })),
+    });
+  },
+
+  onArtworkPick(e) {
+    if (this.data.artworkBusy) return;
+    const id = e.currentTarget.dataset.id;
+    if (id !== "" && !isLocationArtworkId(id)) return;
+    this.setData({ artworkSelectedId: id, artworkError: "" });
+  },
+
+  async onArtworkSaveTap() {
+    const target = this.artworkTarget;
+    if (!target || this.data.artworkBusy || this.data.artworkSelectedId === this.data.artworkOriginalId) return;
+    if (!isScopeGenerationCurrent(target.scope)) {
+      this.onArtworkPickerClose();
+      wx.showToast({ title: "家庭已切换，请重新打开", icon: "none" });
+      return;
+    }
+    const id = this.data.artworkSelectedId;
+    if (id !== "" && !isLocationArtworkId(id)) return;
+    this.setData({ artworkBusy: true, artworkError: "" });
+    try {
+      const response = await callLocationsApi({ action: "setArtwork", node_id: target.nodeId, artwork_id: isLocationArtworkId(id) ? id : null });
+      if (this.artworkTarget !== target) return;
+      if (!isScopeGenerationCurrent(target.scope)) {
+        this.setData({ artworkBusy: false });
+        this.onArtworkPickerClose();
+        return;
+      }
+      const savedId = isLocationArtworkId(response.node.artwork_id) ? response.node.artwork_id : null;
+      this.setData({ rooms: this.data.rooms.map(room => room.location_id === target.nodeId
+        ? { ...room, artworkId: savedId, artwork: roomArtwork(room.name, false, savedId), artworkDark: roomArtwork(room.name, true, savedId) } : room), artworkBusy: false });
+      this.onArtworkPickerClose();
+      wx.showToast({ title: id ? "已更换插画" : "已恢复自动匹配", icon: "success" });
+      await this.loadMapLayer(true);
+    } catch (error) {
+      if (this.artworkTarget === target) {
+        if (isScopeGenerationCurrent(target.scope)) this.setData({ artworkError: errorMessage(error) });
+        else { this.setData({ artworkBusy: false }); this.onArtworkPickerClose(); }
+      }
+    } finally {
+      if (this.artworkTarget === target) this.setData({ artworkBusy: false });
+    }
   },
 
   onAddHereTap() {
@@ -1109,7 +1218,7 @@ Page<
   },
 
   onRoomTap(e) {
-    if (Date.now() < this.suppressRoomTapUntil) return;
+    if (this.data.locationMenuVisible || this.data.artworkPickerVisible || Date.now() < this.suppressRoomTapUntil) return;
     if (this.data.acting) {
       return;
     }

@@ -80,3 +80,7 @@ None required for the approved UI implementation; any future visual direction ch
 - Addition and deletion reuse existing forms and confirmation safeguards. The add button remains available on empty/leaf locations, but not on loading, failed, search or unclassified views. Home root uses manual recording with a real location.
 - The in-page back label uses 30rpx text and an 88rpx minimum touch height. Heading actions retain 88rpx touch areas and existing semantic theme colors.
 - Application-exit confirmation is active only on the visible home root. Location browsing and move pickers must return normally without an exit prompt.
+
+## Location artwork proposal
+- Approved for implementation, 2026-10-28: `docs/design/location-artwork-v1/` contains 24 vector illustrations across spaces, furniture and containers. Retain the existing geometric thin-line style and theme tokens. Native cards use the approved24 illustrations across all8 palettes and light/dark modes; long-press offers 更换插画 with draft selection, explicit save, cancel, and reset to automatic matching.
+- Match names automatically without requiring a location category. Prefer longer keyword matches, provide a neutral fallback, and let explicit illustration choice override name-based selection. Classification does not alter the location tree. Persist manual overrides on the household location node, preserve them through rename/move, and reject changes after scope drift.

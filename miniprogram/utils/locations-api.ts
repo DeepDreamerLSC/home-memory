@@ -39,6 +39,7 @@ import type {
   MoveLocationResponse,
   ParseLocationResponse,
   RenameLocationResponse,
+  SetLocationArtworkResponse,
   ScanHouseholdResponse,
 } from "../types";
 
@@ -193,6 +194,7 @@ function validateLocationsOkResponse(
       }
       break;
     case "rename":
+    case "setArtwork":
     case "move":
     case "merge":
       if (!isLocationNodeSummary(r.node)) {
@@ -297,6 +299,7 @@ function timeoutForAction(action: string): number {
 const LOCATIONS_MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   "ensurePath",
   "rename",
+  "setArtwork",
   "move",
   "merge",
   "delete",
@@ -317,6 +320,9 @@ export function callLocationsApi(
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "rename" }>,
 ): Promise<RenameLocationResponse>;
+export function callLocationsApi(
+  event: Extract<LocationsApiEvent, { action: "setArtwork" }>,
+): Promise<SetLocationArtworkResponse>;
 export function callLocationsApi(
   event: Extract<LocationsApiEvent, { action: "move" }>,
 ): Promise<MoveLocationResponse>;

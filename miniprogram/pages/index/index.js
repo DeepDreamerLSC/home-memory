@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const location_artwork_1 = require("../../utils/location-artwork");
 const profile_api_1 = require("../../utils/profile-api");
 const appearance_page_1 = require("../../utils/appearance-page");
 const exit_guard_1 = require("../../utils/exit-guard");
@@ -78,6 +79,17 @@ Page({
         photoResume: null,
         dueBanner: null,
         familyShared: false,
+        artworkPickerVisible: false,
+        artworkPickerName: "",
+        artworkSelectedId: "",
+        artworkOriginalId: "",
+        artworkCategory: "全部",
+        artworkCategories: ["全部", "空间", "家具", "收纳"],
+        artworkOptions: [],
+        artworkAutoLight: "",
+        artworkAutoDark: "",
+        artworkBusy: false,
+        artworkError: "",
         locationMenuVisible: false,
         locationMenuName: "",
         showLocationHint: false,
@@ -125,6 +137,7 @@ Page({
     suppressRoomTapUntil: 0,
     locationHintChecked: false,
     locationMenuTarget: null,
+    artworkTarget: null,
     currentNodeId: "",
     currentNodePath: [],
     onLoad(options) {
@@ -177,6 +190,10 @@ Page({
         }
     },
     onShow() {
+        if (this.artworkTarget && !(0, household_scope_1.isScopeGenerationCurrent)(this.artworkTarget.scope)) {
+            this.setData({ artworkBusy: false });
+            this.onArtworkPickerClose();
+        }
         if (typeof getCurrentPages === "function" && getCurrentPages().length === 1)
             (0, exit_guard_1.enableHomeExitGuard)();
         (0, appearance_page_1.applyPageAppearance)(this);
@@ -211,6 +228,7 @@ Page({
         }
     },
     onUnload() {
+        this.artworkTarget = null;
         (0, exit_guard_1.disableHomeExitGuard)();
         this.profileRequest++;
         this.recentRequestSeq += 1;
@@ -688,8 +706,9 @@ Page({
             name: c.name,
             initial: c.name.length > 0 ? c.name[0] : "?",
             countText: roomCountText(c),
-            artwork: (0, ui_1.roomArtwork)(c.name),
-            artworkDark: (0, ui_1.roomArtwork)(c.name, true),
+            artwork: (0, ui_1.roomArtwork)(c.name, false, c.artwork_id),
+            artworkDark: (0, ui_1.roomArtwork)(c.name, true, c.artwork_id),
+            artworkId: c.artwork_id || null,
             path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
         }));
         if (!this.locationHintChecked && rooms.length > 0 && !this.data.queried && !this.data.unmountedView) {
@@ -796,12 +815,95 @@ Page({
             return;
         const node = target.node;
         const action = e.currentTarget.dataset.action;
-        if (action === "rename")
+        if (action === "artwork")
+            this.openArtworkPicker(node);
+        else if (action === "rename")
             this.renameContainer(node);
         else if (action === "move")
             this.moveContainer(node);
         else if (action === "delete")
             this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, node.location_id);
+    },
+    openArtworkPicker(node) {
+        const selected = (0, location_artwork_1.isLocationArtworkId)(node.artworkId) ? node.artworkId : "";
+        this.artworkTarget = { nodeId: node.location_id, name: node.name, scope: (0, household_scope_1.captureScopeGeneration)() };
+        this.setData({
+            artworkPickerVisible: true, artworkPickerName: node.name,
+            artworkSelectedId: selected, artworkOriginalId: selected,
+            artworkCategory: "全部", artworkBusy: false, artworkError: "",
+            artworkAutoLight: (0, location_artwork_1.locationArtworkSrc)((0, location_artwork_1.locationArtworkId)(node.name)),
+            artworkAutoDark: (0, location_artwork_1.locationArtworkSrc)((0, location_artwork_1.locationArtworkId)(node.name), true),
+            artworkOptions: location_artwork_1.LOCATION_ARTWORK.map(item => ({ id: item.id, name: item.name, image: (0, location_artwork_1.locationArtworkSrc)(item.id), imageDark: (0, location_artwork_1.locationArtworkSrc)(item.id, true) })),
+        });
+    },
+    onArtworkPickerClose() {
+        if (this.data.artworkBusy)
+            return;
+        this.artworkTarget = null;
+        this.setData({ artworkPickerVisible: false, artworkError: "" });
+    },
+    onArtworkCategoryTap(e) {
+        if (this.data.artworkBusy)
+            return;
+        const category = e.currentTarget.dataset.category;
+        if (!this.data.artworkCategories.includes(category))
+            return;
+        this.setData({ artworkCategory: category, artworkOptions: location_artwork_1.LOCATION_ARTWORK
+                .filter(item => category === "全部" || item.category === category)
+                .map(item => ({ id: item.id, name: item.name, image: (0, location_artwork_1.locationArtworkSrc)(item.id), imageDark: (0, location_artwork_1.locationArtworkSrc)(item.id, true) })),
+        });
+    },
+    onArtworkPick(e) {
+        if (this.data.artworkBusy)
+            return;
+        const id = e.currentTarget.dataset.id;
+        if (id !== "" && !(0, location_artwork_1.isLocationArtworkId)(id))
+            return;
+        this.setData({ artworkSelectedId: id, artworkError: "" });
+    },
+    async onArtworkSaveTap() {
+        const target = this.artworkTarget;
+        if (!target || this.data.artworkBusy || this.data.artworkSelectedId === this.data.artworkOriginalId)
+            return;
+        if (!(0, household_scope_1.isScopeGenerationCurrent)(target.scope)) {
+            this.onArtworkPickerClose();
+            wx.showToast({ title: "家庭已切换，请重新打开", icon: "none" });
+            return;
+        }
+        const id = this.data.artworkSelectedId;
+        if (id !== "" && !(0, location_artwork_1.isLocationArtworkId)(id))
+            return;
+        this.setData({ artworkBusy: true, artworkError: "" });
+        try {
+            const response = await (0, locations_api_1.callLocationsApi)({ action: "setArtwork", node_id: target.nodeId, artwork_id: (0, location_artwork_1.isLocationArtworkId)(id) ? id : null });
+            if (this.artworkTarget !== target)
+                return;
+            if (!(0, household_scope_1.isScopeGenerationCurrent)(target.scope)) {
+                this.setData({ artworkBusy: false });
+                this.onArtworkPickerClose();
+                return;
+            }
+            const savedId = (0, location_artwork_1.isLocationArtworkId)(response.node.artwork_id) ? response.node.artwork_id : null;
+            this.setData({ rooms: this.data.rooms.map(room => room.location_id === target.nodeId
+                    ? { ...room, artworkId: savedId, artwork: (0, ui_1.roomArtwork)(room.name, false, savedId), artworkDark: (0, ui_1.roomArtwork)(room.name, true, savedId) } : room), artworkBusy: false });
+            this.onArtworkPickerClose();
+            wx.showToast({ title: id ? "已更换插画" : "已恢复自动匹配", icon: "success" });
+            await this.loadMapLayer(true);
+        }
+        catch (error) {
+            if (this.artworkTarget === target) {
+                if ((0, household_scope_1.isScopeGenerationCurrent)(target.scope))
+                    this.setData({ artworkError: (0, api_1.errorMessage)(error) });
+                else {
+                    this.setData({ artworkBusy: false });
+                    this.onArtworkPickerClose();
+                }
+            }
+        }
+        finally {
+            if (this.artworkTarget === target)
+                this.setData({ artworkBusy: false });
+        }
     },
     onAddHereTap() {
         if (this.data.acting || this.data.mapLoading || this.data.unmountedView)
@@ -823,7 +925,7 @@ Page({
         });
     },
     onRoomTap(e) {
-        if (Date.now() < this.suppressRoomTapUntil)
+        if (this.data.locationMenuVisible || this.data.artworkPickerVisible || Date.now() < this.suppressRoomTapUntil)
             return;
         if (this.data.acting) {
             return;
