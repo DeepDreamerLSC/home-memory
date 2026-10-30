@@ -71,3 +71,12 @@ None required for the approved UI implementation; any future visual direction ch
 - Prioritize recorded location; use a small fallback illustration and three compact rows for quantity, reminder and media. Keep pending uploads and actionable failures visible.
 - Each edit opens a focused panel with cancel and explicit confirmation. Retain independent semantics of location description/tree classification, quantity, reminder completion and media history.
 - Group photo/video viewing into one entry; preserve explicit playback, search video deep links, original notes and existing conflict/retry safeguards in any later implementation.
+
+
+## Home location actions
+- Approved simplification, 2026-10-28: one heading names the current place (家里 / 书房 / 柜子). Remove the duplicate 房间/位置 subheading and current-location ellipsis menu. Keep add at the heading's right, plus the root profile avatar.
+- Short tap enters a location. Long press shows 管理「位置名」 with 改名 / 移动到… / 删除. To manage the open location, go back to its parent and long-press its tile. Merge remains available only in the dedicated position-management flow.
+- Show a dismissible pill with a themed inset background and thin border containing 长按位置可改名、移动或删除 once when location cards first become available; persist exposure, hide on dismissal, long press or leaving the page.
+- Addition and deletion reuse existing forms and confirmation safeguards. The add button remains available on empty/leaf locations, but not on loading, failed, search or unclassified views. Home root uses manual recording with a real location.
+- The in-page back label uses 30rpx text and an 88rpx minimum touch height. Heading actions retain 88rpx touch areas and existing semantic theme colors.
+- Application-exit confirmation is active only on the visible home root. Location browsing and move pickers must return normally without an exit prompt.

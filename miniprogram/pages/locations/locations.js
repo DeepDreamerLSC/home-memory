@@ -126,6 +126,8 @@ Page({
             busy: false,
         },
     },
+    homeAction: null,
+    homeEntry: "",
     nodeId: "",
     nodePath: [],
     pickExcludePath: "",
@@ -138,19 +140,20 @@ Page({
     scanLoadSeq: 0,
     scanHistorySeq: 0,
     onLoad(options) {
-        // 鸿蒙真机反馈(2026-10-28):子层位置页手势返回直接退出小程序——
-        // 平台层手势未走页面栈导航;enableAlertBeforeUnload 弹确认,至少给用户一次拦截机会
-        // (仅非栈底:栈底是首页,由首页的退出确认负责)
-        const pages = getCurrentPages();
-        if (pages.length > 1) {
-            (0, exit_guard_1.enableHomeExitGuard)();
-        }
+        // 此页包含移动选择器；正常返回不得触发首页的退出确认。
         // 按页面实例创建请求序号(Page options 会被浅拷贝共享,不能在 options 里建闭包)
         this.requestSeq = (0, locations_cache_1.createRequestSeq)();
         this.renderedOnce = false;
         this.scanLoadSeq = 0;
         this.scanHistorySeq = 0;
         const isPicker = options.picker === "1";
+        const action = options.home_action;
+        this.homeEntry = !isPicker && (action === "addItem" || action === "delete") ? action : "";
+        const entryScope = Number(options.home_scope);
+        this.homeAction = this.homeEntry ? {
+            kind: this.homeEntry, targetId: safeDecode(options.home_target),
+            scope: Number.isSafeInteger(entryScope) && entryScope >= 0 ? entryScope : (0, household_scope_1.captureScopeGeneration)(),
+        } : null;
         this.nodeId = safeDecode(options.node_id);
         this.pickExcludePath = isPicker ? safeDecode(options.exclude_path) : "";
         // ④ navigateTo/redirectTo 场景:url 的 hl 参数(onLoad 只跑一次)
@@ -173,9 +176,11 @@ Page({
         if (pendingHl) {
             this.pendingHl = pendingHl;
         }
-        void this.loadNode();
+        void this.loadNode(!!this.homeAction);
     },
     onUnload() {
+        this.homeAction = null;
+        this.homeEntry = "";
         (0, exit_guard_1.disableHomeExitGuard)();
         if (this.hlTimer !== 0) {
             clearTimeout(this.hlTimer);
@@ -278,6 +283,8 @@ Page({
             (0, locations_cache_1.writeLocationsLayer)(this.nodeId, res, Date.now(), gen);
             this.renderList(res); // 刷新成功:原位 setData 更新,不闪屏
             this.setData({ loading: false, refreshing: false, stale: false, loadError: "" });
+            if (this.homeAction)
+                await this.runHomeAction(res);
         }
         catch (e) {
             if (!this.requestSeq.isCurrent(seq)) {
@@ -291,6 +298,38 @@ Page({
                 this.setData({ loading: false, refreshing: false, loadError: (0, api_1.errorMessage)(e) });
             }
         }
+    },
+    async runHomeAction(res) {
+        const action = this.homeAction;
+        if (!action)
+            return;
+        this.homeAction = null;
+        if (this.data.mode !== "browse" || !(0, household_scope_1.isScopeGenerationCurrent)(action.scope)) {
+            wx.showToast({ title: "家庭或位置已变化，请返回后重试", icon: "none" });
+            return;
+        }
+        if (action.kind === "addItem") {
+            if (res.node.type !== "home" && res.node.location_id === this.nodeId)
+                this.onAddItemTap();
+            return;
+        }
+        const target = res.children.find(node => node.location_id === action.targetId);
+        if (!target) {
+            wx.showToast({ title: "位置已变化，请返回后重试", icon: "none" });
+            return;
+        }
+        await this.deleteNodeWithPreview(target);
+    },
+    returnHomeEntry(deletedNodeId = "") {
+        if (!this.homeEntry)
+            return false;
+        this.homeEntry = "";
+        (0, exit_guard_1.disableHomeExitGuard)();
+        const pages = getCurrentPages();
+        const previous = pages[pages.length - 2];
+        const delta = deletedNodeId && previous?.currentNodeId === deletedNodeId && pages.length > 2 ? 2 : 1;
+        wx.navigateBack({ delta, fail: () => { wx.showToast({ title: "请点击左上角返回", icon: "none" }); } });
+        return true;
     },
     /** list 响应(缓存或服务端)→ 上屏数据;原位 setData */
     renderList(res) {
@@ -1046,7 +1085,11 @@ Page({
     },
     /** 取消:关弹层,不调任何接口(#94 三按钮语义) */
     onDeleteLayerCancel() {
+        if (this.data.deleteLayer.busy)
+            return;
         this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
+        if (this.homeEntry)
+            this.returnHomeEntry();
     },
     deleteLayerBusy(busy) {
         this.setData({ deleteLayer: { ...this.data.deleteLayer, busy } });
@@ -1083,6 +1126,8 @@ Page({
                 icon: res.remounted > 0 ? "none" : "success",
                 duration: res.remounted > 0 ? 3000 : 1500,
             });
+            if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId))
+                return;
             await this.loadNode();
         }
         catch (e) {
@@ -1136,6 +1181,8 @@ Page({
                 icon: total > 0 ? "none" : "success",
                 duration: total > 0 ? 3000 : 1500,
             });
+            if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId))
+                return;
             await this.loadNode();
         }
         catch (e) {
@@ -1251,6 +1298,8 @@ Page({
                     });
                     this.setData({ deleteLayer: { ...this.data.deleteLayer, visible: false, busy: false } });
                     wx.showToast({ title: "已全部删除", icon: "success" });
+                    if (this.homeEntry && this.returnHomeEntry(this.data.deleteLayer.nodeId))
+                        return;
                     await this.loadNode();
                     return;
                 }
@@ -1375,6 +1424,8 @@ Page({
             return; // 提交进行中不允许关闭(防半途丢上下文)
         }
         this.setData({ itemPanel: { ...this.data.itemPanel, visible: false } });
+        if (this.homeEntry)
+            this.returnHomeEntry();
     },
     onItemNameInput(e) {
         this.setData({ itemPanel: { ...this.data.itemPanel, name: e.detail.value } });
@@ -1453,6 +1504,8 @@ Page({
             });
             this.setData({ itemPanel: { ...this.data.itemPanel, visible: false, busy: false } });
             wx.showToast({ title: "已添加", icon: "success" });
+            if (this.homeEntry && this.returnHomeEntry())
+                return;
             await this.loadNode();
             // ④ 原地短高亮新物品(本层即可见)
             this.pendingHl = created.item_id;

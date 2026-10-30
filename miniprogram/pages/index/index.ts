@@ -47,6 +47,7 @@ type DisplayRoom = {
   countText: string;
   artwork: string;
   artworkDark: string;
+  path: string[];
 };
 
 /** 「尚未归类」明细行(#36 真机反馈 Fix 3:首字块 + 名称 + 原话位置 + 灰标) */
@@ -158,6 +159,9 @@ Page<
     dueBanner: { text: string; overdue: number; soon: number } | null;
     /** 家庭上下文头:共享家庭=「我们家」(带圆点),个人=「我的家」 */
     familyShared: boolean;
+    locationMenuVisible: boolean;
+    locationMenuName: string;
+    showLocationHint: boolean;
     /** 首用态(H0):根层既无房间也无未归位物品 */
     firstUse: boolean;
     /** 当前视图层首载中(X1 骨架屏;屏上无内容) */
@@ -168,11 +172,11 @@ Page<
     mapStale: boolean;
     /** 首载失败(X2):失败的是这次加载,不是记录没了 */
     mapError: string;
-    /** 抬头:「家里有什么」/「X里有什么」 */
+    /** 抬头显示当前位置名称 */
     mapTitle: string;
     /** 返回胶囊文案(上一层名;根层为空不显示) */
     backLabel: string;
-    /** 是否根层视图(根层无「⋯」整理入口;「尚未归类」通栏格只在根层) */
+    /** 是否根层视图(「尚未归类」通栏格只在根层) */
     isRootView: boolean;
     /** 当前容器名(非根层「直接记录在 X」标题用) */
     containerName: string;
@@ -267,13 +271,25 @@ Page<
     lastFirstUse: boolean;
     /** 容器视图栈(本页状态内维护;离开再返回仍停在原层) */
     viewStack: ViewLayer[];
-    /** 当前层节点标识与完整 path(容器「⋯」整理动作的目标) */
+    mapOpening: boolean;
+    openMapPage(layers: ViewLayer[], unmounted?: boolean): void;
+    navigateMapBack(toRoot?: boolean): boolean;
+    /** 当前层节点标识与完整 path(当前位置新增的目标) */
     currentNodeId: string;
     currentNodePath: string[];
     loadMapLayer(force?: boolean, retryOnStaleGen?: boolean): Promise<void>;
     renderMap(res: ListLocationsResponse): void;
     onRetryTap(): void;
     onRoomTap(e: WechatMiniprogram.CustomEvent): void;
+    onRoomLongPress(e: WechatMiniprogram.CustomEvent): void;
+    onAddHereTap(): void;
+    openLocationAction(action: "addItem" | "delete", nodeId: string, targetId?: string): void;
+    suppressRoomTapUntil: number;
+    locationHintChecked: boolean;
+    onLocationHintDismiss(): void;
+    locationMenuTarget: { node: DisplayRoom; scope: number } | null;
+    onLocationMenuClose(): void;
+    onLocationMenuPick(e: WechatMiniprogram.CustomEvent): void;
     /** 「尚未归类」通栏格:点入未挂物品明细视图(Fix 3) */
     onUnmountedTap(): void;
     /** 明细行点击:按 item_id 进物品详情(原话位置在那里核对/整理) */
@@ -281,8 +297,7 @@ Page<
     onBackTap(): void;
     onDirectItemTap(e: WechatMiniprogram.CustomEvent): void;
     openItem(item: DisplayItem, spacePath?: string[], videoHint?: VideoPlaybackBadge | null): void;
-    /** 容器抬头「⋯」整理位置:改名/移动/合并(复用 locations 页动作与确认交互) */
-    onContainerMore(): void;
+    /** 位置动作复用 locations 页确认交互 */
     currentContainer(): { location_id: string; name: string; path: string[] } | null;
     renameContainer(node: { location_id: string; name: string }): void;
     doRename(
@@ -330,12 +345,15 @@ Page<
     photoResume: null as { count: number; mode: "review" | "evidence" } | null,
     dueBanner: null as { text: string; overdue: number; soon: number } | null,
     familyShared: false,
+    locationMenuVisible: false,
+    locationMenuName: "",
+    showLocationHint: false,
     firstUse: false,
     mapLoading: true,
     mapRefreshing: false,
     mapStale: false,
     mapError: "",
-    mapTitle: "家里有什么",
+    mapTitle: "家里",
     backLabel: "",
     isRootView: true,
     containerName: "",
@@ -371,11 +389,14 @@ Page<
   queriedScopeGen: null as number | null,
   lastFirstUse: true,
   viewStack: [] as ViewLayer[],
+  mapOpening: false,
+  suppressRoomTapUntil: 0,
+  locationHintChecked: false,
+  locationMenuTarget: null as { node: DisplayRoom; scope: number } | null,
   currentNodeId: "",
   currentNodePath: [] as string[],
 
   onLoad(options) {
-    enableHomeExitGuard();
     // Page options 会被浅拷贝共享,实例字段按本页实例重建(locations 页同款防护)
     this.requestSeq = createRequestSeq();
     this.renderedCurrentView = false;
@@ -385,6 +406,29 @@ Page<
     this.viewStack = [];
     this.currentNodeId = "";
     this.currentNodePath = [];
+    // 子层也用真实页面承载，系统手势才能像物品详情一样逐页返回。
+    let raw = options.map_layers || "";
+    try { raw = decodeURIComponent(raw); } catch (_) { /* onLoad 可能已解码 */ }
+    try {
+      const layers = JSON.parse(raw);
+      if (Array.isArray(layers) && layers.length <= 6 && layers.every((layer: ViewLayer) =>
+        layer && typeof layer.id === "string" && layer.id.trim().length > 0 && layer.id.length <= 128 &&
+        typeof layer.name === "string" && layer.name.trim().length > 0 && Array.from(layer.name).length <= 50)) {
+        this.viewStack = layers.map((layer: ViewLayer) => ({ id: layer.id.trim(), name: layer.name.trim() }));
+      }
+    } catch (_) { /* 无效入口按根层打开，不信任路由内容作权限依据 */ }
+    this.mapOpening = false;
+    const top = this.viewStack[this.viewStack.length - 1];
+    const unmounted = options.map_unmounted === "1" && !top;
+    if (top || unmounted) {
+      const entryScope = Number(options.map_scope);
+      this.renderedScopeGen = Number.isSafeInteger(entryScope) && entryScope >= 0 ? entryScope : captureScopeGeneration();
+      this.setData({
+        firstUse: false, isRootView: !top, unmountedView: unmounted,
+        containerName: top ? top.name : "", mapTitle: top ? top.name : "尚未归类",
+        backLabel: this.viewStack.length > 1 ? this.viewStack[this.viewStack.length - 2].name : "家里",
+      });
+    }
     this.ensureVoiceEntry();
     // 邀请卡片落地兜底(issue #34 P1-B):分享卡片 path 指向加入确认页,
     // 冷启动直达;若有其他入口把 invite 带到首页,转送加入确认页(一步确认)
@@ -400,13 +444,14 @@ Page<
   },
 
   onShow() {
+    if (typeof getCurrentPages === "function" && getCurrentPages().length === 1) enableHomeExitGuard();
     applyPageAppearance(this);
     const profile = cachedUserProfile();
     this.setData({ avatarFileId: profile.avatarFileId, profileInitial: Array.from(profile.nickname)[0] || "" });
     const profileRequest = ++this.profileRequest;
     void getUserProfile().then(p => { if (profileRequest === this.profileRequest) this.setData({avatarFileId:p.avatarFileId,profileInitial:Array.from(p.nickname)[0]||""}); }).catch(() => {});
     this.refreshFamilyChip();
-    void this.loadMapLayer();
+    void this.loadMapLayer(this.data.unmountedView);
     void this.loadRecent();
     // 未完成草稿会话恢复入口(中途退出/进程回收;原幂等键续存,不重复建档)。
     // 展示前资格复核(硬门 C):先等服务端家庭上下文验证,未验证期间不把
@@ -422,6 +467,9 @@ Page<
   },
 
   onHide() {
+    disableHomeExitGuard();
+    this.setData({ showLocationHint: false });
+    this.onLocationMenuClose();
     this.profileRequest++;
     this.recentRequestSeq += 1;
     if (this.voiceEntry !== null) {
@@ -792,7 +840,7 @@ Page<
         unmountedCount: 0,
         unmountedView: false,
         unmountedItems: [],
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         isRootView: true,
         containerName: "",
@@ -871,7 +919,7 @@ Page<
           unmountedCount: 0,
           unmountedView: false,
           unmountedItems: [],
-          mapTitle: "家里有什么",
+          mapTitle: "家里",
           backLabel: "",
           isRootView: true,
           containerName: "",
@@ -933,7 +981,17 @@ Page<
       countText: roomCountText(c),
       artwork: roomArtwork(c.name),
       artworkDark: roomArtwork(c.name, true),
+      path: Array.isArray(c.path) ? c.path.slice() : [...(res.node.path || []), c.name],
     }));
+    if (!this.locationHintChecked && rooms.length > 0 && !this.data.queried && !this.data.unmountedView) {
+      this.locationHintChecked = true;
+      try {
+        if (!wx.getStorageSync("home_location_longpress_seen_v1")) {
+          this.setData({ showLocationHint: true });
+          wx.setStorageSync("home_location_longpress_seen_v1", true);
+        }
+      } catch (_) { /* 提示存储失败不影响浏览与操作 */ }
+    }
     this.renderedCurrentView = true;
     this.renderedScopeGen = captureScopeGeneration();
     const firstUse =
@@ -953,8 +1011,8 @@ Page<
       mapTitle: inUnmountedView
         ? "尚未归类 · " + res.unmounted_count + " 件待核实"
         : isRoot
-          ? "家里有什么"
-          : res.node.name + "里有什么",
+          ? "家里"
+          : res.node.name,
       backLabel: inUnmountedView
         ? "家里"
         : isRoot
@@ -976,8 +1034,82 @@ Page<
     void this.loadMapLayer(true);
   },
 
+  openMapPage(layers, unmounted = false) {
+    if (this.mapOpening) return;
+    this.mapOpening = true;
+    const url = "/pages/index/index?map_layers=" + encodeURIComponent(JSON.stringify(layers)) +
+      "&map_scope=" + captureScopeGeneration() + (unmounted ? "&map_unmounted=1" : "");
+    wx.navigateTo({
+      url,
+      fail: () => { wx.showToast({ title: "页面打开失败，请重试", icon: "none" }); },
+      complete: () => { this.mapOpening = false; },
+    });
+  },
+
+  navigateMapBack(toRoot = false) {
+    if (typeof getCurrentPages !== "function") return false;
+    const pages = getCurrentPages();
+    if (pages.length < 2 || pages[pages.length - 2].route !== "pages/index/index") return false;
+    let target = pages.length - 2;
+    if (toRoot) {
+      while (target > 0 && pages[target - 1].route === "pages/index/index") target--;
+    }
+    wx.navigateBack({
+      delta: pages.length - 1 - target,
+      fail: () => { wx.showToast({ title: "返回失败，请重试", icon: "none" }); },
+    });
+    return true;
+  },
+
   /** 点格子:整页切入该容器(中间区域整体替换,抬头随之变化) */
+  onLocationHintDismiss() {
+    this.setData({ showLocationHint: false });
+  },
+
+  onRoomLongPress(e) {
+    if (this.data.acting || this.data.mapLoading || this.renderedScopeGen === null || !isScopeGenerationCurrent(this.renderedScopeGen)) return;
+    const room = this.data.rooms[Number(e.currentTarget.dataset.index)];
+    if (!room) return;
+    this.onLocationHintDismiss();
+    this.suppressRoomTapUntil = Date.now() + 350;
+    this.locationMenuTarget = { node: room, scope: captureScopeGeneration() };
+    this.setData({ locationMenuVisible: true, locationMenuName: room.name });
+  },
+
+  onLocationMenuClose() {
+    this.locationMenuTarget = null;
+    this.setData({ locationMenuVisible: false, locationMenuName: "" });
+  },
+
+  onLocationMenuPick(e) {
+    const target = this.locationMenuTarget;
+    this.onLocationMenuClose();
+    if (!target || this.data.acting || !isScopeGenerationCurrent(target.scope)) return;
+    const node = target.node;
+    const action = e.currentTarget.dataset.action;
+    if (action === "rename") this.renameContainer(node);
+    else if (action === "move") this.moveContainer(node);
+    else if (action === "delete") this.openLocationAction("delete", this.data.isRootView ? "" : this.currentNodeId, node.location_id);
+  },
+
+  onAddHereTap() {
+    if (this.data.acting || this.data.mapLoading || this.data.unmountedView) return;
+    if (this.data.isRootView) { this.onTextRecordTap(); return; }
+    const current = this.currentContainer();
+    if (!current || this.renderedScopeGen === null || !isScopeGenerationCurrent(this.renderedScopeGen)) return;
+    this.openLocationAction("addItem", current.location_id);
+  },
+
+  openLocationAction(action, nodeId, targetId = "") {
+    wx.navigateTo({
+      url: "/pages/locations/locations?node_id=" + encodeURIComponent(nodeId) +
+        "&home_action=" + action + "&home_target=" + encodeURIComponent(targetId) + "&home_scope=" + captureScopeGeneration(),
+      fail: () => { wx.showToast({ title: "页面打开失败，请重试", icon: "none" }); },
+    });
+  },
+
   onRoomTap(e) {
+    if (Date.now() < this.suppressRoomTapUntil) return;
     if (this.data.acting) {
       return;
     }
@@ -986,21 +1118,7 @@ Page<
     if (!room) {
       return;
     }
-    const fromRoot = this.data.isRootView;
-    this.viewStack.push({ id: room.location_id, name: room.name });
-    this.renderedCurrentView = false;
-    this.setData({
-      isRootView: false,
-      backLabel: fromRoot ? "家里" : this.data.containerName,
-      containerName: room.name,
-      mapTitle: room.name + "里有什么",
-      rooms: [],
-      directItems: [],
-      rememberedCount: null,
-      unmountedCount: 0,
-      unmountedView: false,
-    });
-    void this.loadMapLayer();
+    this.openMapPage([...this.viewStack, { id: room.location_id, name: room.name }]);
   },
 
   /**
@@ -1016,17 +1134,7 @@ Page<
     if (this.data.unmountedCount <= 0) {
       return;
     }
-    const staleCache =
-      this.data.unmountedItems.length === 0 && this.data.unmountedCount > 0;
-    this.renderedCurrentView = false;
-    this.setData({
-      unmountedView: true,
-      mapTitle: "尚未归类 · " + this.data.unmountedCount + " 件待核实",
-      backLabel: "家里",
-      rooms: [],
-      directItems: [],
-    });
-    void this.loadMapLayer(staleCache);
+    this.openMapPage([], true);
   },
 
   /** 明细行点击:按 item_id 进物品详情(原话在那里核对,整理位置也在那里) */
@@ -1049,11 +1157,12 @@ Page<
     if (this.data.acting) {
       return;
     }
+    if (this.navigateMapBack()) return;
     if (this.data.unmountedView) {
       this.renderedCurrentView = false;
       this.setData({
         unmountedView: false,
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         rooms: [],
         directItems: [],
@@ -1069,7 +1178,7 @@ Page<
     this.setData({
       isRootView: parent === null,
       containerName: parent ? parent.name : "",
-      mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+      mapTitle: parent ? parent.name : "家里",
       backLabel: parent
         ? this.viewStack.length >= 2
           ? this.viewStack[this.viewStack.length - 2].name
@@ -1126,30 +1235,7 @@ Page<
     });
   },
 
-  /* ---------------- 容器「⋯」整理位置(复用 locations 页动作与确认交互) ---------------- */
-
-  onContainerMore() {
-    if (this.data.acting) {
-      return;
-    }
-    const current = this.currentContainer();
-    if (current === null) {
-      return;
-    }
-    wx.showActionSheet({
-      itemList: ["改名", "移动到…", "合并到…"],
-      success: (r) => {
-        if (r.tapIndex === 0) {
-          this.renameContainer(current);
-        } else if (r.tapIndex === 1) {
-          this.moveContainer(current);
-        } else if (r.tapIndex === 2) {
-          this.mergeContainer(current);
-        }
-      },
-      fail: () => {},
-    });
-  },
+  /* ---------------- 卡片长按整理位置，复用已有确认交互 ---------------- */
 
   currentContainer() {
     const top =
@@ -1227,6 +1313,8 @@ Page<
         new_parent_id: newParentId,
       });
       wx.showToast({ title: "已移动", icon: "success" });
+      if (node.location_id !== this.currentNodeId) { await this.loadMapLayer(true); return; }
+      if (this.navigateMapBack(true)) return;
       // 容器搬了家:视图栈里的祖先层已过时(客户端拿不到新祖先 id),
       // 如实回根层重新看整张地图,不猜层级
       this.viewStack = [];
@@ -1236,7 +1324,7 @@ Page<
       this.setData({
         isRootView: true,
         containerName: "",
-        mapTitle: "家里有什么",
+        mapTitle: "家里",
         backLabel: "",
         rooms: [],
         directItems: [],
@@ -1293,6 +1381,7 @@ Page<
         icon: comp > 0 ? "none" : "success",
         duration: comp > 0 ? 3000 : 1500,
       });
+      if (this.navigateMapBack()) return;
       // 这个位置已消失:退回上一层(父层 id 是钻入时记下的,仍有效)
       this.viewStack.pop();
       this.currentNodeId = "";
@@ -1303,7 +1392,7 @@ Page<
       this.setData({
         isRootView: parent === null,
         containerName: parent ? parent.name : "",
-        mapTitle: parent ? parent.name + "里有什么" : "家里有什么",
+        mapTitle: parent ? parent.name : "家里",
         backLabel: parent
           ? this.viewStack.length >= 2
             ? this.viewStack[this.viewStack.length - 2].name

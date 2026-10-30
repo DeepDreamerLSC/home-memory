@@ -4,14 +4,15 @@
   <image class="ui-icon theme-dark" src="{{ '/assets/icons/' + name + '-dark.png' }}" mode="aspectFit" />
 </template>
 <view class="page page-with-voice-bar home-page">
-  <view wx:if="{{ firstUse && !queried }}" class="first-use-context"><view class="fam-chip" bindtap="onFamilyTap"><text>{{ familyShared ? '我们家' : '我的家' }}</text><template is="icon" data="{{ name: 'down' }}" /></view><button class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button></view>
   <view wx:if="{{ backLabel }}" class="backchip" bindtap="onBackTap">‹ {{ backLabel }}</view>
-  <view wx:if="{{ !firstUse || queried }}" class="heading-row">
+  <view class="heading-row">
     <view class="mtitle">{{ queried ? '找东西' : mapTitle }}</view>
-    <button wx:if="{{isRootView && !unmountedView}}" class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button>
-    <view wx:elif="{{ !isRootView }}" class="more-inline" bindtap="onContainerMore">⋯</view>
+    <view class="heading-actions">
+      <button wx:if="{{ !queried && !mapLoading && !mapError && !unmountedView }}" class="map-add" bindtap="onAddHereTap" aria-label="{{ isRootView ? '添加物品' : '在当前位置添加物品' }}" disabled="{{ acting || switchingFamily }}">+</button>
+      <button wx:if="{{isRootView && !unmountedView}}" class="home-avatar" bindtap="onMeTap" aria-label="我的设置"><image wx:if="{{avatarFileId}}" src="{{avatarFileId}}" mode="aspectFill"/><text wx:elif="{{profileInitial}}">{{profileInitial}}</text><view wx:else class="home-person"><view/><view/></view></button>
+    </view>
   </view>
-  <view wx:if="{{!firstUse && !queried && !unmountedView}}" class="home-meta"><view wx:if="{{rememberedCount !== null}}" class="home-sub">{{isRootView ? '已记住' : '这里有'}} {{rememberedCount}} 件</view><view wx:if="{{isRootView}}" class="fam-chip" bindtap="onFamilyTap"><view class="fam-dot"/><text>{{familyShared ? '我们家' : '我的家'}}</text><template is="icon" data="{{name:'down'}}"/></view></view>
+  <view wx:if="{{!queried && !unmountedView}}" class="home-meta"><view wx:if="{{rememberedCount !== null}}" class="home-sub">{{isRootView ? '已记住' : '这里有'}} {{rememberedCount}} 件</view><view wx:if="{{isRootView}}" class="fam-chip" bindtap="onFamilyTap"><view class="fam-dot"/><text>{{familyShared ? '我们家' : '我的家'}}</text><template is="icon" data="{{name:'down'}}"/></view></view>
   <view wx:if="{{ mapRefreshing }}" class="refresh-flag">同步中…</view>
   <view wx:if="{{ resumeSession }}" class="resume-banner" bindtap="onResumeTap">{{ resumeSession.count }} 件待核对 <text>继续 ›</text></view>
   <view wx:if="{{ photoResume }}" class="resume-banner" bindtap="onPhotoResumeTap">{{ photoResume.count }} 件{{ photoResume.mode === 'evidence' ? '照片待关联' : '拍照待核对' }} <text>继续 ›</text></view>
@@ -20,6 +21,11 @@
     <template is="icon" data="{{ name: 'search' }}" />
     <input class="search-input" placeholder="搜索物品" placeholder-class="placeholder" value="{{ queryText }}" confirm-type="search" bindinput="onQueryInput" bindconfirm="onQueryTap" />
     <view class="search-go-hit" hover-class="btn-press" bindtap="onQueryTap"><view class="search-go">{{ querying ? '…' : '→' }}</view></view>
+  </view>
+
+  <view wx:if="{{ showLocationHint && rooms.length && !queried && !mapLoading && !mapError && !unmountedView }}" class="location-hint">
+    <text>长按位置可改名、移动或删除</text>
+    <button bindtap="onLocationHintDismiss" aria-label="关闭长按操作提示">知道了</button>
   </view>
 
   <block wx:if="{{ queried }}">
@@ -64,9 +70,8 @@
     </view>
   </block>
   <block wx:else>
-    <view wx:if="{{ rooms.length }}" class="section-label">{{ isRootView ? '房间' : '位置' }}</view>
     <view class="roomgrid">
-      <view wx:for="{{ rooms }}" wx:key="location_id" class="roomtile" hover-class="roomtile-active" data-index="{{ index }}" bindtap="onRoomTap">
+      <view wx:for="{{ rooms }}" wx:key="location_id" class="roomtile" hover-class="roomtile-active" data-index="{{ index }}" bindtap="onRoomTap" bindlongpress="onRoomLongPress">
         <view class="room-art"><image class="room-image theme-light" src="{{ item.artwork }}" mode="aspectFit" /><image class="room-image theme-dark" src="{{ item.artworkDark }}" mode="aspectFit" /></view>
         <view class="room-info"><view class="room-copy"><view class="rname">{{ item.name }}</view><view class="rcount">{{ item.countText }}</view></view><template is="icon" data="{{ name: 'chevron' }}" /></view>
       </view>
@@ -85,6 +90,15 @@
   <view wx:if="{{ isRootView && !firstUse && !unmountedView && !queried }}" class="manage-link" bindtap="onLocationsTap">管理位置 ›</view>
 </view>
 <view class="sheet-mask {{ famSheetVisible ? 'open' : '' }}" bindtap="onFamSheetClose"><view class="sheet" catchtap="noop"><view class="sheet-title">切换家庭</view><view wx:for="{{ famSheetOptions }}" wx:key="key" class="sheet-act {{ switchingFamily ? 'disabled' : '' }}" data-key="{{ item.key }}" bindtap="onFamSheetPick"><view class="sheet-act-name">{{ item.current ? '✓ ' : '' }}{{ item.title }}</view><view class="sheet-act-sub">{{ item.sub }}</view></view><view class="sheet-close" bindtap="onFamSheetCloseTap">{{ switchingFamily ? '切换中…' : '取消' }}</view></view></view>
+<view class="sheet-mask {{ locationMenuVisible ? 'open' : '' }}" bindtap="onLocationMenuClose">
+  <view class="sheet" catchtap="noop" role="dialog" aria-label="管理{{locationMenuName}}">
+    <view class="sheet-title">管理「{{ locationMenuName }}」</view>
+    <button class="sheet-act location-act" data-action="rename" bindtap="onLocationMenuPick">改名</button>
+    <button class="sheet-act location-act" data-action="move" bindtap="onLocationMenuPick">移动到…</button>
+    <button class="sheet-act location-act location-delete" data-action="delete" bindtap="onLocationMenuPick">删除</button>
+    <button class="sheet-close location-act" bindtap="onLocationMenuClose">取消</button>
+  </view>
+</view>
 <voice-bar id="global-voice-bar" wx:if="{{ !firstUse || queried }}" />
 
 </view>
